@@ -55,7 +55,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 
 ## presage gotchas (learned the hard way)
 - `Manager` futures are `!Send`: everything runs on the backend thread's `LocalSet` (`spawn_local`). Box large futures (`Box::pin`).
-- Received and sent messages are saved by presage itself. After sending, just reload the window (`current_dirty`).
+- Received and sent messages are saved by presage itself, but a sent one only after every recipient was sent to (seconds in groups: one encrypted copy per member device, sequentially). Until then `App.pending` shows a stub row (`pending_row`, status "전송 중"/"실패"); `Internal::Sent(ts, …)` drops it and reloads the window. The send timestamp is fixed up front and is the message id.
 - **Receipts are filed under the sender's 1:1 thread**, never the group. Status therefore comes from our `ls_receipts(target_ts, who, level)` table: filled live in `content()`, backfilled once (`Persist.receipts_indexed`). Look statuses up by the content's sent timestamp (`ContentExt::timestamp`).
 - `store.messages(thread, range)` does `fetch_all`: always bound the range (use `Index::page` first).
 - presage doesn't send delivery receipts. We batch them per sender in `pending_receipts`. Read receipts are deliberately not sent.

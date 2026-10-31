@@ -65,6 +65,8 @@ pub struct MsgDto {
     pub sticker: bool,
     /// who has the message (outgoing only), shown when the status is clicked
     pub receipt_info: String,
+    /// sent by us, not yet confirmed by the server (or failed)
+    pub pending: bool,
 }
 
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.

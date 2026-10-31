@@ -28,7 +28,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::db::Index;
 use crate::types::{
-    parse_thread_key, thread_key, Command, Event, PackDto, Scroll, StickerDto, Thumb, ThreadDto, STICKER_THUMB_PREFIX,
+    parse_thread_key, thread_key, Command, Event, MsgDto, PackDto, Scroll, StickerDto, Thumb, ThreadDto, STICKER_THUMB_PREFIX,
 };
 use crate::view::{self, Kind, THUMB_MAX};
 
@@ -72,11 +72,23 @@ enum Internal {
     Received(Received),
     ReceiveStopped(String),
     Linked(Result<Mgr, String>),
-    Sent(Result<(), String>),
+    Sent(u64, Result<(), String>),
     ThumbFailed(String),
     Status(String),
     PackInstalled(Result<String, String>),
     ReceiptsIndexed,
+}
+
+/// A message we sent that presage has not stored yet (it stores only after the server accepts it).
+struct Pending {
+    ts: u64,
+    thread_key: String,
+    text: String,
+    quote: String,
+    attachment: String,
+    /// sticker preview: thumbnail key, already emitted to the UI
+    image_key: String,
+    error: Option<String>,
 }
 
 struct Open {
@@ -105,6 +117,7 @@ struct App {
     current_dirty: bool,
     threads_dirty: bool,
     thumbs_requested: HashSet<String>,
+    pending: Vec<Pending>,
     focused: bool,
     synced: bool,
     tx: UnboundedSender<Internal>,
@@ -191,6 +204,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         current_dirty: false,
         threads_dirty: false,
         thumbs_requested: HashSet::new(),
+        pending: Vec::new(),
         focused: true,
         synced: false,
         tx,
@@ -398,12 +412,22 @@ impl App {
                 self.synced = false;
                 self.status(msg);
             }
-            Internal::Sent(Ok(())) => {
-                self.status(if self.synced { "" } else { "동기화 중…" });
-                self.current_dirty = true;
+            Internal::Sent(ts, Ok(())) => {
+                // presage stored the message before returning: swap the stub for the real row now
+                self.pending.retain(|p| p.ts != ts);
+                if let Err(e) = self.reload_window().await {
+                    warn!("reload window: {e:#}");
+                }
                 self.threads_dirty = true;
             }
-            Internal::Sent(Err(e)) => self.status(format!("전송 실패: {e}")),
+            Internal::Sent(ts, Err(e)) => {
+                warn!("send {ts} failed: {e}");
+                self.status(format!("전송 실패: {e}"));
+                if let Some(p) = self.pending.iter_mut().find(|p| p.ts == ts) {
+                    p.error = Some(e);
+                }
+                self.emit_messages(Scroll::KeepIfNotAtBottom).await;
+            }
             Internal::ThumbFailed(key) => {
                 // allow a retry next time the thread is opened
                 self.thumbs_requested.remove(&key);
@@ -845,12 +869,21 @@ impl App {
         });
         let key = open.key.clone();
         let can_older = open.has_more && open.window.len() < MAX_WINDOW;
+        let mut items = built.items;
+        let mut prev = open.window.last().map(|(t, _)| *t);
+        for p in self.pending.iter().filter(|p| p.thread_key == key) {
+            if open.window.iter().any(|(t, _)| *t == p.ts) {
+                continue; // already stored, the real row is shown
+            }
+            items.push(pending_row(p, prev));
+            prev = Some(p.ts);
+        }
         for (k, ptr, fit) in built.wanted_thumbs {
             if self.thumbs_requested.insert(k.clone()) {
                 self.request_thumb(k, ptr, fit);
             }
         }
-        (self.emit)(Event::Messages { key, items: built.items, can_older, scroll });
+        (self.emit)(Event::Messages { key, items, can_older, scroll });
     }
 
     fn attachment_path(&self, key: &str, ptr: &AttachmentPointer) -> PathBuf {
@@ -937,10 +970,35 @@ impl App {
         };
         let dir = self.paths.attachments.clone();
         let tx = self.tx.clone();
-        self.status("전송 중…");
+        let ts = self.next_send_ts();
+        let image_key = format!("pending-{ts}");
+        let Some(thread_key) = self.current.as_ref().map(|o| o.key.clone()) else { return };
+        self.pending.push(Pending {
+            ts,
+            thread_key,
+            text: String::new(),
+            quote: String::new(),
+            attachment: String::new(),
+            image_key: image_key.clone(),
+            error: None,
+        });
+        // preview straight from the sticker bytes, no disk cache
+        let bytes = s.bytes.clone();
+        let emit = self.emit.clone();
+        tokio::task::spawn_blocking(move || {
+            let img = image::load_from_memory(&bytes)
+                .map(|i| downscale(i.to_rgba8(), crate::types::physical_px(view::STICKER_SIZE)));
+            if let Ok(rgba) = img {
+                let t = Thumb { key: image_key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() };
+                emit(Event::Thumb(Arc::new(t)));
+            }
+        });
+        self.emit_messages(Scroll::Bottom).await;
         tokio::task::spawn_local(async move {
-            let res = Box::pin(send_sticker_task(manager, thread, s, group_revision, dir)).await;
-            let _ = tx.send(Internal::Sent(res.map_err(|e| format!("{e:#}"))));
+            let started = std::time::Instant::now();
+            let res = Box::pin(send_sticker_task(manager, thread, s, group_revision, dir, ts)).await;
+            info!(ms = started.elapsed().as_millis() as u64, ok = res.is_ok(), "sticker sent");
+            let _ = tx.send(Internal::Sent(ts, res.map_err(|e| format!("{e:#}"))));
         });
     }
 
@@ -1083,12 +1141,35 @@ impl App {
             Thread::Group(k) => self.store.group(*k).await.ok().flatten().map(|g| g.revision).unwrap_or(0),
             _ => 0,
         };
-        let tx = self.tx.clone();
-        self.status("전송 중…");
-        tokio::task::spawn_local(async move {
-            let res = Box::pin(send_task(manager, thread, text, files, quote, group_revision)).await;
-            let _ = tx.send(Internal::Sent(res.map_err(|e| format!("{e:#}"))));
+        let ts = self.next_send_ts();
+        let attachment = match files.as_slice() {
+            [] => String::new(),
+            [one] => file_label(one),
+            [first, rest @ ..] => format!("{} 외 {}개", file_label(first), rest.len()),
+        };
+        self.pending.push(Pending {
+            ts,
+            thread_key: open.key.clone(),
+            text: text.clone(),
+            quote: quote.as_ref().and_then(|q| q.text.clone()).filter(|t| !t.is_empty()).unwrap_or_default(),
+            attachment,
+            image_key: String::new(),
+            error: None,
         });
+        self.emit_messages(Scroll::Bottom).await;
+        let tx = self.tx.clone();
+        tokio::task::spawn_local(async move {
+            let started = std::time::Instant::now();
+            let res = Box::pin(send_task(manager, thread, text, files, quote, group_revision, ts)).await;
+            info!(ms = started.elapsed().as_millis() as u64, ok = res.is_ok(), "message sent");
+            let _ = tx.send(Internal::Sent(ts, res.map_err(|e| format!("{e:#}"))));
+        });
+    }
+
+    /// Unique, increasing send timestamps (they are the message ids).
+    fn next_send_ts(&self) -> u64 {
+        let last = self.pending.iter().map(|p| p.ts).max().unwrap_or(0);
+        now_ms().max(last + 1)
     }
 
     async fn unlink(&mut self) {
@@ -1141,6 +1222,7 @@ async fn send_task(
     files: Vec<PathBuf>,
     quote: Option<Quote>,
     group_revision: u32,
+    ts: u64,
 ) -> anyhow::Result<()> {
     let mut specs = Vec::new();
     for path in &files {
@@ -1172,7 +1254,6 @@ async fn send_task(
     } else {
         m.upload_attachments(specs).await?.into_iter().collect::<Result<Vec<_>, _>>()?
     };
-    let ts = now_ms();
     let dm = DataMessage {
         body: (!text.is_empty()).then_some(text),
         attachments,
@@ -1181,6 +1262,38 @@ async fn send_task(
         ..Default::default()
     };
     deliver(&mut m, thread, dm, ts, group_revision).await
+}
+
+fn file_label(p: &Path) -> String {
+    p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+}
+
+fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
+    let mut m = view::outgoing_stub(p.ts, prev_ts);
+    m.text = p.text.clone();
+    m.quote = p.quote.clone();
+    m.attachment = p.attachment.clone();
+    if !p.image_key.is_empty() {
+        m.image_key = p.image_key.clone();
+        m.img_w = view::STICKER_SIZE;
+        m.img_h = view::STICKER_SIZE;
+        m.sticker = true;
+    }
+    m.big_emoji = !m.sticker
+        && m.attachment.is_empty()
+        && m.quote.is_empty()
+        && crate::emoji::only_emoji(&m.text, 5).is_some();
+    match &p.error {
+        None => {
+            m.status = "전송 중".into();
+            m.receipt_info = "서버로 보내는 중입니다.".into();
+        }
+        Some(e) => {
+            m.status = "실패".into();
+            m.receipt_info = format!("보내지 못했습니다.\n{e}");
+        }
+    }
+    m
 }
 
 fn now_ms() -> u64 {
@@ -1205,6 +1318,7 @@ async fn send_sticker_task(
     s: StickerSend,
     group_revision: u32,
     attachments_dir: PathBuf,
+    ts: u64,
 ) -> anyhow::Result<()> {
     let spec = AttachmentSpec {
         content_type: s.content_type.clone(),
@@ -1223,7 +1337,6 @@ async fn send_sticker_task(
         .await?
         .pop()
         .context("upload returned nothing")??;
-    let ts = now_ms();
     // keep a local copy so our own sticker renders without downloading it back
     let path = attachment_path(&attachments_dir, &view::attachment_key(&ptr, ts, 99), &ptr);
     if let Some(p) = path.parent() {

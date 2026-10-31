@@ -365,6 +365,16 @@ pub fn build(
 }
 
 
+/// Skeleton row for a message we are still sending; `prev_ts` is the row above (for the day separator).
+pub fn outgoing_stub(ts: u64, prev_ts: Option<u64>) -> MsgDto {
+    let dt = local(ts);
+    let mut m = MsgDto { id: ts.to_string(), time: ampm(&dt), outgoing: true, pending: true, ..Default::default() };
+    if prev_ts.map(|p| local(p).date_naive()) != Some(dt.date_naive()) {
+        m.day_sep = day_label(&dt);
+    }
+    m
+}
+
 /// Status label for an outgoing message, plus a "who has it" breakdown.
 fn receipt_status(
     recv: Option<&HashMap<Uuid, u8>>,

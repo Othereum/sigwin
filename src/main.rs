@@ -123,6 +123,7 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>) -> MsgItem {
         system: m.system,
         sticker: m.sticker,
         receipt_info: m.receipt_info.as_str().into(),
+        pending: m.pending,
     }
 }
 
@@ -658,7 +659,8 @@ fn demo(emit: backend::Emit) {
         .collect();
     let mut items = Vec::new();
     for i in 0..300u32 {
-        let outgoing = i % 3 == 0;
+        // the last row is a message still being sent
+        let outgoing = i % 3 == 0 || i == 299;
         items.push(MsgDto {
             id: i.to_string(),
             sender: if outgoing { String::new() } else { "이서연".into() },
@@ -689,6 +691,12 @@ fn demo(emit: backend::Emit) {
             img_h: if i == 298 || i == 297 { 140 } else { 0 },
             ..Default::default()
         });
+        if i == 299 {
+            let m = items.last_mut().unwrap();
+            m.pending = true;
+            m.status = "전송 중".into();
+            m.receipt_info = "서버로 보내는 중입니다.".into();
+        }
     }
     emit(Event::Ready);
     emit(Event::Threads(threads));

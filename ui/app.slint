@@ -39,6 +39,7 @@ export struct MsgItem {
     system: bool,
     sticker: bool,
     receipt-info: string,
+    pending: bool,
 }
 
 export struct PackItem {
@@ -193,6 +194,7 @@ component Bubble inherits VerticalLayout {
     padding-top: m.show-sender || m.day-sep != "" ? 8px : 2px;
     padding-bottom: 2px;
     spacing: 4px;
+    opacity: m.pending ? 0.6 : 1.0;
 
     if m.day-sep != "": HorizontalLayout {
         alignment: center;
