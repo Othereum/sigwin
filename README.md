@@ -46,8 +46,7 @@ Signal 프로토콜 호환 **경량 데스크톱 클라이언트** (비공식). 
 
 ```powershell
 winget install Google.Protobuf LLVM.LLVM NASM.NASM Kitware.CMake
-cargo build --release
-```
+cargo build --profile fast   # 개발용: 최적화 O, LTO X, 증분 빌드. 수정 후 재빌드 수 초~20초 → targetast\ncargo build --release        # 배포용: thin LTO, 증분 재빌드 약 2.5분 → targetelease\n```
 `.cargo/config.toml`에 `PROTOC`/`LIBCLANG_PATH` 경로가 설정되어 있습니다. 경로가 다르면 수정하세요.
 SQLCipher는 순수 Rust 암호화 provider(`bundled-sqlcipher-custom-crypto`)를 쓰므로 OpenSSL이 필요 없습니다.
 

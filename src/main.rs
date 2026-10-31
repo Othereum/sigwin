@@ -114,6 +114,7 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>) -> MsgItem {
         day_sep: m.day_sep.as_str().into(),
         system: m.system,
         sticker: m.sticker,
+        receipt_info: m.receipt_info.as_str().into(),
     }
 }
 
@@ -281,6 +282,22 @@ fn apply(app: &AppWindow, ev: Event) {
                 None => app.set_current_pack("+".into()),
             }
         }
+        Event::OpenStickerPanel(pack) => {
+            app.set_current_pack(pack.into());
+            app.set_sticker_open(true);
+            // reloads the pack list, then opens the current pack
+            send_cmd(Command::StickerPanel);
+        }
+        Event::AskInstallPack(msg_id) => {
+            let ok = rfd::MessageDialog::new()
+                .set_title("스티커 팩")
+                .set_description("이 스티커가 들어 있는 팩을 추가할까요?")
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show();
+            if ok == rfd::MessageDialogResult::Yes {
+                send_cmd(Command::InstallPackFromMessage(msg_id));
+            }
+        }
         Event::StickerGrid { pack, items } => {
             if !app.get_sticker_open() {
                 return;
@@ -338,6 +355,19 @@ fn main() -> anyhow::Result<()> {
     });
     if std::env::var_os("LITE_SIGNAL_DEMO").is_some() {
         demo(emit);
+        if std::env::var_os("LITE_SIGNAL_DEMO_INFO").is_some() {
+            let weak = app.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
+                if let Some(app) = weak.upgrade() {
+                    app.set_reply_preview("이서연: 답장 미리보기".into());
+                    app.set_info_text("읽음 (2)
+김민준, 이서연
+
+전달됨 (1)
+박지훈".into());
+                }
+            });
+        }
         if std::env::var_os("LITE_SIGNAL_DEMO_STICKERS").is_some() {
             let weak = app.as_weak();
             slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
@@ -428,17 +458,10 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     let s = send.clone();
     app.on_attachment_clicked(move |id| {
         let is_sticker = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id.as_str() && m.sticker));
-        if !is_sticker {
+        if is_sticker {
+            s(Command::StickerClicked(id.to_string()));
+        } else {
             s(Command::OpenAttachment(id.to_string()));
-            return;
-        }
-        let ok = rfd::MessageDialog::new()
-            .set_title("스티커 팩")
-            .set_description("이 스티커가 들어 있는 팩을 추가할까요?")
-            .set_buttons(rfd::MessageButtons::YesNo)
-            .show();
-        if ok == rfd::MessageDialogResult::Yes {
-            s(Command::InstallPackFromMessage(id.to_string()));
         }
     });
 
@@ -598,7 +621,14 @@ fn demo(emit: backend::Emit) {
             time: "오후 3:12".into(),
             outgoing,
             show_sender: !outgoing && i % 4 == 1,
-            status: if outgoing { "읽음".into() } else { String::new() },
+            status: if outgoing { "읽음 2".into() } else { String::new() },
+            receipt_info: if outgoing { "읽음 (2)
+김민준, 이서연
+
+전달됨 (1)
+박지훈
+
+※ 읽음 확인을 끈 사람은 '읽음'으로 표시되지 않습니다.".into() } else { String::new() },
             quote: if i % 11 == 0 { "이전 메시지 인용".into() } else { String::new() },
             reactions: if i % 9 == 0 { "❤️2 👍".into() } else { String::new() },
             attachment: if i % 13 == 0 { "보고서.pdf".into() } else { String::new() },

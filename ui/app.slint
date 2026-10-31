@@ -31,6 +31,7 @@ export struct MsgItem {
     day-sep: string,
     system: bool,
     sticker: bool,
+    receipt-info: string,
 }
 
 export struct PackItem {
@@ -91,6 +92,9 @@ component IconButton inherits Rectangle {
     }
     Text {
         text: label;
+        // the UI font (Malgun Gothic) lacks symbols like ✕ ➤, and the software renderer
+        // does not fall back per glyph: use the symbol font for icons
+        font-family: "Segoe UI Symbol";
         font-size: 18px;
         color: enabled ? Theme.subtle : Theme.border;
     }
@@ -174,6 +178,7 @@ component Bubble inherits VerticalLayout {
     in property <length> max-w;
     callback attachment-clicked(string);
     callback reply(string);
+    callback show-info(string);
     padding-left: 16px;
     padding-right: 16px;
     padding-top: m.show-sender || m.day-sep != "" ? 8px : 2px;
@@ -312,6 +317,10 @@ component Bubble inherits VerticalLayout {
                         text: m.status;
                         font-size: 10.5px;
                         color: m.sticker ? Theme.subtle : #ffffffd0;
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.show-info(m.receipt-info); }
+                        }
                     }
                 }
             }
@@ -569,6 +578,7 @@ export component AppWindow inherits Window {
     in property <string> current-pack;
     in-out property <string> pack-url;
     callback toggle-stickers();
+    in-out property <string> info-text;
     callback pick-pack(string);
     callback send-sticker(string, int);
     callback install-pack(string);
@@ -684,6 +694,7 @@ export component AppWindow inherits Window {
                     max-w: min(560px, msg-list.visible-width * 0.75);
                     attachment-clicked(id) => { root.attachment-clicked(id); }
                     reply(id) => { root.reply(id); }
+                    show-info(t) => { root.info-text = t; }
                 }
             }
             if root.current-key != "" && root.sticker-open: StickerPanel {
@@ -790,6 +801,36 @@ export component AppWindow inherits Window {
                         label: "➤";
                         enabled: root.draft != "" || root.pending-files.length > 0;
                         clicked => { root.send(composer.text); }
+                    }
+                }
+            }
+        }
+    }
+
+    // message info (who received / read an outgoing message)
+    if root.info-text != "": Rectangle {
+        background: #00000080;
+        TouchArea {
+            clicked => { root.info-text = ""; }
+        }
+        Rectangle {
+            width: min(380px, parent.width - 40px);
+            height: info-col.preferred-height;
+            border-radius: 12px;
+            background: Theme.pane;
+            border-width: 1px;
+            border-color: Theme.border;
+            TouchArea { }
+            info-col := VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+                Text { text: "메시지 정보"; font-weight: 700; font-size: 15px; color: Theme.text; }
+                Text { text: root.info-text; wrap: word-wrap; color: Theme.text; font-size: 13px; }
+                HorizontalLayout {
+                    alignment: end;
+                    Button {
+                        text: "닫기";
+                        clicked => { root.info-text = ""; }
                     }
                 }
             }

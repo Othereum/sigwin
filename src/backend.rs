@@ -79,6 +79,8 @@ struct Open {
     thread: Thread,
     key: String,
     is_group: bool,
+    /// group members (ACI uuids), empty for 1:1
+    members: Vec<Uuid>,
     window: Vec<(u64, Content)>,
     has_more: bool,
 }
@@ -314,6 +316,7 @@ impl App {
                 None => self.status("스티커 링크를 인식하지 못했습니다 (signal.art/addstickers 링크)"),
             },
             Command::InstallPackFromMessage(id) => self.install_pack_from_message(&id),
+            Command::StickerClicked(id) => self.sticker_clicked(&id).await,
         }
     }
 
@@ -370,8 +373,7 @@ impl App {
             Internal::Status(s) => self.status(s),
             Internal::PackInstalled(Ok(id)) => {
                 self.status("스티커 팩을 추가했습니다");
-                self.sticker_packs().await;
-                self.open_pack(&id).await;
+                (self.emit)(Event::OpenStickerPanel(id));
             }
             Internal::PackInstalled(Err(e)) => self.status(format!("스티커 팩 추가 실패: {e}")),
         }
@@ -660,9 +662,13 @@ impl App {
         }
         let is_group = matches!(thread, Thread::Group(_));
         let name = self.thread_name(&thread).await;
+        let mut members = Vec::new();
         let sub = match &thread {
             Thread::Group(k) => match self.store.group(*k).await {
-                Ok(Some(g)) => format!("멤버 {}명", g.members.len()),
+                Ok(Some(g)) => {
+                    members = g.members.iter().map(|m| Uuid::from(m.aci)).collect();
+                    format!("멤버 {}명", g.members.len())
+                }
                 _ => String::new(),
             },
             Thread::Contact(id) => self
@@ -681,6 +687,7 @@ impl App {
             thread,
             key: key.to_string(),
             is_group,
+            members,
             has_more: tss.len() as u32 == PAGE,
             window,
         });
@@ -751,6 +758,7 @@ impl App {
         let Some(open) = self.current.as_ref() else { return };
         // resolve names first (async), then build synchronously
         let mut senders: Vec<Uuid> = open.window.iter().map(|(_, c)| c.metadata.sender.raw_uuid()).collect();
+        senders.extend(open.members.iter().copied());
         senders.sort();
         senders.dedup();
         for s in senders {
@@ -760,7 +768,7 @@ impl App {
         }
         let Some(open) = self.current.as_ref() else { return };
         let names = &self.names;
-        let built = view::build(&open.window, self.me, open.is_group, &|u| {
+        let built = view::build(&open.window, self.me, open.is_group, &open.members, &|u| {
             names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())
         });
         let key = open.key.clone();
@@ -870,6 +878,21 @@ impl App {
             let res = Box::pin(m.install_sticker_pack(&id, &key)).await;
             let _ = tx.send(Internal::PackInstalled(res.map(|_| hex::encode(&id)).map_err(|e| e.to_string())));
         });
+    }
+
+    /// Installed pack: open the panel on it. Otherwise ask the user whether to install it.
+    async fn sticker_clicked(&mut self, msg_id: &str) {
+        let pack_id = self.current.as_ref().and_then(|open| {
+            let ts = msg_id.parse::<u64>().ok()?;
+            let (_, c) = open.window.iter().find(|(t, _)| *t == ts)?;
+            let Kind::Msg { dm, .. } = view::classify(c, self.me) else { return None };
+            dm.sticker.as_ref()?.pack_id.clone()
+        });
+        let Some(pack_id) = pack_id else { return };
+        match self.store.sticker_pack(&pack_id).await {
+            Ok(Some(_)) => (self.emit)(Event::OpenStickerPanel(hex::encode(&pack_id))),
+            _ => (self.emit)(Event::AskInstallPack(msg_id.to_string())),
+        }
     }
 
     fn install_pack_from_message(&self, msg_id: &str) {

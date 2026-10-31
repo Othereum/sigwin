@@ -227,10 +227,17 @@ pub struct Built {
 }
 
 /// `window` must be sorted by timestamp ascending.
-pub fn build(window: &[(u64, Content)], me: Uuid, is_group: bool, name_of: &dyn Fn(&Uuid) -> String) -> Built {
+pub fn build(
+    window: &[(u64, Content)],
+    me: Uuid,
+    is_group: bool,
+    members: &[Uuid],
+    name_of: &dyn Fn(&Uuid) -> String,
+) -> Built {
     let mut reactions: HashMap<u64, Vec<(Uuid, String)>> = HashMap::new();
     let mut edits: HashMap<u64, (u64, &DataMessage)> = HashMap::new();
-    let mut status: HashMap<u64, u8> = HashMap::new();
+    // target ts -> recipient -> 1 delivered / 2 read
+    let mut status: HashMap<u64, HashMap<Uuid, u8>> = HashMap::new();
 
     for (ts, c) in window {
         match classify(c, me) {
@@ -249,8 +256,9 @@ pub fn build(window: &[(u64, Content)], me: Uuid, is_group: bool, name_of: &dyn 
                 }
             }
             Kind::Receipt { read, targets } => {
+                let who = c.metadata.sender.raw_uuid();
                 for t in targets {
-                    let s = status.entry(*t).or_insert(1);
+                    let s = status.entry(*t).or_default().entry(who).or_insert(1);
                     *s = (*s).max(if read { 2 } else { 1 });
                 }
             }
@@ -332,12 +340,9 @@ pub fn build(window: &[(u64, Content)], me: Uuid, is_group: bool, name_of: &dyn 
                         .join(" ");
                 }
                 if outgoing {
-                    m.status = match status.get(ts) {
-                        Some(2) => "읽음",
-                        Some(_) => "✓✓",
-                        None => "✓",
-                    }
-                    .into();
+                    let (status, info) = receipt_status(status.get(ts), is_group, members, me, name_of);
+                    m.status = status;
+                    m.receipt_info = info;
                 }
                 if edited {
                     m.time = format!("{} · 수정됨", m.time);
@@ -365,3 +370,48 @@ pub fn build(window: &[(u64, Content)], me: Uuid, is_group: bool, name_of: &dyn 
     Built { items, wanted_thumbs: wanted }
 }
 
+
+/// Status label for an outgoing message, plus a "who has it" breakdown.
+fn receipt_status(
+    recv: Option<&HashMap<Uuid, u8>>,
+    is_group: bool,
+    members: &[Uuid],
+    me: Uuid,
+    name_of: &dyn Fn(&Uuid) -> String,
+) -> (String, String) {
+    let empty = HashMap::new();
+    let recv = recv.unwrap_or(&empty);
+    let mut read: Vec<String> = recv.iter().filter(|(_, s)| **s >= 2).map(|(u, _)| name_of(u)).collect();
+    let mut delivered: Vec<String> = recv.iter().filter(|(_, s)| **s == 1).map(|(u, _)| name_of(u)).collect();
+    let mut pending: Vec<String> =
+        members.iter().filter(|u| **u != me && !recv.contains_key(u)).map(|u| name_of(u)).collect();
+    read.sort();
+    delivered.sort();
+    pending.sort();
+
+    let status = if !is_group {
+        if !read.is_empty() { "읽음".into() } else if !delivered.is_empty() { "✓✓".into() } else { "✓".into() }
+    } else if !read.is_empty() {
+        format!("읽음 {}", read.len())
+    } else if !delivered.is_empty() {
+        "✓✓".into()
+    } else {
+        "✓".into()
+    };
+
+    let mut info = Vec::new();
+    if !read.is_empty() {
+        info.push(format!("읽음 ({})\n{}", read.len(), read.join(", ")));
+    }
+    if !delivered.is_empty() {
+        info.push(format!("전달됨 ({})\n{}", delivered.len(), delivered.join(", ")));
+    }
+    if !pending.is_empty() {
+        info.push(format!("아직 전달 안 됨 ({})\n{}", pending.len(), pending.join(", ")));
+    }
+    if info.is_empty() {
+        info.push("서버로 전송됨. 아직 상대 기기에 전달되지 않았습니다.".into());
+    }
+    info.push("※ 읽음 확인을 끈 사람은 '읽음'으로 표시되지 않습니다.".into());
+    (status, info.join("\n\n"))
+}

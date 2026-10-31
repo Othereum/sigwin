@@ -60,6 +60,8 @@ pub struct MsgDto {
     pub day_sep: String,
     pub system: bool,
     pub sticker: bool,
+    /// who has the message (outgoing only), shown when the status is clicked
+    pub receipt_info: String,
 }
 
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
@@ -109,6 +111,10 @@ pub enum Event {
     Status(String),
     StickerPacks(Vec<PackDto>),
     StickerGrid { pack: String, items: Vec<StickerDto> },
+    /// open the sticker panel on this (installed) pack
+    OpenStickerPanel(String),
+    /// the clicked sticker's pack is not installed: ask, then InstallPackFromMessage(msg id)
+    AskInstallPack(String),
 }
 
 pub enum Command {
@@ -130,4 +136,6 @@ pub enum Command {
     InstallPackUrl(String),
     /// install the pack of the sticker in this message
     InstallPackFromMessage(String),
+    /// a sticker in the message list was clicked
+    StickerClicked(String),
 }

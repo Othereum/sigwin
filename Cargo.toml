@@ -77,3 +77,11 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.zune-jpeg]
 opt-level = 3
+
+# day-to-day builds: optimized like release (dependencies are compiled once and cached),
+# but no LTO and incremental, so only this crate is rebuilt. `cargo build --profile fast`
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
