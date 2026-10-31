@@ -204,6 +204,8 @@ impl VectorFont {
                     .builder(font_ref)
                     .size(self.pixel_size.get() as f32)
                     .normalized_coords(&self.normalized_coords)
+                    // lite-signal patch: optional TrueType hinting (crisper small text)
+                    .hint(text_tuning().hint)
                     .build();
                 // lite-signal patch: try color outlines (COLR v0, e.g. Segoe UI Emoji) first
                 let image = swash::scale::Render::new(&[
@@ -228,7 +230,14 @@ impl VectorFont {
                             Some(i_slint_core::graphics::SharedImageBuffer::RGBA8Premultiplied(buf)),
                         )
                     } else {
-                        (image.data.into(), None)
+                        let mut data = image.data;
+                        // lite-signal patch: DirectWrite-style enhanced contrast on coverage
+                        if let Some(lut) = &text_tuning().contrast_lut {
+                            for a in data.iter_mut() {
+                                *a = lut[*a as usize];
+                            }
+                        }
+                        (data.into(), None)
                     };
 
                 Some(RenderableVectorGlyph {
@@ -338,4 +347,29 @@ impl super::GlyphRenderer for VectorFont {
     fn scale_delta(&self) -> super::Fixed<u16, 8> {
         super::Fixed::from_integer(1)
     }
+}
+
+/// lite-signal patch: text rasterization tuning, read once from the environment.
+/// Defaults (hinting on, contrast 0.5) look closest to native Windows text; override with
+/// `LITE_SIGNAL_HINT=0|1`, `LITE_SIGNAL_CONTRAST=<k>` (0 = off).
+struct TextTuning {
+    hint: bool,
+    contrast_lut: Option<[u8; 256]>,
+}
+
+fn text_tuning() -> &'static TextTuning {
+    static TUNING: std::sync::OnceLock<TextTuning> = std::sync::OnceLock::new();
+    TUNING.get_or_init(|| {
+        let hint = std::env::var("LITE_SIGNAL_HINT").map_or(true, |v| v != "0");
+        let k: f32 = std::env::var("LITE_SIGNAL_CONTRAST").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5);
+        let contrast_lut = (k > 0.0).then(|| {
+            let mut lut = [0u8; 256];
+            for (i, v) in lut.iter_mut().enumerate() {
+                let c = i as f32 / 255.0;
+                *v = ((c * (k + 1.0) / (c * k + 1.0)) * 255.0).round().clamp(0.0, 255.0) as u8;
+            }
+            lut
+        });
+        TextTuning { hint, contrast_lut }
+    })
 }

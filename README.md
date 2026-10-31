@@ -83,6 +83,7 @@ target\release\lite-signal.exe   # 배포용 빌드
 | `LITE_SIGNAL_DEMO_STICKERS=1` / `=add` | 데모에서 스티커 창 열기 / 팩 추가 화면 열기 |
 | `LITE_SIGNAL_DEMO_INFO=1` | 데모에서 메시지 정보 창과 답장 바 띄우기 |
 | `LITE_SIGNAL_DEMO_TICK=1` | 데모에서 0.3초마다 UI 갱신 (최소화 중 갱신 재현용) |
+| `LITE_SIGNAL_HINT=0` / `LITE_SIGNAL_CONTRAST=<k>` | 글자 힌팅 끄기 / 대비 강화 정도 (기본: 힌팅 켬, 0.5. `0`이면 끔) |
 | `LITE_SIGNAL_SELFTEST=1` | (데모와 함께) 파일 대화상자와 알림의 메모리 비용 측정 |
 
 데이터 폴더 구성: `signal.db3`(암호화 DB), `db.key`(DPAPI로 보호한 키), `state.json`(안 읽은 수, 미리보기 캐시), `attachments/`, `thumbs/`
