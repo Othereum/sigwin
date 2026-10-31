@@ -70,6 +70,21 @@ pub struct MsgDto {
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
 pub const STICKER_THUMB_PREFIX: &str = "sp_";
 
+/// Window scale factor x1000, set by the UI once the window exists.
+static UI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1000);
+
+pub fn set_ui_scale(scale: f32) {
+    if scale.is_finite() && scale > 0.0 {
+        UI_SCALE.store((scale * 1000.0).round() as u32, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Logical length -> physical pixels.
+pub fn physical_px(logical: u32) -> u32 {
+    let s = UI_SCALE.load(std::sync::atomic::Ordering::Relaxed);
+    ((logical * s + 500) / 1000).max(1)
+}
+
 #[derive(Debug, Clone)]
 pub struct PackDto {
     /// hex pack id

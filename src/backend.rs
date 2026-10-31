@@ -152,6 +152,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
     std::fs::create_dir_all(&paths.thumbs)?;
     // PNG cache of the former DirectWrite emoji path; emoji are plain text now
     let _ = std::fs::remove_dir_all(dir.join("emoji"));
+    remove_legacy_sticker_thumbs(&paths.thumbs);
     emit(Event::Loading("저장소 여는 중…".into()));
 
     let pass = crate::secret::load_or_create(&paths.key)?;
@@ -844,9 +845,9 @@ impl App {
         });
         let key = open.key.clone();
         let can_older = open.has_more && open.window.len() < MAX_WINDOW;
-        for (k, ptr) in built.wanted_thumbs {
+        for (k, ptr, fit) in built.wanted_thumbs {
             if self.thumbs_requested.insert(k.clone()) {
-                self.request_thumb(k, ptr);
+                self.request_thumb(k, ptr, fit);
             }
         }
         (self.emit)(Event::Messages { key, items: built.items, can_older, scroll });
@@ -872,8 +873,9 @@ impl App {
                     .or_else(|| p.manifest.stickers.iter().find(|s| s.bytes.is_some()));
                 let cover_key = match cover {
                     Some(s) => {
-                        let key = sticker_thumb_key(&id, s.id);
-                        self.sticker_thumb(key.clone(), s.bytes.clone());
+                        let base = sticker_thumb_key(&id, s.id);
+                        let key = format!("{base}-c");
+                        self.sticker_thumb(&base, key.clone(), s.bytes.clone(), PACK_COVER);
                         key
                     }
                     None => String::new(),
@@ -895,21 +897,22 @@ impl App {
         let mut items = Vec::with_capacity(pack.manifest.stickers.len());
         for s in pack.manifest.stickers {
             let key = sticker_thumb_key(hex_id, s.id);
-            self.sticker_thumb(key.clone(), s.bytes);
+            self.sticker_thumb(&key, key.clone(), s.bytes, PICKER_CELL);
             items.push(StickerDto { key, id: s.id, emoji: s.emoji.unwrap_or_default() });
         }
         (self.emit)(Event::StickerGrid { pack: hex_id.to_string(), items });
     }
 
-    fn sticker_thumb(&self, key: String, bytes: Option<Vec<u8>>) {
-        let thumb_path = self.paths.thumbs.join(format!("{key}.png"));
+    /// `base` names the disk cache, `key` the emitted image (a pack cover and its grid cell differ in size).
+    fn sticker_thumb(&self, base: &str, key: String, bytes: Option<Vec<u8>>, fit: u32) {
+        let thumb_path = self.paths.thumbs.join(format!("{base}-{THUMB_MAX}.png"));
         if bytes.is_none() && !thumb_path.exists() {
             return;
         }
         let emit = self.emit.clone();
         tokio::task::spawn_blocking(move || {
             let k = key.clone();
-            match make_thumb_from(&k, || bytes.context("no sticker bytes"), PICKER_THUMB, &thumb_path) {
+            match make_thumb_from(&k, || bytes.context("no sticker bytes"), THUMB_MAX, &thumb_path, fit) {
                 Ok(t) => emit(Event::Thumb(Arc::new(t))),
                 Err(e) => debug!("sticker thumb {key}: {e}"),
             }
@@ -977,7 +980,7 @@ impl App {
         }
     }
 
-    fn request_thumb(&self, key: String, ptr: AttachmentPointer) {
+    fn request_thumb(&self, key: String, ptr: AttachmentPointer, fit: u32) {
         let thumb_path = self.paths.thumbs.join(format!("{key}.png"));
         let orig_path = self.attachment_path(&key, &ptr);
         let manager = self.manager.clone();
@@ -1005,7 +1008,7 @@ impl App {
                 }
             }
             let k = key.clone();
-            let res = tokio::task::spawn_blocking(move || make_thumb(&k, &orig_path, &thumb_path)).await;
+            let res = tokio::task::spawn_blocking(move || make_thumb(&k, &orig_path, &thumb_path, fit)).await;
             match res {
                 Ok(Ok(t)) => emit(Event::Thumb(Arc::new(t))),
                 _ => {
@@ -1256,16 +1259,19 @@ async fn deliver(m: &mut Mgr, thread: Thread, mut dm: DataMessage, ts: u64, grou
     Ok(())
 }
 
-fn make_thumb(key: &str, orig: &Path, thumb: &Path) -> anyhow::Result<Thumb> {
-    make_thumb_from(key, || Ok(std::fs::read(orig)?), THUMB_MAX, thumb)
+fn make_thumb(key: &str, orig: &Path, thumb: &Path, fit: u32) -> anyhow::Result<Thumb> {
+    make_thumb_from(key, || Ok(std::fs::read(orig)?), THUMB_MAX, thumb, fit)
 }
 
 /// Decodes (sniffing the format, file names may lie) and downsizes to `max`, caching the result as PNG.
+/// With `fit` > 0 the result is then resampled so its longer side is exactly `fit` logical px on screen:
+/// the software renderer scales images nearest-neighbor, which shreds downscaled stickers.
 fn make_thumb_from(
     key: &str,
     bytes: impl FnOnce() -> anyhow::Result<Vec<u8>>,
     max: u32,
     thumb: &Path,
+    fit: u32,
 ) -> anyhow::Result<Thumb> {
     let img = if thumb.exists() {
         image::open(thumb)?
@@ -1280,8 +1286,35 @@ fn make_thumb_from(
         }
         img
     };
-    let rgba = img.to_rgba8();
+    let mut rgba = img.to_rgba8();
+    if fit > 0 {
+        rgba = downscale(rgba, crate::types::physical_px(fit));
+    }
     Ok(Thumb { key: key.to_string(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
+}
+
+/// High-quality downscale so the longer side is `px` (never upscales). Filters in premultiplied
+/// alpha, otherwise transparent pixels' colors bleed into sticker edges as dark fringes.
+fn downscale(img: image::RgbaImage, px: u32) -> image::RgbaImage {
+    let (w, h) = img.dimensions();
+    if w.max(h) <= px || w == 0 || h == 0 {
+        return img;
+    }
+    let s = px as f32 / w.max(h) as f32;
+    let (nw, nh) = (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1));
+    let mut pm = image::Rgba32FImage::new(w, h);
+    for (d, p) in pm.pixels_mut().zip(img.pixels()) {
+        let a = p[3] as f32 / 255.0;
+        *d = image::Rgba([p[0] as f32 / 255.0 * a, p[1] as f32 / 255.0 * a, p[2] as f32 / 255.0 * a, a]);
+    }
+    let small = image::imageops::resize(&pm, nw, nh, image::imageops::FilterType::Lanczos3);
+    let mut out = image::RgbaImage::new(nw, nh);
+    for (d, p) in out.pixels_mut().zip(small.pixels()) {
+        let a = p[3].clamp(0.0, 1.0);
+        let un = |c: f32| if a > 0.0 { (c / a).clamp(0.0, 1.0) * 255.0 + 0.5 } else { 0.0 };
+        *d = image::Rgba([un(p[0]) as u8, un(p[1]) as u8, un(p[2]) as u8, (a * 255.0 + 0.5) as u8]);
+    }
+    out
 }
 
 fn attachment_path(dir: &Path, key: &str, ptr: &AttachmentPointer) -> PathBuf {
@@ -1297,7 +1330,21 @@ fn attachment_path(dir: &Path, key: &str, ptr: &AttachmentPointer) -> PathBuf {
     dir.join(key).join(name)
 }
 
-const PICKER_THUMB: u32 = 96;
+/// Logical sizes the picker shows stickers at (ui/app.slint: `cell - 12px`, pack tab cover).
+const PICKER_CELL: u32 = 72;
+const PACK_COVER: u32 = 32;
+
+/// Picker thumbs used to be cached at 96px as `sp_<pack>_<id>.png`; they are `...-260.png` now.
+fn remove_legacy_sticker_thumbs(dir: &Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(STICKER_THUMB_PREFIX) && !name.contains('-') {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
 
 fn sticker_thumb_key(pack_hex: &str, id: u32) -> String {
     format!("{STICKER_THUMB_PREFIX}{pack_hex}_{id}")
@@ -1374,6 +1421,21 @@ fn notify(title: String, body: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn downscale_fits_long_side_and_keeps_transparency() {
+        // opaque red disc on a transparent background with garbage (green) color in the clear pixels
+        let img = image::RgbaImage::from_fn(260, 200, |x, y| {
+            let (dx, dy) = (x as f32 - 130.0, y as f32 - 100.0);
+            if dx * dx + dy * dy < 80.0 * 80.0 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 255, 0, 0]) }
+        });
+        let out = downscale(img, 130);
+        assert_eq!(out.dimensions(), (130, 100));
+        assert_eq!(out.get_pixel(0, 0)[3], 0);
+        // edge pixels must not pick up the green of transparent neighbours
+        assert!(out.pixels().all(|p| p[3] == 0 || p[1] < 8), "green fringe");
+        assert_eq!(downscale(image::RgbaImage::new(50, 40), 130).dimensions(), (50, 40));
+    }
 
     #[test]
     fn blessed_keys_are_32_bytes() {

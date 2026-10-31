@@ -224,8 +224,8 @@ fn fit(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
 
 pub struct Built {
     pub items: Vec<MsgDto>,
-    /// image attachments that need a thumbnail: (key, pointer)
-    pub wanted_thumbs: Vec<(String, AttachmentPointer)>,
+    /// image attachments that need a thumbnail: (key, pointer, square box in logical px to fit into, 0 = as is)
+    pub wanted_thumbs: Vec<(String, AttachmentPointer, u32)>,
 }
 
 /// `window` must be sorted by timestamp ascending.
@@ -283,7 +283,7 @@ pub fn build(
                 // stickers with image data render as a borderless picture instead of text
                 if let Some(data) = dm.sticker.as_ref().and_then(|s| s.data.as_ref()) {
                     let key = attachment_key(data, *ts, 99);
-                    wanted.push((key.clone(), data.clone()));
+                    wanted.push((key.clone(), data.clone(), STICKER_SIZE));
                     m.image_key = key;
                     m.img_w = STICKER_SIZE;
                     m.img_h = STICKER_SIZE;
@@ -309,7 +309,7 @@ pub fn build(
                         let (w, h) = fit(a.width, a.height);
                         m.img_w = w;
                         m.img_h = h;
-                        wanted.push((key.clone(), a.clone()));
+                        wanted.push((key.clone(), a.clone(), 0));
                         m.image_key = key;
                     } else if m.attachment.is_empty() {
                         m.attachment = attachment_label(a);

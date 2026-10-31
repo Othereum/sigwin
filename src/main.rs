@@ -588,6 +588,8 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
             return; // native window not created yet
         }
         this.stop();
+        // thumbnails are pre-scaled to physical pixels: the renderer samples images nearest-neighbor
+        types::set_ui_scale(app.window().scale_factor());
         let last = std::rc::Rc::new(std::cell::Cell::new(true));
         let s2 = send.clone();
         let l2 = last.clone();
