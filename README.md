@@ -46,15 +46,17 @@ Signal 프로토콜 호환 **경량 데스크톱 클라이언트** (비공식). 
 
 ```powershell
 winget install Google.Protobuf LLVM.LLVM NASM.NASM Kitware.CMake
-cargo build --profile fast   # 개발용: 최적화 O, LTO X, 증분 빌드. 재빌드 수 초~20초 -> targetast\
-cargo build --release        # 배포용: thin LTO, 증분 재빌드 약 2.5분 -> targetelease\
+cargo build --profile fast   # 개발용: 최적화 O, LTO X, 증분 빌드. 재빌드 수 초~20초 -> target\fast\
+cargo build --release        # 배포용: thin LTO, 증분 재빌드 약 2.5분 -> target\release\
+elease\
 ```
 `.cargo/config.toml`에 `PROTOC`/`LIBCLANG_PATH` 경로가 설정되어 있습니다. 경로가 다르면 수정하세요.
 SQLCipher는 순수 Rust 암호화 provider(`bundled-sqlcipher-custom-crypto`)를 쓰므로 OpenSSL이 필요 없습니다.
 
 ## 실행
 ```powershell
-target\release\lite-signal.exe
+target\fast\lite-signal.exe      # 개발용 빌드
+target\release\lite-signal.exe   # 배포용 빌드
 ```
 - 데이터 위치: `%LOCALAPPDATA%\lite-signal\lite-signal\data`(환경변수 `LITE_SIGNAL_DATA`로 변경 가능)
 - `LITE_SIGNAL_DEMO=1`: 계정 없이 가짜 데이터로 UI 확인
