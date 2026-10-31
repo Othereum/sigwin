@@ -621,7 +621,7 @@ fn demo(emit: backend::Emit) {
             time: "오후 3:12".into(),
             outgoing,
             show_sender: !outgoing && i % 4 == 1,
-            status: if outgoing { "읽음 2".into() } else { String::new() },
+            status: if outgoing { ["✓", "✓✓", "읽음 2"][(i as usize / 3) % 3].into() } else { String::new() },
             receipt_info: if outgoing { "읽음 (2)
 김민준, 이서연
 

@@ -312,10 +312,17 @@ component Bubble inherits VerticalLayout {
                         text: m.time;
                         font-size: 10.5px;
                         color: m.outgoing && !m.sticker ? #ffffffb0 : Theme.subtle;
+                        TouchArea {
+                            enabled: m.outgoing;
+                            mouse-cursor: m.outgoing ? pointer : default;
+                            clicked => { root.show-info(m.receipt-info); }
+                        }
                     }
                     if m.outgoing && m.status != "": Text {
                         text: m.status;
-                        font-size: 10.5px;
+                        // ✓ is missing from the UI font; Hangul ("읽음") is missing from the symbol font
+                        font-family: m.status == "✓" || m.status == "✓✓" ? "Segoe UI Symbol" : "Malgun Gothic";
+                        font-size: 12px;
                         color: m.sticker ? Theme.subtle : #ffffffd0;
                         TouchArea {
                             mouse-cursor: pointer;
