@@ -40,6 +40,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/secret.rs` | random 256-bit DB key, stored DPAPI-protected (`db.key`) |
 | `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |
 | `src/alloc.rs` | counting global allocator + `PrivateUsage` |
+| `src/winhook.rs` | window-proc subclass: full repaint on restore/activate, focus events |
 | `ui/app.slint` | the whole UI |
 
 ## presage gotchas (learned the hard way)
@@ -56,7 +57,8 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 - Don't use `EmbedResourcesKind::EmbedForSoftwareRenderer`: it bakes only glyphs that appear in `.slint` files, so runtime Korean text loses characters.
 - A `Flickable`'s max size defaults to its content size and propagates up through layouts, which can shrink the window. Set `max-width: 100000px` on Flickables inside layouts.
 - Elements inside `if` can't be referenced by id from outside. Use `visible` and min/max sizes instead (see `composer-bar`).
-- Use `content-y` / `content-height` (the `viewport-*` names are deprecated). The window has no focus callback: `is_foreground()` polls `GetForegroundWindow`.
+- Use `content-y` / `content-height` (the `viewport-*` names are deprecated).
+- **Software renderer and minimize:** it redraws only damaged regions, and UI updates arriving while minimized make it lose track of them. On restore the window was transparent except the last-changed bits. `winhook.rs` subclasses the window proc: on `WM_SIZE` restore and `WM_ACTIVATE` it flips `repaint-flip` (window background toggles between two identical-looking colors), which forces a full repaint. The same hook reports focus to the backend; polling is only a fallback. To reproduce, run `LITE_SIGNAL_DEMO=1 LITE_SIGNAL_DEMO_TICK=1`, minimize/restore with `ShowWindow`, and capture with `CopyFromScreen`. Don't use `PrintWindow` here: it forces a repaint and hides the bug.
 
 ## Conventions
 - UI strings are Korean; code comments are short and English.

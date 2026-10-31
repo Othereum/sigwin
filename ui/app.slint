@@ -52,6 +52,8 @@ global Theme {
     out property <color> accent: #2c6bed;
     out property <color> sidebar: dark ? #1b1b1d : #f6f6f8;
     out property <color> pane: dark ? #121212 : #ffffff;
+    // visually identical twin of `pane`, used to force a full repaint (see AppWindow.repaint-flip)
+    out property <color> pane-twin: dark ? #121213 : #fffffe;
     out property <color> border: dark ? #2a2a2d : #e3e3e6;
     out property <color> text: dark ? #e9e9eb : #1b1b1d;
     out property <color> subtle: dark ? #9a9aa0 : #6b6b70;
@@ -543,7 +545,10 @@ export component AppWindow inherits Window {
     preferred-height: 680px;
     min-width: 640px;
     min-height: 420px;
-    background: Theme.pane;
+    // Flipping this repaints the whole window: the software renderer only redraws damaged
+    // regions and loses track of them when the window was updated while minimized.
+    in property <bool> repaint-flip;
+    background: repaint-flip ? Theme.pane-twin : Theme.pane;
     default-font-family: "Malgun Gothic";
     icon: @image-url("../assets/icon.png");
 

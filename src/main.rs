@@ -7,6 +7,7 @@ mod db;
 mod secret;
 mod types;
 mod view;
+mod winhook;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -355,6 +356,18 @@ fn main() -> anyhow::Result<()> {
     });
     if std::env::var_os("LITE_SIGNAL_DEMO").is_some() {
         demo(emit);
+        if std::env::var_os("LITE_SIGNAL_DEMO_TICK").is_some() {
+            // UI updates arriving continuously, like a live backend (also while minimized)
+            let weak = app.as_weak();
+            let n = std::cell::Cell::new(0u32);
+            let timer = Box::leak(Box::new(slint::Timer::default()));
+            timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(300), move || {
+                n.set(n.get() + 1);
+                if let Some(app) = weak.upgrade() {
+                    app.set_status_text(format!("tick {}", n.get()).into());
+                }
+            });
+        }
         if std::env::var_os("LITE_SIGNAL_DEMO_INFO").is_some() {
             let weak = app.as_weak();
             slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
@@ -554,19 +567,47 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
         }
     });
 
-    // Slint has no window-focus callback; poll the foreground window instead (cheap).
-    let s = send.clone();
+    // Slint exposes neither focus nor minimize/restore: hook the window procedure once the
+    // native window exists (it is created when the event loop starts).
     let weak = app.as_weak();
-    let last = std::cell::Cell::new(true);
-    let timer = Box::leak(Box::new(slint::Timer::default()));
-    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(700), move || {
+    let tries = std::cell::Cell::new(0u32);
+    let timer = Rc::new(slint::Timer::default());
+    let this = timer.clone();
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(50), move || {
         let Some(app) = weak.upgrade() else { return };
-        let f = is_foreground(&app);
-        if f != last.get() {
-            last.set(f);
-            s(Command::WindowFocus(f));
+        let h = hwnd(&app);
+        tries.set(tries.get() + 1);
+        if h == 0 && tries.get() < 100 {
+            return; // native window not created yet
+        }
+        this.stop();
+        let last = std::rc::Rc::new(std::cell::Cell::new(true));
+        let s2 = send.clone();
+        let l2 = last.clone();
+        let hooked = winhook::install(&app, h, move |f| {
+            if f != l2.get() {
+                l2.set(f);
+                s2(Command::WindowFocus(f));
+            }
+        });
+        tracing::info!(hwnd = h, hooked, "window hook");
+        if !hooked {
+            // fallback: poll the foreground window
+            let weak = app.as_weak();
+            let s = send.clone();
+            let poll = Box::leak(Box::new(slint::Timer::default()));
+            poll.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(700), move || {
+                let Some(app) = weak.upgrade() else { return };
+                let f = is_foreground(&app);
+                if f != last.get() {
+                    last.set(f);
+                    s(Command::WindowFocus(f));
+                }
+            });
         }
     });
+    // the timer holds an Rc to itself (to stop itself); it lives for the app's lifetime
+    std::mem::forget(timer);
 }
 
 fn hwnd(app: &AppWindow) -> isize {
