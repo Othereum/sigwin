@@ -42,6 +42,7 @@ url = "2"
 base64 = "0.22"
 # pure-Rust sqlcipher crypto: no OpenSSL needed on Windows
 libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-custom-crypto"] }
+unicode-segmentation = "1"
 
 [features]
 # optional GPU renderers for comparison; pick at runtime with SLINT_BACKEND=winit-femtovg|winit-skia|winit-software
@@ -55,6 +56,14 @@ slint-build = "1.18.1"
 winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Imaging",
+    "Win32_System_Com",
+] }
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_WindowsAndMessaging", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell"] }
 
 # debug builds: line tables for our crate (readable backtraces), no debuginfo for

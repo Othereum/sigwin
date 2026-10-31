@@ -50,7 +50,10 @@ pub struct MsgDto {
     pub show_sender: bool,
     pub status: String,
     pub quote: String,
-    pub reactions: String,
+    /// (emoji, count)
+    pub reactions: Vec<(String, u32)>,
+    /// the message is only 1..=5 emoji: shown large, in color
+    pub big_emoji: Vec<String>,
     pub attachment: String,
     /// key into the UI thumbnail cache, empty when the message has no inline image
     pub image_key: String,
@@ -66,6 +69,8 @@ pub struct MsgDto {
 
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
 pub const STICKER_THUMB_PREFIX: &str = "sp_";
+/// Thumbnail keys with this prefix are color emoji (key = prefix + cluster).
+pub const EMOJI_PREFIX: &str = "em:";
 
 #[derive(Debug, Clone)]
 pub struct PackDto {

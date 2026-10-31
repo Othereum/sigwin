@@ -4,6 +4,7 @@ mod alloc;
 mod backend;
 mod picker;
 mod db;
+mod emoji;
 mod secret;
 mod types;
 mod view;
@@ -59,6 +60,8 @@ struct Ui {
     grid: Vec<types::StickerDto>,
     /// picker thumbnails; dropped when the panel closes
     sticker_thumbs: HashMap<String, Image>,
+    /// color emoji by cluster (small: 64px each, only those seen)
+    emoji: HashMap<String, Image>,
     tx: Option<UnboundedSender<Command>>,
 }
 
@@ -93,9 +96,22 @@ thread_local! {
     static UI: RefCell<Ui> = RefCell::default();
 }
 
-fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>) -> MsgItem {
+fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, emoji: &HashMap<String, Image>) -> MsgItem {
     let image = thumbs.get(&m.image_key).cloned();
+    let reactions: Vec<ReactionItem> = m
+        .reactions
+        .iter()
+        .map(|(e, n)| {
+            let img = emoji.get(e).cloned();
+            ReactionItem { emoji: e.as_str().into(), count: *n as i32, has_img: img.is_some(), img: img.unwrap_or_default() }
+        })
+        .collect();
+    let big: Option<Vec<Image>> = m.big_emoji.iter().map(|e| emoji.get(e).cloned()).collect();
+    let has_big = big.as_ref().is_some_and(|b| !b.is_empty());
     MsgItem {
+        reactions: ModelRc::new(VecModel::from(reactions)),
+        big_emoji: ModelRc::new(VecModel::from(big.unwrap_or_default())),
+        has_big,
         id: m.id.as_str().into(),
         sender: m.sender.as_str().into(),
         sender_color: tint(&m.sender_key),
@@ -105,7 +121,6 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>) -> MsgItem {
         show_sender: m.show_sender,
         status: m.status.as_str().into(),
         quote: m.quote.as_str().into(),
-        reactions: m.reactions.as_str().into(),
         attachment: m.attachment.as_str().into(),
         has_image: !m.image_key.is_empty(),
         image: image.unwrap_or_default(),
@@ -197,7 +212,7 @@ fn apply(app: &AppWindow, ev: Event) {
             let near_bottom = app.get_near_bottom();
             let before_h = app.invoke_content_height();
             UI.with_borrow_mut(|ui| {
-                ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs)).collect::<Vec<_>>());
+                ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.emoji)).collect::<Vec<_>>());
                 ui.last = items;
             });
             app.set_can_load_older(can_older);
@@ -226,6 +241,18 @@ fn apply(app: &AppWindow, ev: Event) {
         Event::Thumb(t) => {
             let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
             let img = Image::from_rgba8(buf);
+            if let Some(cluster) = t.key.strip_prefix(types::EMOJI_PREFIX) {
+                UI.with_borrow_mut(|ui| {
+                    ui.emoji.insert(cluster.to_string(), img);
+                    for (i, m) in ui.last.iter().enumerate() {
+                        let uses = m.reactions.iter().any(|(e, _)| e == cluster) || m.big_emoji.iter().any(|e| e == cluster);
+                        if uses {
+                            slint::Model::set_row_data(&*ui.messages, i, to_item(m, &ui.thumbs, &ui.emoji));
+                        }
+                    }
+                });
+                return;
+            }
             if t.key.starts_with(types::STICKER_THUMB_PREFIX) {
                 if !app.get_sticker_open() {
                     return;
@@ -330,8 +357,12 @@ fn data_dir() -> PathBuf {
 }
 
 fn main() -> anyhow::Result<()> {
-    if picker::run_if_child() {
+    if picker::run_if_child() || emoji::run_if_child() {
         return Ok(());
+    }
+    if let Some(i) = std::env::args().position(|a| a == "--emoji-probe") {
+        let out = std::env::args().nth(i + 1).unwrap_or_else(|| "emoji-probe.png".into());
+        return emoji::probe(&out);
     }
     let filter = tracing_subscriber::EnvFilter::builder()
         .with_default_directive(tracing::Level::INFO.into())
@@ -657,7 +688,7 @@ fn demo(emit: backend::Emit) {
             text: if i % 7 == 0 {
                 "긴 메시지 테스트입니다. 한글 줄바꿈이 제대로 되는지, 말풍선 최대 폭이 적당한지 확인하기 위한 문장입니다. 🙂".into()
             } else {
-                if i == 296 { "기호·이모지 테스트: ✓ ✕ ➤ ★ ♥ → 😀🎉👍❤️🇰🇷".to_string() } else { format!("메시지 {i}") }
+                if i == 295 { "기호·이모지 테스트: ✓ ✕ ➤ ★ ♥ → 😀🎉👍❤️🇰🇷".to_string() } else if i == 296 { "🎉🥳👍🏽".to_string() } else { format!("메시지 {i}") }
             },
             time: "오후 3:12".into(),
             outgoing,
@@ -671,7 +702,7 @@ fn demo(emit: backend::Emit) {
 
 ※ 읽음 확인을 끈 사람은 '읽음'으로 표시되지 않습니다.".into() } else { String::new() },
             quote: if i % 11 == 0 { "이전 메시지 인용".into() } else { String::new() },
-            reactions: if i % 9 == 0 { "❤️2 👍".into() } else { String::new() },
+            reactions: if i % 9 == 0 { vec![("❤️".into(), 2), ("👍".into(), 1), ("😂".into(), 3)] } else { Vec::new() },
             attachment: if i % 13 == 0 { "보고서.pdf".into() } else { String::new() },
             day_sep: if i % 50 == 0 { "2026년 11월 1일 일요일".into() } else { String::new() },
             sticker: i == 298 || i == 297,
@@ -684,6 +715,23 @@ fn demo(emit: backend::Emit) {
     emit(Event::Ready);
     emit(Event::Threads(threads));
     emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
+    for m in items.iter_mut().filter(|m| m.attachment.is_empty() && m.quote.is_empty() && !m.sticker) {
+        if let Some(e) = emoji::only_emoji(&m.text, 5) {
+            m.big_emoji = e;
+        }
+    }
+    let clusters: Vec<String> = items
+        .iter()
+        .flat_map(|m| m.reactions.iter().map(|(e, _)| e.clone()).chain(m.big_emoji.iter().cloned()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let emit2 = emit.clone();
+    std::thread::spawn(move || {
+        for t in emoji::load(&data_dir().join("emoji"), &clusters) {
+            emit2(Event::Thumb(Arc::new(t)));
+        }
+    });
     emit(Event::Messages { key: "c:demo-1".into(), items, can_older: false, scroll: Scroll::Bottom });
     emit(Event::Status("데모 모드".into()));
     if std::env::var_os("LITE_SIGNAL_DEMO_STICKERS").is_some() {

@@ -321,18 +321,19 @@ pub fn build(
                     m.attachment = format!("{} 외 {}개", m.attachment, others);
                 }
                 if let Some(r) = reactions.get(ts).filter(|r| !r.is_empty()) {
-                    let mut counts: Vec<(String, usize)> = Vec::new();
+                    let mut counts: Vec<(String, u32)> = Vec::new();
                     for (_, e) in r {
                         match counts.iter_mut().find(|(x, _)| x == e) {
                             Some(c) => c.1 += 1,
                             None => counts.push((e.clone(), 1)),
                         }
                     }
-                    m.reactions = counts
-                        .into_iter()
-                        .map(|(e, n)| if n > 1 { format!("{e}{n}") } else { e })
-                        .collect::<Vec<_>>()
-                        .join(" ");
+                    m.reactions = counts;
+                }
+                if !m.sticker && m.attachment.is_empty() && m.image_key.is_empty() && m.quote.is_empty() {
+                    if let Some(e) = crate::emoji::only_emoji(&m.text, 5) {
+                        m.big_emoji = e;
+                    }
                 }
                 if outgoing {
                     let (status, info) = receipt_status(status.get(&c.timestamp()).or_else(|| status.get(ts)), is_group, members, me, name_of);

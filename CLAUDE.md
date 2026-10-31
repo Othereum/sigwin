@@ -50,6 +50,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |
 | `src/alloc.rs` | counting global allocator + `PrivateUsage` |
 | `src/winhook.rs` | window-proc subclass: full repaint on restore/activate, focus events |
+| `src/emoji.rs` | color emoji via DirectWrite in a child process, PNG cache |
 | `ui/app.slint` | the whole UI |
 
 ## presage gotchas (learned the hard way)
@@ -63,6 +64,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 
 ## Slint gotchas
 - **Missing glyphs render as blank. There is no per-glyph font fallback.** Malgun Gothic (UI font) lacks `✓ ✕ ➤`; Segoe UI Symbol lacks Hangul. Icons use `font-family: "Segoe UI Symbol"`; the status text switches font based on its content. Check every new symbol in a screenshot.
+- **Color emoji:** the software renderer draws glyphs in monochrome. `emoji.rs` has Windows draw them instead (DirectWrite + a *software* Direct2D target over a WIC bitmap; handles COLRv1, skin tones, ZWJ). It runs in a child process (`--render-emoji <dir>`, clusters on stdin), because DirectWrite/D2D keep ~20MB of font caches per process (measured: +18MB for 16 emoji, only 6MB returned on drop). PNGs are cached in `data/emoji/` (64px, ~3–5KB each) and kept in the UI's `emoji` map. Used for reactions and emoji-only messages (≤5 clusters, `only_emoji`). Inline emoji inside text stay monochrome because Slint text can't embed images. Windows has no flag emoji (🇰🇷 renders as "KR"). `--emoji-probe <png>` renders a sample grid and prints the cost.
 - Don't use `EmbedResourcesKind::EmbedForSoftwareRenderer`: it bakes only glyphs that appear in `.slint` files, so runtime Korean text loses characters.
 - A `Flickable`'s max size defaults to its content size and propagates up through layouts, which can shrink the window. Set `max-width: 100000px` on Flickables inside layouts.
 - Elements inside `if` can't be referenced by id from outside. Use `visible` and min/max sizes instead (see `composer-bar`).
@@ -72,5 +74,6 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 ## Conventions
 - UI strings are Korean; code comments are short and English.
 - Commit at sensible checkpoints without asking (user preference). Never push or rewrite history without asking.
+- **Every experiment run sets `LITE_SIGNAL_DATA` to a scratch dir**, including demo, probe and child modes. If the flag is misparsed the app falls through to the real account, and that would make two instances share one Signal device/DB.
 - Sending messages or installing packs on the user's real account is outward-facing: only the user does that. Ask them to test, then read the log (`RUST_LOG=info,spqr=warn,presage_store_sqlite=error,lite_signal=debug`).
 - Prefer the Edit tool over perl/sed for multi-line or backslash-heavy edits: shell escaping has already corrupted files here (Windows paths, `\f`, `\r`).
