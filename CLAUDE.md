@@ -10,6 +10,15 @@ Lightweight unofficial Signal desktop client: Rust + presage (Signal protocol) +
 - Anything that loads heavy system DLLs (the file dialog) runs in a child process (`picker.rs`).
 - Measure, don't guess: the log prints `mem: rust heap …, private …` every 10s (`alloc.rs` counts Rust heap; the rest is native). `LITE_SIGNAL_DEMO=1 LITE_SIGNAL_SELFTEST=1` measures the dialog and notification cost.
 
+### Why the software renderer (measured 2026-11-01, demo data, NVIDIA GPU)
+| renderer | private | working set | CPU for 80 scroll notches | color emoji | ✓✕➤ fallback |
+|---|---|---|---|---|---|
+| software (software-only build) | **8.4MB** | 28MB | **750ms** | no (monochrome) | no (blank) |
+| femtovg (OpenGL) | 212MB | 157MB | 2328ms | – | – |
+| skia | 388MB | 252MB | 1641ms | yes | no (tofu) |
+
+GPU renderers load the graphics driver into the process (nvoglv64, d3d12): they blow the 100MB budget by themselves, and they are not cheaper on CPU either. Only compiling the GPU renderers in, even when running software, already costs ~54MB private. The `renderer-femtovg` / `renderer-skia` cargo features exist only for re-measuring (`SLINT_BACKEND=winit-skia`); never enable them by default.
+
 ## Build & run
 ```
 cargo build --profile fast     # day-to-day: optimized, no LTO, incremental -> target\fast\

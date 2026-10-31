@@ -657,7 +657,7 @@ fn demo(emit: backend::Emit) {
             text: if i % 7 == 0 {
                 "긴 메시지 테스트입니다. 한글 줄바꿈이 제대로 되는지, 말풍선 최대 폭이 적당한지 확인하기 위한 문장입니다. 🙂".into()
             } else {
-                format!("메시지 {i}")
+                if i == 296 { "기호·이모지 테스트: ✓ ✕ ➤ ★ ♥ → 😀🎉👍❤️🇰🇷".to_string() } else { format!("메시지 {i}") }
             },
             time: "오후 3:12".into(),
             outgoing,
