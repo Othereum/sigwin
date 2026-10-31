@@ -5,6 +5,7 @@ use presage::store::Thread;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 
+#[derive(Clone)]
 pub struct Index {
     pool: SqlitePool,
 }
@@ -31,7 +32,55 @@ impl Index {
             .await?;
         // keep this connection's page cache small, the store has its own
         sqlx::query("PRAGMA cache_size = -512").execute(&pool).await?;
+        // presage files receipts under the 1:1 thread of whoever sent them, so receipts for
+        // group messages never show up in the group's messages: index them by target instead
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_receipts (
+                target_ts INTEGER NOT NULL,
+                who BLOB NOT NULL,
+                level INTEGER NOT NULL,
+                PRIMARY KEY (target_ts, who)
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
         Ok(Self { pool })
+    }
+
+    /// level: 1 delivered, 2 read/viewed. Never downgrades.
+    pub async fn record_receipts(&self, who: uuid::Uuid, targets: &[u64], level: u8) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for t in targets {
+            sqlx::query(
+                "INSERT INTO ls_receipts (target_ts, who, level) VALUES (?, ?, ?)
+                 ON CONFLICT (target_ts, who) DO UPDATE SET level = MAX(level, excluded.level)",
+            )
+            .bind(*t as i64)
+            .bind(who.as_bytes().as_slice())
+            .bind(level as i64)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Receipts for messages sent within [from, to].
+    pub async fn receipts_between(&self, from: u64, to: u64) -> anyhow::Result<Vec<(u64, uuid::Uuid, u8)>> {
+        let rows = sqlx::query("SELECT target_ts, who, level FROM ls_receipts WHERE target_ts BETWEEN ? AND ?")
+            .bind(from as i64)
+            .bind(to as i64)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let ts: i64 = r.try_get("target_ts").ok()?;
+                let who: Vec<u8> = r.try_get("who").ok()?;
+                let level: i64 = r.try_get("level").ok()?;
+                Some((ts as u64, uuid::Uuid::from_slice(&who).ok()?, level as u8))
+            })
+            .collect())
     }
 
     pub async fn threads(&self) -> anyhow::Result<Vec<ThreadRow>> {

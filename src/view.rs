@@ -9,6 +9,8 @@ use presage::libsignal_service::prelude::Uuid;
 use presage::proto::sync_message::{Content as SyncContent, Sent};
 use presage::proto::{receipt_message, AttachmentPointer, EditMessage, ReceiptMessage, SyncMessage};
 
+use presage::store::ContentExt;
+
 use crate::types::MsgDto;
 
 pub const THUMB_MAX: u32 = 260;
@@ -232,12 +234,12 @@ pub fn build(
     me: Uuid,
     is_group: bool,
     members: &[Uuid],
+    // target ts -> recipient -> 1 delivered / 2 read (from the receipt index)
+    status: &HashMap<u64, HashMap<Uuid, u8>>,
     name_of: &dyn Fn(&Uuid) -> String,
 ) -> Built {
     let mut reactions: HashMap<u64, Vec<(Uuid, String)>> = HashMap::new();
     let mut edits: HashMap<u64, (u64, &DataMessage)> = HashMap::new();
-    // target ts -> recipient -> 1 delivered / 2 read
-    let mut status: HashMap<u64, HashMap<Uuid, u8>> = HashMap::new();
 
     for (ts, c) in window {
         match classify(c, me) {
@@ -253,13 +255,6 @@ pub fn build(
                 let e = edits.entry(target).or_insert((*ts, dm));
                 if *ts >= e.0 {
                     *e = (*ts, dm);
-                }
-            }
-            Kind::Receipt { read, targets } => {
-                let who = c.metadata.sender.raw_uuid();
-                for t in targets {
-                    let s = status.entry(*t).or_default().entry(who).or_insert(1);
-                    *s = (*s).max(if read { 2 } else { 1 });
                 }
             }
             _ => {}
@@ -340,7 +335,7 @@ pub fn build(
                         .join(" ");
                 }
                 if outgoing {
-                    let (status, info) = receipt_status(status.get(ts), is_group, members, me, name_of);
+                    let (status, info) = receipt_status(status.get(&c.timestamp()).or_else(|| status.get(ts)), is_group, members, me, name_of);
                     m.status = status;
                     m.receipt_info = info;
                 }

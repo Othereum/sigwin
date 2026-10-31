@@ -63,6 +63,9 @@ struct Persist {
     unread: HashMap<String, u32>,
     /// key -> (db last_ts, display ts, text)
     snippets: HashMap<String, (u64, u64, String)>,
+    /// receipts already stored before the receipt index existed have been indexed
+    #[serde(default)]
+    receipts_indexed: bool,
 }
 
 enum Internal {
@@ -73,6 +76,7 @@ enum Internal {
     ThumbFailed(String),
     Status(String),
     PackInstalled(Result<String, String>),
+    ReceiptsIndexed,
 }
 
 struct Open {
@@ -242,6 +246,37 @@ impl App {
             }
         }
         self.start_receiving();
+        if !self.persist.receipts_indexed {
+            self.backfill_receipts();
+        }
+    }
+
+    /// One-time: index receipts presage stored before we kept our own receipt index.
+    fn backfill_receipts(&self) {
+        let (store, index, me, tx) = (self.store.clone(), self.index.clone(), self.me, self.tx.clone());
+        tokio::task::spawn_local(async move {
+            let Ok(threads) = index.threads().await else { return };
+            let mut n = 0usize;
+            for row in threads {
+                // receipts are always filed under the sender's 1:1 thread
+                if !matches!(row.thread, Thread::Contact(_)) {
+                    continue;
+                }
+                let Ok(msgs) = store.messages(&row.thread, ..).await else { continue };
+                for c in msgs.flatten() {
+                    if let Kind::Receipt { read, targets } = view::classify(&c, me) {
+                        let who = c.metadata.sender.raw_uuid();
+                        n += targets.len();
+                        if let Err(e) = index.record_receipts(who, targets, if read { 2 } else { 1 }).await {
+                            warn!("index receipts: {e:#}");
+                        }
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+            info!("receipt index backfilled: {n} receipts");
+            let _ = tx.send(Internal::ReceiptsIndexed);
+        });
     }
 
     fn start_receiving(&mut self) {
@@ -375,6 +410,11 @@ impl App {
                 self.status("스티커 팩을 추가했습니다");
                 (self.emit)(Event::OpenStickerPanel(id));
             }
+            Internal::ReceiptsIndexed => {
+                self.persist.receipts_indexed = true;
+                self.persist_dirty = true;
+                self.current_dirty = true;
+            }
             Internal::PackInstalled(Err(e)) => self.status(format!("스티커 팩 추가 실패: {e}")),
         }
     }
@@ -409,6 +449,20 @@ impl App {
                     }
                 }
             }
+        }
+
+        if let Kind::Receipt { read, targets } = view::classify(&c, self.me) {
+            debug!("receipt from {who} for {targets:?} read={read}", who = c.metadata.sender.raw_uuid());
+            let who = c.metadata.sender.raw_uuid();
+            if let Err(e) = self.index.record_receipts(who, targets, if read { 2 } else { 1 }).await {
+                warn!("record receipts: {e:#}");
+            }
+            if let Some(open) = &self.current {
+                if targets.iter().any(|t| open.window.iter().any(|(ts, _)| ts == t)) {
+                    self.current_dirty = true;
+                }
+            }
+            return;
         }
 
         let Ok(thread) = Thread::try_from(&c) else { return };
@@ -756,9 +810,24 @@ impl App {
 
     async fn emit_messages(&mut self, scroll: Scroll) {
         let Some(open) = self.current.as_ref() else { return };
+        let (from, to) = match (open.window.first(), open.window.last()) {
+            (Some((a, _)), Some((b, _))) => (*a, *b),
+            _ => (0, 0),
+        };
+        let mut receipts: HashMap<u64, HashMap<Uuid, u8>> = HashMap::new();
+        match self.index.receipts_between(from, to).await {
+            Ok(rows) => {
+                for (ts, who, level) in rows {
+                    receipts.entry(ts).or_default().insert(Uuid::from_bytes(*who.as_bytes()), level);
+                }
+            }
+            Err(e) => warn!("receipts: {e:#}"),
+        }
+        let Some(open) = self.current.as_ref() else { return };
         // resolve names first (async), then build synchronously
         let mut senders: Vec<Uuid> = open.window.iter().map(|(_, c)| c.metadata.sender.raw_uuid()).collect();
         senders.extend(open.members.iter().copied());
+        senders.extend(receipts.values().flat_map(|m| m.keys().copied()));
         senders.sort();
         senders.dedup();
         for s in senders {
@@ -768,7 +837,7 @@ impl App {
         }
         let Some(open) = self.current.as_ref() else { return };
         let names = &self.names;
-        let built = view::build(&open.window, self.me, open.is_group, &open.members, &|u| {
+        let built = view::build(&open.window, self.me, open.is_group, &open.members, &receipts, &|u| {
             names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())
         });
         let key = open.key.clone();
