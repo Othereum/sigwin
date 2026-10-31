@@ -57,6 +57,14 @@ winresource = "0.1"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_WindowsAndMessaging", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell"] }
 
+# debug builds: line tables for our crate (readable backtraces), no debuginfo for
+# dependencies. Full debuginfo made targetdebug 16GB and slowed every link.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 # unoptimized ML-KEM can stack-overflow when decrypting PQXDH prekey messages
 [profile.dev.package.libcrux-ml-kem]
 opt-level = 3
