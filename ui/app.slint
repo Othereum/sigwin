@@ -14,8 +14,7 @@ export struct ThreadItem {
 export struct ReactionItem {
     emoji: string,
     count: int,
-    img: image,
-    has-img: bool,
+
 }
 
 export struct MsgItem {
@@ -29,9 +28,7 @@ export struct MsgItem {
     status: string,
     quote: string,
     reactions: [ReactionItem],
-    big-emoji: [image],
-    // all big emoji images are loaded: show them instead of the text
-    has-big: bool,
+    big-emoji: bool,
     attachment: string,
     has-image: bool,
     image: image,
@@ -230,7 +227,7 @@ component Bubble inherits VerticalLayout {
         Rectangle {
             max-width: root.max-w;
             border-radius: 14px;
-            background: m.deleted || m.sticker || m.has-big ? transparent : (m.outgoing ? Theme.bubble-out : Theme.bubble-in);
+            background: m.deleted || m.sticker || m.big-emoji ? transparent : (m.outgoing ? Theme.bubble-out : Theme.bubble-in);
             border-width: m.deleted ? 1px : 0px;
             border-color: Theme.border;
             bta := TouchArea {
@@ -300,22 +297,15 @@ component Bubble inherits VerticalLayout {
                         }
                     }
                 }
-                if m.has-big: HorizontalLayout {
-                    spacing: 2px;
-                    for e in m.big-emoji: Image {
-                        width: 44px;
-                        height: 44px;
-                        source: e;
-                    }
-                }
-                if m.text != "" && !m.has-big: TextInput {
+                if m.text != "": TextInput {
                     text: m.text;
                     read-only: true;
                     single-line: false;
                     wrap: word-wrap;
-                    color: m.deleted ? Theme.subtle : (m.outgoing && !m.sticker ? white : Theme.text);
+                    color: m.deleted ? Theme.subtle : (m.outgoing && !m.sticker && !m.big-emoji ? white : Theme.text);
                     font-italic: m.deleted;
-                    font-size: 14px;
+                    // emoji-only messages are shown large (color comes from the patched renderer)
+                    font-size: m.big-emoji ? 40px : 14px;
                     selection-background-color: m.outgoing ? #ffffff60 : #2c6bed60;
                     selection-foreground-color: m.outgoing ? white : Theme.text;
                 }
@@ -327,22 +317,15 @@ component Bubble inherits VerticalLayout {
                         spacing: 6px;
                         for r in m.reactions: HorizontalLayout {
                             spacing: 1px;
-                            if r.has-img: Image {
-                                y: (parent.height - self.height) / 2;
-                                width: 18px;
-                                height: 18px;
-                                source: r.img;
-                            }
-                            if !r.has-img: Text {
+                            Text {
                                 text: r.emoji;
-                                font-size: 12px;
-                                color: m.outgoing && !m.sticker ? white : Theme.text;
+                                font-size: 15px;
                                 vertical-alignment: center;
                             }
                             if r.count > 1: Text {
                                 text: r.count;
                                 font-size: 11px;
-                                color: m.outgoing && !m.sticker && !m.has-big ? white : Theme.text;
+                                color: m.outgoing && !m.sticker && !m.big-emoji ? white : Theme.text;
                                 vertical-alignment: center;
                             }
                         }
@@ -350,7 +333,7 @@ component Bubble inherits VerticalLayout {
                     Text {
                         text: m.time;
                         font-size: 10.5px;
-                        color: m.outgoing && !m.sticker && !m.has-big ? #ffffffb0 : Theme.subtle;
+                        color: m.outgoing && !m.sticker && !m.big-emoji ? #ffffffb0 : Theme.subtle;
                         TouchArea {
                             enabled: m.outgoing;
                             mouse-cursor: m.outgoing ? pointer : default;
@@ -362,7 +345,7 @@ component Bubble inherits VerticalLayout {
                         // ✓ is missing from the UI font; Hangul ("읽음") is missing from the symbol font
                         font-family: m.status == "✓" || m.status == "✓✓" ? "Segoe UI Symbol" : "Malgun Gothic";
                         font-size: 12px;
-                        color: m.sticker || m.has-big ? Theme.subtle : #ffffffd0;
+                        color: m.sticker || m.big-emoji ? Theme.subtle : #ffffffd0;
                         TouchArea {
                             mouse-cursor: pointer;
                             clicked => { root.show-info(m.receipt-info); }

@@ -331,9 +331,7 @@ pub fn build(
                     m.reactions = counts;
                 }
                 if !m.sticker && m.attachment.is_empty() && m.image_key.is_empty() && m.quote.is_empty() {
-                    if let Some(e) = crate::emoji::only_emoji(&m.text, 5) {
-                        m.big_emoji = e;
-                    }
+                    m.big_emoji = crate::emoji::only_emoji(&m.text, 5).is_some();
                 }
                 if outgoing {
                     let (status, info) = receipt_status(status.get(&c.timestamp()).or_else(|| status.get(ts)), is_group, members, me, name_of);

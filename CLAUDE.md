@@ -50,7 +50,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |
 | `src/alloc.rs` | counting global allocator + `PrivateUsage` |
 | `src/winhook.rs` | window-proc subclass: full repaint on restore/activate, focus events |
-| `src/emoji.rs` | color emoji via DirectWrite in a child process, PNG cache |
+| `src/emoji.rs` | emoji-only message detection (grapheme clusters) |
 | `ui/app.slint` | the whole UI |
 
 ## presage gotchas (learned the hard way)
@@ -65,7 +65,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 ## Slint gotchas
 - **Missing glyphs render as blank. There is no per-glyph font fallback.** Malgun Gothic (UI font) lacks `✓ ✕ ➤`; Segoe UI Symbol lacks Hangul. Icons use `font-family: "Segoe UI Symbol"`; the status text switches font based on its content. Check every new symbol in a screenshot.
 - **Vendored renderer patch:** `vendor/i-slint-renderer-software` is Slint's software renderer 1.18.1 with a small patch, wired in via `[patch.crates-io]`. Search for "lite-signal patch": glyphs are rasterized with swash `Source::ColorOutline(0)` first and drawn as premultiplied RGBA images. That gives inline color emoji in all text from the COLR v0 layers that Segoe UI Emoji still ships (flat style). **When upgrading Slint**, re-vendor the matching version and re-apply the three hunks (fonts.rs field, vectorfont.rs render + cache weight, lib.rs draw_text_vector), or the patch silently stops applying (cargo warns "patch was not used").
-- **Color emoji:** the software renderer draws glyphs in monochrome. `emoji.rs` has Windows draw them instead (DirectWrite + a *software* Direct2D target over a WIC bitmap; handles COLRv1, skin tones, ZWJ). It runs in a child process (`--render-emoji <dir>`, clusters on stdin), because DirectWrite/D2D keep ~20MB of font caches per process (measured: +18MB for 16 emoji, only 6MB returned on drop). PNGs are cached in `data/emoji/` (64px, ~3–5KB each) and kept in the UI's `emoji` map. Used for reactions and emoji-only messages (≤5 clusters, `only_emoji`). Inline emoji inside text stay monochrome because Slint text can't embed images. Windows has no flag emoji (🇰🇷 renders as "KR"). `--emoji-probe <png>` renders a sample grid and prints the cost.
+- **Color emoji are plain text everywhere** (reactions, emoji-only messages at 40px, inline): the patched renderer draws them in one consistent flat style. History: a DirectWrite path (3D COLRv1 style) was tried and removed. In-process it kept ~20MB of font caches (+18MB for 16 emoji, only 6MB returned on drop), it needed a child process plus a PNG cache, and it mixed two emoji styles on screen. Windows has no flag emoji (🇰🇷 renders as "KR").
 - Don't use `EmbedResourcesKind::EmbedForSoftwareRenderer`: it bakes only glyphs that appear in `.slint` files, so runtime Korean text loses characters.
 - A `Flickable`'s max size defaults to its content size and propagates up through layouts, which can shrink the window. Set `max-width: 100000px` on Flickables inside layouts.
 - Elements inside `if` can't be referenced by id from outside. Use `visible` and min/max sizes instead (see `composer-bar`).

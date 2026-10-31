@@ -60,8 +60,6 @@ struct Ui {
     grid: Vec<types::StickerDto>,
     /// picker thumbnails; dropped when the panel closes
     sticker_thumbs: HashMap<String, Image>,
-    /// color emoji by cluster (small: 64px each, only those seen)
-    emoji: HashMap<String, Image>,
     tx: Option<UnboundedSender<Command>>,
 }
 
@@ -96,22 +94,16 @@ thread_local! {
     static UI: RefCell<Ui> = RefCell::default();
 }
 
-fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, emoji: &HashMap<String, Image>) -> MsgItem {
+fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>) -> MsgItem {
     let image = thumbs.get(&m.image_key).cloned();
     let reactions: Vec<ReactionItem> = m
         .reactions
         .iter()
-        .map(|(e, n)| {
-            let img = emoji.get(e).cloned();
-            ReactionItem { emoji: e.as_str().into(), count: *n as i32, has_img: img.is_some(), img: img.unwrap_or_default() }
-        })
+        .map(|(e, n)| ReactionItem { emoji: e.as_str().into(), count: *n as i32 })
         .collect();
-    let big: Option<Vec<Image>> = m.big_emoji.iter().map(|e| emoji.get(e).cloned()).collect();
-    let has_big = big.as_ref().is_some_and(|b| !b.is_empty());
     MsgItem {
         reactions: ModelRc::new(VecModel::from(reactions)),
-        big_emoji: ModelRc::new(VecModel::from(big.unwrap_or_default())),
-        has_big,
+        big_emoji: m.big_emoji,
         id: m.id.as_str().into(),
         sender: m.sender.as_str().into(),
         sender_color: tint(&m.sender_key),
@@ -212,7 +204,7 @@ fn apply(app: &AppWindow, ev: Event) {
             let near_bottom = app.get_near_bottom();
             let before_h = app.invoke_content_height();
             UI.with_borrow_mut(|ui| {
-                ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.emoji)).collect::<Vec<_>>());
+                ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs)).collect::<Vec<_>>());
                 ui.last = items;
             });
             app.set_can_load_older(can_older);
@@ -241,18 +233,6 @@ fn apply(app: &AppWindow, ev: Event) {
         Event::Thumb(t) => {
             let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
             let img = Image::from_rgba8(buf);
-            if let Some(cluster) = t.key.strip_prefix(types::EMOJI_PREFIX) {
-                UI.with_borrow_mut(|ui| {
-                    ui.emoji.insert(cluster.to_string(), img);
-                    for (i, m) in ui.last.iter().enumerate() {
-                        let uses = m.reactions.iter().any(|(e, _)| e == cluster) || m.big_emoji.iter().any(|e| e == cluster);
-                        if uses {
-                            slint::Model::set_row_data(&*ui.messages, i, to_item(m, &ui.thumbs, &ui.emoji));
-                        }
-                    }
-                });
-                return;
-            }
             if t.key.starts_with(types::STICKER_THUMB_PREFIX) {
                 if !app.get_sticker_open() {
                     return;
@@ -357,12 +337,8 @@ fn data_dir() -> PathBuf {
 }
 
 fn main() -> anyhow::Result<()> {
-    if picker::run_if_child() || emoji::run_if_child() {
+    if picker::run_if_child() {
         return Ok(());
-    }
-    if let Some(i) = std::env::args().position(|a| a == "--emoji-probe") {
-        let out = std::env::args().nth(i + 1).unwrap_or_else(|| "emoji-probe.png".into());
-        return emoji::probe(&out);
     }
     let filter = tracing_subscriber::EnvFilter::builder()
         .with_default_directive(tracing::Level::INFO.into())
@@ -716,22 +692,8 @@ fn demo(emit: backend::Emit) {
     emit(Event::Threads(threads));
     emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
     for m in items.iter_mut().filter(|m| m.attachment.is_empty() && m.quote.is_empty() && !m.sticker) {
-        if let Some(e) = emoji::only_emoji(&m.text, 5) {
-            m.big_emoji = e;
-        }
+        m.big_emoji = emoji::only_emoji(&m.text, 5).is_some();
     }
-    let clusters: Vec<String> = items
-        .iter()
-        .flat_map(|m| m.reactions.iter().map(|(e, _)| e.clone()).chain(m.big_emoji.iter().cloned()))
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let emit2 = emit.clone();
-    std::thread::spawn(move || {
-        for t in emoji::load(&data_dir().join("emoji"), &clusters) {
-            emit2(Event::Thumb(Arc::new(t)));
-        }
-    });
     emit(Event::Messages { key: "c:demo-1".into(), items, can_older: false, scroll: Scroll::Bottom });
     emit(Event::Status("데모 모드".into()));
     if std::env::var_os("LITE_SIGNAL_DEMO_STICKERS").is_some() {

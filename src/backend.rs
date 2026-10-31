@@ -44,7 +44,6 @@ pub struct Paths {
     pub state: PathBuf,
     pub attachments: PathBuf,
     pub thumbs: PathBuf,
-    pub emoji: PathBuf,
 }
 
 impl Paths {
@@ -55,7 +54,6 @@ impl Paths {
             state: dir.join("state.json"),
             attachments: dir.join("attachments"),
             thumbs: dir.join("thumbs"),
-            emoji: dir.join("emoji"),
         }
     }
 }
@@ -107,8 +105,6 @@ struct App {
     current_dirty: bool,
     threads_dirty: bool,
     thumbs_requested: HashSet<String>,
-    /// color emoji already sent to the UI (it keeps them for the session)
-    emoji_requested: HashSet<String>,
     focused: bool,
     synced: bool,
     tx: UnboundedSender<Internal>,
@@ -154,6 +150,8 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
     let paths = Paths::new(&dir);
     std::fs::create_dir_all(&paths.attachments)?;
     std::fs::create_dir_all(&paths.thumbs)?;
+    // PNG cache of the former DirectWrite emoji path; emoji are plain text now
+    let _ = std::fs::remove_dir_all(dir.join("emoji"));
     emit(Event::Loading("저장소 여는 중…".into()));
 
     let pass = crate::secret::load_or_create(&paths.key)?;
@@ -192,7 +190,6 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         current_dirty: false,
         threads_dirty: false,
         thumbs_requested: HashSet::new(),
-        emoji_requested: HashSet::new(),
         focused: true,
         synced: false,
         tx,
@@ -851,20 +848,6 @@ impl App {
             if self.thumbs_requested.insert(k.clone()) {
                 self.request_thumb(k, ptr);
             }
-        }
-        let clusters: Vec<String> = built
-            .items
-            .iter()
-            .flat_map(|m| m.reactions.iter().map(|(e, _)| e.clone()).chain(m.big_emoji.iter().cloned()))
-            .filter(|c| crate::emoji::is_emoji(c) && self.emoji_requested.insert(c.clone()))
-            .collect();
-        if !clusters.is_empty() {
-            let (dir, emit) = (self.paths.emoji.clone(), self.emit.clone());
-            tokio::task::spawn_blocking(move || {
-                for t in crate::emoji::load(&dir, &clusters) {
-                    emit(Event::Thumb(Arc::new(t)));
-                }
-            });
         }
         (self.emit)(Event::Messages { key, items: built.items, can_older, scroll });
     }
