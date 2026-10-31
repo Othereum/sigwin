@@ -1,0 +1,79 @@
+[package]
+name = "lite-signal"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "A lightweight Signal-compatible desktop client (unofficial)"
+
+[dependencies]
+presage = { git = "https://github.com/whisperfish/presage", rev = "aeaedf99babebae2dbc6b86bca797807d4cd9fda" }
+presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "aeaedf99babebae2dbc6b86bca797807d4cd9fda" }
+
+slint = { version = "1.18.1", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-software",
+    "software-renderer-systemfonts",
+    "raw-window-handle-06",
+    "image-default-formats",
+] }
+raw-window-handle = "0.6"
+
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+directories = "6"
+futures = "0.3"
+hex = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+mime_guess = "2"
+qrcode = { version = "0.14", default-features = false }
+rfd = { version = "0.15", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio", "uuid"] }
+tokio = { version = "1.48", features = ["rt", "time", "sync", "macros", "net"] }
+notify-rust = "4"
+getrandom = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = "1"
+url = "2"
+base64 = "0.22"
+# pure-Rust sqlcipher crypto: no OpenSSL needed on Windows
+libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-custom-crypto"] }
+
+[build-dependencies]
+slint-build = "1.18.1"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_WindowsAndMessaging", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse"] }
+
+# unoptimized ML-KEM can stack-overflow when decrypting PQXDH prekey messages
+[profile.dev.package.libcrux-ml-kem]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[patch.crates-io]
+libsqlite3-sys = { version = "0.36.0", git = "https://github.com/whisperfish/rusqlite", rev = "2a42b3354c9194700d08aa070f70a131a470e7dc" }
+
+# keep debug builds usable: crypto is painfully slow unoptimized
+[profile.dev.package.sqlcipher-crypto-provider]
+opt-level = 3
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3

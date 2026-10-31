@@ -1,0 +1,681 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod alloc;
+mod backend;
+mod picker;
+mod db;
+mod secret;
+mod types;
+mod view;
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+
+use types::{Command, Event, MsgDto, Scroll, ThreadDto};
+
+slint::include_modules!();
+
+#[global_allocator]
+static GLOBAL: alloc::Counting = alloc::Counting;
+
+const PALETTE: [u32; 12] = [
+    0xc73f00, 0xf6475d, 0xa23474, 0x8f2af4, 0x5b6ce6, 0x3a77c9, 0x0a7b83, 0x197a3d, 0x6b7b14,
+    0x8a5c00, 0x9e3b8f, 0x4f6f8f,
+];
+
+fn tint(key: &str) -> Color {
+    let h = key.bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+    let c = PALETTE[(h as usize) % PALETTE.len()];
+    Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8)
+}
+
+fn initial(name: &str) -> String {
+    name.chars().find(|c| !c.is_whitespace()).map(|c| c.to_uppercase().to_string()).unwrap_or_default()
+}
+
+/// UI-thread state that isn't a Slint property.
+#[derive(Default)]
+struct Ui {
+    threads: Rc<VecModel<ThreadItem>>,
+    messages: Rc<VecModel<MsgItem>>,
+    /// thumbnails for the open thread only; cleared on thread switch to bound memory
+    thumbs: HashMap<String, Image>,
+    last: Vec<MsgDto>,
+    files: Vec<PathBuf>,
+    reply_to: Option<String>,
+    open_key: String,
+    loading_older: bool,
+    picking: bool,
+    packs: Rc<VecModel<PackItem>>,
+    pack_dtos: Vec<types::PackDto>,
+    stickers: Rc<VecModel<StickerItem>>,
+    grid: Vec<types::StickerDto>,
+    /// picker thumbnails; dropped when the panel closes
+    sticker_thumbs: HashMap<String, Image>,
+    tx: Option<UnboundedSender<Command>>,
+}
+
+fn send_cmd(c: Command) {
+    UI.with_borrow(|ui| {
+        if let Some(tx) = &ui.tx {
+            let _ = tx.send(c);
+        }
+    });
+}
+
+fn pack_item(p: &types::PackDto, thumbs: &HashMap<String, Image>) -> PackItem {
+    PackItem {
+        id: p.id.as_str().into(),
+        title: p.title.as_str().into(),
+        installed: p.installed,
+        cover: thumbs.get(&p.cover_key).cloned().unwrap_or_default(),
+    }
+}
+
+fn close_stickers(app: &AppWindow) {
+    app.set_sticker_open(false);
+    UI.with_borrow_mut(|ui| {
+        ui.sticker_thumbs.clear();
+        ui.grid.clear();
+        ui.stickers.set_vec(Vec::new());
+        ui.packs.set_vec(Vec::new());
+    });
+}
+
+thread_local! {
+    static UI: RefCell<Ui> = RefCell::default();
+}
+
+fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>) -> MsgItem {
+    let image = thumbs.get(&m.image_key).cloned();
+    MsgItem {
+        id: m.id.as_str().into(),
+        sender: m.sender.as_str().into(),
+        sender_color: tint(&m.sender_key),
+        text: m.text.as_str().into(),
+        time: m.time.as_str().into(),
+        outgoing: m.outgoing,
+        show_sender: m.show_sender,
+        status: m.status.as_str().into(),
+        quote: m.quote.as_str().into(),
+        reactions: m.reactions.as_str().into(),
+        attachment: m.attachment.as_str().into(),
+        has_image: !m.image_key.is_empty(),
+        image: image.unwrap_or_default(),
+        img_w: m.img_w as f32,
+        img_h: m.img_h as f32,
+        deleted: m.deleted,
+        day_sep: m.day_sep.as_str().into(),
+        system: m.system,
+        sticker: m.sticker,
+    }
+}
+
+fn thread_item(t: &ThreadDto) -> ThreadItem {
+    ThreadItem {
+        key: t.key.as_str().into(),
+        name: t.name.as_str().into(),
+        snippet: t.snippet.as_str().into(),
+        time: t.time.as_str().into(),
+        unread: t.unread as i32,
+        initial: if t.is_group && t.name.is_empty() { "#".into() } else { initial(&t.name).into() },
+        color: tint(&t.key),
+        is_group: t.is_group,
+    }
+}
+
+fn qr_image(url: &str) -> Option<Image> {
+    let code = qrcode::QrCode::new(url.as_bytes()).ok()?;
+    let w = code.width();
+    let quiet = 2;
+    let size = (w + quiet * 2) as u32;
+    let mut buf = SharedPixelBuffer::<Rgba8Pixel>::new(size, size);
+    let px = buf.make_mut_slice();
+    for p in px.iter_mut() {
+        *p = Rgba8Pixel { r: 255, g: 255, b: 255, a: 255 };
+    }
+    for y in 0..w {
+        for x in 0..w {
+            if code[(x, y)] == qrcode::Color::Dark {
+                px[(y + quiet) * size as usize + (x + quiet)] = Rgba8Pixel { r: 0, g: 0, b: 0, a: 255 };
+            }
+        }
+    }
+    Some(Image::from_rgba8(buf))
+}
+
+fn apply(app: &AppWindow, ev: Event) {
+    match ev {
+        Event::Loading(t) => {
+            app.set_loading_text(t.into());
+            app.set_page("loading".into());
+        }
+        Event::NeedLink => {
+            app.set_has_qr(false);
+            app.set_page("link".into());
+        }
+        Event::LinkQr(url) => {
+            if let Some(img) = qr_image(&url) {
+                app.set_qr(img);
+                app.set_has_qr(true);
+            }
+        }
+        Event::LinkStatus(s) => app.set_link_status(s.into()),
+        Event::Ready => app.set_page("main".into()),
+        Event::Threads(list) => UI.with_borrow(|ui| {
+            app.set_total_unread(list.iter().map(|t| t.unread as i32).sum());
+            ui.threads.set_vec(list.iter().map(thread_item).collect::<Vec<_>>());
+        }),
+        Event::Header { name, sub } => {
+            app.set_current_name(name.into());
+            app.set_current_sub(sub.into());
+        }
+        Event::Messages { key, items, can_older, scroll } => {
+            let switched = UI.with_borrow_mut(|ui| {
+                let switched = ui.open_key != key;
+                if switched {
+                    ui.thumbs.clear();
+                    ui.open_key = key.clone();
+                    ui.reply_to = None;
+                }
+                ui.loading_older = false;
+                switched
+            });
+            if switched {
+                app.set_reply_preview(SharedString::new());
+                close_stickers(app);
+            }
+            app.set_current_key(key.into());
+            let near_bottom = app.get_near_bottom();
+            let before_h = app.invoke_content_height();
+            UI.with_borrow_mut(|ui| {
+                ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs)).collect::<Vec<_>>());
+                ui.last = items;
+            });
+            app.set_can_load_older(can_older);
+            let weak = app.as_weak();
+            let do_scroll = move || {
+                let Some(app) = weak.upgrade() else { return };
+                match scroll {
+                    Scroll::Bottom => app.invoke_scroll_to_bottom(),
+                    Scroll::KeepIfNotAtBottom if near_bottom => app.invoke_scroll_to_bottom(),
+                    Scroll::KeepIfNotAtBottom => {}
+                    Scroll::Older => {
+                        let grown = app.invoke_content_height() - before_h;
+                        app.invoke_shift_by(grown);
+                    }
+                }
+            };
+            // let the ListView lay out the new rows before measuring
+            slint::Timer::single_shot(std::time::Duration::from_millis(16), do_scroll.clone());
+            if scroll == Scroll::Bottom {
+                slint::Timer::single_shot(std::time::Duration::from_millis(120), do_scroll);
+            }
+            if switched {
+                app.invoke_focus_composer();
+            }
+        }
+        Event::Thumb(t) => {
+            let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
+            let img = Image::from_rgba8(buf);
+            if t.key.starts_with(types::STICKER_THUMB_PREFIX) {
+                if !app.get_sticker_open() {
+                    return;
+                }
+                UI.with_borrow_mut(|ui| {
+                    ui.sticker_thumbs.insert(t.key.clone(), img.clone());
+                    for (i, p) in ui.pack_dtos.iter().enumerate() {
+                        if p.cover_key == t.key {
+                            slint::Model::set_row_data(&*ui.packs, i, pack_item(p, &ui.sticker_thumbs));
+                        }
+                    }
+                    for (i, s) in ui.grid.iter().enumerate() {
+                        if s.key == t.key {
+                            if let Some(mut row) = slint::Model::row_data(&*ui.stickers, i) {
+                                row.img = img.clone();
+                                slint::Model::set_row_data(&*ui.stickers, i, row);
+                            }
+                        }
+                    }
+                });
+                return;
+            }
+            UI.with_borrow_mut(|ui| {
+                ui.thumbs.insert(t.key.clone(), img.clone());
+                for (i, m) in ui.last.iter().enumerate() {
+                    if m.image_key == t.key {
+                        if let Some(mut row) = slint::Model::row_data(&*ui.messages, i) {
+                            row.image = img.clone();
+                            slint::Model::set_row_data(&*ui.messages, i, row);
+                        }
+                    }
+                }
+            });
+        }
+        Event::Status(s) => app.set_status_text(s.into()),
+        Event::StickerPacks(list) => {
+            if !app.get_sticker_open() {
+                return;
+            }
+            let first = UI.with_borrow_mut(|ui| {
+                ui.packs.set_vec(list.iter().map(|p| pack_item(p, &ui.sticker_thumbs)).collect::<Vec<_>>());
+                let first = list.iter().find(|p| p.installed).map(|p| p.id.clone());
+                ui.pack_dtos = list;
+                first
+            });
+            let cur = app.get_current_pack().to_string();
+            let still_there = UI.with_borrow(|ui| ui.pack_dtos.iter().any(|p| p.installed && p.id == cur));
+            // the grid is emptied when the panel closes, so always (re)load the selected pack
+            let target = if still_there { Some(cur) } else { first };
+            match target {
+                Some(id) => {
+                    app.set_current_pack(id.as_str().into());
+                    send_cmd(Command::OpenPack(id));
+                }
+                None => app.set_current_pack("+".into()),
+            }
+        }
+        Event::StickerGrid { pack, items } => {
+            if !app.get_sticker_open() {
+                return;
+            }
+            app.set_current_pack(pack.into());
+            UI.with_borrow_mut(|ui| {
+                let rows: Vec<StickerItem> = items
+                    .iter()
+                    .map(|s| StickerItem {
+                        id: s.id as i32,
+                        emoji: s.emoji.as_str().into(),
+                        img: ui.sticker_thumbs.get(&s.key).cloned().unwrap_or_default(),
+                    })
+                    .collect();
+                ui.stickers.set_vec(rows);
+                ui.grid = items;
+            });
+        }
+    }
+}
+
+fn data_dir() -> PathBuf {
+    if let Ok(d) = std::env::var("LITE_SIGNAL_DATA") {
+        return PathBuf::from(d);
+    }
+    directories::ProjectDirs::from("dev", "lite-signal", "lite-signal")
+        .map(|p| p.data_local_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("lite-signal-data"))
+}
+
+fn main() -> anyhow::Result<()> {
+    if picker::run_if_child() {
+        return Ok(());
+    }
+    let filter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(tracing::Level::INFO.into())
+        .from_env_lossy()
+        .add_directive("libsignal=warn".parse()?)
+        .add_directive("presage=warn".parse()?)
+        .add_directive("sqlx=error".parse()?);
+    tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
+
+    let app = AppWindow::new()?;
+    UI.with_borrow(|ui| {
+        app.set_threads(ModelRc::from(ui.threads.clone()));
+        app.set_messages(ModelRc::from(ui.messages.clone()));
+        app.set_packs(ModelRc::from(ui.packs.clone()));
+        app.set_stickers(ModelRc::from(ui.stickers.clone()));
+    });
+
+    let (cmd_tx, cmd_rx) = unbounded_channel::<Command>();
+    let weak = app.as_weak();
+    let emit: backend::Emit = Arc::new(move |ev: Event| {
+        let _ = weak.upgrade_in_event_loop(move |app| apply(&app, ev));
+    });
+    if std::env::var_os("LITE_SIGNAL_DEMO").is_some() {
+        demo(emit);
+        if std::env::var_os("LITE_SIGNAL_DEMO_STICKERS").is_some() {
+            let weak = app.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
+                if let Some(app) = weak.upgrade() {
+                    app.set_sticker_open(true);
+                }
+            });
+        }
+        if std::env::var_os("LITE_SIGNAL_SELFTEST").is_some() {
+            selftest();
+        }
+    } else {
+        let _backend = backend::spawn(data_dir(), cmd_rx, emit);
+    }
+
+    UI.with_borrow_mut(|ui| ui.tx = Some(cmd_tx.clone()));
+    wire(&app, cmd_tx);
+    app.run()?;
+    Ok(())
+}
+
+fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
+    let send = move |c: Command| {
+        let _ = tx.send(c);
+    };
+
+    let s = send.clone();
+    app.on_start_link(move |name| s(Command::StartLink(name.to_string())));
+
+    let s = send.clone();
+    app.on_open_thread(move |key| s(Command::OpenThread(key.to_string())));
+
+    let s = send.clone();
+    app.on_load_older(move || {
+        let go = UI.with_borrow_mut(|ui| !std::mem::replace(&mut ui.loading_older, true));
+        if go {
+            s(Command::LoadOlder);
+        }
+    });
+
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.on_send(move |text| {
+        let Some(app) = weak.upgrade() else { return };
+        let (files, quote) = UI.with_borrow_mut(|ui| (std::mem::take(&mut ui.files), ui.reply_to.take()));
+        if text.trim().is_empty() && files.is_empty() {
+            return;
+        }
+        s(Command::Send { text: text.to_string(), files, quote });
+        app.set_draft(SharedString::new());
+        app.set_pending_files(ModelRc::default());
+        app.set_reply_preview(SharedString::new());
+    });
+
+    let weak = app.as_weak();
+    app.on_attach(move || {
+        let Some(app) = weak.upgrade() else { return };
+        if UI.with_borrow_mut(|ui| std::mem::replace(&mut ui.picking, true)) {
+            return;
+        }
+        let weak = app.as_weak();
+        picker::spawn(hwnd(&app), move |picked| {
+            let _ = slint::invoke_from_event_loop(move || {
+                let names: Vec<SharedString> = UI.with_borrow_mut(|ui| {
+                    ui.picking = false;
+                    ui.files.extend(picked);
+                    ui.files
+                        .iter()
+                        .map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default().into())
+                        .collect()
+                });
+                if let Some(app) = weak.upgrade() {
+                    app.set_pending_files(ModelRc::new(VecModel::from(names)));
+                    app.invoke_focus_composer();
+                }
+            });
+        });
+    });
+
+    let weak = app.as_weak();
+    app.on_clear_attachments(move || {
+        UI.with_borrow_mut(|ui| ui.files.clear());
+        if let Some(app) = weak.upgrade() {
+            app.set_pending_files(ModelRc::default());
+        }
+    });
+
+    let s = send.clone();
+    app.on_attachment_clicked(move |id| {
+        let is_sticker = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id.as_str() && m.sticker));
+        if !is_sticker {
+            s(Command::OpenAttachment(id.to_string()));
+            return;
+        }
+        let ok = rfd::MessageDialog::new()
+            .set_title("스티커 팩")
+            .set_description("이 스티커가 들어 있는 팩을 추가할까요?")
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        if ok == rfd::MessageDialogResult::Yes {
+            s(Command::InstallPackFromMessage(id.to_string()));
+        }
+    });
+
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.on_toggle_stickers(move || {
+        let Some(app) = weak.upgrade() else { return };
+        if app.get_sticker_open() {
+            close_stickers(&app);
+        } else {
+            app.set_sticker_open(true);
+            s(Command::StickerPanel);
+        }
+    });
+
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.on_pick_pack(move |id| {
+        let Some(app) = weak.upgrade() else { return };
+        app.set_current_pack(id.clone());
+        if id.as_str() != "+" {
+            s(Command::OpenPack(id.to_string()));
+        }
+    });
+
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.on_send_sticker(move |pack, id| {
+        s(Command::SendSticker { pack: pack.to_string(), id: id as u32 });
+        if let Some(app) = weak.upgrade() {
+            close_stickers(&app);
+        }
+    });
+
+    let s = send.clone();
+    app.on_install_pack(move |id| s(Command::InstallPack { id: id.to_string(), key: String::new() }));
+
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.on_add_pack_url(move |url| {
+        if url.trim().is_empty() {
+            return;
+        }
+        s(Command::InstallPackUrl(url.to_string()));
+        if let Some(app) = weak.upgrade() {
+            app.set_pack_url(SharedString::new());
+        }
+    });
+
+    let weak = app.as_weak();
+    app.on_reply(move |id| {
+        let Some(app) = weak.upgrade() else { return };
+        let preview = UI.with_borrow_mut(|ui| {
+            let m = ui.last.iter().find(|m| m.id == id.as_str())?;
+            if m.system || m.deleted {
+                return None;
+            }
+            ui.reply_to = Some(m.id.clone());
+            let who = if m.outgoing { "나".to_string() } else { m.sender.clone() };
+            let body = if m.text.is_empty() { m.attachment.clone() } else { m.text.replace('\n', " ") };
+            Some(if who.is_empty() { body } else { format!("{who}: {body}") })
+        });
+        if let Some(p) = preview {
+            app.set_reply_preview(p.into());
+            app.invoke_focus_composer();
+        }
+    });
+
+    let weak = app.as_weak();
+    app.on_cancel_reply(move || {
+        UI.with_borrow_mut(|ui| ui.reply_to = None);
+        if let Some(app) = weak.upgrade() {
+            app.set_reply_preview(SharedString::new());
+        }
+    });
+
+    let s = send.clone();
+    app.on_search_changed(move |q| s(Command::Search(q.to_string())));
+
+    let s = send.clone();
+    app.on_unlink(move || {
+        let ok = rfd::MessageDialog::new()
+            .set_title("연결 해제")
+            .set_description("이 PC의 연결을 해제하고 로컬 데이터를 모두 삭제할까요?")
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .set_level(rfd::MessageLevel::Warning)
+            .show();
+        if ok == rfd::MessageDialogResult::Yes {
+            s(Command::Unlink);
+        }
+    });
+
+    // Slint has no window-focus callback; poll the foreground window instead (cheap).
+    let s = send.clone();
+    let weak = app.as_weak();
+    let last = std::cell::Cell::new(true);
+    let timer = Box::leak(Box::new(slint::Timer::default()));
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(700), move || {
+        let Some(app) = weak.upgrade() else { return };
+        let f = is_foreground(&app);
+        if f != last.get() {
+            last.set(f);
+            s(Command::WindowFocus(f));
+        }
+    });
+}
+
+fn hwnd(app: &AppWindow) -> isize {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let wh = app.window().window_handle();
+    match wh.window_handle().map(|h| h.as_raw()) {
+        Ok(RawWindowHandle::Win32(h)) => h.hwnd.get(),
+        _ => 0,
+    }
+}
+
+#[cfg(windows)]
+fn is_foreground(app: &AppWindow) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsIconic};
+    let hwnd = hwnd(app) as *mut std::ffi::c_void;
+    if hwnd.is_null() {
+        return true;
+    }
+    // SAFETY: plain Win32 queries on our own window handle
+    unsafe { GetForegroundWindow() == hwnd && IsIconic(hwnd) == 0 }
+}
+
+#[cfg(not(windows))]
+fn is_foreground(_: &AppWindow) -> bool {
+    true
+}
+
+/// Synthetic data for checking layout and memory without a Signal account.
+fn demo(emit: backend::Emit) {
+    let threads: Vec<ThreadDto> = (0..40)
+        .map(|i| ThreadDto {
+            key: format!("c:demo-{i}"),
+            name: ["김민준", "이서연", "박지훈", "가족 단톡방", "Alice", "프로젝트 팀"][i % 6].to_string(),
+            snippet: "내일 몇 시에 만날까? 저녁 7시쯤 어때요".into(),
+            time: if i < 3 { "오후 3:12".into() } else { format!("10월 {}일", 30 - (i % 28)) },
+            unread: if i % 5 == 0 { (i % 7) as u32 + 1 } else { 0 },
+            is_group: i % 6 == 3 || i % 6 == 5,
+        })
+        .collect();
+    let mut items = Vec::new();
+    for i in 0..300u32 {
+        let outgoing = i % 3 == 0;
+        items.push(MsgDto {
+            id: i.to_string(),
+            sender: if outgoing { String::new() } else { "이서연".into() },
+            sender_key: "demo".into(),
+            text: if i % 7 == 0 {
+                "긴 메시지 테스트입니다. 한글 줄바꿈이 제대로 되는지, 말풍선 최대 폭이 적당한지 확인하기 위한 문장입니다. 🙂".into()
+            } else {
+                format!("메시지 {i}")
+            },
+            time: "오후 3:12".into(),
+            outgoing,
+            show_sender: !outgoing && i % 4 == 1,
+            status: if outgoing { "읽음".into() } else { String::new() },
+            quote: if i % 11 == 0 { "이전 메시지 인용".into() } else { String::new() },
+            reactions: if i % 9 == 0 { "❤️2 👍".into() } else { String::new() },
+            attachment: if i % 13 == 0 { "보고서.pdf".into() } else { String::new() },
+            day_sep: if i % 50 == 0 { "2026년 11월 1일 일요일".into() } else { String::new() },
+            sticker: i == 298 || i == 297,
+            image_key: if i == 298 || i == 297 { format!("demo-st-{}", i % 2) } else { String::new() },
+            img_w: if i == 298 || i == 297 { 140 } else { 0 },
+            img_h: if i == 298 || i == 297 { 140 } else { 0 },
+            ..Default::default()
+        });
+    }
+    emit(Event::Ready);
+    emit(Event::Threads(threads));
+    emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
+    emit(Event::Messages { key: "c:demo-1".into(), items, can_older: false, scroll: Scroll::Bottom });
+    emit(Event::Status("데모 모드".into()));
+    if std::env::var_os("LITE_SIGNAL_DEMO_STICKERS").is_some() {
+        demo_stickers(emit);
+    }
+}
+
+/// LITE_SIGNAL_SELFTEST=1 (with demo): measure what the file dialog and toasts cost.
+fn selftest() {
+    let step = std::rc::Rc::new(std::cell::Cell::new(0));
+    let timer = Box::leak(Box::new(slint::Timer::default()));
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(4), move || {
+        let s = step.get();
+        step.set(s + 1);
+        eprintln!("selftest step {s}: {}", alloc::report());
+        match s {
+            1 => {
+                picker::spawn(0, |f| eprintln!("selftest picked {} files", f.len()));
+            }
+            3 => {
+                let _ = notify_rust::Notification::new().summary("selftest").body("toast").show();
+            }
+            _ => {}
+        }
+    });
+}
+
+fn demo_blob(key: &str, size: u32, hue: u8) -> types::Thumb {
+    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
+    let c = size as f32 / 2.0;
+    for y in 0..size {
+        for x in 0..size {
+            let d = ((x as f32 - c).powi(2) + (y as f32 - c).powi(2)).sqrt();
+            let a = if d < c * 0.9 { 255 } else { 0 };
+            rgba.extend_from_slice(&[hue, 180u8.wrapping_sub(hue / 2), 255 - hue, a]);
+        }
+    }
+    types::Thumb { key: key.into(), width: size, height: size, rgba }
+}
+
+fn demo_stickers(emit: backend::Emit) {
+    for i in 0..2u8 {
+        emit(Event::Thumb(Arc::new(demo_blob(&format!("demo-st-{i}"), 200, 60 + i * 120))));
+    }
+    let packs: Vec<types::PackDto> = (0..3)
+        .map(|i| types::PackDto {
+            id: format!("p{i}"),
+            title: format!("추천 팩 {i}"),
+            installed: i < 2 && std::env::var("LITE_SIGNAL_DEMO_STICKERS").as_deref() != Ok("add"),
+            cover_key: format!("sp_p{i}_0"),
+        })
+        .collect();
+    let items: Vec<types::StickerDto> =
+        (0..20).map(|i| types::StickerDto { key: format!("sp_p0_{i}"), id: i, emoji: String::new() }).collect();
+    // the panel is opened by main(); give it a moment before filling it
+    slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
+        emit(Event::StickerPacks(packs));
+        if std::env::var("LITE_SIGNAL_DEMO_STICKERS").as_deref() != Ok("add") {
+            emit(Event::StickerGrid { pack: "p0".into(), items });
+        }
+        for i in 0..20u32 {
+            emit(Event::Thumb(Arc::new(demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8))));
+        }
+        emit(Event::Thumb(Arc::new(demo_blob("sp_p1_0", 96, 200))));
+    });
+}

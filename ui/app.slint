@@ -1,0 +1,798 @@
+import { LineEdit, Button, ListView, Palette, Spinner } from "std-widgets.slint";
+
+export struct ThreadItem {
+    key: string,
+    name: string,
+    snippet: string,
+    time: string,
+    unread: int,
+    initial: string,
+    color: color,
+    is-group: bool,
+}
+
+export struct MsgItem {
+    id: string,
+    sender: string,
+    sender-color: color,
+    text: string,
+    time: string,
+    outgoing: bool,
+    show-sender: bool,
+    status: string,
+    quote: string,
+    reactions: string,
+    attachment: string,
+    has-image: bool,
+    image: image,
+    img-w: length,
+    img-h: length,
+    deleted: bool,
+    day-sep: string,
+    system: bool,
+    sticker: bool,
+}
+
+export struct PackItem {
+    id: string,
+    title: string,
+    installed: bool,
+    cover: image,
+}
+
+export struct StickerItem {
+    id: int,
+    emoji: string,
+    img: image,
+}
+
+global Theme {
+    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+    out property <color> accent: #2c6bed;
+    out property <color> sidebar: dark ? #1b1b1d : #f6f6f8;
+    out property <color> pane: dark ? #121212 : #ffffff;
+    out property <color> border: dark ? #2a2a2d : #e3e3e6;
+    out property <color> text: dark ? #e9e9eb : #1b1b1d;
+    out property <color> subtle: dark ? #9a9aa0 : #6b6b70;
+    out property <color> bubble-in: dark ? #2b2b2e : #e9e9eb;
+    out property <color> bubble-out: accent;
+    out property <color> selected: dark ? #2c2c31 : #dfe7fb;
+    out property <color> hover: dark ? #232326 : #ececf0;
+}
+
+component Avatar inherits Rectangle {
+    in property <string> initial;
+    in property <color> tint;
+    in property <length> size: 40px;
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: tint;
+    Text {
+        text: initial;
+        color: white;
+        font-size: size * 0.42;
+        font-weight: 600;
+    }
+}
+
+component IconButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 36px;
+    height: 36px;
+    border-radius: 18px;
+    background: ta.has-hover && enabled ? Theme.hover : transparent;
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Text {
+        text: label;
+        font-size: 18px;
+        color: enabled ? Theme.subtle : Theme.border;
+    }
+}
+
+component ThreadRow inherits Rectangle {
+    in property <ThreadItem> item;
+    in property <bool> selected;
+    callback clicked;
+    height: 64px;
+    background: selected ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        alignment: stretch;
+        Avatar {
+            y: (parent.height - self.height) / 2;
+            initial: item.initial;
+            tint: item.color;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: item.name;
+                    color: Theme.text;
+                    font-weight: item.unread > 0 ? 700 : 500;
+                    font-size: 14px;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: item.time;
+                    color: Theme.subtle;
+                    font-size: 11px;
+                    horizontal-stretch: 0;
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: item.snippet;
+                    color: Theme.subtle;
+                    font-size: 12.5px;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                if item.unread > 0: Rectangle {
+                    horizontal-stretch: 0;
+                    min-width: 20px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: Theme.accent;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        Text {
+                            text: item.unread > 99 ? "99+" : item.unread;
+                            color: white;
+                            font-size: 11px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component Bubble inherits VerticalLayout {
+    in property <MsgItem> m;
+    in property <length> max-w;
+    callback attachment-clicked(string);
+    callback reply(string);
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-top: m.show-sender || m.day-sep != "" ? 8px : 2px;
+    padding-bottom: 2px;
+    spacing: 4px;
+
+    if m.day-sep != "": HorizontalLayout {
+        alignment: center;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        Rectangle {
+            border-radius: 10px;
+            background: Theme.hover;
+            HorizontalLayout {
+                padding: 4px;
+                padding-left: 10px;
+                padding-right: 10px;
+                Text { text: m.day-sep; color: Theme.subtle; font-size: 11.5px; }
+            }
+        }
+    }
+
+    if m.system: HorizontalLayout {
+        alignment: center;
+        Text {
+            text: m.text;
+            color: Theme.subtle;
+            font-size: 12px;
+            font-italic: true;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+        }
+    }
+
+    if !m.system: HorizontalLayout {
+        alignment: m.outgoing ? end : start;
+        Rectangle {
+            max-width: root.max-w;
+            border-radius: 14px;
+            background: m.deleted || m.sticker ? transparent : (m.outgoing ? Theme.bubble-out : Theme.bubble-in);
+            border-width: m.deleted ? 1px : 0px;
+            border-color: Theme.border;
+            bta := TouchArea {
+                double-clicked => { root.reply(m.id); }
+            }
+            VerticalLayout {
+                padding: 9px;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 4px;
+                if m.show-sender && !m.outgoing: Text {
+                    text: m.sender;
+                    color: m.sender-color;
+                    font-size: 12px;
+                    font-weight: 700;
+                }
+                if m.quote != "": Rectangle {
+                    border-radius: 6px;
+                    background: m.outgoing ? #ffffff30 : (Theme.dark ? #ffffff14 : #00000010);
+                    HorizontalLayout {
+                        Rectangle { width: 3px; background: m.outgoing ? white : Theme.accent; }
+                        VerticalLayout {
+                            padding: 6px;
+                            Text {
+                                text: m.quote;
+                                color: m.outgoing ? #ffffffd0 : Theme.subtle;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                                overflow: elide;
+                                max-height: 48px;
+                            }
+                        }
+                    }
+                }
+                if m.has-image: Rectangle {
+                    width: m.img-w;
+                    height: m.img-h;
+                    border-radius: 8px;
+                    clip: true;
+                    Image {
+                        width: 100%;
+                        height: 100%;
+                        source: m.image;
+                        image-fit: m.sticker ? contain : cover;
+                    }
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.attachment-clicked(m.id); }
+                    }
+                }
+                if m.attachment != "": Rectangle {
+                    border-radius: 6px;
+                    background: ata.has-hover ? (m.outgoing ? #ffffff30 : Theme.hover) : transparent;
+                    ata := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.attachment-clicked(m.id); }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        padding: 2px;
+                        Text { text: "📎"; font-size: 14px; }
+                        Text {
+                            text: m.attachment;
+                            color: m.outgoing ? white : Theme.text;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+                if m.text != "": TextInput {
+                    text: m.text;
+                    read-only: true;
+                    single-line: false;
+                    wrap: word-wrap;
+                    color: m.deleted ? Theme.subtle : (m.outgoing && !m.sticker ? white : Theme.text);
+                    font-italic: m.deleted;
+                    font-size: 14px;
+                    selection-background-color: m.outgoing ? #ffffff60 : #2c6bed60;
+                    selection-foreground-color: m.outgoing ? white : Theme.text;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 4px;
+                    if m.reactions != "": Text {
+                        text: m.reactions;
+                        font-size: 12px;
+                        color: m.outgoing && !m.sticker ? white : Theme.text;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: m.time;
+                        font-size: 10.5px;
+                        color: m.outgoing && !m.sticker ? #ffffffb0 : Theme.subtle;
+                    }
+                    if m.outgoing && m.status != "": Text {
+                        text: m.status;
+                        font-size: 10.5px;
+                        color: m.sticker ? Theme.subtle : #ffffffd0;
+                    }
+                }
+            }
+        }
+    }
+}
+
+component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+    height: 28px;
+    min-width: lbl.preferred-width + 20px;
+    max-width: 160px;
+    border-radius: 14px;
+    background: active ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    lbl := Text {
+        x: 10px;
+        width: parent.width - 20px;
+        text: root.text;
+        color: Theme.text;
+        font-size: 12.5px;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+}
+
+component StickerPanel inherits Rectangle {
+    in property <[PackItem]> packs;
+    in property <[StickerItem]> stickers;
+    in property <string> current-pack;
+    in-out property <string> url-text;
+    callback pick-pack(string);
+    callback send-sticker(string, int);
+    callback install-pack(string);
+    callback add-pack-url(string);
+
+    property <length> cell: 84px;
+    property <int> cols: max(1, floor((self.width - 16px) / cell));
+    property <bool> suggest: current-pack == "" || current-pack == "+";
+
+    height: 300px;
+    background: Theme.sidebar;
+    Rectangle { height: 1px; y: 0; background: Theme.border; }
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+        // pack tabs
+        Flickable {
+            height: 40px;
+            // a Flickable's max size defaults to its content: don't let that shrink the window
+            max-width: 100000px;
+            content-width: tabs.preferred-width;
+            tabs := HorizontalLayout {
+                spacing: 4px;
+                for p in root.packs: Rectangle {
+                    visible: p.installed;
+                    width: p.installed ? 40px : 0px;
+                    height: 40px;
+                    border-radius: 8px;
+                    background: p.id == root.current-pack ? Theme.selected : (pta.has-hover ? Theme.hover : transparent);
+                    Image { width: 32px; height: 32px; source: p.cover; image-fit: contain; }
+                    pta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.pick-pack(p.id); }
+                    }
+                }
+                TextButton {
+                    y: 6px;
+                    text: "＋ 팩 추가";
+                    active: root.suggest;
+                    clicked => { root.pick-pack("+"); }
+                }
+            }
+        }
+        // sticker grid
+        if !root.suggest: Flickable {
+            vertical-stretch: 1;
+            max-width: 100000px;
+            content-height: ceil(root.stickers.length / root.cols) * root.cell;
+            for s[i] in root.stickers: Rectangle {
+                x: mod(i, root.cols) * root.cell;
+                y: floor(i / root.cols) * root.cell;
+                width: root.cell;
+                height: root.cell;
+                border-radius: 8px;
+                background: sta.has-hover ? Theme.hover : transparent;
+                Image { width: root.cell - 12px; height: root.cell - 12px; source: s.img; image-fit: contain; }
+                sta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.send-sticker(root.current-pack, s.id); }
+                }
+            }
+        }
+        // add packs: Signal's built-in packs + signal.art link
+        if root.suggest: Flickable {
+            vertical-stretch: 1;
+            max-width: 100000px;
+            content-height: sug.preferred-height;
+            sug := VerticalLayout {
+                spacing: 4px;
+                Text { text: "추천 스티커 팩"; color: Theme.subtle; font-size: 12px; }
+                for p in root.packs: HorizontalLayout {
+                    visible: !p.installed;
+                    height: p.installed ? 0px : 34px;
+                    spacing: 8px;
+                    Text {
+                        text: p.title;
+                        color: Theme.text;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    Button {
+                        text: "추가";
+                        clicked => { root.install-pack(p.id); }
+                    }
+                }
+                Rectangle { height: 8px; }
+                Text { text: "signal.art 스티커 링크로 추가"; color: Theme.subtle; font-size: 12px; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    LineEdit {
+                        placeholder-text: "https://signal.art/addstickers/#pack_id=…&pack_key=…";
+                        text <=> root.url-text;
+                        accepted(t) => { root.add-pack-url(t); }
+                    }
+                    Button {
+                        text: "추가";
+                        clicked => { root.add-pack-url(root.url-text); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component LinkPage inherits Rectangle {
+    in property <image> qr;
+    in property <bool> has-qr;
+    in property <string> status;
+    in-out property <string> device-name: "lite-signal";
+    callback start-link(string);
+    background: Theme.pane;
+    VerticalLayout {
+        alignment: center;
+        spacing: 16px;
+        padding: 32px;
+        Text {
+            text: "lite-signal";
+            font-size: 28px;
+            font-weight: 700;
+            color: Theme.text;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: "휴대폰의 Signal 앱 → 설정 → 연결된 기기 → '+' 를 눌러 아래 QR 코드를 스캔하세요.";
+            color: Theme.subtle;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+        }
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 280px;
+                height: 280px;
+                background: white;
+                border-radius: 12px;
+                if has-qr: Image {
+                    width: 256px;
+                    height: 256px;
+                    source: qr;
+                    image-rendering: pixelated;
+                }
+                if !has-qr: Text {
+                    text: "QR 코드 대기 중";
+                    color: #888;
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 8px;
+            Text { text: "기기 이름"; color: Theme.text; vertical-alignment: center; }
+            LineEdit {
+                width: 200px;
+                text <=> root.device-name;
+            }
+            Button {
+                text: has-qr ? "QR 다시 만들기" : "연결 시작";
+                clicked => { root.start-link(root.device-name); }
+            }
+        }
+        Text {
+            text: status;
+            color: Theme.subtle;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    in property <int> total-unread;
+    title: total-unread > 0 ? "lite-signal (" + total-unread + ")" : "lite-signal";
+    preferred-width: 1000px;
+    preferred-height: 680px;
+    min-width: 640px;
+    min-height: 420px;
+    background: Theme.pane;
+    default-font-family: "Malgun Gothic";
+    icon: @image-url("../assets/icon.png");
+
+    // "loading" | "link" | "main"
+    in property <string> page: "loading";
+    in property <string> loading-text: "불러오는 중…";
+
+    in property <image> qr;
+    in property <bool> has-qr: false;
+    in property <string> link-status;
+
+    in property <[ThreadItem]> threads;
+    in-out property <string> current-key;
+    in property <string> current-name;
+    in property <string> current-sub;
+    in property <[MsgItem]> messages;
+    in property <bool> can-load-older;
+    in property <string> status-text;
+    in property <string> reply-preview;
+    in property <[string]> pending-files;
+    in-out property <string> search;
+    in-out property <string> draft;
+
+    callback start-link(string);
+    callback open-thread(string);
+    callback send(string);
+    callback load-older();
+    callback attach();
+    callback clear-attachments();
+    callback attachment-clicked(string);
+    callback reply(string);
+    callback cancel-reply();
+    callback search-changed(string);
+    callback unlink();
+
+    in-out property <bool> sticker-open;
+    in property <[PackItem]> packs;
+    in property <[StickerItem]> stickers;
+    in property <string> current-pack;
+    in-out property <string> pack-url;
+    callback toggle-stickers();
+    callback pick-pack(string);
+    callback send-sticker(string, int);
+    callback install-pack(string);
+    callback add-pack-url(string);
+
+    public function scroll-to-bottom() {
+        msg-list.content-y = min(0px, msg-list.visible-height - msg-list.content-height);
+    }
+    public function focus-composer() {
+        composer.focus();
+    }
+    public function content-height() -> length {
+        return msg-list.content-height;
+    }
+    public function shift-by(d: length) {
+        msg-list.content-y = max(msg-list.visible-height - msg-list.content-height, min(0px, msg-list.content-y - d));
+    }
+    out property <bool> near-bottom: msg-list.content-y <= msg-list.visible-height - msg-list.content-height + 120px;
+
+    if page == "loading": Rectangle {
+        VerticalLayout {
+            alignment: center;
+            spacing: 12px;
+            HorizontalLayout {
+                alignment: center;
+                Spinner { indeterminate: true; width: 36px; height: 36px; }
+            }
+            Text { text: loading-text; color: Theme.subtle; horizontal-alignment: center; }
+        }
+    }
+
+    if page == "link": LinkPage {
+        qr: root.qr;
+        has-qr: root.has-qr;
+        status: root.link-status;
+        start-link(name) => { root.start-link(name); }
+    }
+
+    main := HorizontalLayout {
+        visible: page == "main";
+        // sidebar
+        Rectangle {
+            width: 300px;
+            background: Theme.sidebar;
+            VerticalLayout {
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 6px;
+                    LineEdit {
+                        placeholder-text: "검색";
+                        text <=> root.search;
+                        edited(t) => { root.search-changed(t); }
+                    }
+                    IconButton {
+                        label: "⏏";
+                        clicked => { root.unlink(); }
+                    }
+                }
+                ListView {
+                    for t in root.threads: ThreadRow {
+                        item: t;
+                        selected: t.key == root.current-key;
+                        clicked => { root.open-thread(t.key); }
+                    }
+                }
+                Rectangle {
+                    height: 24px;
+                    Text {
+                        x: 12px;
+                        text: root.status-text;
+                        color: Theme.subtle;
+                        font-size: 11px;
+                        overflow: elide;
+                        width: parent.width - 24px;
+                    }
+                }
+            }
+            Rectangle { x: parent.width - 1px; width: 1px; background: Theme.border; }
+        }
+        // conversation pane
+        VerticalLayout {
+            if root.current-key == "": Rectangle {
+                vertical-stretch: 1;
+                Text {
+                    text: "대화를 선택하세요";
+                    color: Theme.subtle;
+                    font-size: 15px;
+                }
+            }
+            if root.current-key != "": Rectangle {
+                height: 56px;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    VerticalLayout {
+                        alignment: center;
+                        Text { text: root.current-name; color: Theme.text; font-size: 15px; font-weight: 700; overflow: elide; }
+                        if root.current-sub != "": Text { text: root.current-sub; color: Theme.subtle; font-size: 11.5px; overflow: elide; }
+                    }
+                }
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+            }
+            msg-list := ListView {
+                visible: root.current-key != "";
+                vertical-stretch: 1;
+                scrolled => {
+                    if (self.content-y >= -4px && root.can-load-older) {
+                        root.load-older();
+                    }
+                }
+                for m in root.messages: Bubble {
+                    m: m;
+                    max-w: min(560px, msg-list.visible-width * 0.75);
+                    attachment-clicked(id) => { root.attachment-clicked(id); }
+                    reply(id) => { root.reply(id); }
+                }
+            }
+            if root.current-key != "" && root.sticker-open: StickerPanel {
+                packs: root.packs;
+                stickers: root.stickers;
+                current-pack: root.current-pack;
+                url-text <=> root.pack-url;
+                pick-pack(id) => { root.pick-pack(id); }
+                send-sticker(p, i) => { root.send-sticker(p, i); }
+                install-pack(id) => { root.install-pack(id); }
+                add-pack-url(u) => { root.add-pack-url(u); }
+            }
+            if root.current-key != "" && root.reply-preview != "": Rectangle {
+                background: Theme.sidebar;
+                HorizontalLayout {
+                    padding: 8px;
+                    padding-left: 16px;
+                    spacing: 8px;
+                    Rectangle { width: 3px; background: Theme.accent; }
+                    Text {
+                        text: "답장: " + root.reply-preview;
+                        color: Theme.subtle;
+                        font-size: 12px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton { label: "✕"; width: 28px; height: 28px; clicked => { root.cancel-reply(); } }
+                }
+            }
+            if root.current-key != "" && root.pending-files.length > 0: Rectangle {
+                background: Theme.sidebar;
+                HorizontalLayout {
+                    padding: 8px;
+                    padding-left: 16px;
+                    spacing: 8px;
+                    Text {
+                        text: "📎 " + root.pending-files.length + "개 첨부: " + root.pending-files[0] + (root.pending-files.length > 1 ? " 외" : "");
+                        color: Theme.subtle;
+                        font-size: 12px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton { label: "✕"; width: 28px; height: 28px; clicked => { root.clear-attachments(); } }
+                }
+            }
+            composer-bar := Rectangle {
+                visible: root.current-key != "";
+                min-height: self.visible ? 56px : 0px;
+                max-height: self.visible ? 400px : 0px;
+                Rectangle { height: 1px; y: 0; background: Theme.border; }
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+                    IconButton {
+                        label: "📎";
+                        clicked => { root.attach(); }
+                    }
+                    IconButton {
+                        label: "☺";
+                        clicked => { root.toggle-stickers(); }
+                    }
+                    Rectangle {
+                        border-radius: 18px;
+                        background: Theme.sidebar;
+                        border-width: 1px;
+                        border-color: composer.has-focus ? Theme.accent : Theme.border;
+                        min-height: 36px;
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            padding-top: 8px;
+                            padding-bottom: 8px;
+                            FocusScope {
+                                capture-key-pressed(event) => {
+                                    if (event.text == Key.Return && !event.modifiers.shift && !event.modifiers.control) {
+                                        root.send(composer.text);
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
+                                Rectangle {
+                                    composer := TextInput {
+                                        text <=> root.draft;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                        color: Theme.text;
+                                        font-size: 14px;
+                                        max-height: 140px;
+                                    }
+                                    if root.draft == "": Text {
+                                        x: 0;
+                                        y: 0;
+                                        text: "메시지 입력 (Enter 전송, Shift+Enter 줄바꿈)";
+                                        color: Theme.subtle;
+                                        font-size: 14px;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    IconButton {
+                        label: "➤";
+                        enabled: root.draft != "" || root.pending-files.length > 0;
+                        clicked => { root.send(composer.text); }
+                    }
+                }
+            }
+        }
+    }
+}

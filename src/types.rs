@@ -1,0 +1,133 @@
+//! Plain `Send` data exchanged between the backend thread and the UI thread.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use presage::libsignal_service::protocol::{Aci, ServiceId};
+use presage::libsignal_service::zkgroup::GroupMasterKeyBytes;
+use presage::store::Thread;
+
+/// Stable string form of a [`Thread`], used as UI key and in persisted state.
+pub fn thread_key(thread: &Thread) -> String {
+    match thread {
+        Thread::Contact(id) => format!("c:{}", id.raw_uuid()),
+        Thread::Group(key) => format!("g:{}", hex::encode(key)),
+    }
+}
+
+pub fn parse_thread_key(key: &str) -> Option<Thread> {
+    if let Some(uuid) = key.strip_prefix("c:") {
+        let uuid = uuid.parse().ok()?;
+        Some(Thread::Contact(ServiceId::Aci(Aci::from_uuid_bytes(
+            *uuid::Uuid::as_bytes(&uuid),
+        ))))
+    } else if let Some(hexkey) = key.strip_prefix("g:") {
+        let bytes: GroupMasterKeyBytes = hex::decode(hexkey).ok()?.try_into().ok()?;
+        Some(Thread::Group(bytes))
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ThreadDto {
+    pub key: String,
+    pub name: String,
+    pub snippet: String,
+    pub time: String,
+    pub unread: u32,
+    pub is_group: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MsgDto {
+    pub id: String,
+    pub sender: String,
+    pub sender_key: String,
+    pub text: String,
+    pub time: String,
+    pub outgoing: bool,
+    pub show_sender: bool,
+    pub status: String,
+    pub quote: String,
+    pub reactions: String,
+    pub attachment: String,
+    /// key into the UI thumbnail cache, empty when the message has no inline image
+    pub image_key: String,
+    pub img_w: u32,
+    pub img_h: u32,
+    pub deleted: bool,
+    pub day_sep: String,
+    pub system: bool,
+    pub sticker: bool,
+}
+
+/// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
+pub const STICKER_THUMB_PREFIX: &str = "sp_";
+
+#[derive(Debug, Clone)]
+pub struct PackDto {
+    /// hex pack id
+    pub id: String,
+    pub title: String,
+    pub installed: bool,
+    /// thumbnail key of the cover sticker (installed packs only)
+    pub cover_key: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StickerDto {
+    pub key: String,
+    pub id: u32,
+    pub emoji: String,
+}
+
+pub struct Thumb {
+    pub key: String,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Scroll {
+    Bottom,
+    KeepIfNotAtBottom,
+    Older,
+}
+
+pub enum Event {
+    Loading(String),
+    NeedLink,
+    LinkQr(String),
+    LinkStatus(String),
+    Ready,
+    Threads(Vec<ThreadDto>),
+    Header { name: String, sub: String },
+    Messages { key: String, items: Vec<MsgDto>, can_older: bool, scroll: Scroll },
+    Thumb(Arc<Thumb>),
+    Status(String),
+    StickerPacks(Vec<PackDto>),
+    StickerGrid { pack: String, items: Vec<StickerDto> },
+}
+
+pub enum Command {
+    StartLink(String),
+    OpenThread(String),
+    LoadOlder,
+    Send { text: String, files: Vec<PathBuf>, quote: Option<String> },
+    OpenAttachment(String),
+    Search(String),
+    WindowFocus(bool),
+    Unlink,
+    /// sticker panel opened: (re)load the pack list
+    StickerPanel,
+    OpenPack(String),
+    SendSticker { pack: String, id: u32 },
+    /// hex id + hex key
+    InstallPack { id: String, key: String },
+    /// https://signal.art/addstickers/#pack_id=..&pack_key=..
+    InstallPackUrl(String),
+    /// install the pack of the sticker in this message
+    InstallPackFromMessage(String),
+}
