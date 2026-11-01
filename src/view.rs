@@ -193,7 +193,7 @@ fn push_with_mentions(
     text: &str,
     ranges: &[BodyRange],
     name_of: &dyn Fn(&Uuid) -> String,
-    spans: &mut Vec<(usize, usize)>,
+    spans: &mut Vec<(usize, usize, String)>,
 ) {
     let mut ms: Vec<(usize, usize, Uuid)> = ranges
         .iter()
@@ -208,7 +208,7 @@ fn push_with_mentions(
         let start = out.len();
         out.push('@');
         out.push_str(&name_of(uuid));
-        spans.push((start, out.len()));
+        spans.push((start, out.len(), uuid.to_string()));
     };
     let mut next = ms.iter().peekable();
     let mut pos = 0; // UTF-16 offset of the current char
@@ -243,7 +243,7 @@ fn body_text(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
 }
 
 /// `body_text`, recording where the mentions ended up (byte ranges).
-fn body_text_spans(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String, spans: &mut Vec<(usize, usize)>) -> String {
+fn body_text_spans(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String, spans: &mut Vec<(usize, usize, String)>) -> String {
     let mut parts: Vec<String> = Vec::new();
     if dm.is_view_once.unwrap_or(false) {
         parts.push("[한 번 보기 미디어 — 휴대폰에서 확인하세요]".into());
@@ -668,7 +668,7 @@ mod tests {
         };
         let mut spans = Vec::new();
         let t = body_text_spans(&dm, &name, &mut spans);
-        let got: Vec<&str> = spans.iter().map(|&(s, e)| &t[s..e]).collect();
+        let got: Vec<&str> = spans.iter().map(|&(s, e, _)| &t[s..e]).collect();
         assert_eq!(got, ["@철수", "@영희"]);
     }
 

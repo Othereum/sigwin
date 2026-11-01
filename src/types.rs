@@ -72,8 +72,8 @@ pub struct MsgDto {
     /// ours, text only, young enough to edit / delete for everyone
     pub can_edit: bool,
     pub can_delete: bool,
-    /// "@name" byte ranges in `text`, drawn highlighted
-    pub mentions: Vec<(usize, usize)>,
+    /// "@name" byte ranges in `text` (drawn highlighted) and who they mention (ACI uuid)
+    pub mentions: Vec<(usize, usize, String)>,
 }
 
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
@@ -133,6 +133,8 @@ pub enum Event {
     Ready,
     Threads(Vec<ThreadDto>),
     Header { name: String, sub: String },
+    /// who can be @mentioned in the open thread: (uuid, name); empty outside groups
+    Members(Vec<crate::mention::Member>),
     Messages { key: String, items: Vec<MsgDto>, can_older: bool, scroll: Scroll },
     Thumb(Arc<Thumb>),
     Status(String),
@@ -150,7 +152,8 @@ pub enum Command {
     StartLink(String),
     OpenThread(String),
     LoadOlder,
-    Send { text: String, files: Vec<PathBuf>, quote: Option<String> },
+    /// `mentions`: members picked in the composer, their "@name"s become mentions
+    Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member> },
     OpenAttachment(String),
     Search(String),
     WindowFocus(bool),
@@ -170,7 +173,7 @@ pub enum Command {
     /// react to message `id`; `remove` takes back our reaction `emoji`
     React { id: String, emoji: String, remove: bool },
     /// replace the text of our message `id`
-    Edit { id: String, text: String },
+    Edit { id: String, text: String, mentions: Vec<crate::mention::Member> },
     /// delete our message `id` for everyone
     Delete(String),
     /// the composer was edited; false when it became empty

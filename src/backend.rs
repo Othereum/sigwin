@@ -19,7 +19,7 @@ use presage::libsignal_service::zkgroup::groups::{GroupMasterKey, GroupSecretPar
 use presage::proto::data_message::{Delete, Quote, Reaction};
 use presage::proto::sync_message::Content as SyncContent;
 use presage::proto::{
-    receipt_message, typing_message, AttachmentPointer, EditMessage, ReceiptMessage, SyncMessage, TypingMessage,
+    receipt_message, typing_message, AttachmentPointer, BodyRange, EditMessage, ReceiptMessage, SyncMessage, TypingMessage,
 };
 use presage::store::{ContentExt, ContentsStore, StateStore, Store, Thread};
 use presage::Manager;
@@ -414,7 +414,7 @@ impl App {
                     warn!("load_older: {e:#}");
                 }
             }
-            Command::Send { text, files, quote } => self.send(text, files, quote).await,
+            Command::Send { text, files, quote, mentions } => self.send(text, files, quote, mentions).await,
             Command::OpenAttachment(id) => self.open_attachment(&id),
             Command::Search(s) => {
                 self.search = s;
@@ -443,7 +443,7 @@ impl App {
             Command::InstallPackFromMessage(id) => self.install_pack_from_message(&id),
             Command::StickerClicked(id) => self.sticker_clicked(&id).await,
             Command::React { id, emoji, remove } => self.react(&id, emoji, remove).await,
-            Command::Edit { id, text } => self.edit(&id, text).await,
+            Command::Edit { id, text, mentions } => self.edit(&id, text, &mentions).await,
             Command::Delete(id) => self.delete(&id).await,
             Command::Composing(active) => self.composing(active),
         }
@@ -1093,6 +1093,12 @@ impl App {
             }
         }
         (self.emit)(Event::Header { name, sub: parts.join(" · ") });
+        let mut mentionable = Vec::new();
+        let me = self.me;
+        for &u in members.iter().filter(|u| **u != me) {
+            mentionable.push((u.to_string(), self.name(u).await));
+        }
+        (self.emit)(Event::Members(mentionable));
         members
     }
 
@@ -1222,7 +1228,7 @@ impl App {
         self.send_op(row, Op::React((!remove).then_some(emoji)), dm.into()).await;
     }
 
-    async fn edit(&mut self, id: &str, text: String) {
+    async fn edit(&mut self, id: &str, text: String, mentions: &[crate::mention::Member]) {
         let text = text.trim_end().to_string();
         if text.trim().is_empty() {
             return;
@@ -1235,8 +1241,10 @@ impl App {
             self.status("보낸 지 24시간이 지난 메시지는 수정할 수 없습니다");
             return;
         }
+        let (body, body_ranges) = crate::mention::encode(&text, mentions);
         let dm = DataMessage {
-            body: Some(text.clone()),
+            body: Some(body),
+            body_ranges,
             quote: orig.quote,
             expire_timer: orig.expire_timer,
             expire_timer_version: orig.expire_timer_version,
@@ -1581,7 +1589,7 @@ impl App {
         });
     }
 
-    async fn send(&mut self, text: String, files: Vec<PathBuf>, quote_id: Option<String>) {
+    async fn send(&mut self, text: String, files: Vec<PathBuf>, quote_id: Option<String>, mentions: Vec<crate::mention::Member>) {
         let Some(manager) = self.manager.clone() else { return };
         let Some(open) = self.current.as_ref() else { return };
         let text = text.trim_end().to_string();
@@ -1596,9 +1604,20 @@ impl App {
                 id: Some(qts),
                 author_aci: Some(c.metadata.sender.raw_uuid().to_string()),
                 text: dm.body.clone(),
+                // keeps the quoted @mentions readable on the other side
+                body_ranges: dm.body_ranges.clone(),
                 ..Default::default()
             })
         });
+        let names = &self.names;
+        let quote_label = quote
+            .as_ref()
+            .and_then(|q| {
+                let t = q.text.as_deref().filter(|t| !t.is_empty())?;
+                Some(view::with_mentions(t, &q.body_ranges, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())))
+            })
+            .unwrap_or_default();
+        let (body, body_ranges) = crate::mention::encode(&text, &mentions);
         let group_revision = self.group_revision(&thread).await;
         // the message itself ends our typing indicator on the other side
         self.composing = None;
@@ -1612,7 +1631,7 @@ impl App {
             ts,
             thread_key: open.key.clone(),
             text: text.clone(),
-            quote: quote.as_ref().and_then(|q| q.text.clone()).filter(|t| !t.is_empty()).unwrap_or_default(),
+            quote: quote_label,
             attachment,
             image_key: String::new(),
             error: None,
@@ -1621,7 +1640,7 @@ impl App {
         let tx = self.tx.clone();
         tokio::task::spawn_local(async move {
             let started = std::time::Instant::now();
-            let res = Box::pin(send_task(manager, thread, text, files, quote, group_revision, ts)).await;
+            let res = Box::pin(send_task(manager, thread, body, body_ranges, files, quote, group_revision, ts)).await;
             info!(ms = started.elapsed().as_millis() as u64, ok = res.is_ok(), "message sent");
             let _ = tx.send(Internal::Sent(ts, res.map_err(|e| format!("{e:#}"))));
         });
@@ -1680,6 +1699,7 @@ async fn send_task(
     mut m: Mgr,
     thread: Thread,
     text: String,
+    body_ranges: Vec<BodyRange>,
     files: Vec<PathBuf>,
     quote: Option<Quote>,
     group_revision: u32,
@@ -1717,6 +1737,7 @@ async fn send_task(
     };
     let dm = DataMessage {
         body: (!text.is_empty()).then_some(text),
+        body_ranges,
         attachments,
         quote,
         timestamp: Some(ts),

@@ -6,6 +6,7 @@ mod clip;
 mod picker;
 mod db;
 mod emoji;
+mod mention;
 mod secret;
 mod types;
 mod view;
@@ -66,6 +67,12 @@ struct Ui {
     /// picker thumbnails; dropped when the panel closes
     sticker_thumbs: HashMap<String, Image>,
     tx: Option<UnboundedSender<Command>>,
+    /// who can be @mentioned in the open thread
+    members: Vec<mention::Member>,
+    /// rows of the open mention popup
+    mention_rows: Vec<mention::Member>,
+    /// members picked in the composer since it was last sent
+    picked: Vec<mention::Member>,
 }
 
 fn send_cmd(c: Command) {
@@ -141,7 +148,7 @@ fn mention_text(m: &MsgDto, dark: bool) -> slint::StyledText {
     let mut fmt = String::from(P);
     let mut args = Vec::with_capacity(m.mentions.len() * 2 + 1);
     let mut at = 0;
-    for &(s, e) in &m.mentions {
+    for &(s, e, _) in &m.mentions {
         let (Some(before), Some(name)) = (m.text.get(at..s), m.text.get(s..e)) else { continue };
         args.push(slint::StyledText::from_plain_text(before));
         args.push(slint::StyledText::from_plain_text(name));
@@ -246,6 +253,7 @@ fn apply(app: &AppWindow, ev: Event) {
             app.set_current_name(name.into());
             app.set_current_sub(sub.into());
         }
+        Event::Members(list) => UI.with_borrow_mut(|ui| ui.members = list),
         Event::Messages { key, items, can_older, scroll } => {
             let switched = UI.with_borrow_mut(|ui| {
                 let switched = ui.open_key != key;
@@ -253,6 +261,8 @@ fn apply(app: &AppWindow, ev: Event) {
                     ui.thumbs.clear();
                     ui.open_key = key.clone();
                     ui.reply_to = None;
+                    ui.picked.clear();
+                    ui.mention_rows.clear();
                     if ui.editing.take().is_some() {
                         app.set_draft(SharedString::new());
                     }
@@ -264,6 +274,7 @@ fn apply(app: &AppWindow, ev: Event) {
                 app.set_reply_preview(SharedString::new());
                 app.set_edit_preview(SharedString::new());
                 app.set_menu_id(SharedString::new());
+                app.set_mention_items(ModelRc::default());
                 close_stickers(app);
             }
             app.set_current_key(key.into());
@@ -519,7 +530,9 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
                 UI.with_borrow_mut(|ui| ui.editing = Some(id));
                 return;
             }
-            s(Command::Edit { id, text: text.to_string() });
+            let mentions = UI.with_borrow_mut(|ui| std::mem::take(&mut ui.picked));
+            s(Command::Edit { id, text: text.to_string(), mentions });
+            app.set_mention_items(ModelRc::default());
             app.set_draft(SharedString::new());
             app.set_edit_preview(SharedString::new());
             return;
@@ -528,7 +541,9 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
         if text.trim().is_empty() && files.is_empty() {
             return;
         }
-        s(Command::Send { text: text.to_string(), files, quote });
+        let mentions = UI.with_borrow_mut(|ui| std::mem::take(&mut ui.picked));
+        s(Command::Send { text: text.to_string(), files, quote, mentions });
+        app.set_mention_items(ModelRc::default());
         app.set_draft(SharedString::new());
         app.set_pending_files(ModelRc::default());
         app.set_reply_preview(SharedString::new());
@@ -583,6 +598,59 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
         }
     });
 
+    // @mention popup: follow the "@query" before the cursor
+    let weak = app.as_weak();
+    app.on_mention_check(move |text, cursor, preedit| {
+        let Some(app) = weak.upgrade() else { return };
+        let rows: Vec<mention::Member> = UI.with_borrow(|ui| {
+            if ui.members.is_empty() {
+                return Vec::new();
+            }
+            let Some((_, query)) = mention::query_at(&text, cursor.max(0) as usize) else { return Vec::new() };
+            let query = format!("{query}{preedit}");
+            mention::filter(&ui.members, &query).into_iter().cloned().collect()
+        });
+        // Esc empties the popup in the UI only: show it again on the next keystroke
+        let same = UI.with_borrow(|ui| ui.mention_rows == rows);
+        if same && (rows.is_empty() || slint::Model::row_count(&app.get_mention_items()) > 0) {
+            return;
+        }
+        let items: Vec<MentionItem> = rows
+            .iter()
+            .map(|(uuid, name)| MentionItem {
+                name: name.as_str().into(),
+                initial: name.chars().next().map(String::from).unwrap_or_default().into(),
+                tint: tint(uuid),
+            })
+            .collect();
+        app.set_mention_sel(0);
+        app.set_mention_items(ModelRc::new(VecModel::from(items)));
+        UI.with_borrow_mut(|ui| ui.mention_rows = rows);
+    });
+
+    let weak = app.as_weak();
+    app.on_mention_pick(move |row, text, cursor| {
+        let Some(app) = weak.upgrade() else { return };
+        app.set_mention_items(ModelRc::default());
+        let picked = UI.with_borrow_mut(|ui| {
+            let m = ui.mention_rows.get(row.max(0) as usize).cloned();
+            ui.mention_rows.clear();
+            let m = m?;
+            if !ui.picked.contains(&m) {
+                ui.picked.push(m.clone());
+            }
+            Some(m)
+        });
+        let Some((_, name)) = picked else { return };
+        let cursor = (cursor.max(0) as usize).min(text.len());
+        let Some((at, _)) = mention::query_at(&text, cursor) else { return };
+        let inserted = format!("@{name} ");
+        let new = format!("{}{inserted}{}", &text[..at], &text[cursor..]);
+        app.set_draft(new.into());
+        app.invoke_focus_composer();
+        app.invoke_composer_cursor((at + inserted.len()) as i32);
+    });
+
     let s = send.clone();
     app.on_composing(move |active| {
         if UI.with_borrow(|ui| ui.editing.is_none()) {
@@ -619,7 +687,14 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     app.on_edit_message(move |id| {
         let Some(app) = weak.upgrade() else { return };
         let Some(text) = UI.with_borrow_mut(|ui| {
-            let text = ui.last.iter().find(|m| m.id == id.as_str() && m.can_edit)?.text.clone();
+            let m = ui.last.iter().find(|m| m.id == id.as_str() && m.can_edit)?;
+            let text = m.text.clone();
+            // keep the message's mentions: their "@name"s are sent as mentions again
+            ui.picked = m
+                .mentions
+                .iter()
+                .filter_map(|(s, e, uuid)| Some((uuid.clone(), text.get(s + 1..*e)?.to_string())))
+                .collect();
             ui.editing = Some(id.to_string());
             ui.reply_to = None;
             Some(text)
@@ -918,11 +993,13 @@ fn demo(emit: backend::Emit) {
     ] {
         let m = &mut items[i];
         m.text = text.into();
-        m.mentions = text.match_indices('@').map(|(s, _)| (s, s + text[s..].find(' ').unwrap())).collect();
+        m.mentions = text.match_indices('@').map(|(s, _)| (s, s + text[s..].find(' ').unwrap(), String::new())).collect();
     }
     emit(Event::Ready);
     emit(Event::Threads(threads));
     emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
+    let names = ["김민준", "이서연", "박지훈", "Alice Kim", "Bob", "김지원", "최유나"];
+    emit(Event::Members(names.iter().enumerate().map(|(i, n)| (format!("00000000-0000-0000-0000-00000000000{i}"), n.to_string())).collect()));
     for m in items.iter_mut().filter(|m| m.attachment.is_empty() && m.quote.is_empty() && !m.sticker) {
         m.big_emoji = emoji::only_emoji(&m.text, 5).is_some();
     }
