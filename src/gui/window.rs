@@ -56,6 +56,7 @@ pub(crate) fn monitor_scale(_: isize) -> f32 {
 pub(crate) fn show_settings(app: &AppWindow, s: &settings::Settings) {
     app.set_set_notify(s.notify);
     app.set_set_preview(s.preview as i32);
+    app.set_set_sound(s.sound);
     app.set_set_badge(s.badge);
     app.set_set_theme(s.theme as i32);
     app.set_set_zoom(settings::ZOOMS.iter().position(|&z| z == s.zoom).unwrap_or(1) as i32);

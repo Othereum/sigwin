@@ -304,6 +304,7 @@ pub(crate) fn selftest() {
                     title: "selftest".into(),
                     body: "toast".into(),
                     picture: Some(toast::Picture::Initial { text: "S".into(), rgb: 0x3a77c9 }),
+                    sound: false,
                     key: String::new(),
                     msg: None,
                 });

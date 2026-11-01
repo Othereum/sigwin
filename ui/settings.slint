@@ -42,6 +42,7 @@ export component SettingRow inherits HorizontalLayout {
 export component SettingsPage inherits Rectangle {
     in-out property <bool> notify;
     in-out property <int> preview;
+    in-out property <bool> sound;
     in-out property <bool> badge;
     in-out property <int> theme;
     in-out property <int> zoom;
@@ -95,7 +96,7 @@ export component SettingsPage inherits Rectangle {
                         title: "알림";
                         SettingRow {
                             label: "새 메시지 알림";
-                            hint: "열려 있는 대화를 보고 있을 때는 알리지 않습니다";
+                            hint: "Sigwin 창을 보고 있을 때는 알리지 않습니다";
                             Switch {
                                 checked <=> root.notify;
                                 toggled => { root.changed(); }
@@ -108,6 +109,14 @@ export component SettingsPage inherits Rectangle {
                                 options: ["이름과 내용", "이름만", "숨김"];
                                 current <=> root.preview;
                                 changed => { root.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: "알림 소리";
+                            Switch {
+                                enabled: root.notify;
+                                checked <=> root.sound;
+                                toggled => { root.changed(); }
                             }
                         }
                         SettingRow {

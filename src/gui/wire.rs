@@ -446,6 +446,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let new = settings::Settings {
             notify: app.get_set_notify(),
             preview: app.get_set_preview().clamp(0, 2) as u8,
+            sound: app.get_set_sound(),
             badge: app.get_set_badge(),
             theme: app.get_set_theme().clamp(0, 2) as u8,
             zoom: settings::ZOOMS.get(app.get_set_zoom().max(0) as usize).copied().unwrap_or(100),

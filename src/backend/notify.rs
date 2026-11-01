@@ -124,7 +124,7 @@ impl Notifier {
         // showing replaces the previous toast
         self.clear_shown = false;
         self.shown = Some(Shown { key: q.key.clone(), msg: q.msg, reaction: q.reaction.clone() });
-        toast::show(Toast { title, body, picture, key: q.key, msg: Some(q.msg) });
+        toast::show(Toast { title, body, picture, sound: crate::settings::sound(), key: q.key, msg: Some(q.msg) });
     }
 }
 
