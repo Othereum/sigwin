@@ -238,6 +238,8 @@ pub(crate) fn to_item(
         receipt_info: m.receipt_info.as_str().into(),
         pending: m.pending,
         hide_time: m.hide_time,
+        collapse_above: m.collapse_above,
+        collapse_below: m.collapse_below,
         typing: false,
     }
 }

@@ -87,8 +87,14 @@ pub struct MsgDto {
     pub styles: Vec<(usize, usize, u8)>,
     /// pinned in this thread (a pin marker next to the time)
     pub pinned: bool,
-    /// same sender, minute and status as the next row: the footer's time / status is redundant
+    /// collapsed with the next row (`view::mark_runs`): the footer's time / status is redundant
     pub hide_time: bool,
+    /// same run as the row above / below (Signal's grouping): flatter corners, tighter spacing
+    pub collapse_above: bool,
+    pub collapse_below: bool,
+    /// sort timestamp (ms), what runs are measured by
+    pub ts: u64,
+    pub edited: bool,
     /// who has read it (outgoing only): (uuid, name), by name
     pub readers: Vec<(String, String)>,
 }

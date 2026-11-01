@@ -39,6 +39,13 @@ export component MsgImage inherits Rectangle {
     in property <MsgItem> m;
     // flush: as wide as the bubble (which clips the corners), otherwise a fixed size
     in property <bool> flush;
+    // the photo is the whole message: all four corners follow the bubble's
+    in property <bool> whole;
+    // the bubble's corner radii
+    in property <length> r-tl: 18px;
+    in property <length> r-tr: 18px;
+    in property <length> r-bl: 18px;
+    in property <length> r-br: 18px;
     callback attachment-clicked(string);
     callback menu(string, length, length);
     min-width: flush ? m.img-w : 0px;
@@ -46,9 +53,10 @@ export component MsgImage inherits Rectangle {
     max-width: flush ? 100000px : m.img-w;
     height: m.img-h;
     // flush: only the top corners follow the bubble (the bubble itself must not clip: reader photos hang over its edge)
-    border-radius: flush ? 0px : 8px;
-    border-top-left-radius: flush ? 14px : 8px;
-    border-top-right-radius: flush ? 14px : 8px;
+    border-top-left-radius: flush || whole ? r-tl : 8px;
+    border-top-right-radius: flush || whole ? r-tr : 8px;
+    border-bottom-left-radius: whole ? r-bl : flush ? 0px : 8px;
+    border-bottom-right-radius: whole ? r-br : flush ? 0px : 8px;
     clip: true;
     Image {
         width: 100%;
@@ -121,10 +129,16 @@ export component Bubble inherits VerticalLayout {
     callback menu(string, length, length);
     padding-left: 16px;
     padding-right: 16px;
-    padding-top: m.show-sender || m.day-sep != "" || m.typing ? 8px : 2px;
+    // Signal's spacing: 6px above and below a run, 1px between rows of one run
+    padding-top: m.day-sep != "" || m.typing ? 8px : m.collapse-above ? 1px : 6px;
     // the newest row gets extra room below so it doesn't touch the composer
     in property <bool> last;
-    padding-bottom: (m.typing ? 8px : (m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 12px) : 2px)) + (last ? 10px : 0px);
+    padding-bottom: (m.typing ? 8px : (m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 12px) : m.collapse-below ? 1px : 6px)) + (last ? 10px : 0px);
+    // bubble corners: 18px, 4px on the side that joins a neighbour of the same run
+    out property <length> r-tl: !m.outgoing && m.collapse-above ? 4px : 18px;
+    out property <length> r-tr: m.outgoing && m.collapse-above ? 4px : 18px;
+    out property <length> r-bl: !m.outgoing && m.collapse-below ? 4px : 18px;
+    out property <length> r-br: m.outgoing && m.collapse-below ? 4px : 18px;
     spacing: 4px;
     opacity: m.pending ? 0.6 : 1.0;
     // plain text: the time sits at the right of the last line instead of below
@@ -218,7 +232,10 @@ export component Bubble inherits VerticalLayout {
         }
         Rectangle {
             max-width: root.flush ? max(m.img-w, 200px) : root.max-w;
-            border-radius: 14px;
+            border-top-left-radius: root.r-tl;
+            border-top-right-radius: root.r-tr;
+            border-bottom-left-radius: root.r-bl;
+            border-bottom-right-radius: root.r-br;
             background: m.deleted || m.sticker || m.big-emoji || root.bare ? transparent : (m.outgoing ? Theme.bubble-out : Theme.bubble-in);
             border-width: root.flash ? 3px : m.deleted ? 1px : 0px;
             border-color: root.flash ? #f5b400 : Theme.border;
@@ -249,6 +266,8 @@ export component Bubble inherits VerticalLayout {
                 if root.flush: MsgImage {
                     m: m;
                     flush: true;
+                    r-tl: root.r-tl;
+                    r-tr: root.r-tr;
                     attachment-clicked(id) => { root.attachment-clicked(id); }
                     menu(id, x, y) => { root.menu(id, x, y); }
                 }
@@ -284,6 +303,12 @@ export component Bubble inherits VerticalLayout {
                 }
                 if m.has-image && !root.flush: MsgImage {
                     m: m;
+                    // a photo alone is the message: it takes the bubble's corners (stickers stay as they are)
+                    whole: root.bare && !m.sticker;
+                    r-tl: root.r-tl;
+                    r-tr: root.r-tr;
+                    r-bl: root.r-bl;
+                    r-br: root.r-br;
                     attachment-clicked(id) => { root.attachment-clicked(id); }
                     menu(id, x, y) => { root.menu(id, x, y); }
                 }

@@ -486,38 +486,46 @@ pub struct Built {
     pub next_expiry: Option<u64>,
 }
 
-/// `window` must be sorted by timestamp ascending.
-/// Group rows from others get a photo column; the photo sits on the last row of each sender's run.
-/// Rows followed by one of the same run and minute drop their time / status (`hide_time`).
-pub fn mark_avatar_runs(items: &mut [MsgDto]) {
+/// Messages closer than this from one sender form a run (Signal Desktop: `COLLAPSE_WITHIN`).
+const COLLAPSE_WITHIN_MS: u64 = 3 * 60 * 1000;
+
+/// Whether `newer` continues the run of `older` (Signal Desktop's `areMessagesInSameGroup`).
+fn same_run(older: &MsgDto, newer: &MsgDto) -> bool {
+    !older.system
+        && !newer.system
+        // reactions hang below the bubble
+        && older.reactions.is_empty()
+        && older.outgoing == newer.outgoing
+        // deleted rows from others no longer say who sent them
+        && (older.outgoing || !older.sender_key.is_empty())
+        && older.sender_key == newer.sender_key
+        && newer.day_sep.is_empty()
+        && newer.ts.abs_diff(older.ts) < COLLAPSE_WITHIN_MS
+}
+
+/// Marks runs of messages from one sender. `items` must be in display order (oldest first),
+/// pending rows included. Within a run only the last row shows the time / status (unless it
+/// is still being sent, edited or pinned), group rows show the name on the first row and the
+/// photo on the last; corners and spacing between collapsed rows shrink in the UI.
+pub fn mark_runs(items: &mut [MsgDto], is_group: bool) {
     for i in 0..items.len() {
-        let m = &items[i];
-        let col = !m.outgoing && !m.system;
-        let last = col
-            && !m.sender_key.is_empty()
-            && items.get(i + 1).is_none_or(|n| {
-                n.outgoing || n.system || n.sender_key != m.sender_key || !n.day_sep.is_empty()
-            });
-        let hide_time = !m.pinned
-            && !m.system
-            && items.get(i + 1).is_some_and(|n| {
-                !n.system
-                    && n.outgoing == m.outgoing
-                    && n.sender_key == m.sender_key
-                    && n.day_sep.is_empty()
-                    && n.time == m.time
-                    && n.status == m.status
-            });
-        items[i].avatar_col = col;
-        items[i].show_avatar = last;
-        items[i].hide_time = hide_time;
+        let above = i > 0 && same_run(&items[i - 1], &items[i]);
+        let below = items.get(i + 1).is_some_and(|n| same_run(&items[i], n));
+        let next_deleted = items.get(i + 1).is_some_and(|n| n.deleted);
+        let m = &mut items[i];
+        m.collapse_above = above;
+        m.collapse_below = below;
+        m.hide_time = below && !m.pending && !m.edited && !m.pinned && !(next_deleted && !m.deleted);
+        let col = is_group && !m.outgoing && !m.system;
+        m.avatar_col = col;
+        m.show_avatar = col && !below && !m.sender_key.is_empty();
+        m.show_sender = col && !above && !m.sender.is_empty() && !m.deleted;
     }
 }
 
 pub fn build(
     window: &[(u64, Content)],
     me: Uuid,
-    is_group: bool,
     members: &[Uuid],
     // target ts -> recipient -> 1 delivered / 2 read (from the receipt index)
     status: &HashMap<u64, HashMap<Uuid, u8>>,
@@ -554,7 +562,6 @@ pub fn build(
     let mut items = Vec::new();
     let mut wanted = Vec::new();
     let mut prev_day = None;
-    let mut prev_sender: Option<Uuid> = None;
 
     for (ts, c) in window {
         if let Some(exp) = expires_at(c) {
@@ -566,7 +573,7 @@ pub fn build(
         let kind = classify(c, me);
         let dt = local(*ts);
         let day = dt.date_naive();
-        let mut m = MsgDto { id: ts.to_string(), time: ampm(&dt), ..Default::default() };
+        let mut m = MsgDto { id: ts.to_string(), ts: *ts, time: ampm(&dt), ..Default::default() };
         match kind {
             Kind::Msg { outgoing, dm } => {
                 let sender = c.metadata.sender.raw_uuid();
@@ -601,7 +608,6 @@ pub fn build(
                     m.sender = name_of(&sender);
                     m.sender_key = sender.to_string();
                 }
-                m.show_sender = is_group && !outgoing && (prev_sender != Some(sender) || prev_day != Some(day));
                 if let Some(q) = &dm.quote {
                     m.quote = q
                         .text
@@ -656,18 +662,16 @@ pub fn build(
                 }
                 if edited {
                     m.time = format!("{} · 수정됨", m.time);
+                    m.edited = true;
                 }
-                prev_sender = Some(sender);
             }
             Kind::System(s) => {
                 m.system = true;
                 m.text = s;
-                prev_sender = None;
             }
             Kind::Pin { .. } => {
                 m.system = true;
                 m.text = pin_label(c, me, name_of);
-                prev_sender = None;
             }
             Kind::Deleted => {
                 // rows presage stored for messages sent from this PC have no server guid
@@ -675,7 +679,6 @@ pub fn build(
                 m.deleted = true;
                 m.outgoing = mine;
                 m.text = if mine { DELETED_MINE } else { DELETED_OTHER }.into();
-                prev_sender = None;
             }
             _ => continue,
         }
@@ -691,9 +694,7 @@ pub fn build(
     for m in items.iter_mut().rev().filter(|m| m.outgoing && !m.readers.is_empty()) {
         m.readers.retain(|(u, _)| seen.insert(u.clone()));
     }
-    if is_group {
-        mark_avatar_runs(&mut items);
-    }
+    // runs (`mark_runs`) are marked by the caller once pins, pending ops and stub rows are in
     Built { items, wanted_thumbs: wanted, next_expiry }
 }
 
@@ -720,6 +721,7 @@ pub fn set_my_reaction(m: &mut MsgDto, emoji: Option<&str>) {
 pub fn set_edited_text(m: &mut MsgDto, text: &str) {
     (m.text, m.styles) = crate::format::parse(text);
     m.mentions.clear();
+    m.edited = true;
     if !m.time.ends_with("수정됨") {
         m.time = format!("{} · 수정됨", m.time);
     }
@@ -733,6 +735,7 @@ const DELETED_OTHER: &str = "삭제된 메시지입니다";
 pub fn set_deleted(m: &mut MsgDto) {
     *m = MsgDto {
         id: std::mem::take(&mut m.id),
+        ts: m.ts,
         time: std::mem::take(&mut m.time),
         day_sep: std::mem::take(&mut m.day_sep),
         outgoing: true,
@@ -746,7 +749,7 @@ pub fn set_deleted(m: &mut MsgDto) {
 /// Skeleton row for a message we are still sending; `prev_ts` is the row above (for the day separator).
 pub fn outgoing_stub(ts: u64, prev_ts: Option<u64>) -> MsgDto {
     let dt = local(ts);
-    let mut m = MsgDto { id: ts.to_string(), time: ampm(&dt), outgoing: true, pending: true, ..Default::default() };
+    let mut m = MsgDto { id: ts.to_string(), ts, time: ampm(&dt), outgoing: true, pending: true, ..Default::default() };
     if prev_ts.map(|p| local(p).date_naive()) != Some(dt.date_naive()) {
         m.day_sep = day_label(&dt);
     }

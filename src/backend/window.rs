@@ -191,7 +191,7 @@ impl App {
         }
         let Some(open) = self.current.as_ref() else { return };
         let names = &self.names;
-        let built = view::build(&open.window, self.me, open.is_group, &open.members, &receipts, &my_deletes, &|u| {
+        let built = view::build(&open.window, self.me, &open.members, &receipts, &my_deletes, &|u| {
             names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())
         });
         let key = open.key.clone();
@@ -228,6 +228,7 @@ impl App {
             items.push(pending_row(p, prev));
             prev = Some(p.ts);
         }
+        view::mark_runs(&mut items, open.is_group);
         for (k, ptr, fit) in built.wanted_thumbs {
             if self.thumbs_requested.insert(k.clone()) {
                 self.request_thumb(k, ptr, fit);

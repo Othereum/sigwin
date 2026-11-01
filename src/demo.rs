@@ -95,6 +95,8 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         let outgoing = i % 3 == 0 || i == 299;
         items.push(MsgDto {
             id: i.to_string(),
+            // 40s apart, a 10 minute pause every 6 rows (runs break there)
+            ts: 1_700_000_000_000 + i as u64 * 40_000 + (i as u64 / 6) * 600_000,
             // a group: runs from two senders
             sender: if outgoing { String::new() } else if i % 5 < 3 { "이서연".into() } else { "박지훈".into() },
             sender_key: if outgoing { String::new() } else if i % 5 < 3 { "demo-a".into() } else { "demo-b".into() },
@@ -105,7 +107,6 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             },
             time: "오후 3:12".into(),
             outgoing,
-            show_sender: !outgoing && i % 4 == 1,
             status: if outgoing { ["✓", "✓✓", "✓✓"][(i as usize / 3) % 3].into() } else { String::new() },
             readers: if outgoing && (i as usize / 3) % 3 == 2 {
                 let all = [("demo-a", "이서연"), ("demo-b", "김민준"), ("demo-c", "박지훈"), ("demo-d", "최승민"), ("demo-e", "권준영")];
@@ -143,7 +144,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     }
     // deleted for everyone: by us (right) and by someone else (left)
     view::set_deleted(&mut items[293]);
-    items[292] = MsgDto { id: "292".into(), time: "오후 3:12".into(), deleted: true, text: "삭제된 메시지입니다".into(), ..Default::default() };
+    items[292] = MsgDto { id: "292".into(), ts: items[292].ts, time: "오후 3:12".into(), deleted: true, text: "삭제된 메시지입니다".into(), ..Default::default() };
     // mentions, incoming and outgoing, with a line break and wrapping
     for (i, text) in [
         (290usize, "@김민준 이거 확인 부탁해요\n그리고 @박지훈 님도 내일 회의 전에 문서 한 번 읽어 주시면 좋겠습니다 <b>*그대로*</b>"),
@@ -199,10 +200,10 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     for m in items.iter_mut().filter(|m| m.attachment.is_empty() && m.quote.is_empty() && !m.sticker) {
         m.big_emoji = emoji::only_emoji(&m.text, 5).is_some();
     }
-    view::mark_avatar_runs(&mut items);
     for i in [150usize, 290] {
         items[i].pinned = true;
     }
+    view::mark_runs(&mut items, true);
     let pins = [(290usize, "이서연"), (150, "나")]
         .iter()
         .map(|&(i, who)| types::PinDto { id: i.to_string(), sender: who.into(), text: items[i].text.replace('\n', " ") })
@@ -227,7 +228,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             if rows[0].day_sep.is_empty() {
                 rows[0].day_sep = "2026년 10월 31일 토요일".into();
             }
-            view::mark_avatar_runs(&mut rows);
+            view::mark_runs(&mut rows, true);
             rows
         };
         emit(Event::Messages { key: "c:demo-1".into(), items: window(start), can_older: true, scroll: Scroll::Bottom });
