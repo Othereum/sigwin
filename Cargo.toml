@@ -110,3 +110,6 @@ inherits = "release"
 lto = false
 codegen-units = 16
 incremental = true
+# this crate holds the huge slint-generated UI code: compile it lightly (dependencies stay optimized)
+[profile.fast.package.sigwin]
+opt-level = 0
