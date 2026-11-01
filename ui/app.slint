@@ -270,6 +270,38 @@ component MsgMeta inherits HorizontalLayout {
     }
 }
 
+component MsgImage inherits Rectangle {
+    in property <MsgItem> m;
+    // flush: as wide as the bubble (which clips the corners), otherwise a fixed size
+    in property <bool> flush;
+    callback attachment-clicked(string);
+    callback menu(string, length, length);
+    min-width: flush ? m.img-w : 0px;
+    preferred-width: m.img-w;
+    max-width: flush ? 100000px : m.img-w;
+    height: m.img-h;
+    // flush: only the top corners follow the bubble (the bubble itself must not clip: reader photos hang over its edge)
+    border-radius: flush ? 0px : 8px;
+    border-top-left-radius: flush ? 14px : 8px;
+    border-top-right-radius: flush ? 14px : 8px;
+    clip: true;
+    Image {
+        width: 100%;
+        height: 100%;
+        source: m.image;
+        image-fit: m.sticker ? contain : cover;
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.attachment-clicked(m.id); }
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
+}
+
 component Bubble inherits VerticalLayout {
     in property <MsgItem> m;
     in property <length> max-w;
@@ -292,6 +324,8 @@ component Bubble inherits VerticalLayout {
     property <bool> inline-time: m.text != "" && !m.big-emoji && !m.sticker;
     // a photo alone: no bubble around it, the picture itself is the message
     property <bool> bare: m.has-image && m.text == "" && m.quote == "" && m.attachment == "";
+    // photo with text: the photo sits flush on top of the bubble, the text below it
+    property <bool> flush: m.has-image && !m.sticker && m.text != "" && m.quote == "";
     // height of the day separator above the message itself (centering a jump on the bubble)
     out property <length> lead: m.day-sep != "" ? root.padding-top + 36px + root.spacing : 0px;
 
@@ -375,7 +409,7 @@ component Bubble inherits VerticalLayout {
             }
         }
         Rectangle {
-            max-width: root.max-w;
+            max-width: root.flush ? max(m.img-w, 200px) : root.max-w;
             border-radius: 14px;
             background: m.deleted || m.sticker || m.big-emoji || root.bare ? transparent : (m.outgoing ? Theme.bubble-out : Theme.bubble-in);
             border-width: root.flash ? 3px : m.deleted ? 1px : 0px;
@@ -389,7 +423,16 @@ component Bubble inherits VerticalLayout {
                 }
             }
             VerticalLayout {
+                spacing: 0px;
+                if root.flush: MsgImage {
+                    m: m;
+                    flush: true;
+                    attachment-clicked(id) => { root.attachment-clicked(id); }
+                    menu(id, x, y) => { root.menu(id, x, y); }
+                }
+            VerticalLayout {
                 padding: root.bare ? 0px : 9px;
+                padding-top: root.bare ? 0px : root.flush ? 7px : 9px;
                 padding-left: root.bare ? 0px : 12px;
                 padding-right: root.bare ? 0px : 12px;
                 spacing: 4px;
@@ -417,26 +460,10 @@ component Bubble inherits VerticalLayout {
                         }
                     }
                 }
-                if m.has-image: Rectangle {
-                    width: m.img-w;
-                    height: m.img-h;
-                    border-radius: 8px;
-                    clip: true;
-                    Image {
-                        width: 100%;
-                        height: 100%;
-                        source: m.image;
-                        image-fit: m.sticker ? contain : cover;
-                    }
-                    TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.attachment-clicked(m.id); }
-                        pointer-event(e) => {
-                            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
-                                root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
-                            }
-                        }
-                    }
+                if m.has-image && !root.flush: MsgImage {
+                    m: m;
+                    attachment-clicked(id) => { root.attachment-clicked(id); }
+                    menu(id, x, y) => { root.menu(id, x, y); }
                 }
                 if m.attachment != "": Rectangle {
                     border-radius: 6px;
@@ -526,6 +553,7 @@ component Bubble inherits VerticalLayout {
                         info(t) => { root.show-info(t); }
                     }
                 }
+            }
             }
             // who read it: overlapping round photos straddling the bubble's bottom edge (ringed in the
             // pane color), a "+N" circle for the rest; `Bubble.padding-bottom` makes room for the lower half
