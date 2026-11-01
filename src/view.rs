@@ -7,7 +7,8 @@ use chrono::{DateTime, Datelike, Local, TimeZone};
 use presage::libsignal_service::content::{Content, ContentBody, DataMessage};
 use presage::libsignal_service::prelude::Uuid;
 use presage::proto::sync_message::{Content as SyncContent, Sent};
-use presage::proto::{receipt_message, AttachmentPointer, EditMessage, ReceiptMessage, SyncMessage};
+use presage::proto::body_range::AssociatedValue;
+use presage::proto::{receipt_message, AttachmentPointer, BodyRange, EditMessage, ReceiptMessage, SyncMessage};
 
 use presage::store::ContentExt;
 
@@ -165,8 +166,63 @@ fn attachment_label(ptr: &AttachmentPointer) -> String {
     }
 }
 
+fn mention_uuid(r: &BodyRange) -> Option<Uuid> {
+    match r.associated_value.as_ref()? {
+        AssociatedValue::MentionAci(s) => s.parse().ok(),
+        AssociatedValue::MentionAciBinary(b) => Uuid::from_slice(b).ok(),
+        AssociatedValue::Style(_) => None,
+    }
+}
+
+/// Everyone @mentioned in a data message (body and quote), so callers can resolve names first.
+pub fn mentioned(dm: &DataMessage) -> Vec<Uuid> {
+    let quote = dm.quote.iter().flat_map(|q| q.body_ranges.iter());
+    dm.body_ranges.iter().chain(quote).filter_map(mention_uuid).collect()
+}
+
+/// Replaces mention ranges (a U+FFFC placeholder in the text, offsets in UTF-16 units) with "@name".
+pub fn with_mentions(text: &str, ranges: &[BodyRange], name_of: &dyn Fn(&Uuid) -> String) -> String {
+    let mut ms: Vec<(usize, usize, Uuid)> = ranges
+        .iter()
+        .filter_map(|r| Some((r.start? as usize, r.length.unwrap_or(0) as usize, mention_uuid(r)?)))
+        .collect();
+    if ms.is_empty() {
+        return text.to_string();
+    }
+    ms.sort_by_key(|m| m.0);
+    let mut out = String::with_capacity(text.len() + 16 * ms.len());
+    let mut next = ms.iter().peekable();
+    let mut pos = 0; // UTF-16 offset of the current char
+    let mut skip_until = 0;
+    for ch in text.chars() {
+        while let Some(&&(start, len, uuid)) = next.peek() {
+            if start > pos {
+                break;
+            }
+            next.next();
+            if start == pos && pos >= skip_until {
+                out.push('@');
+                out.push_str(&name_of(&uuid));
+                skip_until = pos + len;
+            }
+        }
+        if pos >= skip_until {
+            out.push(ch);
+        }
+        pos += ch.len_utf16();
+    }
+    // a mention at the very end
+    if let Some(&(start, _, uuid)) = next.next() {
+        if start >= skip_until {
+            out.push('@');
+            out.push_str(&name_of(&uuid));
+        }
+    }
+    out
+}
+
 /// Body text of a data message, with placeholders for content we don't render.
-fn body_text(dm: &DataMessage) -> String {
+fn body_text(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
     let mut parts: Vec<String> = Vec::new();
     if dm.is_view_once.unwrap_or(false) {
         parts.push("[한 번 보기 미디어 — 휴대폰에서 확인하세요]".into());
@@ -187,19 +243,19 @@ fn body_text(dm: &DataMessage) -> String {
         parts.push("[선물 배지]".into());
     }
     if let Some(b) = dm.body.as_deref().filter(|b| !b.is_empty()) {
-        parts.push(b.to_string());
+        parts.push(with_mentions(b, &dm.body_ranges, name_of));
     }
     parts.join("\n")
 }
 
 /// One-line preview used in the thread list and notifications.
-pub fn snippet(c: &Content, me: Uuid) -> Option<String> {
+pub fn snippet(c: &Content, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> Option<String> {
     if expires_at(c).is_some_and(|t| t <= now_ms()) {
         return None;
     }
     let text = match classify(c, me) {
         Kind::Msg { dm, outgoing } => {
-            let mut t = body_text(dm);
+            let mut t = body_text(dm, name_of);
             if t.is_empty() {
                 t = dm
                     .attachments
@@ -344,7 +400,7 @@ pub fn build(
                     _ => (dm, false),
                 };
                 m.outgoing = outgoing;
-                m.text = body_text(dm);
+                m.text = body_text(dm, name_of);
                 // stickers with image data render as a borderless picture instead of text
                 if let Some(data) = dm.sticker.as_ref().and_then(|s| s.data.as_ref()) {
                     let key = attachment_key(data, *ts, 99);
@@ -353,7 +409,7 @@ pub fn build(
                     m.img_w = STICKER_SIZE;
                     m.img_h = STICKER_SIZE;
                     m.sticker = true;
-                    m.text = dm.body.clone().unwrap_or_default();
+                    m.text = with_mentions(dm.body.as_deref().unwrap_or_default(), &dm.body_ranges, name_of);
                 }
                 if !outgoing {
                     m.sender = name_of(&sender);
@@ -363,8 +419,9 @@ pub fn build(
                 if let Some(q) = &dm.quote {
                     m.quote = q
                         .text
-                        .clone()
+                        .as_deref()
                         .filter(|t| !t.is_empty())
+                        .map(|t| with_mentions(t, &q.body_ranges, name_of))
                         .unwrap_or_else(|| "(첨부파일)".into());
                 }
                 let mut others = 0;
@@ -543,6 +600,31 @@ fn receipt_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mentions_become_names() {
+        let a = Uuid::from_u128(1);
+        let b = Uuid::from_u128(2);
+        let r = |start, uuid: Uuid| BodyRange {
+            start: Some(start),
+            length: Some(1),
+            associated_value: Some(AssociatedValue::MentionAci(uuid.to_string())),
+        };
+        let name = |u: &Uuid| if *u == a { "철수".to_string() } else { "영희".to_string() };
+        // "😀" is two UTF-16 units, so the second placeholder sits at offset 5
+        let text = "\u{FFFC} 😀 \u{FFFC} 안녕";
+        assert_eq!(with_mentions(text, &[r(5, b), r(0, a)], &name), "@철수 😀 @영희 안녕");
+        // style ranges are left alone
+        let style = BodyRange { start: Some(0), length: Some(2), associated_value: Some(AssociatedValue::Style(1)) };
+        assert_eq!(with_mentions("hi", &[style], &name), "hi");
+        // binary ACI
+        let bin = BodyRange {
+            start: Some(3),
+            length: Some(1),
+            associated_value: Some(AssociatedValue::MentionAciBinary(a.as_bytes().to_vec())),
+        };
+        assert_eq!(with_mentions("hi \u{FFFC}", &[bin], &name), "hi @철수");
+    }
 
     #[test]
     fn timer_labels() {

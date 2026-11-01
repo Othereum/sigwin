@@ -650,7 +650,7 @@ impl App {
                 }
                 if self.synced && !(is_open && self.focused) {
                     let title = self.thread_name(&thread).await;
-                    let body = view::snippet(&c, self.me).unwrap_or_default();
+                    let body = self.snippet(&c).await.unwrap_or_default();
                     let title = match (&thread, &c.metadata.sender) {
                         (Thread::Group(_), s) => format!("{} — {}", self.name(s.raw_uuid()).await, title),
                         _ => title,
@@ -772,7 +772,8 @@ impl App {
             let key = thread_key(&row.thread);
             seen.insert(key.clone());
             let (display_ts, snippet) = match self.persist.snippets.get(&key) {
-                Some((last, ts, s)) if *last == row.last_ts => (*ts, s.clone()),
+                // cached before mentions were resolved: recompute
+                Some((last, ts, s)) if *last == row.last_ts && !s.contains('\u{FFFC}') => (*ts, s.clone()),
                 _ => {
                     let (ts, s) = self.compute_snippet(&row.thread, row.last_ts).await;
                     self.persist.snippets.insert(key.clone(), (row.last_ts, ts, s.clone()));
@@ -819,13 +820,22 @@ impl App {
         Ok(())
     }
 
-    async fn compute_snippet(&self, thread: &Thread, last_ts: u64) -> (u64, String) {
+    /// `view::snippet` with @mention names resolved.
+    async fn snippet(&mut self, c: &Content) -> Option<String> {
+        for u in view::data_message(c).map(view::mentioned).unwrap_or_default() {
+            self.name(u).await;
+        }
+        let names = &self.names;
+        view::snippet(c, self.me, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()))
+    }
+
+    async fn compute_snippet(&mut self, thread: &Thread, last_ts: u64) -> (u64, String) {
         let Ok(tss) = self.index.page(thread, last_ts.saturating_add(1), 20).await else {
             return (last_ts, String::new());
         };
         for ts in tss {
             if let Ok(Some(c)) = self.store.message(thread, ts).await {
-                if let Some(s) = view::snippet(&c, self.me) {
+                if let Some(s) = self.snippet(&c).await {
                     return (ts, s);
                 }
             }
@@ -1011,8 +1021,13 @@ impl App {
         let mut senders: Vec<Uuid> = open.window.iter().map(|(_, c)| c.metadata.sender.raw_uuid()).collect();
         senders.extend(open.members.iter().copied());
         senders.extend(receipts.values().flat_map(|m| m.keys().copied()));
+        let mentioned: Vec<Uuid> =
+            open.window.iter().filter_map(|(_, c)| view::data_message(c)).flat_map(view::mentioned).collect();
         senders.sort();
         senders.dedup();
+        for s in mentioned {
+            self.name(s).await;
+        }
         for s in senders {
             if s != self.me && !s.is_nil() {
                 self.name(s).await;
