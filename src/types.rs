@@ -152,27 +152,23 @@ pub struct Thumb {
     pub rgba: Vec<u8>,
 }
 
-/// The UI advances animations once per slot of this many ms (`Anim.slot`).
-pub const ANIM_SLOT_MS: u32 = 33;
-/// Longest loop the timeline covers (slots); longer animations are cut there.
-pub const ANIM_MAX_SLOTS: usize = 30_000 / ANIM_SLOT_MS as usize;
 /// Frames of all playing stickers in the message list together; the least recently shown
 /// sticker beyond this goes back to its still image.
 pub const ANIM_BUDGET: usize = 24 << 20;
 
-/// An animated sticker's frames (all `width` x `height` RGBA) and which frame shows in each
-/// `ANIM_SLOT_MS` slot of a loop. No frames: the image is a still.
+/// An animated sticker's frames (all `width` x `height` RGBA) and how long each shows (µs).
+/// No frames: the image is a still.
 pub struct Frames {
     pub key: String,
     pub width: u32,
     pub height: u32,
     pub frames: Vec<Vec<u8>>,
-    pub order: Vec<u16>,
+    pub delays_us: Vec<u32>,
 }
 
 impl Frames {
     pub fn still(key: String) -> Self {
-        Frames { key, width: 0, height: 0, frames: Vec::new(), order: Vec::new() }
+        Frames { key, width: 0, height: 0, frames: Vec::new(), delays_us: Vec::new() }
     }
 
     /// Decodes `bytes` with each frame fitted to `fit` logical px.
@@ -182,7 +178,7 @@ impl Frames {
                 key,
                 width: a.frames[0].width(),
                 height: a.frames[0].height(),
-                order: sigwin_thumb::timeline(&a.delays, ANIM_SLOT_MS, ANIM_MAX_SLOTS),
+                delays_us: a.delays_us,
                 frames: a.frames.into_iter().map(|f| f.into_raw()).collect(),
             },
             Ok(None) => Frames::still(key),

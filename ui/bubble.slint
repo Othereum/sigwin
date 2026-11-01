@@ -75,8 +75,7 @@ export component MsgImage inherits Rectangle {
     Image {
         width: 100%;
         height: 100%;
-        // Anim.slot is only read (and redraws only this image) while the sticker has frames
-        source: m.frames.length > 0 ? m.frames[m.order[mod(Anim.slot, m.order.length)]] : m.image;
+        source: m.frames.length > 0 ? m.frames[m.frame[0]] : m.image;
         image-fit: m.sticker ? contain : cover;
     }
     TouchArea {

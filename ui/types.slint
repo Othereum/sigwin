@@ -55,9 +55,9 @@ export struct MsgItem {
     attachment: string,
     has-image: bool,
     image: image,
-    // animated sticker: frames and the frame of each Anim slot (empty: show `image`)
+    // animated sticker: frames and the current one's index in `frame[0]` (empty: show `image`)
     frames: [image],
-    order: [int],
+    frame: [int],
     img-w: length,
     img-h: length,
     deleted: bool,
@@ -102,5 +102,5 @@ export struct StickerItem {
     // plays while hovered (frames are loaded then and dropped after)
     animated: bool,
     frames: [image],
-    order: [int],
+    frame: [int],
 }

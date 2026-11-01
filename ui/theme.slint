@@ -7,10 +7,10 @@ export global Links {
     callback open(string);
 }
 
-// animated stickers (src/gui/anim.rs): `slot` advances every ANIM_SLOT_MS while any play.
-// A row shows `frames[order[mod(slot, order.length)]]` when it has frames, else its still image.
+// animated stickers (src/gui/anim.rs). A row with frames shows `frames[frame[0]]`: `frame` is a
+// one-element model the Rust timer updates at each frame's exact time, shared by the rows of one
+// sticker, so a frame change touches just that image.
 export global Anim {
-    in property <int> slot;
     // a sticker row was put on screen or changed (message id): load its frames, keep them longer
     callback shown(string);
     // a picker sticker gained or lost the hover

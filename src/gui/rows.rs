@@ -189,7 +189,7 @@ pub(crate) fn to_item(
     dark: bool,
 ) -> MsgItem {
     let image = thumbs.get(&m.image_key).cloned();
-    let (frames, order) = anims.models(&m.image_key);
+    let (frames, frame) = anims.models(&m.image_key);
     let avatar = if m.show_avatar { senders.get(&m.sender_key).cloned() } else { None };
     let reactions: Vec<ReactionItem> = m
         .reactions
@@ -232,7 +232,7 @@ pub(crate) fn to_item(
         has_image: !m.image_key.is_empty(),
         image: image.unwrap_or_default(),
         frames,
-        order,
+        frame,
         img_w: m.img_w as f32,
         img_h: m.img_h as f32,
         deleted: m.deleted,

@@ -93,10 +93,11 @@ pub fn square(img: &DynamicImage, px: u32) -> RgbaImage {
     image::imageops::resize(&out, px, px, image::imageops::FilterType::CatmullRom)
 }
 
-/// Frames of an animated image, resampled, with each frame's display time in ms.
+/// Frames of an animated image, resampled, with each frame's display time in µs (APNG times
+/// are fractions: 1/30 s must stay 33333µs, not 33ms, or the cadence drifts).
 pub struct Animation {
     pub frames: Vec<RgbaImage>,
-    pub delays: Vec<u32>,
+    pub delays_us: Vec<u32>,
 }
 
 /// Decoding stops here: long animations would take seconds to resample.
@@ -129,13 +130,10 @@ pub fn animation(bytes: &[u8], px: u32, max_bytes: usize) -> ImageResult<Option<
         Some(image::ImageFormat::Gif) => GifDecoder::new(cur())?.into_frames(),
         _ => return Ok(None),
     };
-    let mut anim = Animation { frames: Vec::new(), delays: Vec::new() };
+    let mut anim = Animation { frames: Vec::new(), delays_us: Vec::new() };
     for f in frames.take(MAX_FRAMES) {
         let f = f?;
-        let (n, d) = f.delay().numer_denom_ms();
-        let ms = if d == 0 { 0 } else { n / d };
-        // like browsers: "as fast as possible" delays play at 10 fps
-        anim.delays.push(if ms <= 10 { 100 } else { ms });
+        anim.delays_us.push(delay_us(f.delay()));
         anim.frames.push(fit(f.into_buffer(), px));
     }
     if anim.frames.len() < 2 {
@@ -144,7 +142,7 @@ pub fn animation(bytes: &[u8], px: u32, max_bytes: usize) -> ImageResult<Option<
     let size = |a: &Animation| a.frames.iter().map(|f| f.as_raw().len()).sum::<usize>();
     while size(&anim) > max_bytes && anim.frames.len() > 1 {
         let (mut frames, mut delays) = (Vec::new(), Vec::new());
-        for (i, (f, d)) in anim.frames.into_iter().zip(anim.delays).enumerate() {
+        for (i, (f, d)) in anim.frames.into_iter().zip(anim.delays_us).enumerate() {
             if i % 2 == 0 {
                 frames.push(f);
                 delays.push(d);
@@ -152,9 +150,16 @@ pub fn animation(bytes: &[u8], px: u32, max_bytes: usize) -> ImageResult<Option<
                 *last += d;
             }
         }
-        anim = Animation { frames, delays };
+        anim = Animation { frames, delays_us: delays };
     }
     Ok(Some(anim))
+}
+
+/// A frame's display time in µs. Like browsers, "as fast as possible" (<= 10ms) plays at 10 fps.
+fn delay_us(delay: image::Delay) -> u32 {
+    let (n, d) = delay.numer_denom_ms();
+    let us = if d == 0 { 0 } else { (n as u64 * 1000 / d as u64).min(u32::MAX as u64) as u32 };
+    if us <= 10_000 { 100_000 } else { us }
 }
 
 /// An endlessly looping GIF (demo stickers, tests).
@@ -183,24 +188,6 @@ pub fn is_animated(bytes: &[u8]) -> bool {
     }
 }
 
-/// Which frame shows in each `slot_ms` slot of one loop (the UI ticks once per slot).
-/// At most `max_slots` slots; a frame shorter than a slot may be skipped.
-pub fn timeline(delays: &[u32], slot_ms: u32, max_slots: usize) -> Vec<u16> {
-    let total: u64 = delays.iter().map(|&d| d as u64).sum();
-    let slots = (total.div_ceil(slot_ms as u64) as usize).clamp(1, max_slots);
-    let mut out = Vec::with_capacity(slots);
-    let (mut frame, mut end) = (0usize, delays.first().copied().unwrap_or(0) as u64);
-    for s in 0..slots {
-        let t = s as u64 * slot_ms as u64;
-        while t >= end && frame + 1 < delays.len() {
-            frame += 1;
-            end += delays[frame] as u64;
-        }
-        out.push(frame as u16);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,7 +202,7 @@ mod tests {
         let a = animation(&gif(4, 50), 32, usize::MAX).unwrap().unwrap();
         assert_eq!(a.frames.len(), 4);
         assert_eq!(a.frames[0].dimensions(), (32, 32));
-        assert_eq!(a.delays, vec![50; 4]);
+        assert_eq!(a.delays_us, vec![50_000; 4]);
         assert!(animation(&gif(1, 50), 32, usize::MAX).unwrap().is_none());
         let png = png_rgba(&RgbaImage::new(8, 8)).unwrap();
         assert!(animation(&png, 32, usize::MAX).unwrap().is_none());
@@ -224,19 +211,21 @@ mod tests {
     }
 
     #[test]
+    fn keeps_fractional_delays() {
+        // APNG stores 1/30 s; image reports it in ms as 100/3
+        assert_eq!(delay_us(image::Delay::from_numer_denom_ms(100, 3)), 33_333);
+        assert_eq!(delay_us(image::Delay::from_numer_denom_ms(0, 1)), 100_000);
+        assert_eq!(delay_us(image::Delay::from_numer_denom_ms(20, 1)), 20_000);
+    }
+
+    #[test]
     fn drops_frames_to_fit_the_budget() {
         // 4 frames of 32x32 RGBA = 4 x 4096 bytes; room for 2
         let a = animation(&gif(4, 50), 32, 2 * 4096).unwrap().unwrap();
         assert_eq!(a.frames.len(), 2);
-        assert_eq!(a.delays, vec![100, 100]);
+        assert_eq!(a.delays_us, vec![100_000, 100_000]);
     }
 
-    #[test]
-    fn timeline_maps_slots_to_frames() {
-        assert_eq!(timeline(&[66, 33, 99], 33, 1000), vec![0, 0, 1, 2, 2, 2]);
-        assert_eq!(timeline(&[10, 10], 33, 1000), vec![0]);
-        assert_eq!(timeline(&[1000, 1000], 33, 10).len(), 10);
-    }
 
     #[test]
     fn downscale_fits_long_side_and_keeps_transparency() {
