@@ -1,0 +1,202 @@
+// Settings page.
+
+import { Button, Switch } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { IconButton, Segmented } from "widgets.slint";
+
+export component SettingSection inherits VerticalLayout {
+    in property <string> title;
+    spacing: 2px;
+    padding-top: 18px;
+    Text {
+        text: root.title;
+        color: Theme.accent;
+        font-size: 12.5px;
+        font-weight: 700;
+    }
+    Rectangle { height: 4px; }
+    @children
+}
+
+// label (+ optional hint) on the left, a control on the right
+export component SettingRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> hint;
+    spacing: 12px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        spacing: 2px;
+        Text { text: root.label; color: Theme.text; font-size: 13.5px; wrap: word-wrap; }
+        if root.hint != "": Text { text: root.hint; color: Theme.subtle; font-size: 11.5px; wrap: word-wrap; }
+    }
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 0;
+        @children
+    }
+}
+
+export component SettingsPage inherits Rectangle {
+    in-out property <bool> notify;
+    in-out property <int> preview;
+    in-out property <bool> badge;
+    in-out property <int> theme;
+    in-out property <int> zoom;
+    in-out property <bool> enter-sends;
+    in property <string> account-name;
+    in property <string> account-number;
+    in property <string> account-device;
+    in property <string> account-phone;
+    in property <string> storage;
+    in property <string> version;
+    callback changed();
+    callback close();
+    callback clear-thumbs();
+    callback unlink();
+    background: Theme.pane;
+    // swallow clicks so nothing underneath reacts
+    TouchArea { }
+    VerticalLayout {
+        Rectangle {
+            height: 56px;
+            HorizontalLayout {
+                padding-left: 24px;
+                padding-right: 12px;
+                Text {
+                    text: "설정";
+                    color: Theme.text;
+                    font-size: 17px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    label: "✕";
+                    clicked => { root.close(); }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+        }
+        Flickable {
+            vertical-stretch: 1;
+            max-width: 100000px;
+            content-height: body.preferred-height;
+            HorizontalLayout {
+                width: parent.width;
+                alignment: center;
+                body := VerticalLayout {
+                    width: min(560px, root.width - 48px);
+                    padding-bottom: 24px;
+                    SettingSection {
+                        title: "알림";
+                        SettingRow {
+                            label: "새 메시지 알림";
+                            hint: "열려 있는 대화를 보고 있을 때는 알리지 않습니다";
+                            Switch {
+                                checked <=> root.notify;
+                                toggled => { root.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: "알림에 표시할 내용";
+                            Segmented {
+                                enabled: root.notify;
+                                options: ["이름과 내용", "이름만", "숨김"];
+                                current <=> root.preview;
+                                changed => { root.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: "작업 표시줄 배지";
+                            hint: "작업 표시줄 아이콘에 안 읽은 메시지 수를 표시합니다";
+                            Switch {
+                                checked <=> root.badge;
+                                toggled => { root.changed(); }
+                            }
+                        }
+                    }
+                    SettingSection {
+                        title: "화면";
+                        SettingRow {
+                            label: "테마";
+                            Segmented {
+                                options: ["시스템", "밝게", "어둡게"];
+                                current <=> root.theme;
+                                changed => { root.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: "크기";
+                            hint: "Windows 배율에 곱해서 적용합니다";
+                            Segmented {
+                                options: ["90%", "100%", "110%", "125%", "150%"];
+                                current <=> root.zoom;
+                                changed => { root.changed(); }
+                            }
+                        }
+                    }
+                    SettingSection {
+                        title: "입력";
+                        SettingRow {
+                            label: "메시지 보내기";
+                            hint: root.enter-sends ? "Shift+Enter로 줄을 바꿉니다" : "Enter로 줄을 바꿉니다";
+                            Segmented {
+                                options: ["Enter", "Ctrl+Enter"];
+                                current: root.enter-sends ? 0 : 1;
+                                changed(i) => {
+                                    root.enter-sends = i == 0;
+                                    root.changed();
+                                }
+                            }
+                        }
+                    }
+                    SettingSection {
+                        title: "계정";
+                        SettingRow {
+                            label: root.account-name != "" ? root.account-name : "내 계정";
+                            hint: root.account-number + (root.account-device != "" ? "  ·  이 기기: " + root.account-device : "");
+                        }
+                        SettingRow {
+                            label: "읽음 확인 · 입력 중 표시";
+                            hint: root.account-phone;
+                        }
+                        SettingRow {
+                            label: "연결 해제";
+                            hint: "이 PC의 연결을 끊고 메시지와 파일을 모두 지웁니다";
+                            Button {
+                                text: "연결 해제";
+                                clicked => { root.unlink(); }
+                            }
+                        }
+                    }
+                    SettingSection {
+                        title: "저장 공간";
+                        SettingRow {
+                            label: "사용 중";
+                            hint: root.storage;
+                        }
+                        SettingRow {
+                            label: "썸네일 캐시 비우기";
+                            hint: "이미지 미리보기와 프로필 사진 캐시를 지웁니다. 필요할 때 다시 만듭니다.";
+                            Button {
+                                text: "비우기";
+                                clicked => { root.clear-thumbs(); }
+                            }
+                        }
+                    }
+                    Rectangle { height: 20px; }
+                    Text {
+                        text: root.version;
+                        color: Theme.subtle;
+                        font-size: 11.5px;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

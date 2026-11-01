@@ -41,4 +41,8 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/toast.rs` | notifications: own AppUserModelID `Sigwin` registered under HKCU (name + icon), otherwise toasts show as "Windows PowerShell" |
 | `crates/thumb` | decode / resample (`downscale`, `square`). Own crate because the `fast` profile builds `sigwin` at opt-level 0 and generic pixel code compiles in the calling crate: a 200-sticker pack resampled in 7.4s there, 0.34s here. Picker thumbs are also cached at their final size (`thumbs/sp_*-<px>px.enc`) |
 | `crates/vault` | encrypted cache files: everything under `attachments/` and `thumbs/` (all named `*.enc`) goes through `sigwin_vault::read`/`write` (per-file HKDF key from the DB key, chunked AES-256-GCM). Own crate so the cipher is optimized in the `fast` profile. Opening an attachment decrypts it to `open/<random>/<name>`, emptied on exit (`main`) and at startup. `seal_legacy_files` converts older caches once per `CACHE_FORMAT` bump (`Persist.cache_format`) |
-| `ui/app.slint` | the whole UI |
+| `ui/app.slint` | `AppWindow`: properties and callbacks the Rust side uses, main layout, overlays (menu, mention popup, info). Re-exports the structs and globals for the generated code |
+| `ui/types.slint`, `ui/theme.slint` | rows filled by Rust (`MsgItem`, `ThreadItem`, ...); `Theme` colors and the `Links` hook |
+| `ui/bubble.slint` | message bubble (`Bubble`, `MsgMeta`, `MsgImage`, `MsgTools`) |
+| `ui/widgets.slint` | small shared widgets (`Avatar`, `IconButton`, `MenuRow`, `TextButton`, `Segmented`) |
+| `ui/thread_row.slint`, `ui/stickers.slint`, `ui/settings.slint`, `ui/link.slint` | thread list row, sticker panel, settings page, linking page |

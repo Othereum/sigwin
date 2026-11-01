@@ -1,0 +1,69 @@
+// Device linking page (QR code).
+
+import { LineEdit, Button } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export component LinkPage inherits Rectangle {
+    in property <image> qr;
+    in property <bool> has-qr;
+    in property <string> status;
+    in-out property <string> device-name: "Sigwin";
+    callback start-link(string);
+    background: Theme.pane;
+    VerticalLayout {
+        alignment: center;
+        spacing: 16px;
+        padding: 32px;
+        Text {
+            text: "Sigwin";
+            font-size: 28px;
+            font-weight: 700;
+            color: Theme.text;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: "휴대폰의 Signal 앱 → 설정 → 연결된 기기 → '+' 를 눌러 아래 QR 코드를 스캔하세요.";
+            color: Theme.subtle;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+        }
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 280px;
+                height: 280px;
+                background: white;
+                border-radius: 12px;
+                if has-qr: Image {
+                    width: 256px;
+                    height: 256px;
+                    source: qr;
+                    image-rendering: pixelated;
+                }
+                if !has-qr: Text {
+                    text: "QR 코드 대기 중";
+                    color: #888;
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 8px;
+            Text { text: "기기 이름"; color: Theme.text; vertical-alignment: center; }
+            LineEdit {
+                width: 200px;
+                text <=> root.device-name;
+            }
+            Button {
+                text: has-qr ? "QR 다시 만들기" : "연결 시작";
+                clicked => { root.start-link(root.device-name); }
+            }
+        }
+        Text {
+            text: status;
+            color: Theme.subtle;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}

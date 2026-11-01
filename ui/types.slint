@@ -1,0 +1,94 @@
+// Data rows the Rust side fills (exported from app.slint for the generated code).
+
+export struct ThreadItem {
+    key: string,
+    name: string,
+    snippet: string,
+    time: string,
+    unread: int,
+    initial: string,
+    color: color,
+    is-group: bool,
+    photo: image,
+    has-photo: bool,
+}
+
+export struct ReactionItem {
+    emoji: string,
+    count: int,
+
+}
+
+export struct ReaderItem {
+    photo: image,
+    has-photo: bool,
+    initial: string,
+    tint: color,
+}
+
+export struct MsgItem {
+    id: string,
+    sender: string,
+    sender-color: color,
+    text: string,
+    // text with highlighted @mentions and links (only when has-rich)
+    rich: styled-text,
+    has-rich: bool,
+    time: string,
+    outgoing: bool,
+    show-sender: bool,
+    // incoming in a group: photo column; the photo itself on the last row of a run
+    avatar-col: bool,
+    show-avatar: bool,
+    avatar: image,
+    has-avatar: bool,
+    initial: string,
+    status: string,
+    // photos of those who read it (outgoing; replaces the status text) and how many more there are
+    readers: [ReaderItem],
+    readers-more: int,
+    quote: string,
+    reactions: [ReactionItem],
+    big-emoji: bool,
+    attachment: string,
+    has-image: bool,
+    image: image,
+    img-w: length,
+    img-h: length,
+    deleted: bool,
+    day-sep: string,
+    system: bool,
+    sticker: bool,
+    receipt-info: string,
+    pending: bool,
+    // same run and minute as the next row: no time / status footer
+    hide-time: bool,
+    // the "someone is typing" bubble at the end of the list
+    typing: bool,
+}
+
+export struct PinItem {
+    // sent timestamp of the pinned message
+    id: string,
+    sender: string,
+    text: string,
+}
+
+export struct MentionItem {
+    name: string,
+    initial: string,
+    tint: color,
+}
+
+export struct PackItem {
+    id: string,
+    title: string,
+    installed: bool,
+    cover: image,
+}
+
+export struct StickerItem {
+    id: int,
+    emoji: string,
+    img: image,
+}

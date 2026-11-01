@@ -24,11 +24,11 @@ use crate::backend::{Emit, Mgr};
 use crate::db::Index;
 use crate::types::{Event, Thumb};
 
-/// Logical size of the thread list / header avatar (ui/app.slint `Avatar` default size).
+/// Logical size of the thread list / header avatar (ui/widgets.slint `Avatar` default size).
 pub const SIZE: u32 = 40;
-/// next to incoming group messages (ui/app.slint `Bubble`)
+/// next to incoming group messages (ui/bubble.slint `Bubble`)
 pub const MSG_SIZE: u32 = 28;
-/// who read a message, under the bubble (ui/app.slint `Bubble`)
+/// who read a message, under the bubble (ui/bubble.slint `Bubble`)
 pub const READ_SIZE: u32 = 16;
 /// Emitted key prefix of a reader avatar: `r:<uuid>`.
 pub const READ_PREFIX: &str = "r:";

@@ -1,0 +1,118 @@
+// Sticker picker panel.
+
+import { LineEdit, Button } from "std-widgets.slint";
+import { PackItem, StickerItem } from "types.slint";
+import { Theme } from "theme.slint";
+import { TextButton } from "widgets.slint";
+
+export component StickerPanel inherits Rectangle {
+    in property <[PackItem]> packs;
+    in property <[StickerItem]> stickers;
+    in property <string> current-pack;
+    in-out property <string> url-text;
+    callback pick-pack(string);
+    callback send-sticker(string, int);
+    callback install-pack(string);
+    callback add-pack-url(string);
+
+    property <length> cell: 84px;
+    property <int> cols: max(1, floor((self.width - 16px) / cell));
+    property <bool> suggest: current-pack == "" || current-pack == "+";
+
+    height: 300px;
+    background: Theme.sidebar;
+    Rectangle { height: 1px; y: 0; background: Theme.border; }
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+        // pack tabs
+        Flickable {
+            height: 40px;
+            // a Flickable's max size defaults to its content: don't let that shrink the window
+            max-width: 100000px;
+            content-width: tabs.preferred-width;
+            tabs := HorizontalLayout {
+                spacing: 4px;
+                for p in root.packs: Rectangle {
+                    visible: p.installed;
+                    width: p.installed ? 40px : 0px;
+                    height: 40px;
+                    border-radius: 8px;
+                    background: p.id == root.current-pack ? Theme.selected : (pta.has-hover ? Theme.hover : transparent);
+                    Image { width: 32px; height: 32px; source: p.cover; image-fit: contain; }
+                    pta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.pick-pack(p.id); }
+                    }
+                }
+                TextButton {
+                    y: 6px;
+                    text: "＋ 팩 추가";
+                    active: root.suggest;
+                    clicked => { root.pick-pack("+"); }
+                }
+            }
+        }
+        // sticker grid
+        if !root.suggest: Flickable {
+            vertical-stretch: 1;
+            max-width: 100000px;
+            content-height: ceil(root.stickers.length / root.cols) * root.cell;
+            for s[i] in root.stickers: Rectangle {
+                x: mod(i, root.cols) * root.cell;
+                y: floor(i / root.cols) * root.cell;
+                width: root.cell;
+                height: root.cell;
+                border-radius: 8px;
+                background: sta.has-hover ? Theme.hover : transparent;
+                Image { width: root.cell - 12px; height: root.cell - 12px; source: s.img; image-fit: contain; }
+                sta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.send-sticker(root.current-pack, s.id); }
+                }
+            }
+        }
+        // add packs: Signal's built-in packs + signal.art link
+        if root.suggest: Flickable {
+            vertical-stretch: 1;
+            max-width: 100000px;
+            content-height: sug.preferred-height;
+            sug := VerticalLayout {
+                spacing: 4px;
+                Text { text: "추천 스티커 팩"; color: Theme.subtle; font-size: 12px; }
+                for p in root.packs: HorizontalLayout {
+                    visible: !p.installed;
+                    height: p.installed ? 0px : 34px;
+                    spacing: 8px;
+                    Text {
+                        text: p.title;
+                        color: Theme.text;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    Button {
+                        text: "추가";
+                        clicked => { root.install-pack(p.id); }
+                    }
+                }
+                Rectangle { height: 8px; }
+                Text { text: "signal.art 스티커 링크로 추가"; color: Theme.subtle; font-size: 12px; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    LineEdit {
+                        placeholder-text: "https://signal.art/addstickers/#pack_id=…&pack_key=…";
+                        text <=> root.url-text;
+                        accepted(t) => { root.add-pack-url(t); }
+                    }
+                    Button {
+                        text: "추가";
+                        clicked => { root.add-pack-url(root.url-text); }
+                    }
+                }
+            }
+        }
+    }
+}

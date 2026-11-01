@@ -1,0 +1,80 @@
+// A row of the thread list.
+
+import { ThreadItem } from "types.slint";
+import { Theme } from "theme.slint";
+import { Avatar } from "widgets.slint";
+
+export component ThreadRow inherits Rectangle {
+    in property <ThreadItem> item;
+    in property <bool> selected;
+    callback clicked;
+    height: 64px;
+    background: selected ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        alignment: stretch;
+        Avatar {
+            y: (parent.height - self.height) / 2;
+            initial: item.initial;
+            tint: item.color;
+            photo: item.photo;
+            has-photo: item.has-photo;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: item.name;
+                    color: Theme.text;
+                    font-weight: item.unread > 0 ? 700 : 500;
+                    font-size: 14px;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: item.time;
+                    color: Theme.subtle;
+                    font-size: 11px;
+                    horizontal-stretch: 0;
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: item.snippet;
+                    color: Theme.subtle;
+                    font-size: 12.5px;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                if item.unread > 0: Rectangle {
+                    horizontal-stretch: 0;
+                    min-width: 20px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: Theme.accent;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        Text {
+                            text: item.unread > 99 ? "99+" : item.unread;
+                            color: white;
+                            font-size: 11px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,136 @@
+// Small shared widgets.
+
+import { Theme } from "theme.slint";
+
+export component Avatar inherits Rectangle {
+    in property <string> initial;
+    in property <color> tint;
+    in property <length> size: 40px;
+    // pre-cut round by the backend (avatar.rs) at the exact physical size
+    in property <image> photo;
+    in property <bool> has-photo;
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: has-photo ? transparent : tint;
+    Text {
+        visible: !has-photo;
+        text: initial;
+        color: white;
+        font-size: size * 0.42;
+        font-weight: 600;
+    }
+    Image {
+        visible: has-photo;
+        width: size;
+        height: size;
+        source: photo;
+        image-fit: fill;
+    }
+}
+
+export component IconButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 36px;
+    height: 36px;
+    border-radius: 18px;
+    background: ta.has-hover && enabled ? Theme.hover : transparent;
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Text {
+        text: label;
+        // the UI font (Malgun Gothic) lacks symbols like ✕ ➤, and the software renderer
+        // does not fall back per glyph: use the symbol font for icons
+        font-family: "Segoe UI Symbol";
+        font-size: 18px;
+        color: enabled ? Theme.subtle : Theme.border;
+    }
+}
+
+export component MenuRow inherits Rectangle {
+    in property <string> text;
+    in property <bool> danger;
+    callback clicked;
+    height: 32px;
+    border-radius: 6px;
+    background: ta.has-hover ? Theme.hover : transparent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Text {
+        x: 10px;
+        text: root.text;
+        color: root.danger ? #e5484d : Theme.text;
+        font-size: 13px;
+        vertical-alignment: center;
+    }
+}
+
+export component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+    height: 28px;
+    min-width: lbl.preferred-width + 20px;
+    max-width: 160px;
+    border-radius: 14px;
+    background: active ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    lbl := Text {
+        x: 10px;
+        width: parent.width - 20px;
+        text: root.text;
+        color: Theme.text;
+        font-size: 12.5px;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+}
+
+// a row of mutually exclusive choices
+export component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> current;
+    in property <bool> enabled: true;
+    callback changed(int);
+    height: 30px;
+    border-radius: 8px;
+    background: Theme.hover;
+    opacity: enabled ? 1.0 : 0.5;
+    HorizontalLayout {
+        padding: 2px;
+        spacing: 2px;
+        for o[i] in root.options: Rectangle {
+            min-width: seg-label.preferred-width + 20px;
+            border-radius: 6px;
+            background: i == root.current ? Theme.pane : (sta.has-hover && root.enabled ? Theme.selected : transparent);
+            drop-shadow-blur: i == root.current ? 2px : 0px;
+            drop-shadow-color: #00000030;
+            sta := TouchArea {
+                enabled: root.enabled;
+                mouse-cursor: pointer;
+                clicked => {
+                    if (root.current != i) {
+                        root.current = i;
+                        root.changed(i);
+                    }
+                }
+            }
+            seg-label := Text {
+                text: o;
+                color: Theme.text;
+                font-size: 12.5px;
+                font-weight: i == root.current ? 600 : 400;
+            }
+        }
+    }
+}
