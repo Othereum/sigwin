@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**Sigwin**: lightweight unofficial Signal desktop client. Never use "Signal" in its name (Signal brand guidelines). Rust + presage (Signal protocol) + Slint (software renderer). Windows-first. User-facing text and replies are Korean.
+**Sigwin**: lightweight unofficial Signal desktop client. Never use "Signal" in its name (Signal brand guidelines). Rust + presage (Signal protocol) + Slint (software renderer). Windows-first. User-facing text is Korean.
 
 ## Where things live
 - `docs/architecture.md`: thread model and per-file roles. Read before touching an unfamiliar module.
@@ -24,12 +24,12 @@ cargo build                    # debug: quickest for UI experiments -> target\de
 cargo build --release          # distribution only (~2.5 min, thin LTO)
 cargo test
 ```
-- **A running `sigwin.exe` locks its exe and the build fails with "액세스가 거부되었습니다".** The user runs `target\fast\sigwin.exe` with their real account. To ship a change: stop the process, run `cargo build --profile fast`, relaunch it. Use the **debug** build for experiments so the user's app keeps running.
-- `.cargo/config.toml` pins `PROTOC`, `LIBCLANG_PATH`, and dummy `OPENSSL_*` dirs. libsqlite3-sys uses `bundled-sqlcipher-custom-crypto` (pure-Rust crypto); its Windows build script still demands OpenSSL paths, hence `build-support/no-openssl`.
+- **A running `sigwin.exe` locks its exe and the build fails with "액세스가 거부되었습니다".** Use the **debug** build for experiments so an app running from `target\fast\` keeps running.
+- `protoc` comes from `PATH`. `.cargo/config.toml` defaults `LIBCLANG_PATH` (overridable by env) and pins dummy `OPENSSL_*` dirs. libsqlite3-sys uses `bundled-sqlcipher-custom-crypto` (pure-Rust crypto); its Windows build script still demands OpenSSL paths, hence `build-support/no-openssl`.
 - presage and presage-store-sqlite are git deps pinned to one `rev`. Bump both together, and keep the `[patch.crates-io] libsqlite3-sys` entry in sync with presage's workspace.
 
 ## Verifying UI without an account
-Layout and glyph bugs only show up visually; a successful compile proves nothing about them. Use the demo modes (`SIGWIN_DEMO=1`, synthetic data, no backend) **headless**: the user works on this PC, so never pop up a window, take focus or move the real mouse. `SIGWIN_HEADLESS="<steps>"` renders offscreen and writes PNG shots (`shot PATH`). Step syntax, demo variants and what headless can't cover: `docs/headless.md`.
+Layout and glyph bugs only show up visually; a successful compile proves nothing about them. Use the demo modes (`SIGWIN_DEMO=1`, synthetic data, no backend) **headless**, without popping up a window, taking focus or moving the real mouse. `SIGWIN_HEADLESS="<steps>"` renders offscreen and writes PNG shots (`shot PATH`). Step syntax, demo variants and what headless can't cover: `docs/headless.md`.
 
 ## Architecture in brief
 UI thread (Slint) sends `Command`s to a backend thread (tokio current_thread + `LocalSet`) that owns the `!Send` presage `Manager`; results come back as `Event`s via `upgrade_in_event_loop`. `gui/` = UI wiring and rows, `backend/` = Signal logic, `view.rs` = message rows, `db.rs` = own SQL, `types.rs` = cross-thread types, `ui/` = Slint UI (`app.slint` is the window). Full file table: `docs/architecture.md`.
@@ -44,9 +44,8 @@ Every hunk under `vendor/` has to be re-applied by hand on each Slint / presage 
 
 ## Conventions
 - UI strings are Korean; code comments are short and English.
-- Commit at sensible checkpoints without asking (user preference).
 - **Commit subjects are short**: one line, imperative, about 50 characters or less (hard cap 72), no trailing period. Put details in the body (blank line, then wrapped lines) only when the why isn't obvious. Don't cram the whole change list into the subject.
-- **Keep `README.md` current** (user preference): when a user-visible feature lands or changes, update its 기능 / 사용법 / 미지원 sections in the same commit. Never push or rewrite history without asking.
+- **Keep `README.md` current**: when a user-visible feature lands or changes, update its 기능 / 사용법 / 미지원 sections in the same commit.
 - **Every experiment run sets `SIGWIN_DATA` to a scratch dir**, including demo, probe and child modes. If the flag is misparsed the app falls through to the real account, and that would make two instances share one Signal device/DB.
-- Sending messages or installing packs (`install_sticker_pack` syncs to the phone) on the user's real account is outward-facing: only the user does that. Ask them to test, then read the log (`RUST_LOG=info,spqr=warn,presage_store_sqlite=error,sigwin=debug`).
+- Sending messages or installing packs (`install_sticker_pack` syncs to the phone) on a real account is outward-facing: never do it from tests or automation. Useful log filter: `RUST_LOG=info,spqr=warn,presage_store_sqlite=error,sigwin=debug`.
 - Prefer the Edit tool over perl/sed for multi-line or backslash-heavy edits: shell escaping has already corrupted files here (Windows paths, `\f`, `\r`).
