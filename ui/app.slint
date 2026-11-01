@@ -282,7 +282,9 @@ component Bubble inherits VerticalLayout {
     padding-left: 16px;
     padding-right: 16px;
     padding-top: m.show-sender || m.day-sep != "" || m.typing ? 8px : 2px;
-    padding-bottom: m.typing ? 8px : (m.outgoing && m.readers.length > 0 ? 12px : 2px);
+    // the newest row gets extra room below so it doesn't touch the composer
+    in property <bool> last;
+    padding-bottom: (m.typing ? 8px : (m.outgoing && m.readers.length > 0 ? 12px : 2px)) + (last ? 10px : 0px);
     spacing: 4px;
     opacity: m.pending ? 0.6 : 1.0;
     // plain text: the time sits at the right of the last line instead of below
@@ -1400,8 +1402,9 @@ export component AppWindow inherits Window {
                             root.check-older();
                         }
                     }
-                    for m in root.messages: Bubble {
+                    for m[idx] in root.messages: Bubble {
                         m: m;
+                        last: idx == root.messages.length - 1;
                         max-w: min(560px, msg-list.visible-width * 0.75);
                         flash: m.id == root.flash-id;
                         property <int> probe: root.jump-probe;
@@ -1521,11 +1524,13 @@ export component AppWindow inherits Window {
             }
             composer-bar := Rectangle {
                 visible: root.current-key != "";
-                min-height: self.visible ? 56px : 0px;
+                min-height: self.visible ? 48px : 0px;
                 max-height: self.visible ? 400px : 0px;
                 Rectangle { height: 1px; y: 0; background: Theme.border; }
                 HorizontalLayout {
                     padding: 10px;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
                     spacing: 8px;
                     IconButton {
                         label: "📎";
