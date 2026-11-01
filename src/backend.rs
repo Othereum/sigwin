@@ -101,9 +101,9 @@ struct Persist {
     /// pin messages stored before the pin index existed have been indexed
     #[serde(default)]
     pins_indexed: bool,
-    /// attachment and thumbnail caches written before they were encrypted have been sealed
+    /// layout of the attachment and thumbnail caches on disk (`CACHE_FORMAT` once converted)
     #[serde(default)]
-    files_sealed: bool,
+    cache_format: u32,
 }
 
 #[derive(Default, Clone, Copy, Serialize, Deserialize)]
@@ -289,7 +289,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
-    let sealed_now = !persist.files_sealed && {
+    let sealed_now = persist.cache_format < CACHE_FORMAT && {
         emit(Event::Loading("첨부파일 캐시 암호화 중…".into()));
         let (att, thumbs) = (paths.attachments.clone(), paths.thumbs.clone());
         let started = std::time::Instant::now();
@@ -305,7 +305,9 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
             Err(_) => false,
         }
     };
-    persist.files_sealed |= sealed_now;
+    if sealed_now {
+        persist.cache_format = CACHE_FORMAT;
+    }
 
     let (tx, mut rx) = unbounded_channel();
     let mut app = App {
@@ -1951,7 +1953,7 @@ impl App {
     }
 
     fn sticker_cover_path(&self, pack_hex: &str, id: u32) -> PathBuf {
-        self.paths.thumbs.join(format!("{}-{THUMB_MAX}.png", sticker_thumb_key(pack_hex, id)))
+        self.paths.thumbs.join(format!("{}-{THUMB_MAX}.enc", sticker_thumb_key(pack_hex, id)))
     }
 
     /// Picker images, made on both blocking threads (interleaved, so the top of the grid fills
@@ -2077,7 +2079,7 @@ impl App {
     }
 
     fn request_thumb(&self, key: String, ptr: AttachmentPointer, fit: u32) {
-        let thumb_path = self.paths.thumbs.join(format!("{key}.png"));
+        let thumb_path = self.paths.thumbs.join(format!("{key}.enc"));
         let orig_path = attachment_path(&self.paths.attachments, &key);
         let manager = self.manager.clone();
         let emit = self.emit.clone();
@@ -2502,7 +2504,7 @@ fn remove_files(c: &Content, ts: u64, attachments: &Path, thumbs: &Path) {
     }
     for k in keys {
         let _ = std::fs::remove_file(attachment_path(attachments, &k));
-        let _ = std::fs::remove_file(thumbs.join(format!("{k}.png")));
+        let _ = std::fs::remove_file(thumbs.join(format!("{k}.enc")));
     }
 }
 
@@ -2576,8 +2578,11 @@ fn decrypt_for_open(src: &Path, open_dir: &Path, name: &str) -> std::io::Result<
     Ok(dst)
 }
 
-/// Caches written before they were encrypted: attachments lived in `<key>/<original name>`,
-/// thumbnails were plain PNGs. Err leaves the rest for the next start.
+/// 1: everything encrypted, thumbnails still named `.png`. 2: thumbnails named `.enc`.
+const CACHE_FORMAT: u32 = 2;
+
+/// Converts older caches: attachments lived in `<key>/<original name>`, thumbnails were plain
+/// PNGs, then encrypted but still named `.png`. Idempotent; Err leaves the rest for the next start.
 fn seal_legacy_files(attachments: &Path, thumbs: &Path) -> anyhow::Result<()> {
     let mut failed = 0;
     for e in std::fs::read_dir(attachments)?.flatten() {
@@ -2597,12 +2602,19 @@ fn seal_legacy_files(attachments: &Path, thumbs: &Path) -> anyhow::Result<()> {
     }
     for e in std::fs::read_dir(thumbs)?.flatten() {
         let p = e.path();
-        if p.is_file() && !sigwin_vault::is_sealed(&p) {
-            if let Err(e) = sigwin_vault::encrypt_file(&p, &p, false) {
-                // only a cache: drop it rather than keep it plain
-                warn!("encrypt {}: {e}", p.display());
-                let _ = std::fs::remove_file(&p);
-            }
+        if !p.is_file() || p.extension().is_none_or(|x| x != "png") {
+            continue;
+        }
+        let dst = p.with_extension("enc");
+        let res = if sigwin_vault::is_sealed(&p) {
+            std::fs::rename(&p, &dst)
+        } else {
+            sigwin_vault::encrypt_file(&p, &dst, false).and_then(|_| std::fs::remove_file(&p))
+        };
+        if let Err(e) = res {
+            // only a cache: drop it rather than keep it plain
+            warn!("encrypt {}: {e}", p.display());
+            let _ = std::fs::remove_file(&p);
         }
     }
     anyhow::ensure!(failed == 0, "{failed} attachments left unencrypted");
@@ -2613,7 +2625,7 @@ fn seal_legacy_files(attachments: &Path, thumbs: &Path) -> anyhow::Result<()> {
 const PICKER_CELL: u32 = 72;
 const PACK_COVER: u32 = 32;
 
-/// Picker thumbs used to be cached at 96px as `sp_<pack>_<id>.png`; they are `...-260.png` now.
+/// Picker thumbs used to be cached at 96px as `sp_<pack>_<id>.png`; they are `...-260.enc` now.
 fn remove_legacy_sticker_thumbs(dir: &Path) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
@@ -2636,18 +2648,18 @@ struct StickerJob {
 
 impl StickerJob {
     fn source(&self, dir: &Path) -> PathBuf {
-        dir.join(format!("{}-{THUMB_MAX}.png", self.base))
+        dir.join(format!("{}-{THUMB_MAX}.enc", self.base))
     }
 
     fn fitted(&self, dir: &Path) -> PathBuf {
-        dir.join(format!("{}-{}px.png", self.base, crate::types::physical_px(self.fit)))
+        dir.join(format!("{}-{}px.enc", self.base, crate::types::physical_px(self.fit)))
     }
 
     fn has_cache(&self, dir: &Path) -> bool {
         self.fitted(dir).exists() || self.source(dir).exists()
     }
 
-    /// The resampled result is cached too (`-<px>px.png`): resampling costs ~10x the decode.
+    /// The resampled result is cached too (`-<px>px.enc`): resampling costs ~10x the decode.
     fn make(self, dir: &Path) -> anyhow::Result<Thumb> {
         let fitted = self.fitted(dir);
         if let Ok(rgba) = load_cached(&fitted) {
@@ -2803,8 +2815,9 @@ mod tests {
         seal_legacy_files(&att, &thumbs).unwrap();
         assert!(!att.join("abc").exists());
         assert_eq!(sigwin_vault::read(&attachment_path(&att, "abc")).unwrap(), b"pdf bytes");
-        assert_eq!(sigwin_vault::read(&thumbs.join("abc.png")).unwrap(), b"png bytes");
-        assert_eq!(sigwin_vault::read(&thumbs.join("new.png")).unwrap(), b"already sealed");
+        assert_eq!(sigwin_vault::read(&thumbs.join("abc.enc")).unwrap(), b"png bytes");
+        assert_eq!(sigwin_vault::read(&thumbs.join("new.enc")).unwrap(), b"already sealed");
+        assert!(!thumbs.join("abc.png").exists() && !thumbs.join("new.png").exists());
 
         let open = dir.join("open");
         let plain = decrypt_for_open(&attachment_path(&att, "abc"), &open, "계약서.pdf").unwrap();

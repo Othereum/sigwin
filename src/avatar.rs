@@ -192,7 +192,7 @@ fn hash<T: Hash + ?Sized>(v: &T) -> u64 {
 /// The round photo of `owner` at `px`, from the disk cache when the source bytes haven't changed.
 fn cached(dir: &Path, owner: &str, key: &str, bytes: &[u8], px: u32) -> Option<Thumb> {
     let prefix = format!("av-{:016x}-{px}-", hash(owner));
-    let name = format!("{prefix}{:016x}.png", hash(bytes));
+    let name = format!("{prefix}{:016x}.enc", hash(bytes));
     let path = dir.join(&name);
     if let Ok(rgba) = crate::backend::load_cached(&path) {
         return Some(Thumb { key: key.into(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() });
@@ -210,7 +210,7 @@ fn cached(dir: &Path, owner: &str, key: &str, bytes: &[u8], px: u32) -> Option<T
         for e in rd.flatten() {
             let n = e.file_name();
             let n = n.to_string_lossy();
-            if n.starts_with(&prefix) || (n.starts_with(&legacy) && n.ends_with(&format!("-{px}.png"))) {
+            if n.starts_with(&prefix) || (n.starts_with(&legacy) && n.ends_with(&format!("-{px}.enc"))) {
                 let _ = std::fs::remove_file(e.path());
             }
         }
