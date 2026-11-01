@@ -101,6 +101,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 ## Conventions
 - UI strings are Korean; code comments are short and English.
 - Commit at sensible checkpoints without asking (user preference).
+- **Commit subjects are short**: one line, imperative, about 50 characters or less (hard cap 72), no trailing period. Put details in the body (blank line, then wrapped lines) only when the why isn't obvious. Don't cram the whole change list into the subject.
 - **Keep `README.md` current** (user preference): when a user-visible feature lands or changes, update its 기능 / 사용법 / 미지원 sections in the same commit. Never push or rewrite history without asking.
 - **Every experiment run sets `SIGWIN_DATA` to a scratch dir**, including demo, probe and child modes. If the flag is misparsed the app falls through to the real account, and that would make two instances share one Signal device/DB.
 - Sending messages or installing packs on the user's real account is outward-facing: only the user does that. Ask them to test, then read the log (`RUST_LOG=info,spqr=warn,presage_store_sqlite=error,sigwin=debug`).
