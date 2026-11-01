@@ -39,9 +39,12 @@ pub fn filter<'a>(members: &'a [Member], query: &str) -> Vec<&'a Member> {
     hits.into_iter().map(|(_, m)| m).take(MAX_ROWS).collect()
 }
 
-/// Replaces each "@name" of a picked member with the mention placeholder and a body range.
-/// Text the user changed after picking no longer matches and is sent as typed.
+/// Strips the style markers (`format::parse`) into style body ranges, and replaces each "@name"
+/// of a picked member with the mention placeholder and a body range. Text the user changed after
+/// picking no longer matches and is sent as typed.
 pub fn encode(text: &str, picked: &[Member]) -> (String, Vec<BodyRange>) {
+    let (plain, styles) = crate::format::parse(text);
+    let text = plain.as_str();
     let mut picked: Vec<&Member> = picked.iter().filter(|m| !m.1.is_empty()).collect();
     // longest name first, so "@Kim Lee" wins over "@Kim"
     picked.sort_by_key(|m| std::cmp::Reverse(m.1.len()));
@@ -49,7 +52,10 @@ pub fn encode(text: &str, picked: &[Member]) -> (String, Vec<BodyRange>) {
     let mut ranges = Vec::new();
     let mut utf16 = 0u32;
     let mut rest = text;
+    // (byte offset in `text`, UTF-16 offset in `out`) where each char or mention starts
+    let mut map: Vec<(usize, u32)> = Vec::new();
     while let Some(c) = rest.chars().next() {
+        map.push((text.len() - rest.len(), utf16));
         if c == '@' {
             if let Some(m) = picked.iter().find(|m| rest[1..].starts_with(m.1.as_str())) {
                 ranges.push(BodyRange {
@@ -66,6 +72,22 @@ pub fn encode(text: &str, picked: &[Member]) -> (String, Vec<BodyRange>) {
         out.push(c);
         utf16 += c.len_utf16() as u32;
         rest = &rest[c.len_utf8()..];
+    }
+    map.push((text.len(), utf16));
+    // a byte inside a mention maps to the mention's end
+    let at = |b: usize| match map.binary_search_by_key(&b, |m| m.0) {
+        Ok(i) => map[i].1,
+        Err(i) => map.get(i).map_or(utf16, |m| m.1),
+    };
+    for (s, e, style) in styles {
+        let (s, e) = (at(s), at(e));
+        if e > s {
+            ranges.push(BodyRange {
+                start: Some(s),
+                length: Some(e - s),
+                associated_value: Some(AssociatedValue::Style(style as i32)),
+            });
+        }
     }
     (out, ranges)
 }
@@ -105,5 +127,20 @@ mod tests {
             .collect();
         // "😀" is two UTF-16 units
         assert_eq!(got, [(3, "u2".to_string()), (8, "u1".to_string())]);
+    }
+
+    #[test]
+    fn encodes_styles_around_mentions() {
+        let picked: Vec<Member> = vec![("u1".into(), "철수".into())];
+        let (body, ranges) = encode("😀 **@철수 안녕** ||비밀||", &picked);
+        assert_eq!(body, "😀 \u{FFFC} 안녕 비밀");
+        let got: Vec<(u32, u32, i32)> = ranges
+            .iter()
+            .filter_map(|r| match r.associated_value {
+                Some(AssociatedValue::Style(s)) => Some((r.start.unwrap(), r.length.unwrap(), s)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(got, [(3, 4, 1), (8, 2, 3)]);
     }
 }

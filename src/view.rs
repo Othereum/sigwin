@@ -718,9 +718,8 @@ pub fn set_my_reaction(m: &mut MsgDto, emoji: Option<&str>) {
 
 /// Optimistic update while an edit is being sent.
 pub fn set_edited_text(m: &mut MsgDto, text: &str) {
-    m.text = text.to_string();
+    (m.text, m.styles) = crate::format::parse(text);
     m.mentions.clear();
-    m.styles.clear();
     if !m.time.ends_with("수정됨") {
         m.time = format!("{} · 수정됨", m.time);
     }

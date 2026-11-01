@@ -9,6 +9,7 @@ mod picker;
 mod db;
 mod emoji;
 mod headless;
+mod format;
 mod link;
 mod mention;
 mod secret;
@@ -1270,6 +1271,20 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     });
 
     let weak = app.as_weak();
+    app.on_format_toggle({
+        let weak = app.as_weak();
+        move |style, text, anchor, cursor| {
+            let Some(app) = weak.upgrade() else { return };
+            let (new, a, b) = format::toggle(&text, anchor.max(0) as usize, cursor.max(0) as usize, style as u8);
+            let was_empty = text.is_empty();
+            app.set_draft(new.into());
+            app.invoke_composer_select(a as i32, b as i32);
+            if was_empty {
+                app.invoke_composing(true);
+            }
+        }
+    });
+
     app.on_mention_pick(move |row, text, cursor| {
         let Some(app) = weak.upgrade() else { return };
         app.set_mention_items(ModelRc::default());
@@ -1331,13 +1346,14 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
         let Some(app) = weak.upgrade() else { return };
         let Some(text) = UI.with_borrow_mut(|ui| {
             let m = ui.last.iter().find(|m| m.id == id.as_str() && m.can_edit)?;
-            let text = m.text.clone();
             // keep the message's mentions: their "@name"s are sent as mentions again
             ui.picked = m
                 .mentions
                 .iter()
-                .filter_map(|(s, e, uuid)| Some((uuid.clone(), text.get(s + 1..*e)?.to_string())))
+                .filter_map(|(s, e, uuid)| Some((uuid.clone(), m.text.get(s + 1..*e)?.to_string())))
                 .collect();
+            // its styles come back as markers
+            let text = format::to_markup(&m.text, &m.styles);
             ui.editing = Some(id.to_string());
             ui.reply_to = None;
             Some(text)

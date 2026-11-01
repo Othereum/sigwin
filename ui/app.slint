@@ -1209,6 +1209,8 @@ export component AppWindow inherits Window {
     callback mention-check(string, int, string);
     // picked row, composer text, cursor
     callback mention-pick(int, string, int);
+    // style shortcut (view::STYLE_*), composer text, selection anchor and cursor (bytes)
+    callback format-toggle(int, string, int, int);
 
     // pinned messages of the open thread (newest first); the bar shows pins[pin-index]
     in property <[PinItem]> pins;
@@ -1270,6 +1272,9 @@ export component AppWindow inherits Window {
     }
     public function composer-to-end() {
         composer.set-selection-offsets(10000000, 10000000);
+    }
+    public function composer-select(start: int, end: int) {
+        composer.set-selection-offsets(start, end);
     }
     public function composer-cursor(offset: int) {
         composer.set-selection-offsets(offset, offset);
@@ -1675,6 +1680,17 @@ export component AppWindow inherits Window {
                                     }
                                     if (event.modifiers.control && (event.text == "v" || event.text == "V")) {
                                         if (root.paste-files()) {
+                                            return accept;
+                                        }
+                                    }
+                                    // text styles (Signal Desktop's shortcuts): wrap the selection in markers
+                                    if (event.modifiers.control && !event.modifiers.alt) {
+                                        let k = event.text;
+                                        let style = !event.modifiers.shift
+                                            ? (k == "b" || k == "B" ? 1 : k == "i" || k == "I" ? 2 : k == "e" || k == "E" ? 5 : 0)
+                                            : (k == "x" || k == "X" ? 4 : k == "b" || k == "B" ? 3 : 0);
+                                        if (style != 0) {
+                                            root.format-toggle(style, composer.text, composer.anchor-position-byte-offset, composer.cursor-position-byte-offset);
                                             return accept;
                                         }
                                     }

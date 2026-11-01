@@ -2248,7 +2248,7 @@ fn file_label(p: &Path) -> String {
 
 fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     let mut m = view::outgoing_stub(p.ts, prev_ts);
-    m.text = p.text.clone();
+    (m.text, m.styles) = crate::format::parse(&p.text);
     m.quote = p.quote.clone();
     m.attachment = p.attachment.clone();
     if !p.image_key.is_empty() {
