@@ -62,6 +62,29 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        // title and cover of installed sticker packs: presage keeps every sticker's bytes in one
+        // JSON column, so listing packs from its table means reading all of them
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_packs (
+                id BLOB PRIMARY KEY,
+                title TEXT NOT NULL,
+                cover INTEGER
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
+        // sticker ids and emoji per pack, in manifest order (same reason as `ls_packs`)
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_stickers (
+                pack BLOB NOT NULL,
+                ord INTEGER NOT NULL,
+                id INTEGER NOT NULL,
+                emoji TEXT NOT NULL,
+                PRIMARY KEY (pack, ord)
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
         Ok(Self { pool })
     }
 
@@ -112,6 +135,68 @@ impl Index {
                 Some((ts as u64, uuid::Uuid::from_slice(&author).ok()?, at as u64, exp as u64))
             })
             .collect())
+    }
+
+    /// Ids of installed sticker packs. Reads the id column only, not the manifests.
+    pub async fn pack_ids(&self) -> anyhow::Result<Vec<Vec<u8>>> {
+        let rows = sqlx::query("SELECT id FROM sticker_packs").fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().filter_map(|r| r.try_get("id").ok()).collect())
+    }
+
+    /// Cached pack metadata: (id, title, cover sticker id).
+    pub async fn cached_packs(&self) -> anyhow::Result<Vec<(Vec<u8>, String, Option<u32>)>> {
+        let rows = sqlx::query("SELECT id, title, cover FROM ls_packs").fetch_all(&self.pool).await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let cover: Option<i64> = r.try_get("cover").ok()?;
+                Some((r.try_get("id").ok()?, r.try_get("title").ok()?, cover.map(|c| c as u32)))
+            })
+            .collect())
+    }
+
+    pub async fn cache_pack(&self, id: &[u8], title: &str, cover: Option<u32>) -> anyhow::Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO ls_packs (id, title, cover) VALUES (?, ?, ?)")
+            .bind(id)
+            .bind(title)
+            .bind(cover.map(|c| c as i64))
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn uncache_pack(&self, id: &[u8]) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM ls_packs WHERE id = ?").bind(id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM ls_stickers WHERE pack = ?").bind(id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Cached stickers of a pack in manifest order: (id, emoji). Empty if not cached yet.
+    pub async fn cached_stickers(&self, pack: &[u8]) -> anyhow::Result<Vec<(u32, String)>> {
+        let rows = sqlx::query("SELECT id, emoji FROM ls_stickers WHERE pack = ? ORDER BY ord")
+            .bind(pack)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| Some((r.try_get::<i64, _>("id").ok()? as u32, r.try_get("emoji").ok()?)))
+            .collect())
+    }
+
+    pub async fn cache_stickers(&self, pack: &[u8], items: &[(u32, String)]) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM ls_stickers WHERE pack = ?").bind(pack).execute(&mut *tx).await?;
+        for (ord, (id, emoji)) in items.iter().enumerate() {
+            sqlx::query("INSERT INTO ls_stickers (pack, ord, id, emoji) VALUES (?, ?, ?, ?)")
+                .bind(pack)
+                .bind(ord as i64)
+                .bind(*id as i64)
+                .bind(emoji)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Drops presage's cached profile, so the next `retrieve_profile_by_uuid` fetches it again.

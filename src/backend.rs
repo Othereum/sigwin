@@ -1802,30 +1802,64 @@ impl App {
 
     // ---- stickers ----
 
+    /// Installed packs come from the `ls_packs` cache. Only packs it doesn't know yet (or whose
+    /// cover thumb is gone) are read from presage, one at a time: a pack row holds every sticker.
     async fn sticker_packs(&mut self) {
+        let started = std::time::Instant::now();
         let mut out = Vec::new();
         let mut installed = HashSet::new();
-        if let Ok(packs) = self.store.sticker_packs().await {
-            // packs carry every sticker's bytes: handle one at a time, keep only metadata
-            for p in packs.flatten() {
-                let id = hex::encode(&p.id);
-                installed.insert(id.clone());
-                let cover_id = p.manifest.cover.as_ref().map(|c| c.id);
-                let cover = cover_id
-                    .and_then(|cid| p.manifest.stickers.iter().find(|s| s.id == cid && s.bytes.is_some()))
-                    .or_else(|| p.manifest.stickers.iter().find(|s| s.bytes.is_some()));
-                let cover_key = match cover {
-                    Some(s) => {
-                        let base = sticker_thumb_key(&id, s.id);
-                        let key = format!("{base}-c");
-                        self.sticker_thumb(&base, key.clone(), s.bytes.clone(), PACK_COVER);
-                        key
-                    }
-                    None => String::new(),
-                };
-                out.push(PackDto { id, title: p.manifest.title, installed: true, cover_key });
-            }
+        let ids = self.index.pack_ids().await.unwrap_or_default();
+        let mut cached: HashMap<Vec<u8>, (String, Option<u32>)> = self
+            .index
+            .cached_packs()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, title, cover)| (id, (title, cover)))
+            .collect();
+        for id in cached.keys().filter(|k| !ids.contains(k)).cloned().collect::<Vec<_>>() {
+            let _ = self.index.uncache_pack(&id).await;
+            cached.remove(&id);
         }
+        let mut loaded = 0;
+        for raw in ids {
+            let id = hex::encode(&raw);
+            let hit = cached.get(&raw).filter(|(_, cover)| match cover {
+                Some(c) => self.sticker_cover_path(&id, *c).exists(),
+                None => true,
+            });
+            let (title, cover_id, bytes) = match hit {
+                Some((title, cover)) => (title.clone(), *cover, None),
+                None => {
+                    let Ok(Some(p)) = self.store.sticker_pack(&raw).await else { continue };
+                    loaded += 1;
+                    let cover_id = p.manifest.cover.as_ref().map(|c| c.id);
+                    let cover = cover_id
+                        .and_then(|cid| p.manifest.stickers.iter().find(|s| s.id == cid && s.bytes.is_some()))
+                        .or_else(|| p.manifest.stickers.iter().find(|s| s.bytes.is_some()));
+                    let (cid, bytes) = match cover {
+                        Some(s) => (Some(s.id), s.bytes.clone()),
+                        None => (None, None),
+                    };
+                    if let Err(e) = self.index.cache_pack(&raw, &p.manifest.title, cid).await {
+                        warn!("cache pack: {e}");
+                    }
+                    (p.manifest.title, cid, bytes)
+                }
+            };
+            installed.insert(id.clone());
+            let cover_key = match cover_id {
+                Some(cid) => {
+                    let base = sticker_thumb_key(&id, cid);
+                    let key = format!("{base}-c");
+                    self.sticker_thumb(&base, key.clone(), bytes, PACK_COVER);
+                    key
+                }
+                None => String::new(),
+            };
+            out.push(PackDto { id, title, installed: true, cover_key });
+        }
+        debug!(ms = started.elapsed().as_millis() as u64, packs = out.len(), loaded, "sticker packs");
         for (id, _, title) in BLESSED_PACKS {
             if !installed.contains(*id) {
                 out.push(PackDto { id: id.to_string(), title: title.to_string(), installed: false, cover_key: String::new() });
@@ -1834,16 +1868,42 @@ impl App {
         (self.emit)(Event::StickerPacks(out));
     }
 
+    /// The grid comes from `ls_stickers` and the thumb files when all are cached; otherwise the
+    /// pack is read from presage once (it holds every sticker's bytes) and cached.
     async fn open_pack(&mut self, hex_id: &str) {
+        let started = std::time::Instant::now();
         let Ok(id) = hex::decode(hex_id) else { return };
-        let Ok(Some(pack)) = self.store.sticker_pack(&id).await else { return };
-        let mut items = Vec::with_capacity(pack.manifest.stickers.len());
-        for s in pack.manifest.stickers {
-            let key = sticker_thumb_key(hex_id, s.id);
-            self.sticker_thumb(&key, key.clone(), s.bytes, PICKER_CELL);
-            items.push(StickerDto { key, id: s.id, emoji: s.emoji.unwrap_or_default() });
+        let cached = self.index.cached_stickers(&id).await.unwrap_or_default();
+        let all_thumbs = |me: &Self| cached.iter().all(|(sid, _)| me.sticker_cover_path(hex_id, *sid).exists());
+        let mut items = Vec::new();
+        let from_cache = !cached.is_empty() && all_thumbs(self);
+        if from_cache {
+            for (sid, emoji) in cached {
+                let key = sticker_thumb_key(hex_id, sid);
+                self.sticker_thumb(&key, key.clone(), None, PICKER_CELL);
+                items.push(StickerDto { key, id: sid, emoji });
+            }
+        } else {
+            let Ok(Some(pack)) = self.store.sticker_pack(&id).await else { return };
+            let mut meta = Vec::with_capacity(pack.manifest.stickers.len());
+            items.reserve(pack.manifest.stickers.len());
+            for s in pack.manifest.stickers {
+                let key = sticker_thumb_key(hex_id, s.id);
+                self.sticker_thumb(&key, key.clone(), s.bytes, PICKER_CELL);
+                let emoji = s.emoji.unwrap_or_default();
+                meta.push((s.id, emoji.clone()));
+                items.push(StickerDto { key, id: s.id, emoji });
+            }
+            if let Err(e) = self.index.cache_stickers(&id, &meta).await {
+                warn!("cache stickers: {e}");
+            }
         }
+        debug!(ms = started.elapsed().as_millis() as u64, stickers = items.len(), from_cache, "open pack");
         (self.emit)(Event::StickerGrid { pack: hex_id.to_string(), items });
+    }
+
+    fn sticker_cover_path(&self, pack_hex: &str, id: u32) -> PathBuf {
+        self.paths.thumbs.join(format!("{}-{THUMB_MAX}.png", sticker_thumb_key(pack_hex, id)))
     }
 
     /// `base` names the disk cache, `key` the emitted image (a pack cover and its grid cell differ in size).
