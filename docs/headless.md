@@ -11,6 +11,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 - `SIGWIN_DEMO_MENU=1|edit|pin`
 - `SIGWIN_DEMO_SETTINGS=1`
 - `SIGWIN_DEMO_TICK=1` (periodic updates, for the minimize/restore repro)
+- `SIGWIN_DEMO_NOTIFY=<secs>` (a fake incoming message every <secs>, through the real `Notifier` and real toasts: 1:1 with photo, group, reaction, disappearing; needs a real window and an unfocused app, so it's for the user: `scripts\demo-notify.ps1`)
 - `SIGWIN_SELFTEST=1` (with `SIGWIN_DEMO=1`: measures the file dialog and notification memory cost)
 
 ## Headless runs (`src/headless.rs`)
@@ -24,4 +25,4 @@ Steps: `size W H` (logical, default 1000x680), `scale S`, `wait MS`, `move/click
 
 Theme follows the system (`SIGWIN_HEADLESS_THEME=dark|light`). Coordinates are window-client logical px; read them off a previous shot. Headless ignores theme and zoom settings.
 
-Not covered (needs a real window, ask the user first): minimize/restore repaint (`winhook.rs`), file dialog, notifications, clipboard, IME composition.
+Not covered (needs a real window, ask the user first): minimize/restore repaint (`winhook.rs`), file dialog, notifications (headless stays "focused", so `SIGWIN_DEMO_NOTIFY` only logs), clipboard, IME composition.

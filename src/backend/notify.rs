@@ -18,14 +18,14 @@ const NEW_MESSAGE: &str = "새 메시지";
 
 /// Someone's reaction to one of our messages.
 #[derive(Clone, PartialEq, Debug)]
-pub(super) struct ReactionRef {
+pub(crate) struct ReactionRef {
     pub from: Uuid,
     pub from_name: String,
     pub emoji: String,
 }
 
 /// What a toast is about (Signal's `QueuedNotificationData`).
-pub(super) struct Queued {
+pub(crate) struct Queued {
     pub key: String,
     /// sent timestamp of the message (reactions: the reacted-to message)
     pub msg: u64,
@@ -44,7 +44,7 @@ struct Shown {
 }
 
 #[derive(Default)]
-pub(super) struct Notifier {
+pub(crate) struct Notifier {
     queued: Option<Queued>,
     shown: Option<Shown>,
     clear_shown: bool,
@@ -52,7 +52,7 @@ pub(super) struct Notifier {
 }
 
 /// What to take back (Signal's `removeBy`).
-pub(super) enum By<'a> {
+pub(crate) enum By<'a> {
     Thread(&'a str),
     Message(u64),
     /// `from`'s reaction to message `msg` (any emoji: a new one replaces it)

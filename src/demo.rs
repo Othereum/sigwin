@@ -245,13 +245,25 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         });
     } else {
         emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), can_older: false, scroll: Scroll::Bottom });
+        let notes = std::env::var("SIGWIN_DEMO_NOTIFY").ok().map(|v| demo_notify(emit.clone(), v.parse().unwrap_or(10)));
         // clicking another thread shows the same rows under its key (drafts follow the key)
         let (emit, items) = (emit.clone(), items.clone());
         std::thread::spawn(move || {
             while let Some(c) = cmd_rx.blocking_recv() {
                 demo_frames(&emit, &c);
-                if let Command::OpenThread(key) = c {
+                let open = match &c {
+                    Command::OpenThread(key) => Some((key.clone(), None)),
+                    Command::OpenFromToast { key, msg } => Some((key.clone(), *msg)),
+                    _ => None,
+                };
+                if let Some((key, msg)) = open {
                     emit(Event::Messages { key, items: items.clone(), can_older: false, scroll: Scroll::Bottom });
+                    if let Some(m) = msg {
+                        emit(Event::JumpTo(m.to_string()));
+                    }
+                }
+                if let Some(tx) = &notes {
+                    let _ = tx.send(c);
                 }
             }
         });
@@ -325,6 +337,93 @@ pub(crate) fn demo_blob(key: &str, size: u32, hue: u8) -> types::Thumb {
         }
     }
     types::Thumb { key: key.into(), width: size, height: size, rgba }
+}
+
+/// `SIGWIN_DEMO_NOTIFY=<secs>`: a fake incoming message every `secs` seconds, run through the
+/// real notification logic (`backend::notify::Notifier`) and real toasts, so notifications can
+/// be tried without anyone sending messages. Cycles through a 1:1 message with a photo, a group
+/// message (initial picture), a reaction to one of our messages and a disappearing message.
+/// Focus, opening a chat and clicking a toast act like in the real backend.
+fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Command> {
+    use backend::notify::{By, Notifier, Queued, ReactionRef};
+    use toast::Picture;
+    let (tx, rx) = std::sync::mpsc::channel::<Command>();
+    let every = std::time::Duration::from_secs(secs.max(2));
+    std::thread::spawn(move || {
+        // after demo()'s own "데모 모드" status
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        emit(Event::Status(format!("알림 테스트: {}초마다 메시지 (다른 창을 클릭해 두세요)", every.as_secs())));
+        // a demo photo as stored bytes, like a profile avatar
+        let src = image::RgbaImage::from_fn(320, 240, |x, y| {
+            let (cx, cy) = (x as f32 - 160.0, y as f32 - 110.0);
+            if cx * cx + cy * cy < 60.0f32.powi(2) { image::Rgba([250, 210, 170, 255]) } else { image::Rgba([(x / 2) as u8, 40, (y / 2 + 60) as u8, 255]) }
+        });
+        let photo = sigwin_thumb::png_rgba(&src).unwrap_or_default();
+        let letter = |key: &str, name: &str| Picture::Initial { text: initial(name), rgb: tint_rgb(key) };
+        let mut notes = Notifier::default();
+        let mut focused = true;
+        let mut next = std::time::Instant::now() + every;
+        let mut n = 0u32;
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_millis(250)) {
+                Ok(Command::WindowFocus(f)) => {
+                    focused = f;
+                    if f {
+                        notes.clear();
+                    }
+                }
+                Ok(Command::OpenThread(key)) | Ok(Command::OpenFromToast { key, .. }) => notes.remove(By::Thread(&key)),
+                Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+            if std::time::Instant::now() >= next {
+                next += every;
+                n += 1;
+                let q = match n % 4 {
+                    1 => Queued {
+                        key: "c:demo-0".into(),
+                        msg: 290,
+                        sender_title: "김민준".into(),
+                        message: format!("알림 테스트 {n}: 내일 몇 시에 만날까?"),
+                        expiring: false,
+                        reaction: None,
+                        picture: Some(Picture::Photo(photo.clone())),
+                    },
+                    2 => Queued {
+                        key: "c:demo-3".into(),
+                        msg: 280,
+                        sender_title: "가족 단톡방의 이서연 님".into(),
+                        message: format!("알림 테스트 {n}: 저녁 같이 먹어요"),
+                        expiring: false,
+                        reaction: None,
+                        picture: Some(letter("c:demo-3", "가족 단톡방")),
+                    },
+                    3 => Queued {
+                        key: "c:demo-2".into(),
+                        msg: 297,
+                        sender_title: "박지훈".into(),
+                        message: format!("알림 테스트 {n}: 보고서 보냈어요"),
+                        expiring: false,
+                        reaction: Some(ReactionRef { from: uuid::Uuid::from_u128(2), from_name: "박지훈".into(), emoji: "👍".into() }),
+                        picture: Some(letter("c:demo-2", "박지훈")),
+                    },
+                    _ => Queued {
+                        key: "c:demo-4".into(),
+                        msg: 270,
+                        sender_title: "Alice".into(),
+                        message: "사라지는 메시지 (본문은 표시되지 않아야 함)".into(),
+                        expiring: true,
+                        reaction: None,
+                        picture: Some(letter("c:demo-4", "Alice")),
+                    },
+                };
+                tracing::info!(n, focused, "demo notify: message");
+                notes.add(q);
+            }
+            notes.tick(focused);
+        }
+    });
+    tx
 }
 
 /// `StickerFrames` / `PickerFrames`: `demo-st-1` and every 4th picker sticker are animated GIFs

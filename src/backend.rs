@@ -38,7 +38,7 @@ use crate::types::{
 use crate::view::{self, Kind, THUMB_MAX};
 
 pub(crate) mod files;
-mod notify;
+pub(crate) mod notify;
 mod ops;
 mod receive;
 mod send;
