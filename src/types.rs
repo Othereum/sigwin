@@ -48,6 +48,10 @@ pub struct MsgDto {
     pub time: String,
     pub outgoing: bool,
     pub show_sender: bool,
+    /// incoming in a group: the row keeps a column for the sender's photo
+    pub avatar_col: bool,
+    /// last of a run from one sender: the photo is drawn on this row
+    pub show_avatar: bool,
     pub status: String,
     pub quote: String,
     /// (emoji, count)

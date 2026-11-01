@@ -364,6 +364,21 @@ pub struct Built {
 }
 
 /// `window` must be sorted by timestamp ascending.
+/// Group rows from others get a photo column; the photo sits on the last row of each sender's run.
+pub fn mark_avatar_runs(items: &mut [MsgDto]) {
+    for i in 0..items.len() {
+        let m = &items[i];
+        let col = !m.outgoing && !m.system;
+        let last = col
+            && !m.sender_key.is_empty()
+            && items.get(i + 1).is_none_or(|n| {
+                n.outgoing || n.system || n.sender_key != m.sender_key || !n.day_sep.is_empty()
+            });
+        items[i].avatar_col = col;
+        items[i].show_avatar = last;
+    }
+}
+
 pub fn build(
     window: &[(u64, Content)],
     me: Uuid,
@@ -526,6 +541,9 @@ pub fn build(
             prev_day = Some(day);
         }
         items.push(m);
+    }
+    if is_group {
+        mark_avatar_runs(&mut items);
     }
     Built { items, wanted_thumbs: wanted, next_expiry }
 }

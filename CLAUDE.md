@@ -61,7 +61,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/headless.rs` | offscreen test platform: scripted input, PNG shots |
 | `src/winhook.rs` | window-proc subclass: full repaint on restore/activate, focus events |
 | `src/link.rs` | URL detection in message text, opening links (clicks come from StyledText `link-clicked`) |
-| `src/avatar.rs` | profile/group photos for the thread list: fetch (presage caches them forever, so profiles are refetched every 3 days and group photos when the path changes), crop round, cache `thumbs/av-*` |
+| `src/avatar.rs` | profile/group photos (thread list + header 40px, next to group messages 28px as `m:<uuid>`): fetch (presage caches them forever, so profiles are refetched every 3 days and group photos when the path changes), crop round, cache `thumbs/av-*` |
 | `src/emoji.rs` | emoji-only message detection (grapheme clusters) |
 | `ui/app.slint` | the whole UI |
 

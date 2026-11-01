@@ -30,6 +30,12 @@ export struct MsgItem {
     time: string,
     outgoing: bool,
     show-sender: bool,
+    // incoming in a group: photo column; the photo itself on the last row of a run
+    avatar-col: bool,
+    show-avatar: bool,
+    avatar: image,
+    has-avatar: bool,
+    initial: string,
     status: string,
     quote: string,
     reactions: [ReactionItem],
@@ -257,6 +263,18 @@ component Bubble inherits VerticalLayout {
 
     if !m.system: HorizontalLayout {
         alignment: m.outgoing ? end : start;
+        spacing: 8px;
+        if m.avatar-col: Rectangle {
+            width: 28px;
+            if m.show-avatar: Avatar {
+                y: parent.height - self.height;
+                size: 28px;
+                initial: m.initial;
+                tint: m.sender-color;
+                photo: m.avatar;
+                has-photo: m.has-avatar;
+            }
+        }
         Rectangle {
             max-width: root.max-w;
             border-radius: 14px;
@@ -669,6 +687,10 @@ export component AppWindow inherits Window {
     in property <[ThreadItem]> threads;
     in-out property <string> current-key;
     in property <string> current-name;
+    in property <string> current-initial;
+    in property <color> current-tint;
+    in property <image> current-photo;
+    in property <bool> current-has-photo;
     in property <string> current-sub;
     in property <[MsgItem]> messages;
     in property <bool> can-load-older;
@@ -837,6 +859,14 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     padding-left: 16px;
                     padding-right: 16px;
+                    spacing: 10px;
+                    Avatar {
+                        y: (parent.height - self.height) / 2;
+                        initial: root.current-initial;
+                        tint: root.current-tint;
+                        photo: root.current-photo;
+                        has-photo: root.current-has-photo;
+                    }
                     VerticalLayout {
                         alignment: center;
                         Text { text: root.current-name; color: Theme.text; font-size: 15px; font-weight: 700; overflow: elide; }

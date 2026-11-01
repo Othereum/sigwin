@@ -18,14 +18,25 @@ use presage::libsignal_service::protocol::ServiceId;
 use presage::store::{ContentsStore, Thread};
 use presage_store_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::backend::{downscale, Emit, Mgr};
 use crate::db::Index;
 use crate::types::{Event, Thumb};
 
-/// Logical size of the thread list avatar (ui/app.slint `Avatar` default size).
+/// Logical size of the thread list / header avatar (ui/app.slint `Avatar` default size).
 pub const SIZE: u32 = 40;
+/// next to incoming group messages (ui/app.slint `Bubble`)
+pub const MSG_SIZE: u32 = 28;
+/// Emitted key prefix of a message-list avatar: `m:<uuid>`.
+pub const MSG_PREFIX: &str = "m:";
+
+/// One photo to load: emitted key, whose photo, logical size.
+pub struct Want {
+    pub key: String,
+    pub thread: Thread,
+    pub size: u32,
+}
 /// Signal profiles (name, photo) are cached forever by presage: refetch them after this.
 const PROFILE_REFRESH: Duration = Duration::from_secs(3 * 24 * 3600);
 /// pause after a network fetch, so a first run over many threads doesn't hammer the server
@@ -58,13 +69,15 @@ pub struct Done {
 }
 
 impl Job {
-    /// Loads (fetching when needed) and emits the photo of every thread, one after another.
-    pub async fn run(mut self, todo: Vec<(String, Thread)>) -> Done {
+    /// Loads (fetching when needed) and emits the photos, one after another.
+    pub async fn run(mut self, todo: Vec<Want>) -> Done {
         let now = unix_now();
         let mut refreshed = false;
         let mut found = 0;
-        for (key, thread) in todo {
-            let mut st = self.state.get(&key).cloned().unwrap_or_default();
+        for Want { key, thread, size } in todo {
+            // state and disk cache belong to the person / group, whatever size is asked for
+            let skey = crate::types::thread_key(&thread);
+            let mut st = self.state.get(&skey).cloned().unwrap_or_default();
             let (bytes, fetched) = match &thread {
                 Thread::Contact(sid) => {
                     let (b, f) = Box::pin(self.contact(sid.raw_uuid(), &mut st, now)).await;
@@ -73,13 +86,13 @@ impl Job {
                 }
                 Thread::Group(master) => Box::pin(self.group(*master, &mut st)).await,
             };
-            self.state.insert(key.clone(), st);
+            self.state.insert(skey.clone(), st);
             found += bytes.is_some() as usize;
             let dir = self.dir.clone();
             let k = key.clone();
             // per item: the UI sets the scale factor shortly after the window appears
-            let px = crate::types::physical_px(SIZE);
-            let thumb = tokio::task::spawn_blocking(move || bytes.and_then(|b| cached(&dir, &k, &b, px)))
+            let px = crate::types::physical_px(size);
+            let thumb = tokio::task::spawn_blocking(move || bytes.and_then(|b| cached(&dir, &skey, &k, &b, px)))
                 .await
                 .ok()
                 .flatten();
@@ -90,7 +103,7 @@ impl Job {
                 tokio::time::sleep(FETCH_GAP).await;
             }
         }
-        info!(found, refreshed, "avatars loaded");
+        debug!(found, refreshed, "avatars loaded");
         Done { state: self.state, profiles_refreshed: refreshed }
     }
 
@@ -172,10 +185,10 @@ fn hash<T: Hash + ?Sized>(v: &T) -> u64 {
     h.finish()
 }
 
-/// The round photo for `key`, from the disk cache when the source bytes haven't changed.
-fn cached(dir: &Path, key: &str, bytes: &[u8], px: u32) -> Option<Thumb> {
-    let prefix = format!("av-{:016x}-", hash(key));
-    let name = format!("{prefix}{:016x}-{px}.png", hash(bytes));
+/// The round photo of `owner` at `px`, from the disk cache when the source bytes haven't changed.
+fn cached(dir: &Path, owner: &str, key: &str, bytes: &[u8], px: u32) -> Option<Thumb> {
+    let prefix = format!("av-{:016x}-{px}-", hash(owner));
+    let name = format!("{prefix}{:016x}.png", hash(bytes));
     let path = dir.join(&name);
     if let Ok(img) = image::open(&path) {
         let rgba = img.to_rgba8();
@@ -188,10 +201,13 @@ fn cached(dir: &Path, key: &str, bytes: &[u8], px: u32) -> Option<Thumb> {
             return None;
         }
     };
-    // older pictures (or sizes) of this thread
+    // older pictures of this owner at this size, and the pre-size-in-prefix naming
+    let legacy = format!("av-{:016x}-", hash(owner));
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.flatten() {
-            if e.file_name().to_string_lossy().starts_with(&prefix) {
+            let n = e.file_name();
+            let n = n.to_string_lossy();
+            if n.starts_with(&prefix) || (n.starts_with(&legacy) && n.ends_with(&format!("-{px}.png"))) {
                 let _ = std::fs::remove_file(e.path());
             }
         }

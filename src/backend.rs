@@ -196,6 +196,7 @@ struct App {
     /// threads whose photo was loaded (or is queued) this session
     avatars_done: HashSet<String>,
     avatars_running: bool,
+    avatar_queue: std::collections::VecDeque<crate::avatar::Want>,
 }
 
 /// Messages that produce a visible row.
@@ -290,6 +291,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         pending_receipts: HashMap::new(),
         avatars_done: HashSet::new(),
         avatars_running: false,
+        avatar_queue: Default::default(),
     };
 
     if app.store.is_registered().await {
@@ -554,9 +556,9 @@ impl App {
                     // refetched profiles may carry new names
                     self.names.clear();
                     self.threads_dirty = true;
+                    self.current_dirty = true;
                 }
-                // threads that showed up meanwhile
-                self.load_avatars();
+                self.run_avatars();
             }
             Internal::Swept { sweep, changed } => {
                 self.sweeping = false;
@@ -842,23 +844,41 @@ impl App {
         Ok(())
     }
 
-    /// Loads the photos of listed threads not seen yet this session, in the background.
+    /// Queues the photos of listed threads not seen yet this session.
     fn load_avatars(&mut self) {
-        if self.avatars_running {
+        let me = thread_key(&Thread::Contact(ServiceId::Aci(self.me.into())));
+        let keys: Vec<String> =
+            self.threads.iter().filter(|t| t.key != me && !self.avatars_done.contains(&t.key)).map(|t| t.key.clone()).collect();
+        for key in keys {
+            if let Some(thread) = parse_thread_key(&key) {
+                self.avatars_done.insert(key.clone());
+                self.avatar_queue.push_back(crate::avatar::Want { key, thread, size: crate::avatar::SIZE });
+            }
+        }
+        self.run_avatars();
+    }
+
+    /// Photos of the senders shown next to group messages; ahead of the thread list.
+    fn load_sender_avatars(&mut self, items: &[MsgDto]) {
+        for m in items.iter().filter(|m| m.show_avatar) {
+            let Ok(uuid) = m.sender_key.parse::<Uuid>() else { continue };
+            let key = format!("{}{uuid}", crate::avatar::MSG_PREFIX);
+            if self.avatars_done.insert(key.clone()) {
+                let thread = Thread::Contact(ServiceId::Aci(uuid.into()));
+                self.avatar_queue.push_front(crate::avatar::Want { key, thread, size: crate::avatar::MSG_SIZE });
+            }
+        }
+        self.run_avatars();
+    }
+
+    /// Loads queued photos in the background, a few at a time so new requests can cut in.
+    fn run_avatars(&mut self) {
+        if self.avatars_running || self.avatar_queue.is_empty() {
             return;
         }
         let Some(manager) = self.manager.clone() else { return };
-        let me = thread_key(&Thread::Contact(ServiceId::Aci(self.me.into())));
-        let todo: Vec<(String, Thread)> = self
-            .threads
-            .iter()
-            .filter(|t| t.key != me && !self.avatars_done.contains(&t.key))
-            .filter_map(|t| parse_thread_key(&t.key).map(|th| (t.key.clone(), th)))
-            .collect();
-        if todo.is_empty() {
-            return;
-        }
-        self.avatars_done.extend(todo.iter().map(|(k, _)| k.clone()));
+        let n = self.avatar_queue.len().min(8);
+        let todo: Vec<crate::avatar::Want> = self.avatar_queue.drain(..n).collect();
         self.avatars_running = true;
         let job = crate::avatar::Job {
             store: self.store.clone(),
@@ -866,7 +886,11 @@ impl App {
             manager,
             emit: self.emit.clone(),
             dir: self.paths.thumbs.clone(),
-            state: todo.iter().filter_map(|(k, _)| self.persist.avatars.get(k).map(|s| (k.clone(), s.clone()))).collect(),
+            state: todo
+                .iter()
+                .map(|w| thread_key(&w.thread))
+                .filter_map(|k| self.persist.avatars.get(&k).map(|s| (k, s.clone())))
+                .collect(),
         };
         let tx = self.tx.clone();
         tokio::task::spawn_local(async move {
@@ -967,6 +991,9 @@ impl App {
         let is_group = matches!(thread, Thread::Group(_));
         let members = self.emit_header(&thread).await;
         self.thumbs_requested.clear();
+        // the UI drops message-list avatars on thread switch
+        self.avatars_done.retain(|k| !k.starts_with(crate::avatar::MSG_PREFIX));
+        self.avatar_queue.retain(|w| !w.key.starts_with(crate::avatar::MSG_PREFIX));
         // leaving a thread we were typing in
         if let Some(c) = self.composing.take() {
             self.send_typing(c.thread, false);
@@ -1121,6 +1148,7 @@ impl App {
             }
         }
         self.next_expiry = next_expiry;
+        self.load_sender_avatars(&items);
         (self.emit)(Event::Messages { key, items, can_older, scroll });
     }
 
@@ -1723,6 +1751,7 @@ impl App {
         self.threads.clear();
         self.names.clear();
         self.avatars_done.clear();
+        self.avatar_queue.clear();
         self.persist = Persist::default();
         self.save_persist();
         let _ = std::fs::remove_dir_all(&self.paths.attachments);

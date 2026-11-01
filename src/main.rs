@@ -55,6 +55,8 @@ struct Ui {
     thumbs: HashMap<String, Image>,
     /// round photos by thread key, for the whole session (~6KB each at 40px)
     avatars: HashMap<String, Image>,
+    /// photos next to group messages by sender uuid, open thread only
+    sender_avatars: HashMap<String, Image>,
     last: Vec<MsgDto>,
     files: Vec<PathBuf>,
     reply_to: Option<String>,
@@ -174,8 +176,9 @@ fn rich_text(m: &MsgDto, links: &[(usize, usize)], dark: bool) -> slint::StyledT
     parse_markdown(&fmt, &args)
 }
 
-fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, dark: bool) -> MsgItem {
+fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, senders: &HashMap<String, Image>, dark: bool) -> MsgItem {
     let image = thumbs.get(&m.image_key).cloned();
+    let avatar = if m.show_avatar { senders.get(&m.sender_key).cloned() } else { None };
     let reactions: Vec<ReactionItem> = m
         .reactions
         .iter()
@@ -195,6 +198,11 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, dark: bool) -> MsgItem {
         time: m.time.as_str().into(),
         outgoing: m.outgoing,
         show_sender: m.show_sender,
+        avatar_col: m.avatar_col,
+        show_avatar: m.show_avatar,
+        has_avatar: avatar.is_some(),
+        avatar: avatar.unwrap_or_default(),
+        initial: initial(&m.sender).into(),
         status: m.status.as_str().into(),
         quote: m.quote.as_str().into(),
         attachment: m.attachment.as_str().into(),
@@ -225,6 +233,25 @@ fn thread_item(t: &ThreadDto, avatars: &HashMap<String, Image>) -> ThreadItem {
         color: tint(&t.key),
         is_group: t.is_group,
     }
+}
+
+/// The open thread's photo (or initial) in the conversation header, from its thread list row.
+fn header_avatar(app: &AppWindow, ui: &Ui) {
+    let row = (0..slint::Model::row_count(&*ui.threads))
+        .filter_map(|i| slint::Model::row_data(&*ui.threads, i))
+        .find(|t| t.key.as_str() == ui.open_key);
+    let Some(row) = row else {
+        // not in the list (a contact found by search)
+        app.set_current_initial(initial(&app.get_current_name()).into());
+        app.set_current_tint(tint(&ui.open_key));
+        app.set_current_has_photo(false);
+        app.set_current_photo(Image::default());
+        return;
+    };
+    app.set_current_initial(row.initial);
+    app.set_current_tint(row.color);
+    app.set_current_has_photo(row.has_photo);
+    app.set_current_photo(row.photo);
 }
 
 fn qr_image(url: &str) -> Option<Image> {
@@ -268,6 +295,7 @@ fn apply(app: &AppWindow, ev: Event) {
         Event::Threads(list) => UI.with_borrow(|ui| {
             app.set_total_unread(list.iter().map(|t| t.unread as i32).sum());
             ui.threads.set_vec(list.iter().map(|t| thread_item(t, &ui.avatars)).collect::<Vec<_>>());
+            header_avatar(app, ui);
         }),
         Event::Header { name, sub } => {
             app.set_current_name(name.into());
@@ -279,6 +307,7 @@ fn apply(app: &AppWindow, ev: Event) {
                 let switched = ui.open_key != key;
                 if switched {
                     ui.thumbs.clear();
+                    ui.sender_avatars.clear();
                     ui.open_key = key.clone();
                     ui.reply_to = None;
                     ui.picked.clear();
@@ -296,6 +325,7 @@ fn apply(app: &AppWindow, ev: Event) {
                 app.set_menu_id(SharedString::new());
                 app.set_mention_items(ModelRc::default());
                 close_stickers(app);
+                UI.with_borrow(|ui| header_avatar(app, ui));
             }
             app.set_current_key(key.into());
             let near_bottom = app.get_near_bottom();
@@ -312,7 +342,7 @@ fn apply(app: &AppWindow, ev: Event) {
                     }
                 }
                 let dark = app.global::<Theme>().get_dark();
-                ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, dark)).collect::<Vec<_>>());
+                ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.sender_avatars, dark)).collect::<Vec<_>>());
                 ui.last = items;
             });
             app.set_can_load_older(can_older);
@@ -338,6 +368,20 @@ fn apply(app: &AppWindow, ev: Event) {
             let img = (t.width > 0).then(|| {
                 Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height))
             });
+            if let Some(uuid) = t.key.strip_prefix(avatar::MSG_PREFIX) {
+                let Some(img) = img else { return };
+                ui.sender_avatars.insert(uuid.to_string(), img.clone());
+                for (i, m) in ui.last.iter().enumerate() {
+                    if m.show_avatar && m.sender_key == uuid {
+                        if let Some(mut row) = slint::Model::row_data(&*ui.messages, i) {
+                            row.has_avatar = true;
+                            row.avatar = img.clone();
+                            slint::Model::set_row_data(&*ui.messages, i, row);
+                        }
+                    }
+                }
+                return;
+            }
             let changed = match img.clone() {
                 Some(i) => {
                     ui.avatars.insert(t.key.clone(), i);
@@ -356,6 +400,9 @@ fn apply(app: &AppWindow, ev: Event) {
                         slint::Model::set_row_data(&*ui.threads, i, row);
                     }
                 }
+            }
+            if t.key == ui.open_key {
+                header_avatar(app, ui);
             }
         }),
         Event::Thumb(t) => {
@@ -1022,8 +1069,9 @@ fn demo(emit: backend::Emit) {
         let outgoing = i % 3 == 0 || i == 299;
         items.push(MsgDto {
             id: i.to_string(),
-            sender: if outgoing { String::new() } else { "이서연".into() },
-            sender_key: "demo".into(),
+            // a group: runs from two senders
+            sender: if outgoing { String::new() } else if i % 5 < 3 { "이서연".into() } else { "박지훈".into() },
+            sender_key: if outgoing { String::new() } else if i % 5 < 3 { "demo-a".into() } else { "demo-b".into() },
             text: if i % 7 == 0 {
                 "긴 메시지 테스트입니다. 한글 줄바꿈이 제대로 되는지, 말풍선 최대 폭이 적당한지 확인하기 위한 문장입니다. 🙂".into()
             } else {
@@ -1077,7 +1125,7 @@ fn demo(emit: backend::Emit) {
     emit(Event::Ready);
     emit(Event::Threads(threads));
     // photos on some threads, through the same crop/resample/circle path as real ones
-    for i in [0u32, 2, 3, 7] {
+    let photo = |key: String, i: u32, size: u32| {
         let src = image::RgbaImage::from_fn(320, 240, |x, y| {
             let (cx, cy) = (x as f32 - 160.0, y as f32 - 110.0);
             let face = cx * cx + cy * cy < 60.0f32.powi(2);
@@ -1085,11 +1133,14 @@ fn demo(emit: backend::Emit) {
         });
         let mut png = Vec::new();
         if src.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).is_ok() {
-            if let Ok(r) = avatar::round(&png, types::physical_px(avatar::SIZE)) {
-                let t = types::Thumb { key: format!("c:demo-{i}"), width: r.width(), height: r.height(), rgba: r.into_raw() };
+            if let Ok(r) = avatar::round(&png, types::physical_px(size)) {
+                let t = types::Thumb { key, width: r.width(), height: r.height(), rgba: r.into_raw() };
                 emit(Event::Avatar(Arc::new(t)));
             }
         }
+    };
+    for i in [0u32, 1, 2, 3, 7] {
+        photo(format!("c:demo-{i}"), i, avatar::SIZE);
     }
     emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
     let names = ["김민준", "이서연", "박지훈", "Alice Kim", "Bob", "김지원", "최유나"];
@@ -1097,7 +1148,10 @@ fn demo(emit: backend::Emit) {
     for m in items.iter_mut().filter(|m| m.attachment.is_empty() && m.quote.is_empty() && !m.sticker) {
         m.big_emoji = emoji::only_emoji(&m.text, 5).is_some();
     }
+    view::mark_avatar_runs(&mut items);
     emit(Event::Messages { key: "c:demo-1".into(), items, can_older: false, scroll: Scroll::Bottom });
+    // one sender with a photo, the other falls back to the initial
+    photo(format!("{}demo-a", avatar::MSG_PREFIX), 1, avatar::MSG_SIZE);
     emit(Event::Status("데모 모드".into()));
     if std::env::var_os("LITE_SIGNAL_DEMO_STICKERS").is_some() {
         demo_stickers(emit);
