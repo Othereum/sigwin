@@ -141,6 +141,8 @@ pub struct StickerDto {
     pub key: String,
     pub id: u32,
     pub emoji: String,
+    /// plays on hover (`Command::PickerFrames`)
+    pub animated: bool,
 }
 
 pub struct Thumb {
@@ -148,6 +150,48 @@ pub struct Thumb {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+}
+
+/// The UI advances animations once per slot of this many ms (`Anim.slot`).
+pub const ANIM_SLOT_MS: u32 = 33;
+/// Longest loop the timeline covers (slots); longer animations are cut there.
+pub const ANIM_MAX_SLOTS: usize = 30_000 / ANIM_SLOT_MS as usize;
+/// Frames of all playing stickers in the message list together; the least recently shown
+/// sticker beyond this goes back to its still image.
+pub const ANIM_BUDGET: usize = 24 << 20;
+
+/// An animated sticker's frames (all `width` x `height` RGBA) and which frame shows in each
+/// `ANIM_SLOT_MS` slot of a loop. No frames: the image is a still.
+pub struct Frames {
+    pub key: String,
+    pub width: u32,
+    pub height: u32,
+    pub frames: Vec<Vec<u8>>,
+    pub order: Vec<u16>,
+}
+
+impl Frames {
+    pub fn still(key: String) -> Self {
+        Frames { key, width: 0, height: 0, frames: Vec::new(), order: Vec::new() }
+    }
+
+    /// Decodes `bytes` with each frame fitted to `fit` logical px.
+    pub fn decode(key: String, bytes: &[u8], fit: u32, max_bytes: usize) -> Self {
+        match sigwin_thumb::animation(bytes, physical_px(fit), max_bytes) {
+            Ok(Some(a)) => Frames {
+                key,
+                width: a.frames[0].width(),
+                height: a.frames[0].height(),
+                order: sigwin_thumb::timeline(&a.delays, ANIM_SLOT_MS, ANIM_MAX_SLOTS),
+                frames: a.frames.into_iter().map(|f| f.into_raw()).collect(),
+            },
+            Ok(None) => Frames::still(key),
+            Err(e) => {
+                tracing::debug!("frames {key}: {e}");
+                Frames::still(key)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -175,6 +219,8 @@ pub enum Event {
     /// scroll the message list to row `id` (already in the last `Messages`) and flash it
     JumpTo(String),
     Thumb(Arc<Thumb>),
+    /// answer to `StickerFrames` / `PickerFrames`
+    Frames(Frames),
     /// sticker picker images (grid cells, pack covers), batched
     StickerThumbs(Vec<Thumb>),
     /// round photo of a thread (key = thread key); width 0 = none
@@ -217,6 +263,10 @@ pub enum Command {
     InstallPackFromMessage(String),
     /// a sticker in the message list was clicked
     StickerClicked(String),
+    /// the frames of the sticker with this thumbnail key (message list), if it is animated
+    StickerFrames(String),
+    /// the frames of a picker sticker (hovered), if it is animated
+    PickerFrames { pack: String, id: u32 },
     /// react to message `id`; `remove` takes back our reaction `emoji`
     React { id: String, emoji: String, remove: bool },
     /// replace the text of our message `id`

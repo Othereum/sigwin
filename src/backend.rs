@@ -32,7 +32,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::db::Index;
 use crate::types::{
-    parse_thread_key, thread_key, Command, Event, MsgDto, PackDto, PinDto, Scroll, StickerDto, Thumb, ThreadDto, STICKER_THUMB_PREFIX,
+    parse_thread_key, thread_key, Command, Event, Frames, MsgDto, PackDto, PinDto, Scroll, StickerDto, Thumb, ThreadDto, ANIM_BUDGET,
+    STICKER_THUMB_PREFIX,
 };
 use crate::view::{self, Kind, THUMB_MAX};
 
@@ -474,6 +475,8 @@ impl App {
             },
             Command::InstallPackFromMessage(id) => self.install_pack_from_message(&id),
             Command::StickerClicked(id) => self.sticker_clicked(&id).await,
+            Command::StickerFrames(key) => self.sticker_frames(key),
+            Command::PickerFrames { pack, id } => self.picker_frames(&pack, id),
             Command::React { id, emoji, remove } => self.react(&id, emoji, remove).await,
             Command::Edit { id, text, mentions } => self.edit(&id, text, &mentions).await,
             Command::Delete(id) => self.delete(&id).await,

@@ -79,33 +79,82 @@ impl App {
         let cached = self.index.cached_stickers(&id).await.unwrap_or_default();
         let all_thumbs = |me: &Self| cached.iter().all(|(sid, _)| me.sticker_cover_path(hex_id, *sid).exists());
         let mut items = Vec::new();
-        let from_cache = !cached.is_empty() && all_thumbs(self);
+        let marker = anim_marker(&self.paths.thumbs, hex_id);
+        let animated = if cached.is_empty() { None } else { read_marker(&marker) };
+        let from_cache = animated.is_some() && all_thumbs(self);
         let mut jobs = Vec::new();
-        if from_cache {
+        if let (true, Some(animated)) = (from_cache, animated) {
             for (sid, emoji) in cached {
                 let key = sticker_thumb_key(hex_id, sid);
                 jobs.push(StickerJob { base: key.clone(), key: key.clone(), bytes: None, fit: PICKER_CELL });
-                items.push(StickerDto { key, id: sid, emoji });
+                items.push(StickerDto { key, id: sid, emoji, animated: animated.contains(&sid) });
             }
         } else {
             let Ok(Some(pack)) = self.store.sticker_pack(&id).await else { return };
             let mut meta = Vec::with_capacity(pack.manifest.stickers.len());
+            let mut sources = Vec::new();
             items.reserve(pack.manifest.stickers.len());
             for s in pack.manifest.stickers {
                 let key = sticker_thumb_key(hex_id, s.id);
+                let animated = s.bytes.as_deref().is_some_and(sigwin_thumb::is_animated);
+                if let (true, Some(b)) = (animated, &s.bytes) {
+                    sources.push((anim_source(&self.paths.thumbs, hex_id, s.id), b.clone()));
+                }
                 jobs.push(StickerJob { base: key.clone(), key: key.clone(), bytes: s.bytes, fit: PICKER_CELL });
                 let emoji = s.emoji.unwrap_or_default();
                 meta.push((s.id, emoji.clone()));
-                items.push(StickerDto { key, id: s.id, emoji });
+                items.push(StickerDto { key, id: s.id, emoji, animated });
             }
             if let Err(e) = self.index.cache_stickers(&id, &meta).await {
                 warn!("cache stickers: {e}");
             }
+            // hovering a picker sticker plays it: keep the animated ones' bytes next to the thumbs
+            let ids: Vec<String> = items.iter().filter(|s| s.animated).map(|s| s.id.to_string()).collect();
+            tokio::task::spawn_blocking(move || {
+                for (path, bytes) in sources {
+                    if let Err(e) = sigwin_vault::write_cache(&path, &bytes) {
+                        warn!("save {}: {e}", path.display());
+                        return;
+                    }
+                }
+                if let Err(e) = sigwin_vault::write_cache(&marker, ids.join(",").as_bytes()) {
+                    warn!("save {}: {e}", marker.display());
+                }
+            });
         }
         debug!(ms = started.elapsed().as_millis() as u64, stickers = items.len(), from_cache, "open pack");
         // grid first: the UI only keeps images for the grid it shows
         (self.emit)(Event::StickerGrid { pack: hex_id.to_string(), items });
         self.sticker_thumbs(jobs, true);
+    }
+
+    /// A message-list sticker's frames, from its downloaded attachment (`key` is its thumbnail key).
+    pub(super) fn sticker_frames(&self, key: String) {
+        let path = attachment_path(&self.paths.attachments, &key);
+        let emit = self.emit.clone();
+        tokio::task::spawn_blocking(move || {
+            let started = std::time::Instant::now();
+            let f = match sigwin_vault::read(&path) {
+                Ok(bytes) => Frames::decode(key, &bytes, view::STICKER_SIZE, ANIM_BUDGET / 2),
+                Err(_) => Frames::still(key),
+            };
+            debug!(ms = started.elapsed().as_millis() as u64, frames = f.frames.len(), "sticker frames");
+            emit(Event::Frames(f));
+        });
+    }
+
+    /// A hovered picker sticker's frames, from the bytes `open_pack` kept for animated stickers.
+    pub(super) fn picker_frames(&self, pack_hex: &str, id: u32) {
+        let path = anim_source(&self.paths.thumbs, pack_hex, id);
+        let key = sticker_thumb_key(pack_hex, id);
+        let emit = self.emit.clone();
+        tokio::task::spawn_blocking(move || {
+            let f = match sigwin_vault::read(&path) {
+                Ok(bytes) => Frames::decode(key, &bytes, PICKER_CELL, ANIM_BUDGET / 4),
+                Err(_) => Frames::still(key),
+            };
+            emit(Event::Frames(f));
+        });
     }
 
     pub(super) fn sticker_cover_path(&self, pack_hex: &str, id: u32) -> PathBuf {
@@ -345,6 +394,21 @@ impl StickerJob {
 
 pub(super) fn sticker_thumb_key(pack_hex: &str, id: u32) -> String {
     format!("{STICKER_THUMB_PREFIX}{pack_hex}_{id}")
+}
+
+/// Which of a pack's stickers are animated (comma-separated ids); written by `open_pack`.
+fn anim_marker(dir: &Path, pack_hex: &str) -> PathBuf {
+    dir.join(format!("{STICKER_THUMB_PREFIX}{pack_hex}-anim.enc"))
+}
+
+/// An animated picker sticker's original bytes.
+fn anim_source(dir: &Path, pack_hex: &str, id: u32) -> PathBuf {
+    dir.join(format!("{}-anim.enc", sticker_thumb_key(pack_hex, id)))
+}
+
+fn read_marker(path: &Path) -> Option<HashSet<u32>> {
+    let bytes = sigwin_vault::read(path).ok()?;
+    Some(String::from_utf8_lossy(&bytes).split(',').filter_map(|s| s.parse().ok()).collect())
 }
 
 /// Signal's built-in packs (Signal-Desktop `BLESSED_PACKS`): hex id, base64 key, title.

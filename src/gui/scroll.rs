@@ -133,7 +133,7 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, can_older: bool, sc
         }
         let dark = app.global::<Theme>().get_dark();
         if rebuild {
-            ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.sender_avatars, &ui.revealed, dark)).collect::<Vec<_>>());
+            ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.anims, &ui.sender_avatars, &ui.revealed, dark)).collect::<Vec<_>>());
             ui.typing_row = false;
         } else {
             update_rows(ui, &items, dark);

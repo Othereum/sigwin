@@ -11,6 +11,7 @@ pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     wire_messages(app, &send);
     wire_stickers(app, &send);
     wire_settings(app, &send);
+    anim::wire(app);
     if !headless::active() {
         hook_window(app, &send); // no native window in headless
     }

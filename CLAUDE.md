@@ -14,6 +14,7 @@
 - No GPU renderer, WebView, JVM, or extra runtimes. Slint uses `renderer-software` only (GPU renderers cost 200MB+; numbers in `docs/decisions.md`). Never enable the `renderer-femtovg` / `renderer-skia` features by default.
 - Never load whole threads: page messages through `db::Index::page` (60 rows); the open window is capped at `MAX_WINDOW` (600). `store.messages(thread, range)` does `fetch_all`: always bound the range.
 - Images: decode to thumbnails (`THUMB_MAX` 260px, stickers in the picker 96px), cache them on disk under `thumbs/`. Keep `slint::Image`s only for what's on screen; clear them on thread switch or when the panel closes.
+- Animated sticker frames are decoded RGBA, so they're the costliest images: only for stickers shown on screen, all together under `ANIM_BUDGET` (24MB), and only the hovered sticker in the picker (`gui/anim.rs`).
 - Anything that loads heavy system DLLs (the file dialog) runs in a child process (`picker.rs`).
 - Measure, don't guess: the log prints `mem: rust heap …, private …` every 10s (`alloc.rs` counts Rust heap; the rest is native). `SIGWIN_DEMO=1 SIGWIN_SELFTEST=1` measures the dialog and notification cost.
 

@@ -12,6 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::types::{Command, Event, MsgDto, Scroll, ThreadDto};
 use crate::*;
 
+pub(crate) mod anim;
 pub(crate) mod drafts;
 mod rows;
 mod scroll;
@@ -35,6 +36,8 @@ pub(crate) struct Ui {
     pub(crate) messages: Rc<VecModel<MsgItem>>,
     /// thumbnails for the open thread only; cleared on thread switch to bound memory
     thumbs: HashMap<String, Image>,
+    /// animated stickers' frames (message list, open thread; the hovered picker sticker)
+    anims: anim::Anims,
     /// round photos by thread key, for the whole session (~6KB each at 40px)
     avatars: HashMap<String, Image>,
     /// photos next to group messages by sender uuid, open thread only
@@ -86,6 +89,7 @@ pub(crate) fn send_cmd(c: Command) {
 pub(crate) fn close_stickers(app: &AppWindow) {
     app.set_sticker_open(false);
     UI.with_borrow_mut(|ui| {
+        anim::stop_picker(ui);
         ui.sticker_thumbs.clear();
         ui.grid.clear();
         ui.stickers.set_vec(Vec::new());
@@ -177,6 +181,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 let mut restored = None;
                 if switched {
                     ui.thumbs.clear();
+                    ui.anims.clear_list();
                     ui.sender_avatars.clear();
                     ui.revealed.clear();
                     sigwin_clear_plain_styles();
@@ -324,6 +329,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 }
             });
         }
+        Event::Frames(f) => anim::frames_arrived(f),
         Event::Status(s) => app.set_status_text(s.into()),
         Event::Typing { group, who } => {
             let near_bottom = app.get_near_bottom();
@@ -394,12 +400,14 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             }
             app.set_current_pack(pack.into());
             UI.with_borrow_mut(|ui| {
+                anim::stop_picker(ui);
                 let rows: Vec<StickerItem> = items
                     .iter()
                     .map(|s| StickerItem {
                         id: s.id as i32,
                         emoji: s.emoji.as_str().into(),
-                        img: Image::default(),
+                        animated: s.animated,
+                        ..Default::default()
                     })
                     .collect();
                 ui.stickers.set_vec(rows);

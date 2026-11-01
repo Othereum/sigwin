@@ -3,6 +3,7 @@
 //! - Restore from minimized: the software renderer redraws only damaged regions, and when
 //!   the UI changed while minimized it loses track of them. The restored window then shows
 //!   only the last-changed bits over a transparent background. We force a full repaint.
+//!   Sticker animations pause while minimized for the same reason (`gui::anim::pause`).
 //! - Activation changes: tell the backend whether the window is in the foreground
 //!   (replaces polling).
 //! - DPI change: winit resets the scale factor to the monitor's; re-apply the zoom setting.
@@ -70,9 +71,13 @@ unsafe extern "system" fn subclass_proc(
     };
     match msg {
         WM_SIZE => match wparam as u32 {
-            SIZE_MINIMIZED => MINIMIZED.set(true),
+            SIZE_MINIMIZED => {
+                MINIMIZED.set(true);
+                crate::gui::anim::pause(true);
+            }
             SIZE_RESTORED | SIZE_MAXIMIZED if MINIMIZED.get() => {
                 MINIMIZED.set(false);
+                crate::gui::anim::pause(false);
                 schedule_repaint();
             }
             _ => {}

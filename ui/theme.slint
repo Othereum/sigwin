@@ -7,6 +7,16 @@ export global Links {
     callback open(string);
 }
 
+// animated stickers (src/gui/anim.rs): `slot` advances every ANIM_SLOT_MS while any play.
+// A row shows `frames[order[mod(slot, order.length)]]` when it has frames, else its still image.
+export global Anim {
+    in property <int> slot;
+    // a sticker row was put on screen or changed (message id): load its frames, keep them longer
+    callback shown(string);
+    // a picker sticker gained or lost the hover
+    callback hover(string, int, bool);
+}
+
 export global Theme {
     out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
     out property <color> accent: #2c6bed;

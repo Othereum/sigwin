@@ -1,7 +1,7 @@
 // A message bubble and its parts.
 
 import { MsgItem } from "types.slint";
-import { Links, Theme } from "theme.slint";
+import { Anim, Links, Theme } from "theme.slint";
 import { Avatar } from "widgets.slint";
 
 // time + delivery status of a message; clicking either shows who has it
@@ -58,10 +58,25 @@ export component MsgImage inherits Rectangle {
     border-bottom-left-radius: whole ? r-bl : flush ? 0px : 8px;
     border-bottom-right-radius: whole ? r-br : flush ? 0px : 8px;
     clip: true;
+    // tell the Rust side a sticker is on screen: when the row is created, when a reused row gets
+    // another message, when the still image arrives. Not on frame changes (an evicted sticker
+    // must not ask for its frames again right away).
+    property <string> sticker-id: m.sticker ? m.id : "";
+    property <image> still: m.image;
+    init => {
+        if m.sticker { Anim.shown(m.id); }
+    }
+    changed sticker-id => {
+        if m.sticker { Anim.shown(m.id); }
+    }
+    changed still => {
+        if m.sticker { Anim.shown(m.id); }
+    }
     Image {
         width: 100%;
         height: 100%;
-        source: m.image;
+        // Anim.slot is only read (and redraws only this image) while the sticker has frames
+        source: m.frames.length > 0 ? m.frames[m.order[mod(Anim.slot, m.order.length)]] : m.image;
         image-fit: m.sticker ? contain : cover;
     }
     TouchArea {

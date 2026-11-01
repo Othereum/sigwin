@@ -235,6 +235,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         let emit = emit.clone();
         std::thread::spawn(move || {
             while let Some(c) = cmd_rx.blocking_recv() {
+                demo_frames(&emit, &c);
                 if matches!(c, Command::LoadOlder) && start > 0 {
                     std::thread::sleep(delay);
                     start = start.saturating_sub(60);
@@ -248,6 +249,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         let (emit, items) = (emit.clone(), items.clone());
         std::thread::spawn(move || {
             while let Some(c) = cmd_rx.blocking_recv() {
+                demo_frames(&emit, &c);
                 if let Command::OpenThread(key) = c {
                     emit(Event::Messages { key, items: items.clone(), can_older: false, scroll: Scroll::Bottom });
                 }
@@ -318,6 +320,36 @@ pub(crate) fn demo_blob(key: &str, size: u32, hue: u8) -> types::Thumb {
     types::Thumb { key: key.into(), width: size, height: size, rgba }
 }
 
+/// `StickerFrames` / `PickerFrames`: `demo-st-1` and every 4th picker sticker are animated GIFs
+/// (a pulsing blob), decoded like real stickers.
+fn demo_frames(emit: &backend::Emit, c: &Command) {
+    let (key, fit) = match c {
+        Command::StickerFrames(k) => (k.clone(), view::STICKER_SIZE),
+        Command::PickerFrames { pack, id } => (format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX), 72),
+        _ => return,
+    };
+    let animated = key == "demo-st-1" || key.rsplit('_').next().and_then(|i| i.parse::<u32>().ok()).is_some_and(|i| i % 4 == 0);
+    if !animated {
+        emit(Event::Frames(types::Frames::still(key)));
+        return;
+    }
+    let frames = (0..8u32)
+        .map(|f| {
+            let r = 40.0 + 50.0 * (f as f32 / 8.0 * std::f32::consts::TAU).sin().abs();
+            image::RgbaImage::from_fn(200, 200, |x, y| {
+                let d = ((x as f32 - 100.0).powi(2) + (y as f32 - 100.0).powi(2)).sqrt();
+                if d < r { image::Rgba([240, 120 + (f * 15) as u8, 40, 255]) } else { image::Rgba([0, 0, 0, 0]) }
+            })
+        })
+        .collect();
+    let emit = emit.clone();
+    std::thread::spawn(move || {
+        if let Ok(gif) = sigwin_thumb::gif(frames, 120) {
+            emit(Event::Frames(types::Frames::decode(key, &gif, fit, types::ANIM_BUDGET / 2)));
+        }
+    });
+}
+
 pub(crate) fn demo_stickers(emit: backend::Emit) {
     for i in 0..2u8 {
         emit(Event::Thumb(Arc::new(demo_blob(&format!("demo-st-{i}"), 200, 60 + i * 120))));
@@ -331,7 +363,7 @@ pub(crate) fn demo_stickers(emit: backend::Emit) {
         })
         .collect();
     let items: Vec<types::StickerDto> =
-        (0..20).map(|i| types::StickerDto { key: format!("sp_p0_{i}"), id: i, emoji: String::new() }).collect();
+        (0..20).map(|i| types::StickerDto { key: format!("sp_p0_{i}"), id: i, emoji: String::new(), animated: i % 4 == 0 }).collect();
     // the panel is opened by main(); give it a moment before filling it
     slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
         emit(Event::StickerPacks(packs));

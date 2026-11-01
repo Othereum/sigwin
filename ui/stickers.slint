@@ -2,7 +2,7 @@
 
 import { LineEdit, Button } from "std-widgets.slint";
 import { PackItem, StickerItem } from "types.slint";
-import { Theme } from "theme.slint";
+import { Anim, Theme } from "theme.slint";
 import { TextButton } from "widgets.slint";
 
 export component StickerPanel inherits Rectangle {
@@ -66,10 +66,18 @@ export component StickerPanel inherits Rectangle {
                 height: root.cell;
                 border-radius: 8px;
                 background: sta.has-hover ? Theme.hover : transparent;
-                Image { width: root.cell - 12px; height: root.cell - 12px; source: s.img; image-fit: contain; }
+                Image {
+                    width: root.cell - 12px;
+                    height: root.cell - 12px;
+                    source: s.frames.length > 0 ? s.frames[s.order[mod(Anim.slot, s.order.length)]] : s.img;
+                    image-fit: contain;
+                }
                 sta := TouchArea {
                     mouse-cursor: pointer;
                     clicked => { root.send-sticker(root.current-pack, s.id); }
+                    changed has-hover => {
+                        if s.animated { Anim.hover(root.current-pack, s.id, self.has-hover); }
+                    }
                 }
             }
         }

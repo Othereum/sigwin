@@ -74,9 +74,150 @@ pub fn square(img: &DynamicImage, px: u32) -> RgbaImage {
     image::imageops::resize(&out, px, px, image::imageops::FilterType::CatmullRom)
 }
 
+/// Frames of an animated image, resampled, with each frame's display time in ms.
+pub struct Animation {
+    pub frames: Vec<RgbaImage>,
+    pub delays: Vec<u32>,
+}
+
+/// Decoding stops here: long animations would take seconds to resample.
+const MAX_FRAMES: usize = 500;
+
+/// Decodes an animated WebP / APNG / GIF, each frame downscaled to `px` (see `downscale`).
+/// `None` when the image is a still (one frame, or a format without animation). If the frames
+/// would take more than `max_bytes`, every other frame is dropped (its time goes to the one before)
+/// until they fit.
+pub fn animation(bytes: &[u8], px: u32, max_bytes: usize) -> ImageResult<Option<Animation>> {
+    use image::AnimationDecoder;
+    use image::codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder};
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
+    let cur = || std::io::Cursor::new(bytes);
+    let frames = match reader.format() {
+        Some(image::ImageFormat::WebP) => {
+            let d = WebPDecoder::new(cur())?;
+            if !d.has_animation() {
+                return Ok(None);
+            }
+            d.into_frames()
+        }
+        Some(image::ImageFormat::Png) => {
+            let d = PngDecoder::new(cur())?;
+            if !d.is_apng()? {
+                return Ok(None);
+            }
+            d.apng()?.into_frames()
+        }
+        Some(image::ImageFormat::Gif) => GifDecoder::new(cur())?.into_frames(),
+        _ => return Ok(None),
+    };
+    let mut anim = Animation { frames: Vec::new(), delays: Vec::new() };
+    for f in frames.take(MAX_FRAMES) {
+        let f = f?;
+        let (n, d) = f.delay().numer_denom_ms();
+        let ms = if d == 0 { 0 } else { n / d };
+        // like browsers: "as fast as possible" delays play at 10 fps
+        anim.delays.push(if ms <= 10 { 100 } else { ms });
+        anim.frames.push(downscale(f.into_buffer(), px));
+    }
+    if anim.frames.len() < 2 {
+        return Ok(None);
+    }
+    let size = |a: &Animation| a.frames.iter().map(|f| f.as_raw().len()).sum::<usize>();
+    while size(&anim) > max_bytes && anim.frames.len() > 1 {
+        let (mut frames, mut delays) = (Vec::new(), Vec::new());
+        for (i, (f, d)) in anim.frames.into_iter().zip(anim.delays).enumerate() {
+            if i % 2 == 0 {
+                frames.push(f);
+                delays.push(d);
+            } else if let Some(last) = delays.last_mut() {
+                *last += d;
+            }
+        }
+        anim = Animation { frames, delays };
+    }
+    Ok(Some(anim))
+}
+
+/// An endlessly looping GIF (demo stickers, tests).
+pub fn gif(frames: Vec<RgbaImage>, delay_ms: u32) -> ImageResult<Vec<u8>> {
+    let mut out = Vec::new();
+    {
+        let mut enc = image::codecs::gif::GifEncoder::new(&mut out);
+        enc.set_repeat(image::codecs::gif::Repeat::Infinite)?;
+        let delay = image::Delay::from_numer_denom_ms(delay_ms, 1);
+        enc.encode_frames(frames.into_iter().map(|f| image::Frame::from_parts(f, 0, 0, delay)))?;
+    }
+    Ok(out)
+}
+
+/// Whether `bytes` hold an animation, from the headers (GIFs decode their first two frames).
+pub fn is_animated(bytes: &[u8]) -> bool {
+    use image::AnimationDecoder;
+    use image::codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder};
+    let cur = || std::io::Cursor::new(bytes);
+    let Ok(reader) = image::ImageReader::new(cur()).with_guessed_format() else { return false };
+    match reader.format() {
+        Some(image::ImageFormat::WebP) => WebPDecoder::new(cur()).is_ok_and(|d| d.has_animation()),
+        Some(image::ImageFormat::Png) => PngDecoder::new(cur()).is_ok_and(|d| d.is_apng().unwrap_or(false)),
+        Some(image::ImageFormat::Gif) => GifDecoder::new(cur()).is_ok_and(|d| d.into_frames().take(2).count() == 2),
+        _ => false,
+    }
+}
+
+/// Which frame shows in each `slot_ms` slot of one loop (the UI ticks once per slot).
+/// At most `max_slots` slots; a frame shorter than a slot may be skipped.
+pub fn timeline(delays: &[u32], slot_ms: u32, max_slots: usize) -> Vec<u16> {
+    let total: u64 = delays.iter().map(|&d| d as u64).sum();
+    let slots = (total.div_ceil(slot_ms as u64) as usize).clamp(1, max_slots);
+    let mut out = Vec::with_capacity(slots);
+    let (mut frame, mut end) = (0usize, delays.first().copied().unwrap_or(0) as u64);
+    for s in 0..slots {
+        let t = s as u64 * slot_ms as u64;
+        while t >= end && frame + 1 < delays.len() {
+            frame += 1;
+            end += delays[frame] as u64;
+        }
+        out.push(frame as u16);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gif(frames: u32, delay_ms: u32) -> Vec<u8> {
+        let fs = (0..frames).map(|i| RgbaImage::from_pixel(64, 64, image::Rgba([(i * 40) as u8, 0, 0, 255])));
+        super::gif(fs.collect(), delay_ms).unwrap()
+    }
+
+    #[test]
+    fn decodes_animated_gif_and_skips_stills() {
+        let a = animation(&gif(4, 50), 32, usize::MAX).unwrap().unwrap();
+        assert_eq!(a.frames.len(), 4);
+        assert_eq!(a.frames[0].dimensions(), (32, 32));
+        assert_eq!(a.delays, vec![50; 4]);
+        assert!(animation(&gif(1, 50), 32, usize::MAX).unwrap().is_none());
+        let png = png_rgba(&RgbaImage::new(8, 8)).unwrap();
+        assert!(animation(&png, 32, usize::MAX).unwrap().is_none());
+        assert!(is_animated(&gif(3, 50)));
+        assert!(!is_animated(&gif(1, 50)) && !is_animated(&png) && !is_animated(b"junk"));
+    }
+
+    #[test]
+    fn drops_frames_to_fit_the_budget() {
+        // 4 frames of 32x32 RGBA = 4 x 4096 bytes; room for 2
+        let a = animation(&gif(4, 50), 32, 2 * 4096).unwrap().unwrap();
+        assert_eq!(a.frames.len(), 2);
+        assert_eq!(a.delays, vec![100, 100]);
+    }
+
+    #[test]
+    fn timeline_maps_slots_to_frames() {
+        assert_eq!(timeline(&[66, 33, 99], 33, 1000), vec![0, 0, 1, 2, 2, 2]);
+        assert_eq!(timeline(&[10, 10], 33, 1000), vec![0]);
+        assert_eq!(timeline(&[1000, 1000], 33, 10).len(), 10);
+    }
 
     #[test]
     fn downscale_fits_long_side_and_keeps_transparency() {
