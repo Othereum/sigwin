@@ -87,13 +87,13 @@ pub(crate) fn is_foreground(_: &AppWindow) -> bool {
     true
 }
 
-/// A toast was clicked: window to the front, its thread open.
-pub(crate) fn open_from_toast(app: &AppWindow, key: &str) {
+/// A toast was clicked: window to the front, its chat open at the message (an outdated
+/// toast just raises the window).
+pub(crate) fn open_from_toast(app: &AppWindow, hit: Option<crate::toast::Click>) {
     to_front(app);
+    let Some(hit) = hit else { return };
     app.set_settings_open(false);
-    if app.get_current_key().as_str() != key {
-        app.invoke_open_thread(key.into());
-    }
+    send_cmd(Command::OpenFromToast { key: hit.key, msg: hit.msg });
 }
 
 #[cfg(windows)]

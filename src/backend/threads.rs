@@ -254,6 +254,7 @@ impl App {
     }
 
     pub(super) fn mark_read(&mut self, key: &str) {
+        self.notes.remove(notify::By::Thread(key));
         let unread = self.persist.unread.remove(key);
         if unread.is_some() {
             self.persist_dirty = true;

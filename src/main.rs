@@ -62,6 +62,8 @@ fn main() -> anyhow::Result<()> {
     headless::install_if_requested()?;
     if !headless::active() {
         toast::register();
+        // left over from a crash: clicking them would do nothing
+        toast::clear();
     }
 
     let app = AppWindow::new()?;
@@ -88,8 +90,8 @@ fn main() -> anyhow::Result<()> {
         let _ = weak.upgrade_in_event_loop(move |app| apply(&app, ev));
     });
     let weak = app.as_weak();
-    toast::on_click(move |key| {
-        let _ = weak.upgrade_in_event_loop(move |app| open_from_toast(&app, &key));
+    toast::init(backend::Paths::new(&data_dir()).open, move |hit| {
+        let _ = weak.upgrade_in_event_loop(move |app| open_from_toast(&app, hit));
     });
     if std::env::var_os("SIGWIN_DEMO").is_some() {
         demo::start(&app, emit, cmd_rx);
@@ -116,6 +118,10 @@ fn main() -> anyhow::Result<()> {
     apply_theme(&app, true);
     wire(&app, cmd_tx);
     app.run()?;
+    // like Signal's `fastClear` on unload: a toast we can no longer act on goes away
+    if !headless::active() {
+        toast::clear_now();
+    }
     drafts::save_on_exit(&app);
     // plain copies of opened attachments; the backend also empties this on start (crashes,
     // files another app still held)

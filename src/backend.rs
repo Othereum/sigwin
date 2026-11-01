@@ -38,6 +38,7 @@ use crate::types::{
 use crate::view::{self, Kind, THUMB_MAX};
 
 pub(crate) mod files;
+mod notify;
 mod ops;
 mod receive;
 mod send;
@@ -242,6 +243,8 @@ struct App {
     avatar_queue: std::collections::VecDeque<crate::avatar::Want>,
     /// bumped per opened sticker pack: image work for an older grid stops
     grid_gen: Arc<std::sync::atomic::AtomicU64>,
+    /// the toast slot (`notify.rs`)
+    notes: notify::Notifier,
 }
 
 pub fn spawn(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit) -> std::thread::JoinHandle<()> {
@@ -355,6 +358,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         avatars_running: false,
         avatar_queue: Default::default(),
         grid_gen: Default::default(),
+        notes: Default::default(),
     };
     if sealed_now {
         app.save_persist();
@@ -459,6 +463,7 @@ impl App {
             Command::WindowFocus(f) => {
                 self.focused = f;
                 if f {
+                    self.notes.clear();
                     if let Some(key) = self.current.as_ref().map(|c| c.key.clone()) {
                         self.mark_read(&key);
                     }
@@ -485,6 +490,7 @@ impl App {
             Command::Delete(id) => self.delete(&id).await,
             Command::Pin { id, secs } => self.pin(&id, secs).await,
             Command::Unpin(id) => self.unpin(&id).await,
+            Command::OpenFromToast { key, msg } => self.open_from_toast(&key, msg).await,
             Command::JumpTo(id) => {
                 if let Err(e) = self.jump_to(&id).await {
                     warn!("jump to {id}: {e:#}");

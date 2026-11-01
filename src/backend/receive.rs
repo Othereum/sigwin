@@ -126,6 +126,7 @@ impl App {
                 let Some(sid) = ServiceId::parse_from_service_id_string(aci) else { continue };
                 if let Ok(Some(t)) = self.store.thread_for_sender_and_timestamp(&sid, ts).await {
                     let key = thread_key(&t);
+                    self.notes.remove(notify::By::Thread(&key));
                     let upto = self.persist.read_upto.entry(key.clone()).or_default();
                     if ts > *upto {
                         *upto = ts;
@@ -157,9 +158,10 @@ impl App {
             }
         }
 
-        // we deleted a message for everyone from another device
-        if c.metadata.sender.raw_uuid() == self.me {
-            if let Some(target) = view::data_message(&c).and_then(|dm| dm.delete.as_ref()?.target_sent_timestamp) {
+        if let Some(target) = view::data_message(&c).and_then(|dm| dm.delete.as_ref()?.target_sent_timestamp) {
+            self.notes.remove(notify::By::Message(target));
+            // we deleted a message for everyone from another device
+            if c.metadata.sender.raw_uuid() == self.me {
                 if let Err(e) = self.index.record_my_delete(target).await {
                     warn!("record delete: {e:#}");
                 }
@@ -205,21 +207,17 @@ impl App {
                     *self.persist.unread.entry(key.clone()).or_default() += 1;
                     self.persist_dirty = true;
                 }
-                if self.synced && !(is_open && self.focused) && crate::settings::notify_enabled() {
-                    let title = self.thread_name(&thread).await;
-                    let body = self.snippet(&c).await.unwrap_or_default();
-                    let title = match (&thread, &c.metadata.sender) {
-                        (Thread::Group(_), s) => format!("{} — {}", self.name(s.raw_uuid()).await, title),
-                        _ => title,
-                    };
-                    notify(title, body, key.clone());
-                }
+                self.notify_message(&thread, &key, &c).await;
             }
             Kind::Msg { outgoing: true, .. } => {
                 // we replied from another device: consider the thread read
+                self.notes.remove(notify::By::Thread(&key));
                 if self.persist.unread.remove(&key).is_some() {
                     self.persist_dirty = true;
                 }
+            }
+            Kind::Reaction { target, ref emoji, remove } => {
+                self.notify_reaction(&thread, &key, &c, target, emoji, remove).await;
             }
             _ => {}
         }
@@ -231,6 +229,7 @@ impl App {
 
     /// Periodic work: coalesces bursts of incoming messages into one UI update.
     pub(super) async fn flush(&mut self) {
+        self.notes.tick(self.focused);
         if self.next_expiry.is_some_and(|t| t <= view::now_ms()) {
             self.next_expiry = None;
             self.current_dirty = true;
@@ -334,13 +333,4 @@ pub(super) async fn send_receipts(
     if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, now())).await {
         debug!("read sync: {e}");
     }
-}
-
-pub(super) fn notify(title: String, body: String, key: String) {
-    let Some((title, body)) = crate::settings::toast_text(title, body) else { return };
-    tokio::task::spawn_blocking(move || {
-        if let Err(e) = crate::toast::show(&title, &body, Some(key)) {
-            debug!("notification: {e}");
-        }
-    });
 }

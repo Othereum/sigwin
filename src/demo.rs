@@ -300,7 +300,13 @@ pub(crate) fn selftest() {
                 picker::spawn(0, |f| eprintln!("selftest picked {} files", f.len()));
             }
             3 => {
-                let _ = toast::show("selftest", "toast", None);
+                toast::show(toast::Toast {
+                    title: "selftest".into(),
+                    body: "toast".into(),
+                    picture: Some(toast::Picture::Initial { text: "S".into(), rgb: 0x3a77c9 }),
+                    key: String::new(),
+                    msg: None,
+                });
             }
             _ => {}
         }

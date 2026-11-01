@@ -8,9 +8,14 @@ pub(crate) const PALETTE: [u32; 12] = [
 ];
 
 pub(crate) fn tint(key: &str) -> Color {
-    let h = key.bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
-    let c = PALETTE[(h as usize) % PALETTE.len()];
+    let c = tint_rgb(key);
     Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8)
+}
+
+/// A chat's placeholder color as 0xRRGGBB (also used for toast pictures).
+pub(crate) fn tint_rgb(key: &str) -> u32 {
+    let h = key.bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+    PALETTE[(h as usize) % PALETTE.len()]
 }
 
 pub(crate) fn initial(name: &str) -> String {

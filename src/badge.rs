@@ -50,7 +50,7 @@ fn label(n: u32) -> String {
 }
 
 #[cfg(windows)]
-mod win {
+pub(crate) mod win {
     use std::cell::Cell;
     use std::ffi::c_void;
 
@@ -170,8 +170,9 @@ mod win {
         }
     }
 
-    /// Grayscale coverage (0..=255, `size`x`size`) of `text` in bold Segoe UI, centered.
-    pub fn text_coverage(text: &str, size: usize) -> Vec<u8> {
+    /// Grayscale coverage (0..=255, `size`x`size`) of `text`, centered: the largest font up to
+    /// `frac` of the size whose text fits the circle's width.
+    pub(crate) fn text_coverage(text: &str, size: usize, face: &str, weight: i32, frac: f32) -> Vec<u8> {
         let s = size as i32;
         let mut out = vec![0u8; size * size];
         // SAFETY: GDI objects are created, used and released locally
@@ -182,14 +183,13 @@ mod win {
                 return out;
             }
             let old_bmp = SelectObject(dc, bmp);
-            let face: Vec<u16> = "Segoe UI".encode_utf16().chain(Some(0)).collect();
+            let face: Vec<u16> = face.encode_utf16().chain(Some(0)).collect();
             let t: Vec<u16> = text.encode_utf16().collect();
-            // largest font (up to 78% of the icon) whose text fits the circle's width
             let max_w = (s as f32 * 0.76).round() as i32;
-            let mut h = (s as f32 * 0.78).round() as i32;
+            let mut h = (s as f32 * frac).round() as i32;
             let (font, old_font) = loop {
                 let font = CreateFontW(
-                    -h, 0, 0, 0, FW_BOLD as i32, 0, 0, 0,
+                    -h, 0, 0, 0, weight, 0, 0, 0,
                     DEFAULT_CHARSET as u32, OUT_TT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32,
                     ANTIALIASED_QUALITY as u32, 0, face.as_ptr(),
                 );
@@ -260,7 +260,7 @@ mod win {
 #[cfg(windows)]
 fn render(text: &str, size: usize) -> Vec<u8> {
     const RED: [f32; 3] = [0xe0 as f32, 0x30 as f32, 0x2c as f32]; // r, g, b
-    let cov = win::text_coverage(text, size);
+    let cov = win::text_coverage(text, size, "Segoe UI", 700, 0.78);
     let r = size as f32 / 2.0;
     let mut out = vec![0u8; size * size * 4];
     for y in 0..size {

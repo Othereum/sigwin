@@ -68,13 +68,11 @@ pub fn notify_enabled() -> bool {
     NOTIFY.load(Ordering::Relaxed) != OFF
 }
 
-/// The toast's (title, body) under the current preview setting; None when notifications are off.
-pub fn toast_text(title: String, body: String) -> Option<(String, String)> {
+/// What toasts show (0 = sender and text, 1 = sender only, 2 = neither); None when they're off.
+pub fn preview() -> Option<u8> {
     match NOTIFY.load(Ordering::Relaxed) {
         OFF => None,
-        0 => Some((title, body)),
-        1 => Some((title, "새 메시지".into())),
-        _ => Some(("Sigwin".into(), "새 메시지".into())),
+        p => Some(p),
     }
 }
 
@@ -104,14 +102,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn toast_text_follows_preview() {
-        let s = Settings { preview: 1, ..Default::default() };
-        s.publish();
-        assert_eq!(toast_text("김민준".into(), "안녕".into()), Some(("김민준".into(), "새 메시지".into())));
+    fn preview_follows_settings() {
+        Settings { preview: 1, ..Default::default() }.publish();
+        assert_eq!(preview(), Some(1));
         Settings { notify: false, ..Default::default() }.publish();
-        assert!(toast_text("a".into(), "b".into()).is_none());
+        assert_eq!(preview(), None);
+        assert!(!notify_enabled());
         Settings::default().publish();
-        assert_eq!(toast_text("a".into(), "b".into()), Some(("a".into(), "b".into())));
+        assert_eq!(preview(), Some(0));
     }
 
     #[test]

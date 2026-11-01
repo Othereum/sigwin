@@ -275,6 +275,8 @@ pub enum Command {
     Unpin(String),
     /// show the pinned message with this sent timestamp, loading older rows if needed
     JumpTo(String),
+    /// a toast was clicked: open chat `key` at message `msg` (sent timestamp)
+    OpenFromToast { key: String, msg: Option<u64> },
     /// the composer was edited; false when it became empty
     Composing(bool),
     /// the settings page opened: send Account and Storage
