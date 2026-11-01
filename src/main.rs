@@ -281,6 +281,16 @@ fn apply(app: &AppWindow, ev: Event) {
             let near_bottom = app.get_near_bottom();
             let before_h = app.invoke_content_height();
             UI.with_borrow_mut(|ui| {
+                if switched {
+                    app.set_new_below(0);
+                } else if !near_bottom {
+                    // count incoming rows that weren't shown before
+                    let seen: std::collections::HashSet<&str> = ui.last.iter().map(|m| m.id.as_str()).collect();
+                    let fresh = items.iter().filter(|m| !m.outgoing && !m.system && !seen.contains(m.id.as_str())).count();
+                    if matches!(scroll, Scroll::KeepIfNotAtBottom) && fresh > 0 {
+                        app.set_new_below(app.get_new_below() + fresh as i32);
+                    }
+                }
                 let dark = app.global::<Theme>().get_dark();
                 ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, dark)).collect::<Vec<_>>());
                 ui.last = items;
@@ -451,6 +461,13 @@ fn main() -> anyhow::Result<()> {
             });
         }
         if std::env::var_os("LITE_SIGNAL_DEMO_INFO").is_some() {
+            // "new messages below" badge, set late so a test can scroll up first
+            let weak = app.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(4000), move || {
+                if let Some(app) = weak.upgrade() {
+                    app.set_new_below(3);
+                }
+            });
             let weak = app.as_weak();
             slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
                 if let Some(app) = weak.upgrade() {
@@ -512,6 +529,14 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
 
     let s = send.clone();
     app.on_open_thread(move |key| s(Command::OpenThread(key.to_string())));
+
+    let weak = app.as_weak();
+    app.on_jump_to_bottom(move || {
+        if let Some(app) = weak.upgrade() {
+            app.set_new_below(0);
+            stick_to_bottom(&app);
+        }
+    });
 
     let s = send.clone();
     app.on_load_older(move || {

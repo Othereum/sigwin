@@ -657,6 +657,9 @@ export component AppWindow inherits Window {
     in property <string> current-sub;
     in property <[MsgItem]> messages;
     in property <bool> can-load-older;
+    // incoming messages that arrived while scrolled up
+    in-out property <int> new-below;
+    callback jump-to-bottom();
     in property <string> status-text;
     in property <string> reply-preview;
     in property <[string]> pending-files;
@@ -736,6 +739,9 @@ export component AppWindow inherits Window {
         msg-list.content-y = max(msg-list.visible-height - msg-list.content-height, min(0px, msg-list.content-y - d));
     }
     out property <bool> near-bottom: msg-list.content-y <= msg-list.visible-height - msg-list.content-height + 120px;
+    changed near-bottom => {
+        if (near-bottom) { new-below = 0; }
+    }
 
     if page == "loading": Rectangle {
         VerticalLayout {
@@ -821,21 +827,62 @@ export component AppWindow inherits Window {
                 }
                 Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
             }
-            msg-list := ListView {
+            Rectangle {
                 visible: root.current-key != "";
                 vertical-stretch: 1;
-                scrolled => {
-                    if (self.content-y >= -4px && root.can-load-older) {
-                        root.load-older();
+                msg-list := ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    scrolled => {
+                        if (self.content-y >= -4px && root.can-load-older) {
+                            root.load-older();
+                        }
+                    }
+                    for m in root.messages: Bubble {
+                        m: m;
+                        max-w: min(560px, msg-list.visible-width * 0.75);
+                        attachment-clicked(id) => { root.attachment-clicked(id); }
+                        reply(id) => { root.reply(id); }
+                        show-info(t) => { root.info-text = t; }
+                        menu(id, x, y) => { root.open-menu(id, x, y); }
                     }
                 }
-                for m in root.messages: Bubble {
-                    m: m;
-                    max-w: min(560px, msg-list.visible-width * 0.75);
-                    attachment-clicked(id) => { root.attachment-clicked(id); }
-                    reply(id) => { root.reply(id); }
-                    show-info(t) => { root.info-text = t; }
-                    menu(id, x, y) => { root.open-menu(id, x, y); }
+                // jump to the latest message
+                if !root.near-bottom: Rectangle {
+                    x: parent.width - self.width - 20px;
+                    y: parent.height - self.height - 14px;
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 20px;
+                    background: jump-ta.has-hover ? Theme.hover : Theme.sidebar;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    drop-shadow-blur: 6px;
+                    drop-shadow-color: #00000040;
+                    jump-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.jump-to-bottom(); }
+                    }
+                    Text {
+                        text: "↓";
+                        font-family: "Segoe UI Symbol";
+                        font-size: 18px;
+                        color: Theme.text;
+                    }
+                    if root.new-below > 0: Rectangle {
+                        x: parent.width - self.width + 4px;
+                        y: -6px;
+                        height: 18px;
+                        width: max(18px, badge.preferred-width + 10px);
+                        border-radius: 9px;
+                        background: Theme.accent;
+                        badge := Text {
+                            text: root.new-below > 99 ? "99+" : root.new-below;
+                            color: white;
+                            font-size: 11px;
+                            font-weight: 700;
+                        }
+                    }
                 }
             }
             if root.current-key != "" && root.sticker-open: StickerPanel {
