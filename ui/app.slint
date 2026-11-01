@@ -1109,8 +1109,10 @@ export component AppWindow inherits Window {
     public function list-visible-height() -> length {
         return msg-list.visible-height;
     }
+    // prefetch within two screens of the top: rows inserted above the ones on screen keep the
+    // view still, so a wheel scroll in progress never hits the top and waits
     public function check-older() {
-        if (msg-list.content-y >= -4px && root.can-load-older) {
+        if (msg-list.content-y >= -2 * msg-list.visible-height && root.can-load-older) {
             root.load-older();
         }
     }

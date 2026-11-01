@@ -484,6 +484,13 @@ fn hold_older(app: &AppWindow, anchor: String, items: Vec<MsgDto>, can_older: bo
             let (Some(idx), true) = (idx, found) else {
                 tracing::debug!("older page: anchor not on screen, inserting above");
                 show_rows(&app, items, can_older, Scroll::Older, false);
+                // a short page may leave the top still near (content-y is current after a layout)
+                let weak = app.as_weak();
+                slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
+                    if let Some(app) = weak.upgrade() {
+                        app.invoke_check_older();
+                    }
+                });
                 return;
             };
             let want = app.get_jump_pos() + app.get_jump_h();
