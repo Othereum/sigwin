@@ -99,7 +99,7 @@ target\release\sigwin.exe   # 배포용 빌드
 ```
 | 환경 변수 | 용도 |
 |---|---|
-| `SIGWIN_DATA` | 데이터 폴더 (기본값 `%LOCALAPPDATA%\Sigwin\data`. 예전 이름 lite-signal의 폴더가 있으면 처음 실행할 때 옮김) |
+| `SIGWIN_DATA` | 데이터 폴더 (기본값 `%LOCALAPPDATA%\Sigwin\data`) |
 | `RUST_LOG` | 로그 레벨 (예: `info,sigwin=debug`). 콘솔에서 실행하면 stderr로 출력 |
 | `SIGWIN_DEMO=1` | 계정 없이 가짜 데이터로 UI 확인 |
 | `SIGWIN_DEMO_STICKERS=1` / `=add` | 데모에서 스티커 창 열기 / 팩 추가 화면 열기 |

@@ -968,36 +968,15 @@ fn show_settings(app: &AppWindow, s: &settings::Settings) {
     app.set_enter_sends(s.enter_sends);
 }
 
-/// `SIGWIN_DATA`, else `%LOCALAPPDATA%\Sigwin\data`. The folder of the old name
-/// (`lite-signal\lite-signal\data`) is moved there once.
+/// `SIGWIN_DATA`, else `%LOCALAPPDATA%\Sigwin\data`.
 fn data_dir() -> PathBuf {
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
         if let Ok(d) = std::env::var("SIGWIN_DATA") {
             return PathBuf::from(d);
         }
-        let local = |org: &str, app: &str| {
-            directories::ProjectDirs::from("dev", org, app).map(|p| p.data_local_dir().to_path_buf())
-        };
-        let Some(dir) = local("", "Sigwin") else { return PathBuf::from("sigwin-data") };
-        if let Some(old) = local("lite-signal", "lite-signal").filter(|o| o.exists() && !dir.exists()) {
-            let moved = dir.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::rename(&old, &dir));
-            match moved {
-                Ok(()) => {
-                    tracing::info!("moved data folder {} -> {}", old.display(), dir.display());
-                    // drop the now-empty lite-signal\lite-signal and lite-signal folders
-                    for p in old.ancestors().skip(1).take(2) {
-                        let _ = std::fs::remove_dir(p);
-                    }
-                }
-                Err(e) => {
-                    // e.g. an old build still has the DB open: keep using it rather than relink
-                    tracing::warn!("can't move data folder {}: {e}; using it in place", old.display());
-                    return old;
-                }
-            }
-        }
-        dir
+        directories::ProjectDirs::from("dev", "", "Sigwin")
+            .map_or_else(|| PathBuf::from("sigwin-data"), |p| p.data_local_dir().to_path_buf())
     })
     .clone()
 }

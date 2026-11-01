@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**Sigwin** (formerly lite-signal): lightweight unofficial Signal desktop client. Never use "Signal" in its name (Signal brand guidelines). Rust + presage (Signal protocol) + Slint (software renderer). Windows-first. User-facing text and replies are Korean.
+**Sigwin**: lightweight unofficial Signal desktop client. Never use "Signal" in its name (Signal brand guidelines). Rust + presage (Signal protocol) + Slint (software renderer). Windows-first. User-facing text and replies are Korean.
 
 ## Where things live
 - `docs/architecture.md`: thread model and per-file roles. Read before touching an unfamiliar module.
