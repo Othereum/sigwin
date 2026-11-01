@@ -355,13 +355,30 @@ pub fn time_short(ts: u64) -> String {
     let dt = local(ts);
     let now = Local::now();
     if dt.date_naive() == now.date_naive() {
-        ampm(&dt)
+        match (now - dt).num_minutes() {
+            m if m < 1 => "방금".into(),
+            m if m < 60 => format!("{m}분"),
+            _ => ampm(&dt),
+        }
     } else if (now.date_naive() - dt.date_naive()).num_days() == 1 {
         "어제".into()
     } else if dt.year() == now.year() {
         format!("{}월 {}일", dt.month(), dt.day())
     } else {
         format!("{}. {}. {}.", dt.year(), dt.month(), dt.day())
+    }
+}
+
+/// Bubble time: "방금" / "3분" for the last hour, else the absolute `abs` ("오후 3:12 · 수정됨").
+pub fn bubble_time(ts: u64, abs: &str) -> String {
+    let mins = (Local::now() - local(ts)).num_minutes();
+    if !(0..60).contains(&mins) && mins >= 0 {
+        return abs.to_string();
+    }
+    let rel = if mins < 1 { "방금".to_string() } else { format!("{mins}분") };
+    match abs.split_once(" · ") {
+        Some((_, tail)) => format!("{rel} · {tail}"),
+        None => rel,
     }
 }
 

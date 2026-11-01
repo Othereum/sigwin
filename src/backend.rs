@@ -334,6 +334,9 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
     let mut memtick = tokio::time::interval(Duration::from_secs(10));
     let mut sweeptick = tokio::time::interval(SWEEP_EVERY);
     sweeptick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // relative times ("3분") in the thread list age
+    let mut agetick = tokio::time::interval(Duration::from_secs(30));
+    agetick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             cmd = cmd_rx.recv() => match cmd {
@@ -344,6 +347,19 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
             _ = tick.tick() => app.flush().await,
             _ = memtick.tick() => info!("mem: {}", crate::alloc::report()),
             _ = sweeptick.tick() => app.sweep(),
+            _ = agetick.tick() => {
+                let mut changed = false;
+                for t in app.threads.iter_mut().filter(|t| t.ts != 0) {
+                    let s = view::time_short(t.ts);
+                    if s != t.time {
+                        t.time = s;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    app.emit_threads().await;
+                }
+            }
         }
     }
     app.save_persist();
@@ -953,6 +969,7 @@ impl App {
                     unread: self.persist.unread.get(&key).copied().unwrap_or(0),
                     is_group: matches!(row.thread, Thread::Group(_)),
                     time: view::time_short(display_ts),
+                    ts: display_ts,
                     key,
                     name,
                     snippet,
@@ -973,6 +990,7 @@ impl App {
                         name: if g.title.is_empty() { "그룹".into() } else { g.title },
                         snippet: String::new(),
                         time: String::new(),
+                        ts: 0,
                         unread: 0,
                         is_group: true,
                     },
@@ -1095,6 +1113,7 @@ impl App {
                         name: if c.name.is_empty() { phone } else { c.name },
                         snippet: "새 대화 시작".into(),
                         time: String::new(),
+                        ts: 0,
                         unread: 0,
                         is_group: false,
                     });

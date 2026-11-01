@@ -35,6 +35,8 @@ pub struct ThreadDto {
     pub name: String,
     pub snippet: String,
     pub time: String,
+    /// last activity (ms), 0 = none; `time` is derived from it
+    pub ts: u64,
     pub unread: u32,
     pub is_group: bool,
 }

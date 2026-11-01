@@ -125,6 +125,22 @@ fn update_rows(ui: &mut Ui, items: &[MsgDto], dark: bool) {
     }
 }
 
+/// Re-derives the relative times of recent bubbles ("3분") as the minutes pass.
+fn refresh_times(ui: &Ui) {
+    use slint::Model;
+    for (i, m) in ui.last.iter().enumerate().rev().take(100) {
+        let Ok(ts) = m.id.parse::<u64>() else { continue };
+        let t = view::bubble_time(ts, &m.time);
+        let t = if m.pinned { format!("📌 {t}") } else { t };
+        if let Some(mut row) = ui.messages.row_data(i) {
+            if row.time.as_str() != t {
+                row.time = t.into();
+                ui.messages.set_row_data(i, row);
+            }
+        }
+    }
+}
+
 /// Put the typing bubble at the end of the message list, or take it away.
 fn sync_typing(ui: &mut Ui) {
     if ui.typing_row {
@@ -287,7 +303,10 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, senders: &HashMap<String
         text: m.text.as_str().into(),
         has_rich,
         rich: if has_rich { rich_text(m, &links, dark) } else { Default::default() },
-        time: if m.pinned { format!("📌 {}", m.time).into() } else { m.time.as_str().into() },
+        time: {
+            let t = m.id.parse::<u64>().map_or(m.time.clone(), |ts| view::bubble_time(ts, &m.time));
+            if m.pinned { format!("📌 {t}").into() } else { t.into() }
+        },
         outgoing: m.outgoing,
         show_sender: m.show_sender,
         avatar_col: m.avatar_col,
@@ -943,6 +962,10 @@ fn main() -> anyhow::Result<()> {
     if headless::active() {
         app.invoke_set_dark(headless::dark());
     }
+    let age_timer = Box::leak(Box::new(slint::Timer::default()));
+    age_timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(30), || {
+        UI.with_borrow(|ui| refresh_times(ui));
+    });
     UI.with_borrow(|ui| {
         app.set_threads(ModelRc::from(ui.threads.clone()));
         app.set_messages(ModelRc::from(ui.messages.clone()));
@@ -1560,6 +1583,7 @@ fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Co
             name: ["김민준", "이서연", "박지훈", "가족 단톡방", "Alice", "프로젝트 팀"][i % 6].to_string(),
             snippet: "내일 몇 시에 만날까? 저녁 7시쯤 어때요".into(),
             time: if i < 3 { "오후 3:12".into() } else { format!("10월 {}일", 30 - (i % 28)) },
+            ts: 0,
             unread: if i % 5 == 0 { (i % 7) as u32 + 1 } else { 0 },
             is_group: i % 6 == 3 || i % 6 == 5,
         })
