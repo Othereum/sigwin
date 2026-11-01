@@ -87,6 +87,52 @@ pub(crate) fn is_foreground(_: &AppWindow) -> bool {
     true
 }
 
+/// A toast was clicked: window to the front, its thread open.
+pub(crate) fn open_from_toast(app: &AppWindow, key: &str) {
+    to_front(app);
+    app.set_settings_open(false);
+    if app.get_current_key().as_str() != key {
+        app.invoke_open_thread(key.into());
+    }
+}
+
+#[cfg(windows)]
+fn to_front(app: &AppWindow) {
+    use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow,
+        SW_RESTORE,
+    };
+    let hwnd = hwnd(app) as *mut std::ffi::c_void;
+    if hwnd.is_null() {
+        return;
+    }
+    // SAFETY: Win32 calls on our own window; the input attach is undone right after
+    unsafe {
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        if SetForegroundWindow(hwnd) != 0 {
+            return;
+        }
+        // the foreground lock can refuse us: borrow the foreground thread's input state
+        let fg = GetWindowThreadProcessId(GetForegroundWindow(), std::ptr::null_mut());
+        let me = GetCurrentThreadId();
+        let attached = fg != 0 && fg != me && AttachThreadInput(me, fg, 1) != 0;
+        BringWindowToTop(hwnd);
+        let ok = SetForegroundWindow(hwnd) != 0;
+        if attached {
+            AttachThreadInput(me, fg, 0);
+        }
+        tracing::debug!(ok, attached, "toast: window to front");
+    }
+}
+
+#[cfg(not(windows))]
+fn to_front(app: &AppWindow) {
+    app.show().ok();
+}
+
 /// Slint exposes neither focus nor minimize/restore: hook the window procedure once the
 /// native window exists (it is created when the event loop starts).
 pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {

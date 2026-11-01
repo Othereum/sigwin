@@ -87,6 +87,10 @@ fn main() -> anyhow::Result<()> {
     let emit: backend::Emit = Arc::new(move |ev: Event| {
         let _ = weak.upgrade_in_event_loop(move |app| apply(&app, ev));
     });
+    let weak = app.as_weak();
+    toast::on_click(move |key| {
+        let _ = weak.upgrade_in_event_loop(move |app| open_from_toast(&app, &key));
+    });
     if std::env::var_os("SIGWIN_DEMO").is_some() {
         demo::start(&app, emit, cmd_rx);
     } else {

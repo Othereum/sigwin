@@ -6353,6 +6353,7 @@ dependencies = [
  "slint",
  "slint-build",
  "sqlx",
+ "tauri-winrt-notification",
  "tokio",
  "tracing",
  "tracing-subscriber",

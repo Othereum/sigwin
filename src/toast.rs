@@ -1,14 +1,41 @@
-//! Notification identity. Without an AppUserModelID notify-rust borrows PowerShell's, so
-//! toasts said "Windows PowerShell". We register our own under HKCU (name + icon); no
-//! installer or shortcut needed.
+//! Notifications. On Windows we drive the WinRT toast directly (the crate notify-rust uses)
+//! to get the click: it opens the toast's thread while we're running. Without our own
+//! AppUserModelID toasts said "Windows PowerShell"; we register one under HKCU (name + icon),
+//! no installer or shortcut needed. No COM activator: clicks after exit do nothing.
+
+use std::sync::OnceLock;
 
 pub const APP_ID: &str = "Sigwin";
 
-pub fn notification() -> notify_rust::Notification {
-    let mut n = notify_rust::Notification::new();
-    #[cfg(windows)]
-    n.app_id(APP_ID);
-    n
+type OnClick = Box<dyn Fn(String) + Send + Sync>;
+static ON_CLICK: OnceLock<OnClick> = OnceLock::new();
+
+/// What a click on a toast does with its thread key (called on a WinRT thread).
+pub fn on_click(f: impl Fn(String) + Send + Sync + 'static) {
+    let _ = ON_CLICK.set(Box::new(f));
+}
+
+/// Shows a toast (blocking: run it off the UI and backend threads). `key` is the thread a
+/// click opens.
+#[cfg(windows)]
+pub fn show(title: &str, body: &str, key: Option<String>) -> anyhow::Result<()> {
+    let mut t = tauri_winrt_notification::Toast::new(APP_ID).title(title).text1(body);
+    if let Some(key) = key {
+        t = t.on_activated(move |_| {
+            if let Some(f) = ON_CLICK.get() {
+                f(key.clone());
+            }
+            Ok(())
+        });
+    }
+    t.show()?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn show(title: &str, body: &str, _key: Option<String>) -> anyhow::Result<()> {
+    notify_rust::Notification::new().summary(title).body(body).show()?;
+    Ok(())
 }
 
 /// Writes `HKCU\Software\Classes\AppUserModelId\Sigwin` (DisplayName, IconUri) and the icon

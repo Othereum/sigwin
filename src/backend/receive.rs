@@ -212,7 +212,7 @@ impl App {
                         (Thread::Group(_), s) => format!("{} — {}", self.name(s.raw_uuid()).await, title),
                         _ => title,
                     };
-                    notify(title, body);
+                    notify(title, body, key.clone());
                 }
             }
             Kind::Msg { outgoing: true, .. } => {
@@ -336,10 +336,10 @@ pub(super) async fn send_receipts(
     }
 }
 
-pub(super) fn notify(title: String, body: String) {
+pub(super) fn notify(title: String, body: String, key: String) {
     let Some((title, body)) = crate::settings::toast_text(title, body) else { return };
     tokio::task::spawn_blocking(move || {
-        if let Err(e) = crate::toast::notification().summary(&title).body(&body).show() {
+        if let Err(e) = crate::toast::show(&title, &body, Some(key)) {
             debug!("notification: {e}");
         }
     });
