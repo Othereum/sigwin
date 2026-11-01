@@ -315,9 +315,7 @@ pub(crate) fn selftest() {
                 toast::show(toast::Toast {
                     title: "selftest".into(),
                     body: "toast".into(),
-                    picture: Some(toast::Picture::Initial { text: "S".into(), rgb: 0x3a77c9 }),
-                    sound: false,
-                    key: String::new(),
+                    picture: Some(toast::Picture::Initial { text: "S".into(), rgb: 0x3a77c9 }),                    key: String::new(),
                     msg: None,
                 });
             }

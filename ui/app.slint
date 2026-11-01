@@ -69,7 +69,6 @@ export component AppWindow inherits Window {
     in-out property <bool> settings-open;
     in-out property <bool> set-notify: true;
     in-out property <int> set-preview;
-    in-out property <bool> set-sound: true;
     in-out property <bool> set-badge: true;
     in-out property <int> set-theme;
     // index into the zoom steps (see settings::ZOOMS)
@@ -635,7 +634,6 @@ export component AppWindow inherits Window {
         height: root.height;
         notify <=> root.set-notify;
         preview <=> root.set-preview;
-        sound <=> root.set-sound;
         badge <=> root.set-badge;
         theme <=> root.set-theme;
         zoom <=> root.set-zoom;

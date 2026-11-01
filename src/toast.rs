@@ -28,8 +28,6 @@ pub struct Toast {
     pub title: String,
     pub body: String,
     pub picture: Option<Picture>,
-    /// Windows' IM sound, else silent
-    pub sound: bool,
     /// chat a click opens
     pub key: String,
     /// sent timestamp of the message a click shows
@@ -104,7 +102,7 @@ fn run(op: Op) {
     match op {
         Op::Show(t, token) => {
             let picture = t.picture.as_ref().and_then(|p| DIR.get().and_then(|d| write_picture(d, p)));
-            let xml = toast_xml(&t.title, &t.body, picture.as_deref(), t.sound, &token);
+            let xml = toast_xml(&t.title, &t.body, picture.as_deref(), &token);
             #[cfg(windows)]
             if let Err(e) = win::show(&xml) {
                 tracing::debug!("toast: {e}");
@@ -193,15 +191,16 @@ fn identicon(_: &str, _: u32, _: u32) -> Option<image::RgbaImage> {
     None
 }
 
-/// Signal Desktop's toast XML: ToastImageAndText02 with the photo, else ToastText02.
-fn toast_xml(title: &str, body: &str, picture: Option<&Path>, sound: bool, token: &str) -> String {
+/// Signal Desktop's toast XML: ToastImageAndText02 with the photo, else ToastText02. The IM
+/// sound is always asked for; whether it plays is the app's switch in Windows' notification
+/// settings (Signal's own "sound" setting is an extra in-app sound, not this).
+fn toast_xml(title: &str, body: &str, picture: Option<&Path>, token: &str) -> String {
     let (template, image) = match picture {
         Some(p) => ("ToastImageAndText02", format!(r#"<image id="1" src="{}" hint-crop="circle"/>"#, esc(&file_uri(p)))),
         None => ("ToastText02", String::new()),
     };
-    let audio = if sound { r#"<audio src="ms-winsoundevent:Notification.IM"/>"# } else { r#"<audio silent="true"/>"# };
     format!(
-        r#"<toast launch="{}" activationType="foreground"><visual><binding template="{template}">{image}<text id="1">{}</text><text id="2">{}</text></binding></visual>{audio}</toast>"#,
+        r#"<toast launch="{}" activationType="foreground"><visual><binding template="{template}">{image}<text id="1">{}</text><text id="2">{}</text></binding></visual><audio src="ms-winsoundevent:Notification.IM"/></toast>"#,
         esc(token),
         esc(title),
         esc(body),
@@ -320,14 +319,13 @@ mod tests {
 
     #[test]
     fn xml_escapes_and_picks_template() {
-        let x = toast_xml("A & <B>", "\"hi\"\u{1}", None, true, "1-2");
+        let x = toast_xml("A & <B>", "\"hi\"\u{1}", None, "1-2");
         assert!(x.contains(r#"template="ToastText02""#));
         assert!(x.contains("Notification.IM"));
-        assert!(toast_xml("t", "b", None, false, "1").contains(r#"<audio silent="true"/>"#));
         assert!(x.contains("<text id=\"1\">A &amp; &lt;B&gt;</text>"));
         assert!(x.contains("<text id=\"2\">&quot;hi&quot;</text>"));
         assert!(x.contains(r#"launch="1-2""#));
-        let x = toast_xml("t", "b", Some(Path::new(r"C:\Users\김 철수\open\toast-1.png")), true, "1");
+        let x = toast_xml("t", "b", Some(Path::new(r"C:\Users\김 철수\open\toast-1.png")), "1");
         assert!(x.contains(r#"template="ToastImageAndText02""#));
         assert!(x.contains(r#"src="file:///C:/Users/%EA%B9%80%20%EC%B2%A0%EC%88%98/open/toast-1.png""#));
     }
@@ -339,9 +337,9 @@ mod tests {
         use windows::core::HSTRING;
         use windows::Data::Xml::Dom::XmlDocument;
         use windows::UI::Notifications::ToastNotification;
-        for (pic, sound) in [(None, true), (Some(Path::new(r"C:\tmp\a b\toast-1.png")), false)] {
+        for pic in [None, Some(Path::new(r"C:\tmp\a b\toast-1.png"))] {
             let doc = XmlDocument::new().unwrap();
-            doc.LoadXml(&HSTRING::from(toast_xml("김 & <철수>", "\"안녕\" 👍", pic, sound, "1-2"))).unwrap();
+            doc.LoadXml(&HSTRING::from(toast_xml("김 & <철수>", "\"안녕\" 👍", pic, "1-2"))).unwrap();
             ToastNotification::CreateToastNotification(&doc).unwrap();
         }
     }

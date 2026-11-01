@@ -1,8 +1,9 @@
 //! User settings (`settings.json` in the data folder). Owned by the UI thread; the backend
-//! only reads the notification mode and sound through atomics.
+//! only reads the notification mode through an atomic. The toast sound is Windows' per-app
+//! notification setting, not ours.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -12,8 +13,6 @@ pub struct Settings {
     pub notify: bool,
     /// 0 = sender and text, 1 = sender only, 2 = neither
     pub preview: u8,
-    /// toasts play the Windows IM sound
-    pub sound: bool,
     pub badge: bool,
     /// 0 = follow the system, 1 = light, 2 = dark
     pub theme: u8,
@@ -25,7 +24,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { notify: true, preview: 0, sound: true, badge: true, theme: 0, zoom: 100, enter_sends: true }
+        Self { notify: true, preview: 0, badge: true, theme: 0, zoom: 100, enter_sends: true }
     }
 }
 
@@ -55,9 +54,7 @@ impl Settings {
 
     /// Makes the notification choice visible to the backend thread.
     pub fn publish(&self) {
-        NOTIFY.store(if self.notify { self.preview } else { OFF }, Ordering::Relaxed);
-        SOUND.store(self.sound, Ordering::Relaxed);
-    }
+        NOTIFY.store(if self.notify { self.preview } else { OFF }, Ordering::Relaxed);    }
 }
 
 pub fn path(data_dir: &Path) -> PathBuf {
@@ -66,12 +63,6 @@ pub fn path(data_dir: &Path) -> PathBuf {
 
 const OFF: u8 = 255;
 static NOTIFY: AtomicU8 = AtomicU8::new(0);
-static SOUND: AtomicBool = AtomicBool::new(true);
-
-/// Whether toasts make a sound.
-pub fn sound() -> bool {
-    SOUND.load(Ordering::Relaxed)
-}
 
 pub fn notify_enabled() -> bool {
     NOTIFY.load(Ordering::Relaxed) != OFF
