@@ -750,31 +750,36 @@ fn apply(app: &AppWindow, ev: Event) {
                 header_avatar(app, ui);
             }
         }),
+        Event::StickerThumbs(list) => {
+            if !app.get_sticker_open() {
+                return;
+            }
+            UI.with_borrow_mut(|ui| {
+                let mut fresh = HashMap::with_capacity(list.len());
+                for t in list {
+                    let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
+                    fresh.insert(t.key, Image::from_rgba8(buf));
+                }
+                for (i, p) in ui.pack_dtos.iter().enumerate() {
+                    if let Some(img) = fresh.get(&p.cover_key) {
+                        ui.sticker_thumbs.insert(p.cover_key.clone(), img.clone());
+                        slint::Model::set_row_data(&*ui.packs, i, pack_item(p, &ui.sticker_thumbs));
+                    }
+                }
+                for (i, s) in ui.grid.iter().enumerate() {
+                    if let Some(img) = fresh.get(&s.key) {
+                        if let Some(mut row) = slint::Model::row_data(&*ui.stickers, i) {
+                            row.img = img.clone();
+                            slint::Model::set_row_data(&*ui.stickers, i, row);
+                        }
+                    }
+                }
+                ui.sticker_thumbs.extend(fresh);
+            });
+        }
         Event::Thumb(t) => {
             let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
             let img = Image::from_rgba8(buf);
-            if t.key.starts_with(types::STICKER_THUMB_PREFIX) {
-                if !app.get_sticker_open() {
-                    return;
-                }
-                UI.with_borrow_mut(|ui| {
-                    ui.sticker_thumbs.insert(t.key.clone(), img.clone());
-                    for (i, p) in ui.pack_dtos.iter().enumerate() {
-                        if p.cover_key == t.key {
-                            slint::Model::set_row_data(&*ui.packs, i, pack_item(p, &ui.sticker_thumbs));
-                        }
-                    }
-                    for (i, s) in ui.grid.iter().enumerate() {
-                        if s.key == t.key {
-                            if let Some(mut row) = slint::Model::row_data(&*ui.stickers, i) {
-                                row.img = img.clone();
-                                slint::Model::set_row_data(&*ui.stickers, i, row);
-                            }
-                        }
-                    }
-                });
-                return;
-            }
             UI.with_borrow_mut(|ui| {
                 ui.thumbs.insert(t.key.clone(), img.clone());
                 for (i, m) in ui.last.iter().enumerate() {
@@ -1889,10 +1894,9 @@ fn demo_stickers(emit: backend::Emit) {
         if std::env::var("SIGWIN_DEMO_STICKERS").as_deref() != Ok("add") {
             emit(Event::StickerGrid { pack: "p0".into(), items });
         }
-        for i in 0..20u32 {
-            emit(Event::Thumb(Arc::new(demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8))));
-        }
-        emit(Event::Thumb(Arc::new(demo_blob("sp_p1_0", 96, 200))));
+        let mut thumbs: Vec<_> = (0..20u32).map(|i| demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8)).collect();
+        thumbs.push(demo_blob("sp_p1_0", 96, 200));
+        emit(Event::StickerThumbs(thumbs));
     });
 }
 

@@ -169,6 +169,8 @@ pub enum Event {
     /// scroll the message list to row `id` (already in the last `Messages`) and flash it
     JumpTo(String),
     Thumb(Arc<Thumb>),
+    /// sticker picker images (grid cells, pack covers), batched
+    StickerThumbs(Vec<Thumb>),
     /// round photo of a thread (key = thread key); width 0 = none
     Avatar(Arc<Thumb>),
     Status(String),

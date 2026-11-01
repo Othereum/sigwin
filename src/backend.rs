@@ -1822,6 +1822,7 @@ impl App {
             cached.remove(&id);
         }
         let mut loaded = 0;
+        let mut jobs = Vec::new();
         for raw in ids {
             let id = hex::encode(&raw);
             let hit = cached.get(&raw).filter(|(_, cover)| match cover {
@@ -1852,13 +1853,14 @@ impl App {
                 Some(cid) => {
                     let base = sticker_thumb_key(&id, cid);
                     let key = format!("{base}-c");
-                    self.sticker_thumb(&base, key.clone(), bytes, PACK_COVER);
+                    jobs.push(StickerJob { base, key: key.clone(), bytes, fit: PACK_COVER });
                     key
                 }
                 None => String::new(),
             };
             out.push(PackDto { id, title, installed: true, cover_key });
         }
+        self.sticker_thumbs(jobs);
         debug!(ms = started.elapsed().as_millis() as u64, packs = out.len(), loaded, "sticker packs");
         for (id, _, title) in BLESSED_PACKS {
             if !installed.contains(*id) {
@@ -1877,10 +1879,11 @@ impl App {
         let all_thumbs = |me: &Self| cached.iter().all(|(sid, _)| me.sticker_cover_path(hex_id, *sid).exists());
         let mut items = Vec::new();
         let from_cache = !cached.is_empty() && all_thumbs(self);
+        let mut jobs = Vec::new();
         if from_cache {
             for (sid, emoji) in cached {
                 let key = sticker_thumb_key(hex_id, sid);
-                self.sticker_thumb(&key, key.clone(), None, PICKER_CELL);
+                jobs.push(StickerJob { base: key.clone(), key: key.clone(), bytes: None, fit: PICKER_CELL });
                 items.push(StickerDto { key, id: sid, emoji });
             }
         } else {
@@ -1889,7 +1892,7 @@ impl App {
             items.reserve(pack.manifest.stickers.len());
             for s in pack.manifest.stickers {
                 let key = sticker_thumb_key(hex_id, s.id);
-                self.sticker_thumb(&key, key.clone(), s.bytes, PICKER_CELL);
+                jobs.push(StickerJob { base: key.clone(), key: key.clone(), bytes: s.bytes, fit: PICKER_CELL });
                 let emoji = s.emoji.unwrap_or_default();
                 meta.push((s.id, emoji.clone()));
                 items.push(StickerDto { key, id: s.id, emoji });
@@ -1898,6 +1901,7 @@ impl App {
                 warn!("cache stickers: {e}");
             }
         }
+        self.sticker_thumbs(jobs);
         debug!(ms = started.elapsed().as_millis() as u64, stickers = items.len(), from_cache, "open pack");
         (self.emit)(Event::StickerGrid { pack: hex_id.to_string(), items });
     }
@@ -1906,32 +1910,35 @@ impl App {
         self.paths.thumbs.join(format!("{}-{THUMB_MAX}.png", sticker_thumb_key(pack_hex, id)))
     }
 
-    /// `base` names the disk cache, `key` the emitted image (a pack cover and its grid cell differ in size).
-    /// The resampled result is cached too (`-<px>px.png`): resampling costs ~40x the decode.
-    fn sticker_thumb(&self, base: &str, key: String, bytes: Option<Vec<u8>>, fit: u32) {
-        let thumb_path = self.paths.thumbs.join(format!("{base}-{THUMB_MAX}.png"));
-        let fitted = self.paths.thumbs.join(format!("{base}-{}px.png", crate::types::physical_px(fit)));
-        if bytes.is_none() && !fitted.exists() && !thumb_path.exists() {
-            return;
+    /// Picker images, made on both blocking threads (interleaved, so the top of the grid fills
+    /// first) and sent in batches: one UI update per ~30ms instead of one per sticker.
+    fn sticker_thumbs(&self, jobs: Vec<StickerJob>) {
+        let mut lanes: [Vec<StickerJob>; 2] = Default::default();
+        for (i, j) in jobs.into_iter().filter(|j| j.bytes.is_some() || j.has_cache(&self.paths.thumbs)).enumerate() {
+            lanes[i % 2].push(j);
         }
-        let emit = self.emit.clone();
-        tokio::task::spawn_blocking(move || {
-            let res = match sigwin_thumb::open_rgba(&fitted) {
-                Ok(rgba) => Ok(Thumb { key: key.clone(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() }),
-                Err(_) => make_thumb_from(&key, || bytes.context("no sticker bytes"), THUMB_MAX, &thumb_path, fit)
-                    .inspect(|t| {
-                        if let Some(img) = image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone()) {
-                            if let Err(e) = img.save(&fitted) {
-                                warn!("save fitted thumb: {e}");
-                            }
-                        }
-                    }),
-            };
-            match res {
-                Ok(t) => emit(Event::Thumb(Arc::new(t))),
-                Err(e) => debug!("sticker thumb {key}: {e}"),
-            }
-        });
+        for lane in lanes.into_iter().filter(|l| !l.is_empty()) {
+            let emit = self.emit.clone();
+            let dir = self.paths.thumbs.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut batch = Vec::new();
+                let mut last = std::time::Instant::now();
+                for j in lane {
+                    let key = j.key.clone();
+                    match j.make(&dir) {
+                        Ok(t) => batch.push(t),
+                        Err(e) => debug!("sticker thumb {key}: {e}"),
+                    }
+                    if last.elapsed() >= std::time::Duration::from_millis(30) {
+                        emit(Event::StickerThumbs(std::mem::take(&mut batch)));
+                        last = std::time::Instant::now();
+                    }
+                }
+                if !batch.is_empty() {
+                    emit(Event::StickerThumbs(batch));
+                }
+            });
+        }
     }
 
     async fn send_sticker(&mut self, hex_id: &str, sticker_id: u32) {
@@ -2499,6 +2506,46 @@ fn remove_legacy_sticker_thumbs(dir: &Path) {
         if name.starts_with(STICKER_THUMB_PREFIX) && !name.contains('-') {
             let _ = std::fs::remove_file(e.path());
         }
+    }
+}
+
+/// One picker image: `base` names the disk cache, `key` the emitted image (a pack cover and its
+/// grid cell differ in size).
+struct StickerJob {
+    base: String,
+    key: String,
+    bytes: Option<Vec<u8>>,
+    fit: u32,
+}
+
+impl StickerJob {
+    fn source(&self, dir: &Path) -> PathBuf {
+        dir.join(format!("{}-{THUMB_MAX}.png", self.base))
+    }
+
+    fn fitted(&self, dir: &Path) -> PathBuf {
+        dir.join(format!("{}-{}px.png", self.base, crate::types::physical_px(self.fit)))
+    }
+
+    fn has_cache(&self, dir: &Path) -> bool {
+        self.fitted(dir).exists() || self.source(dir).exists()
+    }
+
+    /// The resampled result is cached too (`-<px>px.png`): resampling costs ~10x the decode.
+    fn make(self, dir: &Path) -> anyhow::Result<Thumb> {
+        let fitted = self.fitted(dir);
+        if let Ok(rgba) = sigwin_thumb::open_rgba(&fitted) {
+            return Ok(Thumb { key: self.key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() });
+        }
+        let source = self.source(dir);
+        let bytes = self.bytes;
+        let t = make_thumb_from(&self.key, || bytes.context("no sticker bytes"), THUMB_MAX, &source, self.fit)?;
+        if let Some(img) = image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone()) {
+            if let Err(e) = img.save(&fitted) {
+                warn!("save fitted thumb: {e}");
+            }
+        }
+        Ok(t)
     }
 }
 
