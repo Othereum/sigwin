@@ -3283,7 +3283,18 @@ impl<T: ProcessScene> sharedparley::GlyphRenderer for SceneBuilder<'_, T> {
         // quantizes the glyph origin and the clip it cuts glyphs with. Truncating here puts a
         // selection highlight edge a whole pixel away from the glyph clip meant to line up with it,
         // as soon as the item's own offset lands on a fractional device pixel.
-        let geometry: PhysicalRect = physical_rect.round().cast().transformed(self.rotation);
+        // lite-signal patch: keep thin fills (underlines are <1px at 14px) at least one pixel,
+        // otherwise rounding both edges drops them on every other line depending on its y
+        let mut rounded = physical_rect.round();
+        if rounded.size.height < 1.0 && physical_rect.size.height > 0.0 {
+            rounded.origin.y = (physical_rect.origin.y + physical_rect.size.height / 2.0 - 0.5).round();
+            rounded.size.height = 1.0;
+        }
+        if rounded.size.width < 1.0 && physical_rect.size.width > 0.0 {
+            rounded.origin.x = (physical_rect.origin.x + physical_rect.size.width / 2.0 - 0.5).round();
+            rounded.size.width = 1.0;
+        }
+        let geometry: PhysicalRect = rounded.cast().transformed(self.rotation);
         // These fills reach the processor directly rather than through `draw_rectangle`, so they
         // have to bring the clip along themselves. Without it a text decoration, a selection
         // highlight or a cursor taller than the item it belongs to paints right over its

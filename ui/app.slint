@@ -22,7 +22,7 @@ export struct MsgItem {
     sender: string,
     sender-color: color,
     text: string,
-    // text with highlighted @mentions (only when has-rich)
+    // text with highlighted @mentions and links (only when has-rich)
     rich: styled-text,
     has-rich: bool,
     time: string,
@@ -62,6 +62,11 @@ export struct StickerItem {
     id: int,
     emoji: string,
     img: image,
+}
+
+// clickable links in message text (see src/link.rs)
+export global Links {
+    callback cursor-moved(string, int, int);
 }
 
 export global Theme {
@@ -325,7 +330,7 @@ component Bubble inherits VerticalLayout {
                         }
                     }
                 }
-                // With @mentions the visible glyphs come from a StyledText underneath (same font and
+                // With @mentions or links the visible glyphs come from a StyledText underneath (same font and
                 // size, only colors differ, so it lays out like the TextInput) and the TextInput on
                 // top is transparent, keeping selection. StyledText swallows every mouse event, so a
                 // TouchArea between them takes the right clicks the read-only TextInput ignores.
@@ -357,6 +362,11 @@ component Bubble inherits VerticalLayout {
                             font-size: m.big-emoji ? 40px : 14px;
                             selection-background-color: m.outgoing ? #ffffff60 : #2c6bed60;
                             selection-foreground-color: m.outgoing ? white : Theme.text;
+                            cursor-position-changed => {
+                                if (m.has-rich) {
+                                    Links.cursor-moved(m.text, self.cursor-position-byte-offset, self.anchor-position-byte-offset);
+                                }
+                            }
                         }
                     }
                 }

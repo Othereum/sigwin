@@ -7,6 +7,7 @@ mod picker;
 mod db;
 mod emoji;
 mod headless;
+mod link;
 mod mention;
 mod secret;
 mod types;
@@ -134,26 +135,33 @@ thread_local! {
     static UI: RefCell<Ui> = RefCell::default();
 }
 
-/// Message text with the @mentions colored. The colored text is drawn inside a TextInput
-/// whose own glyphs are transparent, so selection keeps working; only colors change,
-/// never the font, so both lay out identically.
-fn mention_text(m: &MsgDto, dark: bool) -> slint::StyledText {
+/// Message text with the @mentions colored and links underlined. The styled text is drawn
+/// under a TextInput whose own glyphs are transparent, so selection keeps working; only
+/// colors and underlines change, never the font, so both lay out identically.
+fn rich_text(m: &MsgDto, links: &[(usize, usize)], dark: bool) -> slint::StyledText {
     use slint::private_unstable_api::re_exports::parse_markdown;
-    let color = match (m.outgoing, dark) {
-        (true, _) => "#ffe27a",
-        (false, true) => "#7aa7ff",
-        (false, false) => "#1f5fd6",
+    let (mention, link) = match (m.outgoing, dark) {
+        (true, _) => ("#ffe27a", "#ffffff"),
+        (false, true) => ("#7aa7ff", "#7aa7ff"),
+        (false, false) => ("#1f5fd6", "#1f5fd6"),
     };
+    let mut spans: Vec<(usize, usize, bool)> = m.mentions.iter().map(|&(s, e, _)| (s, e, false)).collect();
+    spans.extend(links.iter().map(|&(s, e)| (s, e, true)));
+    spans.sort_unstable();
     // placeholders are filled with plain text verbatim, so user text is never parsed as markdown
     const P: char = '\u{e541}';
     let mut fmt = String::from(P);
-    let mut args = Vec::with_capacity(m.mentions.len() * 2 + 1);
+    let mut args = Vec::with_capacity(spans.len() * 2 + 1);
     let mut at = 0;
-    for &(s, e, _) in &m.mentions {
-        let (Some(before), Some(name)) = (m.text.get(at..s), m.text.get(s..e)) else { continue };
+    for (s, e, is_link) in spans {
+        let (Some(before), Some(part)) = (m.text.get(at..s), m.text.get(s..e)) else { continue };
         args.push(slint::StyledText::from_plain_text(before));
-        args.push(slint::StyledText::from_plain_text(name));
-        fmt.push_str(&format!("<font color=\"{color}\">{P}</font>{P}"));
+        args.push(slint::StyledText::from_plain_text(part));
+        if is_link {
+            fmt.push_str(&format!("<u><font color=\"{link}\">{P}</font></u>{P}"));
+        } else {
+            fmt.push_str(&format!("<font color=\"{mention}\">{P}</font>{P}"));
+        }
         at = e;
     }
     args.push(slint::StyledText::from_plain_text(&m.text[at..]));
@@ -167,6 +175,8 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, dark: bool) -> MsgItem {
         .iter()
         .map(|(e, n)| ReactionItem { emoji: e.as_str().into(), count: *n as i32 })
         .collect();
+    let links = if m.deleted { Vec::new() } else { link::find(&m.text) };
+    let has_rich = !m.mentions.is_empty() || !links.is_empty();
     MsgItem {
         reactions: ModelRc::new(VecModel::from(reactions)),
         big_emoji: m.big_emoji,
@@ -174,8 +184,8 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, dark: bool) -> MsgItem {
         sender: m.sender.as_str().into(),
         sender_color: tint(&m.sender_key),
         text: m.text.as_str().into(),
-        has_rich: !m.mentions.is_empty(),
-        rich: if m.mentions.is_empty() { Default::default() } else { mention_text(m, dark) },
+        has_rich,
+        rich: if has_rich { rich_text(m, &links, dark) } else { Default::default() },
         time: m.time.as_str().into(),
         outgoing: m.outgoing,
         show_sender: m.show_sender,
@@ -870,6 +880,10 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
         }
     });
 
+    app.global::<Links>().on_cursor_moved(|text, cursor, anchor| {
+        link::cursor_moved(&text, cursor.max(0) as usize, anchor.max(0) as usize);
+    });
+
     if headless::active() {
         return; // no native window to hook
     }
@@ -1022,7 +1036,8 @@ fn demo(emit: backend::Emit) {
     // mentions, incoming and outgoing, with a line break and wrapping
     for (i, text) in [
         (290usize, "@김민준 이거 확인 부탁해요\n그리고 @박지훈 님도 내일 회의 전에 문서 한 번 읽어 주시면 좋겠습니다 <b>*그대로*</b>"),
-        (291, "@이서연 넵 알겠습니다 🙂"),
+        (291, "@이서연 넵 알겠습니다 🙂 자료는 https://signal.org/ko/ 그리고 www.naver.com."),
+        (289, "https://example.com/a_(b) 링크로 시작 가나다라마바사 아자차카타파하 가나다라마바사 아자차카타파하 가나다 보세요 https://x.com/abc 끝 그리고 줄 끝까지 채우는 문장 www.naver.com"),
     ] {
         let m = &mut items[i];
         m.text = text.into();
