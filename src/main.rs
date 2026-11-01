@@ -6,6 +6,7 @@ mod clip;
 mod picker;
 mod db;
 mod emoji;
+mod headless;
 mod mention;
 mod secret;
 mod types;
@@ -432,8 +433,12 @@ fn main() -> anyhow::Result<()> {
         .add_directive("presage=warn".parse()?)
         .add_directive("sqlx=error".parse()?);
     tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
+    headless::install_if_requested()?;
 
     let app = AppWindow::new()?;
+    if headless::active() {
+        app.invoke_set_dark(headless::dark());
+    }
     UI.with_borrow(|ui| {
         app.set_threads(ModelRc::from(ui.threads.clone()));
         app.set_messages(ModelRc::from(ui.messages.clone()));
@@ -865,6 +870,9 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
         }
     });
 
+    if headless::active() {
+        return; // no native window to hook
+    }
     // Slint exposes neither focus nor minimize/restore: hook the window procedure once the
     // native window exists (it is created when the event loop starts).
     let weak = app.as_weak();

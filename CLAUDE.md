@@ -31,7 +31,15 @@ cargo test
 - presage and presage-store-sqlite are git deps pinned to one `rev`. Bump both together, and keep the `[patch.crates-io] libsqlite3-sys` entry in sync with presage's workspace.
 
 ## Verifying UI without an account
-Use the demo modes (synthetic data, no backend): `LITE_SIGNAL_DEMO=1`, plus `LITE_SIGNAL_DEMO_STICKERS=1|add` or `LITE_SIGNAL_DEMO_INFO=1`. Take a screenshot of the window (PrintWindow via PowerShell `System.Drawing`) and look at it. Layout and glyph bugs only show up visually; a successful compile proves nothing about them.
+Use the demo modes (synthetic data, no backend): `LITE_SIGNAL_DEMO=1`, plus `LITE_SIGNAL_DEMO_STICKERS=1|add`, `LITE_SIGNAL_DEMO_INFO=1` or `LITE_SIGNAL_DEMO_MENU=1|edit`. Layout and glyph bugs only show up visually; a successful compile proves nothing about them.
+
+**Run them headless** (`src/headless.rs`): the user works on this PC, so never pop up a window, take focus or move the real mouse. `LITE_SIGNAL_HEADLESS="<steps>"` (or `@file`) renders offscreen with the same software renderer and fonts, feeds scripted input, and exits after the last step:
+```
+$env:LITE_SIGNAL_DATA="<scratch>"; $env:LITE_SIGNAL_DEMO="1"
+$env:LITE_SIGNAL_HEADLESS="wait 500; wheel 650 350 6; click 960 590; type 안녕; key shift+Enter; wait 300; shot <scratch>\a.png"
+.\target\debug\lite-signal.exe
+```
+Steps: `size W H` (logical, default 1000x680), `scale S`, `wait MS`, `move/click/rclick/dblclick X Y`, `drag X1 Y1 X2 Y2`, `wheel X Y N` (+ = up), `type TEXT`, `key [ctrl+][shift+]NAME`, `shot PATH`. Theme follows the system (`LITE_SIGNAL_HEADLESS_THEME=dark|light`). Coordinates are window-client logical px; read them off a previous shot. Not covered (needs a real window, ask the user first): minimize/restore repaint (`winhook.rs`), file dialog, notifications, clipboard, IME composition.
 
 ## Architecture
 ```
@@ -50,6 +58,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |
 | `src/clip.rs` | Ctrl+V: files (CF_HDROP) or images (PNG / DIB streamed to PNG under `paste/`) from the clipboard |
 | `src/alloc.rs` | counting global allocator + `PrivateUsage` |
+| `src/headless.rs` | offscreen test platform: scripted input, PNG shots |
 | `src/winhook.rs` | window-proc subclass: full repaint on restore/activate, focus events |
 | `src/emoji.rs` | emoji-only message detection (grapheme clusters) |
 | `ui/app.slint` | the whole UI |

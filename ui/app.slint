@@ -720,6 +720,10 @@ export component AppWindow inherits Window {
     callback install-pack(string);
     callback add-pack-url(string);
 
+    // headless test mode: no platform color scheme, set it explicitly
+    public function set-dark(d: bool) {
+        Palette.color-scheme = d ? ColorScheme.dark : ColorScheme.light;
+    }
     public function scroll-to-bottom() {
         msg-list.content-y = min(0px, msg-list.visible-height - msg-list.content-height);
     }
