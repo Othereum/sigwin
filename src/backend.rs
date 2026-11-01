@@ -119,6 +119,9 @@ struct Persist {
     /// layout of the attachment and thumbnail caches on disk (`CACHE_FORMAT` once converted)
     #[serde(default)]
     cache_format: u32,
+    /// `snippets` no longer holds misses from the old 20-row scan
+    #[serde(default)]
+    snippets_deep: bool,
 }
 
 #[derive(Default, Clone, Copy, Serialize, Deserialize)]

@@ -55,6 +55,12 @@ impl App {
 
     pub(super) async fn rebuild_threads(&mut self) -> anyhow::Result<()> {
         let rows = self.index.threads().await?;
+        // empty snippets cached while only the last 20 rows were looked at
+        if !self.persist.snippets_deep {
+            self.persist.snippets.retain(|_, (_, _, s)| !s.is_empty());
+            self.persist.snippets_deep = true;
+            self.persist_dirty = true;
+        }
         let mut list: Vec<(u64, ThreadDto)> = Vec::with_capacity(rows.len());
         let mut seen = HashSet::new();
         for row in rows {
@@ -185,16 +191,29 @@ impl App {
         view::snippet(c, self.me, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()))
     }
 
+    /// Newest message that makes a snippet. 1:1 threads collect receipts (also for our group
+    /// messages), so look past them page by page, as far back as opening the thread would.
     pub(super) async fn compute_snippet(&mut self, thread: &Thread, last_ts: u64) -> (u64, String) {
-        let Ok(tss) = self.index.page(thread, last_ts.saturating_add(1), 20).await else {
-            return (last_ts, String::new());
-        };
-        for ts in tss {
-            if let Ok(Some(c)) = self.store.message(thread, ts).await {
-                if let Some(s) = self.snippet(&c).await {
-                    return (ts, s);
+        let mut before = last_ts.saturating_add(1);
+        let mut scanned = 0usize;
+        while scanned < MAX_WINDOW {
+            let Ok(tss) = self.index.page(thread, before, PAGE).await else {
+                return (last_ts, String::new());
+            };
+            let Some(&oldest) = tss.last() else { break };
+            let Ok(rows) = self.fetch_range(thread, &tss).await else {
+                return (last_ts, String::new());
+            };
+            for (ts, c) in rows.iter().rev() {
+                if let Some(s) = self.snippet(c).await {
+                    return (*ts, s);
                 }
             }
+            if (tss.len() as u32) < PAGE {
+                break;
+            }
+            scanned += tss.len();
+            before = oldest;
         }
         (0, String::new())
     }
