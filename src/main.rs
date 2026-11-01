@@ -149,8 +149,9 @@ fn close_stickers(app: &AppWindow) {
 /// only get their real (often taller: quotes, images) height once instantiated, which
 /// grows `content-height` after the first scroll.
 fn stick_to_bottom(app: &AppWindow) {
-    thread_local! {
-        static TIMER: slint::Timer = slint::Timer::default();
+    // a jump to a pinned message owns the scroll position until it lands
+    if !app.get_jump_id().is_empty() {
+        return;
     }
     let weak = app.as_weak();
     let mut last_h = -1.0f32;
@@ -173,6 +174,10 @@ fn stick_to_bottom(app: &AppWindow) {
 
 thread_local! {
     static UI: RefCell<Ui> = RefCell::default();
+    /// stick_to_bottom
+    static TIMER: slint::Timer = slint::Timer::default();
+    /// jump_to_row
+    static JUMP: slint::Timer = slint::Timer::default();
 }
 
 /// Message text with the @mentions colored and links underlined. The styled text is drawn
@@ -290,51 +295,53 @@ fn header_avatar(app: &AppWindow, ui: &Ui) {
     app.set_current_photo(row.photo);
 }
 
-/// Scrolls the message list until row `id` sits a third down the view, then flashes it.
-/// Rows have different heights and only visible ones exist, so this homes in over a few frames:
-/// the row reports its y once instantiated; until then, any visible row and the average
-/// row height give an estimate.
+/// Scrolls the message list until row `id` sits about a third down the view, then flashes it.
+///
+/// Only rows on screen exist, and after every layout the ListView rescales all positions by the
+/// average height of those rows, so positions from different frames don't match. So this
+/// alternates: one frame the target row reports its on-screen position (y and content-y read
+/// together), the next frame acts on it.
+/// - Row on screen: shift by the exact distance (a short scroll lays out real row heights).
+/// - Row not instantiated: content-y = -(idx + 0.5) * average height. That is the ListView's own
+///   "random seek" formula (offset = floor(-content-y / average)) inverted, so for a far target
+///   the row lands at the top of the view; a near one just scrolls toward it.
 fn jump_to_row(app: &AppWindow, id: String) {
-    thread_local! {
-        static TIMER: slint::Timer = slint::Timer::default();
-    }
     let Some(idx) = UI.with_borrow(|ui| ui.last.iter().position(|m| m.id == id)) else { return };
+    TIMER.with(|t| t.stop());
     app.set_jump_id(id.as_str().into());
-    app.set_jump_y(-1.0);
-    app.set_seen_index(-1);
-    let estimate = move |app: &AppWindow| {
-        let n = slint::Model::row_count(&app.get_messages()).max(1) as f32;
-        let avg = app.invoke_content_height() / n;
-        let (si, sy) = (app.get_seen_index(), app.get_seen_y());
-        if si >= 0 { sy + (idx as f32 - si as f32) * avg } else { idx as f32 * avg }
-    };
-    app.invoke_scroll_to_y(estimate(app));
+    app.set_jump_found(false);
+    app.set_jump_probe(app.get_jump_probe() + 1);
     let weak = app.as_weak();
     let mut ticks = 0u32;
-    app.set_jump_probe(app.get_jump_probe() + 1);
-    TIMER.with(|t| {
-        t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(16), move || {
+    JUMP.with(|t| {
+        t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(20), move || {
             let Some(app) = weak.upgrade() else { return };
             ticks += 1;
-            // the ListView re-estimates row positions whenever it scrolls, so chasing an exact y
-            // never settles: stop as soon as the row is on screen
-            let y = app.get_jump_y();
-            let mut done = ticks >= 60;
-            if y >= 0.0 {
-                let pos = app.invoke_list_pos(y);
-                if pos >= 0.0 && pos <= app.invoke_list_visible_height() * 0.7 {
+            if ticks % 2 == 0 {
+                // measure (the layout has caught up with the last move)
+                app.set_jump_found(false);
+                app.set_jump_probe(app.get_jump_probe() + 1);
+                return;
+            }
+            let vh = app.invoke_list_visible_height();
+            let mut done = ticks >= 60;            if app.get_jump_found() {
+                let pos = app.get_jump_pos();
+                if pos >= 0.0 && pos <= vh * 0.6 {
                     done = true;
                 } else {
-                    app.invoke_scroll_to_y(y);
+                    app.invoke_shift_by(pos - vh / 3.0);
                 }
-            } else if app.get_seen_index() >= 0 {
-                app.invoke_scroll_to_y(estimate(&app));
+            } else {
+                // the row may have gone (the list was reloaded without it)
+                // rows above may have been added since (older history, a reload)
+                let jid = app.get_jump_id();
+                let idx = UI.with_borrow(|ui| ui.last.iter().position(|m| m.id == jid.as_str())).unwrap_or(idx);
+                let n = slint::Model::row_count(&app.get_messages()).max(1) as f32;
+                let avg = app.invoke_content_height() / n;
+                app.invoke_set_content_y(-(idx as f32 + 0.5) * avg);
             }
-            app.set_jump_y(-1.0);
-            app.set_seen_index(-1);
-            app.set_jump_probe(app.get_jump_probe() + 1);
             if done {
-                TIMER.with(|t| t.stop());
+                JUMP.with(|t| t.stop());
                 let id = app.get_jump_id();
                 app.set_jump_id(SharedString::new());
                 app.set_flash_id(id.clone());
@@ -1487,8 +1494,29 @@ fn demo(emit: backend::Emit) {
         .iter()
         .map(|&(i, who)| types::PinDto { id: i.to_string(), sender: who.into(), text: items[i].text.replace('\n', " ") })
         .collect();
-    emit(Event::Messages { key: "c:demo-1".into(), items, can_older: false, scroll: Scroll::Bottom });
+    let reload = std::env::var_os("SIGWIN_DEMO_RELOAD").is_some();
+    if reload {
+        // like a real account: photos make rows very uneven in height
+        for (i, m) in items.iter_mut().enumerate().filter(|(i, _)| i % 9 == 4 && *i < 290) {
+            m.image_key = format!("demo-photo-{i}");
+            (m.img_w, m.img_h) = if i % 2 == 0 { (260, 195) } else { (195, 260) };
+        }
+    }
+    emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), can_older: false, scroll: Scroll::Bottom });
     emit(Event::Pins(pins));
+    if reload {
+        // ... and the list is re-sent all the time (receipts, typing, reactions)
+        let emit = emit.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            emit(Event::Messages {
+                key: "c:demo-1".into(),
+                items: items.clone(),
+                can_older: false,
+                scroll: Scroll::KeepIfNotAtBottom,
+            });
+        });
+    }
     // one sender with a photo, the other falls back to the initial
     photo(format!("{}demo-a", avatar::MSG_PREFIX), 1, avatar::MSG_SIZE);
     emit(Event::Status("데모 모드".into()));

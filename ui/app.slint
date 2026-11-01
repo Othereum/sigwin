@@ -1039,13 +1039,13 @@ export component AppWindow inherits Window {
     // the bar was clicked: scroll to that message
     callback pin-clicked(string);
     callback unpin(string);
-    // jump to a row: the row with this id reports its y in the list (whenever jump-probe changes)
+    // jump to a row: whenever jump-probe changes, the row with this id (if instantiated) reports
+    // where it is on screen (0 = top of the list). Its y and content-y are read together because
+    // the ListView renormalizes both on every layout.
     in-out property <string> jump-id;
-    in-out property <length> jump-y: -1px;
+    in-out property <bool> jump-found;
+    in-out property <length> jump-pos;
     in-out property <int> jump-probe;
-    // some other instantiated row (to estimate where the target is while it isn't instantiated)
-    in-out property <int> seen-index: -1;
-    in-out property <length> seen-y;
     // flash the jumped-to row
     in-out property <string> flash-id;
     // message menu (right click); menu-id is "" when closed
@@ -1099,13 +1099,8 @@ export component AppWindow inherits Window {
     public function content-height() -> length {
         return msg-list.content-height;
     }
-    // scroll so that content position y sits a third down the visible list
-    public function scroll-to-y(y: length) {
-        msg-list.content-y = max(msg-list.visible-height - msg-list.content-height, min(0px, msg-list.visible-height / 3 - y));
-    }
-    // where content position y currently is on screen (0 = top of the list)
-    public function list-pos(y: length) -> length {
-        return y + msg-list.content-y;
+    public function set-content-y(y: length) {
+        msg-list.content-y = max(msg-list.visible-height - msg-list.content-height, min(0px, y));
     }
     public function list-visible-height() -> length {
         return msg-list.visible-height;
@@ -1294,18 +1289,15 @@ export component AppWindow inherits Window {
                             root.load-older();
                         }
                     }
-                    for m[i] in root.messages: Bubble {
+                    for m in root.messages: Bubble {
                         m: m;
                         max-w: min(560px, msg-list.visible-width * 0.75);
                         flash: m.id == root.flash-id;
                         property <int> probe: root.jump-probe;
                         changed probe => {
                             if (m.id == root.jump-id) {
-                                root.jump-y = self.y;
-                            } else if (self.y + msg-list.content-y >= 0 && self.y + msg-list.content-y < msg-list.visible-height) {
-                                // recycled rows off screen keep stale positions
-                                root.seen-index = i;
-                                root.seen-y = self.y;
+                                root.jump-pos = self.y + msg-list.content-y;
+                                root.jump-found = true;
                             }
                         }
                         attachment-clicked(id) => { root.attachment-clicked(id); }
