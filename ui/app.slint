@@ -503,6 +503,7 @@ component Bubble inherits VerticalLayout {
                                 text: m.text;
                                 read-only: true;
                                 single-line: false;
+                                text-cursor-width: 0px; // selectable, but no blinking caret
                                 wrap: word-wrap;
                                 color: m.has-rich ? transparent : m.deleted ? Theme.subtle : (m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? white : Theme.text);
                                 font-italic: m.deleted;
