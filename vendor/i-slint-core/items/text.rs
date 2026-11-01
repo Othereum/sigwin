@@ -997,6 +997,11 @@ impl Item for TextInput {
                     }
                     return InputEventResult::GrabMouse;
                 }
+                // sigwin patch: a read-only text (message bubble) lets plain hover moves through
+                // to the item below, so the bubble's TouchArea sees has-hover over the text too.
+                if self.read_only() {
+                    return InputEventResult::EventIgnored;
+                }
             }
             _ => return InputEventResult::EventIgnored,
         }

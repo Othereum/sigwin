@@ -302,6 +302,48 @@ component MsgImage inherits Rectangle {
     }
 }
 
+// hover toolbar beside a bubble: reply, more (the menu has the reactions)
+component MsgTools inherits Rectangle {
+    in property <bool> shown;
+    out property <bool> hovered: ta-reply.has-hover || ta-more.has-hover || gap.has-hover;
+    callback reply();
+    callback more(length, length);
+    width: 2 * 28px + 8px;
+    height: 28px;
+    opacity: shown || hovered ? 1.0 : 0.0;
+    // 4px transparent gap next to the bubble keeps the hover from dropping while crossing to the buttons
+    gap := TouchArea { }
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        for icon[i] in ["↩", "⋯"]: Rectangle {
+            width: 28px;
+            border-radius: 14px;
+            background: (i == 0 ? ta-reply.has-hover : ta-more.has-hover) ? Theme.hover : transparent;
+            Text {
+                text: icon;
+                font-family: "Segoe UI Symbol";
+                font-size: 16px;
+                color: Theme.subtle;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+    ta-reply := TouchArea {
+        x: 4px;
+        width: 28px;
+        mouse-cursor: pointer;
+        clicked => { root.reply(); }
+    }
+    ta-more := TouchArea {
+        x: 32px;
+        width: 28px;
+        mouse-cursor: pointer;
+        clicked => { root.more(self.absolute-position.x, self.absolute-position.y); }
+    }
+}
+
 component Bubble inherits VerticalLayout {
     in property <MsgItem> m;
     in property <length> max-w;
@@ -421,6 +463,13 @@ component Bubble inherits VerticalLayout {
                         root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
                     }
                 }
+            }
+            if !m.pending && !m.deleted: tools := MsgTools {
+                x: m.outgoing ? -self.width : parent.width;
+                y: (parent.height - self.height) / 2;
+                shown: bta.has-hover;
+                reply => { root.reply(m.id); }
+                more(x, y) => { root.menu(m.id, x, y + 28px); }
             }
             VerticalLayout {
                 spacing: 0px;
