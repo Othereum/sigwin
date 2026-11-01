@@ -17,6 +17,10 @@ use super::*;
 /// that visually marks them as code.
 const INLINE_CODE_FONT_SCALE: f32 = 0.85;
 
+/// sigwin patch: CJK fonts tried after the requested family (Japanese, Simplified, Traditional).
+/// Missing ones are skipped by fontique.
+const SIGWIN_CJK_FAMILIES: [&str; 3] = ["Yu Gothic UI", "Microsoft YaHei UI", "Microsoft JhengHei UI"];
+
 std::thread_local! {
     static LAYOUT_CONTEXT: RefCell<parley::LayoutContext<Brush>> = Default::default();
 }
@@ -83,25 +87,30 @@ impl LayoutWithoutLineBreaksBuilder {
         }
 
         if let Some(ref font_request) = self.font_request {
-            let mut fallback_family_iter = sharedfontique::FALLBACK_FAMILIES
+            // sigwin patch: per-script fallback picks one font per script (for Han on Korean
+            // Windows: Malgun Gothic, which lacks Japanese/Chinese-only ideographs like 駅 鉄).
+            // Named CJK families after the requested one cover those glyph by glyph; fonts
+            // are only loaded once a cluster reaches them.
+            let mut fallback_family_iter = SIGWIN_CJK_FAMILIES
                 .into_iter()
-                .map(parley::style::FontFamilyName::Generic);
+                .map(parley::style::FontFamilyName::named)
+                .chain(
+                    sharedfontique::FALLBACK_FAMILIES
+                        .into_iter()
+                        .map(parley::style::FontFamilyName::Generic),
+                );
 
+            const N: usize =
+                SIGWIN_CJK_FAMILIES.len() + sharedfontique::FALLBACK_FAMILIES.as_slice().len();
             let font_families: &[parley::style::FontFamilyName] = if let Some(family) =
                 &font_request.family
             {
                 let mut iter =
                     core::iter::once(parley::style::FontFamilyName::named(family.as_str()))
                         .chain(fallback_family_iter);
-                &core::array::from_fn::<
-                    _,
-                    { sharedfontique::FALLBACK_FAMILIES.as_slice().len() + 1 },
-                    _,
-                >(|_| iter.next().unwrap())
+                &core::array::from_fn::<_, { N + 1 }, _>(|_| iter.next().unwrap())
             } else {
-                &core::array::from_fn::<_, { sharedfontique::FALLBACK_FAMILIES.as_slice().len() }, _>(
-                    |_| fallback_family_iter.next().unwrap(),
-                )
+                &core::array::from_fn::<_, N, _>(|_| fallback_family_iter.next().unwrap())
             };
 
             builder.push_default(parley::style::FontFamily::List(std::borrow::Cow::Borrowed(
