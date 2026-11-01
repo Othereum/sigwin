@@ -126,7 +126,33 @@ thread_local! {
     static UI: RefCell<Ui> = RefCell::default();
 }
 
-fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>) -> MsgItem {
+/// Message text with the @mentions colored. The colored text is drawn inside a TextInput
+/// whose own glyphs are transparent, so selection keeps working; only colors change,
+/// never the font, so both lay out identically.
+fn mention_text(m: &MsgDto, dark: bool) -> slint::StyledText {
+    use slint::private_unstable_api::re_exports::parse_markdown;
+    let color = match (m.outgoing, dark) {
+        (true, _) => "#ffe27a",
+        (false, true) => "#7aa7ff",
+        (false, false) => "#1f5fd6",
+    };
+    // placeholders are filled with plain text verbatim, so user text is never parsed as markdown
+    const P: char = '\u{e541}';
+    let mut fmt = String::from(P);
+    let mut args = Vec::with_capacity(m.mentions.len() * 2 + 1);
+    let mut at = 0;
+    for &(s, e) in &m.mentions {
+        let (Some(before), Some(name)) = (m.text.get(at..s), m.text.get(s..e)) else { continue };
+        args.push(slint::StyledText::from_plain_text(before));
+        args.push(slint::StyledText::from_plain_text(name));
+        fmt.push_str(&format!("<font color=\"{color}\">{P}</font>{P}"));
+        at = e;
+    }
+    args.push(slint::StyledText::from_plain_text(&m.text[at..]));
+    parse_markdown(&fmt, &args)
+}
+
+fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, dark: bool) -> MsgItem {
     let image = thumbs.get(&m.image_key).cloned();
     let reactions: Vec<ReactionItem> = m
         .reactions
@@ -140,6 +166,8 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>) -> MsgItem {
         sender: m.sender.as_str().into(),
         sender_color: tint(&m.sender_key),
         text: m.text.as_str().into(),
+        has_rich: !m.mentions.is_empty(),
+        rich: if m.mentions.is_empty() { Default::default() } else { mention_text(m, dark) },
         time: m.time.as_str().into(),
         outgoing: m.outgoing,
         show_sender: m.show_sender,
@@ -242,7 +270,8 @@ fn apply(app: &AppWindow, ev: Event) {
             let near_bottom = app.get_near_bottom();
             let before_h = app.invoke_content_height();
             UI.with_borrow_mut(|ui| {
-                ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs)).collect::<Vec<_>>());
+                let dark = app.global::<Theme>().get_dark();
+                ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, dark)).collect::<Vec<_>>());
                 ui.last = items;
             });
             app.set_can_load_older(can_older);
@@ -882,6 +911,15 @@ fn demo(emit: backend::Emit) {
     // deleted for everyone: by us (right) and by someone else (left)
     view::set_deleted(&mut items[293]);
     items[292] = MsgDto { id: "292".into(), time: "오후 3:12".into(), deleted: true, text: "삭제된 메시지입니다".into(), ..Default::default() };
+    // mentions, incoming and outgoing, with a line break and wrapping
+    for (i, text) in [
+        (290usize, "@김민준 이거 확인 부탁해요\n그리고 @박지훈 님도 내일 회의 전에 문서 한 번 읽어 주시면 좋겠습니다 <b>*그대로*</b>"),
+        (291, "@이서연 넵 알겠습니다 🙂"),
+    ] {
+        let m = &mut items[i];
+        m.text = text.into();
+        m.mentions = text.match_indices('@').map(|(s, _)| (s, s + text[s..].find(' ').unwrap())).collect();
+    }
     emit(Event::Ready);
     emit(Event::Threads(threads));
     emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });

@@ -72,6 +72,8 @@ pub struct MsgDto {
     /// ours, text only, young enough to edit / delete for everyone
     pub can_edit: bool,
     pub can_delete: bool,
+    /// "@name" byte ranges in `text`, drawn highlighted
+    pub mentions: Vec<(usize, usize)>,
 }
 
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.

@@ -22,6 +22,9 @@ export struct MsgItem {
     sender: string,
     sender-color: color,
     text: string,
+    // text with highlighted @mentions (only when has-rich)
+    rich: styled-text,
+    has-rich: bool,
     time: string,
     outgoing: bool,
     show-sender: bool,
@@ -55,7 +58,7 @@ export struct StickerItem {
     img: image,
 }
 
-global Theme {
+export global Theme {
     out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
     out property <color> accent: #2c6bed;
     out property <color> sidebar: dark ? #1b1b1d : #f6f6f8;
@@ -316,17 +319,40 @@ component Bubble inherits VerticalLayout {
                         }
                     }
                 }
-                if m.text != "": TextInput {
-                    text: m.text;
-                    read-only: true;
-                    single-line: false;
-                    wrap: word-wrap;
-                    color: m.deleted ? Theme.subtle : (m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? white : Theme.text);
-                    font-italic: m.deleted;
-                    // emoji-only messages are shown large (color comes from the patched renderer)
-                    font-size: m.big-emoji ? 40px : 14px;
-                    selection-background-color: m.outgoing ? #ffffff60 : #2c6bed60;
-                    selection-foreground-color: m.outgoing ? white : Theme.text;
+                // With @mentions the visible glyphs come from a StyledText underneath (same font and
+                // size, only colors differ, so it lays out like the TextInput) and the TextInput on
+                // top is transparent, keeping selection. StyledText swallows every mouse event, so a
+                // TouchArea between them takes the right clicks the read-only TextInput ignores.
+                if m.text != "": Rectangle {
+                    if m.has-rich: StyledText {
+                        width: parent.width;
+                        height: parent.height;
+                        text: m.rich;
+                        default-color: m.outgoing && !m.sticker ? white : Theme.text;
+                        default-font-size: 14px;
+                    }
+                    if m.has-rich: TouchArea {
+                        double-clicked => { root.reply(m.id); }
+                        pointer-event(e) => {
+                            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                                root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        TextInput {
+                            text: m.text;
+                            read-only: true;
+                            single-line: false;
+                            wrap: word-wrap;
+                            color: m.has-rich ? transparent : m.deleted ? Theme.subtle : (m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? white : Theme.text);
+                            font-italic: m.deleted;
+                            // emoji-only messages are shown large (color comes from the patched renderer)
+                            font-size: m.big-emoji ? 40px : 14px;
+                            selection-background-color: m.outgoing ? #ffffff60 : #2c6bed60;
+                            selection-foreground-color: m.outgoing ? white : Theme.text;
+                        }
+                    }
                 }
                 HorizontalLayout {
                     alignment: end;

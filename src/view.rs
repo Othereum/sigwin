@@ -182,15 +182,34 @@ pub fn mentioned(dm: &DataMessage) -> Vec<Uuid> {
 
 /// Replaces mention ranges (a U+FFFC placeholder in the text, offsets in UTF-16 units) with "@name".
 pub fn with_mentions(text: &str, ranges: &[BodyRange], name_of: &dyn Fn(&Uuid) -> String) -> String {
+    let mut out = String::new();
+    push_with_mentions(&mut out, text, ranges, name_of, &mut Vec::new());
+    out
+}
+
+/// Appends `text` to `out` with mentions replaced; records each "@name" as a byte range of `out`.
+fn push_with_mentions(
+    out: &mut String,
+    text: &str,
+    ranges: &[BodyRange],
+    name_of: &dyn Fn(&Uuid) -> String,
+    spans: &mut Vec<(usize, usize)>,
+) {
     let mut ms: Vec<(usize, usize, Uuid)> = ranges
         .iter()
         .filter_map(|r| Some((r.start? as usize, r.length.unwrap_or(0) as usize, mention_uuid(r)?)))
         .collect();
     if ms.is_empty() {
-        return text.to_string();
+        out.push_str(text);
+        return;
     }
     ms.sort_by_key(|m| m.0);
-    let mut out = String::with_capacity(text.len() + 16 * ms.len());
+    let mut mention = |out: &mut String, uuid: &Uuid| {
+        let start = out.len();
+        out.push('@');
+        out.push_str(&name_of(uuid));
+        spans.push((start, out.len()));
+    };
     let mut next = ms.iter().peekable();
     let mut pos = 0; // UTF-16 offset of the current char
     let mut skip_until = 0;
@@ -201,8 +220,7 @@ pub fn with_mentions(text: &str, ranges: &[BodyRange], name_of: &dyn Fn(&Uuid) -
             }
             next.next();
             if start == pos && pos >= skip_until {
-                out.push('@');
-                out.push_str(&name_of(&uuid));
+                mention(out, &uuid);
                 skip_until = pos + len;
             }
         }
@@ -214,15 +232,18 @@ pub fn with_mentions(text: &str, ranges: &[BodyRange], name_of: &dyn Fn(&Uuid) -
     // a mention at the very end
     if let Some(&(start, _, uuid)) = next.next() {
         if start >= skip_until {
-            out.push('@');
-            out.push_str(&name_of(&uuid));
+            mention(out, &uuid);
         }
     }
-    out
 }
 
 /// Body text of a data message, with placeholders for content we don't render.
 fn body_text(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
+    body_text_spans(dm, name_of, &mut Vec::new())
+}
+
+/// `body_text`, recording where the mentions ended up (byte ranges).
+fn body_text_spans(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String, spans: &mut Vec<(usize, usize)>) -> String {
     let mut parts: Vec<String> = Vec::new();
     if dm.is_view_once.unwrap_or(false) {
         parts.push("[한 번 보기 미디어 — 휴대폰에서 확인하세요]".into());
@@ -243,7 +264,12 @@ fn body_text(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
         parts.push("[선물 배지]".into());
     }
     if let Some(b) = dm.body.as_deref().filter(|b| !b.is_empty()) {
-        parts.push(with_mentions(b, &dm.body_ranges, name_of));
+        let mut out = parts.join("\n");
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        push_with_mentions(&mut out, b, &dm.body_ranges, name_of, spans);
+        return out;
     }
     parts.join("\n")
 }
@@ -400,7 +426,7 @@ pub fn build(
                     _ => (dm, false),
                 };
                 m.outgoing = outgoing;
-                m.text = body_text(dm, name_of);
+                m.text = body_text_spans(dm, name_of, &mut m.mentions);
                 // stickers with image data render as a borderless picture instead of text
                 if let Some(data) = dm.sticker.as_ref().and_then(|s| s.data.as_ref()) {
                     let key = attachment_key(data, *ts, 99);
@@ -409,7 +435,15 @@ pub fn build(
                     m.img_w = STICKER_SIZE;
                     m.img_h = STICKER_SIZE;
                     m.sticker = true;
-                    m.text = with_mentions(dm.body.as_deref().unwrap_or_default(), &dm.body_ranges, name_of);
+                    m.text.clear();
+                    m.mentions.clear();
+                    push_with_mentions(
+                        &mut m.text,
+                        dm.body.as_deref().unwrap_or_default(),
+                        &dm.body_ranges,
+                        name_of,
+                        &mut m.mentions,
+                    );
                 }
                 if !outgoing {
                     m.sender = name_of(&sender);
@@ -518,6 +552,7 @@ pub fn set_my_reaction(m: &mut MsgDto, emoji: Option<&str>) {
 /// Optimistic update while an edit is being sent.
 pub fn set_edited_text(m: &mut MsgDto, text: &str) {
     m.text = text.to_string();
+    m.mentions.clear();
     if !m.time.ends_with("수정됨") {
         m.time = format!("{} · 수정됨", m.time);
     }
@@ -624,6 +659,17 @@ mod tests {
             associated_value: Some(AssociatedValue::MentionAciBinary(a.as_bytes().to_vec())),
         };
         assert_eq!(with_mentions("hi \u{FFFC}", &[bin], &name), "hi @철수");
+        // spans point at the "@name"s, after placeholder parts like a sticker label
+        let dm = DataMessage {
+            body: Some(text.into()),
+            body_ranges: vec![r(0, a), r(5, b)],
+            is_view_once: Some(true),
+            ..Default::default()
+        };
+        let mut spans = Vec::new();
+        let t = body_text_spans(&dm, &name, &mut spans);
+        let got: Vec<&str> = spans.iter().map(|&(s, e)| &t[s..e]).collect();
+        assert_eq!(got, ["@철수", "@영희"]);
     }
 
     #[test]
