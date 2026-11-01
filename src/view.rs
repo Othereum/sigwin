@@ -415,12 +415,6 @@ pub struct Built {
 /// Group rows from others get a photo column; the photo sits on the last row of each sender's run.
 /// Rows followed by one of the same run and minute drop their time / status (`hide_time`).
 pub fn mark_avatar_runs(items: &mut [MsgDto]) {
-    // Whoever read a message has read everything before it: a reader's photo stays on the newest
-    // message they read only.
-    let mut seen = std::collections::HashSet::new();
-    for m in items.iter_mut().rev().filter(|m| m.outgoing && !m.readers.is_empty()) {
-        m.readers.retain(|(u, _)| seen.insert(u.clone()));
-    }
     for i in 0..items.len() {
         let m = &items[i];
         let col = !m.outgoing && !m.system;
@@ -613,6 +607,12 @@ pub fn build(
             prev_day = Some(day);
         }
         items.push(m);
+    }
+    // Whoever read a message has read everything before it: a reader's photo stays on the newest
+    // message they read only (1:1 and groups).
+    let mut seen = std::collections::HashSet::new();
+    for m in items.iter_mut().rev().filter(|m| m.outgoing && !m.readers.is_empty()) {
+        m.readers.retain(|(u, _)| seen.insert(u.clone()));
     }
     if is_group {
         mark_avatar_runs(&mut items);
