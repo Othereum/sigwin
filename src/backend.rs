@@ -820,12 +820,7 @@ impl App {
             if let Ok(Some(key)) = self.store.profile_key(&sid).await {
                 if let Ok(Some(p)) = self.store.profile(uuid, key).await {
                     if let Some(n) = p.name {
-                        name = match n.family_name.filter(|f| !f.is_empty()) {
-                            Some(f) => format!("{} {}", n.given_name, f),
-                            None => n.given_name,
-                        }
-                        .trim()
-                        .to_string();
+                        name = combine_names(&n.given_name, n.family_name.as_deref().unwrap_or(""));
                     }
                 }
             }
@@ -2258,6 +2253,29 @@ fn dir_size(dir: &Path) -> u64 {
         .sum()
 }
 
+/// Profile display name like the official apps: CJK names are family first with no space
+/// ("홍길동"), everything else "given family".
+fn combine_names(given: &str, family: &str) -> String {
+    let (given, family) = (given.trim(), family.trim());
+    if given.is_empty() || family.is_empty() {
+        return format!("{given}{family}");
+    }
+    if is_cjk(given) && is_cjk(family) {
+        format!("{family}{given}")
+    } else {
+        format!("{given} {family}")
+    }
+}
+
+fn is_cjk(s: &str) -> bool {
+    s.chars().all(|c| {
+        matches!(c as u32,
+            0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xAC00..=0xD7FF // Hangul
+            | 0x3040..=0x30FF | 0x31F0..=0x31FF | 0xFF66..=0xFF9F // kana
+            | 0x3005 | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x20000..=0x3FFFF) // Han
+    })
+}
+
 /// Removes the folder's contents, keeping the folder.
 fn clear_dir(dir: &Path) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -2295,6 +2313,16 @@ mod tests {
         // edge pixels must not pick up the green of transparent neighbours
         assert!(out.pixels().all(|p| p[3] == 0 || p[1] < 8), "green fringe");
         assert_eq!(downscale(image::RgbaImage::new(50, 40), 130).dimensions(), (50, 40));
+    }
+
+    #[test]
+    fn combines_profile_names() {
+        assert_eq!(combine_names("길동", "홍"), "홍길동");
+        assert_eq!(combine_names("太郎", "山田"), "山田太郎");
+        assert_eq!(combine_names("John", "Smith"), "John Smith");
+        assert_eq!(combine_names("길동", "Hong"), "길동 Hong");
+        assert_eq!(combine_names(" 홍길동 ", ""), "홍길동");
+        assert_eq!(combine_names("", "홍"), "홍");
     }
 
     #[test]
