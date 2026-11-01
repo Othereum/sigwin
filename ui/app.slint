@@ -465,6 +465,7 @@ component Bubble inherits VerticalLayout {
                 if m.text != "": HorizontalLayout {
                     spacing: 8px;
                     if m.text != "": Rectangle {
+                        horizontal-stretch: 1;
                         VerticalLayout {
                             TextInput {
                                 text: m.text;
