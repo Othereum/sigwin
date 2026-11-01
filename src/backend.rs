@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use futures::{channel::oneshot, pin_mut, StreamExt};
@@ -15,8 +15,12 @@ use presage::libsignal_service::protocol::ServiceId;
 use presage::libsignal_service::sender::AttachmentSpec;
 use presage::manager::Registered;
 use presage::model::messages::Received;
-use presage::proto::data_message::Quote;
-use presage::proto::{receipt_message, AttachmentPointer, ReceiptMessage, SyncMessage};
+use presage::libsignal_service::zkgroup::groups::{GroupMasterKey, GroupSecretParams};
+use presage::proto::data_message::{Delete, Quote, Reaction};
+use presage::proto::sync_message::Content as SyncContent;
+use presage::proto::{
+    receipt_message, typing_message, AttachmentPointer, EditMessage, ReceiptMessage, SyncMessage, TypingMessage,
+};
 use presage::store::{ContentExt, ContentsStore, StateStore, Store, Thread};
 use presage::Manager;
 use presage_store_sqlite::{OnNewIdentity, SqliteConnectOptions, SqliteStore};
@@ -37,6 +41,14 @@ pub type Emit = Arc<dyn Fn(Event) + Send + Sync>;
 
 const PAGE: u32 = 60;
 const MAX_WINDOW: usize = 600;
+/// presage sends to each group member one by one: skip typing indicators in larger groups
+const TYPING_MAX_GROUP: usize = 12;
+/// Signal clients resend "typing" every few seconds and give up on silent typists after 15s
+const TYPING_RESEND: Duration = Duration::from_secs(10);
+const TYPING_IDLE: Duration = Duration::from_secs(5);
+const TYPING_TIMEOUT: Duration = Duration::from_secs(15);
+/// how often to look for expired disappearing messages
+const SWEEP_EVERY: Duration = Duration::from_secs(300);
 
 pub struct Paths {
     pub db: PathBuf,
@@ -66,6 +78,22 @@ struct Persist {
     /// receipts already stored before the receipt index existed have been indexed
     #[serde(default)]
     receipts_indexed: bool,
+    /// the phone's "typing indicators" setting (configuration sync); None = not received yet
+    #[serde(default)]
+    typing_indicators: Option<bool>,
+    /// disappearing-message sweep progress per thread
+    #[serde(default)]
+    sweep: HashMap<String, SweepState>,
+}
+
+#[derive(Default, Clone, Copy, Serialize, Deserialize)]
+struct SweepState {
+    /// every message up to here has been looked at
+    scanned: u64,
+    /// oldest looked-at message whose timer still runs (rescan from here once `due`)
+    hold: Option<u64>,
+    /// earliest expiry among the held messages
+    due: u64,
 }
 
 enum Internal {
@@ -77,6 +105,31 @@ enum Internal {
     Status(String),
     PackInstalled(Result<String, String>),
     ReceiptsIndexed,
+    Swept { sweep: HashMap<String, SweepState>, changed: Vec<String> },
+}
+
+/// A reaction, edit or delete we sent that presage has not stored yet. Shown optimistically.
+struct PendingOp {
+    ts: u64,
+    thread_key: String,
+    /// row (window timestamp) of the target message
+    row: u64,
+    op: Op,
+}
+
+enum Op {
+    /// None: reaction taken back
+    React(Option<String>),
+    Edit(String),
+    Delete,
+}
+
+/// We are typing in this thread (typing indicator sent).
+struct Composing {
+    key: String,
+    thread: Thread,
+    last_edit: Instant,
+    last_sent: Instant,
 }
 
 /// A message we sent that presage has not stored yet (it stores only after the server accepts it).
@@ -97,6 +150,8 @@ struct Open {
     is_group: bool,
     /// group members (ACI uuids), empty for 1:1
     members: Vec<Uuid>,
+    /// group identifier (what typing messages carry), None for 1:1
+    group_id: Option<[u8; 32]>,
     window: Vec<(u64, Content)>,
     has_more: bool,
 }
@@ -118,6 +173,14 @@ struct App {
     threads_dirty: bool,
     thumbs_requested: HashSet<String>,
     pending: Vec<Pending>,
+    ops: Vec<PendingOp>,
+    /// who is typing in the open thread
+    typing: HashMap<Uuid, Instant>,
+    typing_shown: String,
+    composing: Option<Composing>,
+    /// a disappearing message in the open window expires then
+    next_expiry: Option<u64>,
+    sweeping: bool,
     focused: bool,
     synced: bool,
     tx: UnboundedSender<Internal>,
@@ -205,6 +268,12 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         threads_dirty: false,
         thumbs_requested: HashSet::new(),
         pending: Vec::new(),
+        ops: Vec::new(),
+        typing: HashMap::new(),
+        typing_shown: String::new(),
+        composing: None,
+        next_expiry: None,
+        sweeping: false,
         focused: true,
         synced: false,
         tx,
@@ -230,6 +299,8 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut memtick = tokio::time::interval(Duration::from_secs(10));
+    let mut sweeptick = tokio::time::interval(SWEEP_EVERY);
+    sweeptick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             cmd = cmd_rx.recv() => match cmd {
@@ -239,6 +310,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
             Some(ev) = rx.recv() => Box::pin(app.internal(ev)).await,
             _ = tick.tick() => app.flush().await,
             _ = memtick.tick() => info!("mem: {}", crate::alloc::report()),
+            _ = sweeptick.tick() => app.sweep(),
         }
     }
     app.save_persist();
@@ -369,6 +441,10 @@ impl App {
             },
             Command::InstallPackFromMessage(id) => self.install_pack_from_message(&id),
             Command::StickerClicked(id) => self.sticker_clicked(&id).await,
+            Command::React { id, emoji, remove } => self.react(&id, emoji, remove).await,
+            Command::Edit { id, text } => self.edit(&id, text).await,
+            Command::Delete(id) => self.delete(&id).await,
+            Command::Composing(active) => self.composing(active),
         }
     }
 
@@ -415,6 +491,7 @@ impl App {
             Internal::Sent(ts, Ok(())) => {
                 // presage stored the message before returning: swap the stub for the real row now
                 self.pending.retain(|p| p.ts != ts);
+                self.ops.retain(|o| o.ts != ts);
                 if let Err(e) = self.reload_window().await {
                     warn!("reload window: {e:#}");
                 }
@@ -422,6 +499,17 @@ impl App {
             }
             Internal::Sent(ts, Err(e)) => {
                 warn!("send {ts} failed: {e}");
+                if let Some(i) = self.ops.iter().position(|o| o.ts == ts) {
+                    // nothing to retry from: drop the optimistic change
+                    let what = match self.ops.remove(i).op {
+                        Op::React(_) => "반응",
+                        Op::Edit(_) => "수정",
+                        Op::Delete => "삭제",
+                    };
+                    self.status(format!("{what} 실패: {e}"));
+                    self.emit_messages(Scroll::KeepIfNotAtBottom).await;
+                    return;
+                }
                 self.status(format!("전송 실패: {e}"));
                 if let Some(p) = self.pending.iter_mut().find(|p| p.ts == ts) {
                     p.error = Some(e);
@@ -443,12 +531,30 @@ impl App {
                 self.current_dirty = true;
             }
             Internal::PackInstalled(Err(e)) => self.status(format!("스티커 팩 추가 실패: {e}")),
+            Internal::Swept { sweep, changed } => {
+                self.sweeping = false;
+                self.persist.sweep = sweep;
+                self.persist_dirty = true;
+                for key in &changed {
+                    self.persist.snippets.remove(key);
+                    if self.current.as_ref().is_some_and(|o| &o.key == key) {
+                        self.current_dirty = true;
+                    }
+                }
+                if !changed.is_empty() {
+                    info!("disappearing messages removed in {} threads", changed.len());
+                    self.threads_dirty = true;
+                }
+            }
         }
     }
 
     async fn received(&mut self, r: Received) {
         match r {
             Received::QueueEmpty => {
+                if !self.synced {
+                    self.sweep();
+                }
                 self.synced = true;
                 self.status("");
                 self.threads_dirty = true;
@@ -478,6 +584,24 @@ impl App {
             }
         }
 
+        if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Configuration(cfg)), .. }) = &c.body {
+            if let Some(on) = cfg.typing_indicators {
+                info!(on, "typing indicators setting");
+                self.persist.typing_indicators = Some(on);
+                self.persist_dirty = true;
+                if !on {
+                    self.typing.clear();
+                    self.composing = None;
+                    self.emit_typing().await;
+                }
+            }
+        }
+
+        if let ContentBody::TypingMessage(t) = &c.body {
+            self.typing_received(c.metadata.sender.raw_uuid(), t).await;
+            return;
+        }
+
         if let Kind::Receipt { read, targets } = view::classify(&c, self.me) {
             debug!("receipt from {who} for {targets:?} read={read}", who = c.metadata.sender.raw_uuid());
             let who = c.metadata.sender.raw_uuid();
@@ -498,6 +622,10 @@ impl App {
         let kind = view::classify(&c, self.me);
         match kind {
             Kind::Msg { outgoing: false, .. } => {
+                // a message ends its sender's typing indicator
+                if is_open && self.typing.remove(&c.metadata.sender.raw_uuid()).is_some() {
+                    self.emit_typing().await;
+                }
                 if c.metadata.needs_receipt {
                     self.pending_receipts.entry(c.metadata.sender).or_default().push(c.timestamp());
                 }
@@ -531,6 +659,21 @@ impl App {
 
     /// Periodic work: coalesces bursts of incoming messages into one UI update.
     async fn flush(&mut self) {
+        if self.next_expiry.is_some_and(|t| t <= view::now_ms()) {
+            self.next_expiry = None;
+            self.current_dirty = true;
+            self.sweep();
+        }
+        if self.composing.as_ref().is_some_and(|c| c.last_edit.elapsed() >= TYPING_IDLE) {
+            if let Some(c) = self.composing.take() {
+                self.send_typing(c.thread, false);
+            }
+        }
+        let typists = self.typing.len();
+        self.typing.retain(|_, t| t.elapsed() < TYPING_TIMEOUT);
+        if self.typing.len() != typists {
+            self.emit_typing().await;
+        }
         if self.current_dirty {
             self.current_dirty = false;
             if let Err(e) = self.reload_window().await {
@@ -742,33 +885,24 @@ impl App {
             window = older;
         }
         let is_group = matches!(thread, Thread::Group(_));
-        let name = self.thread_name(&thread).await;
-        let mut members = Vec::new();
-        let sub = match &thread {
-            Thread::Group(k) => match self.store.group(*k).await {
-                Ok(Some(g)) => {
-                    members = g.members.iter().map(|m| Uuid::from(m.aci)).collect();
-                    format!("멤버 {}명", g.members.len())
-                }
-                _ => String::new(),
-            },
-            Thread::Contact(id) => self
-                .store
-                .contact_by_id(id)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|c| c.phone_number)
-                .map(|p| p.to_string())
-                .unwrap_or_default(),
-        };
-        (self.emit)(Event::Header { name, sub });
+        let members = self.emit_header(&thread).await;
         self.thumbs_requested.clear();
+        // leaving a thread we were typing in
+        if let Some(c) = self.composing.take() {
+            self.send_typing(c.thread, false);
+        }
+        self.typing.clear();
+        self.emit_typing().await;
+        let group_id = match &thread {
+            Thread::Group(k) => Some(group_identifier(k)),
+            _ => None,
+        };
         self.current = Some(Open {
             thread,
             key: key.to_string(),
             is_group,
             members,
+            group_id,
             has_more: tss.len() as u32 == PAGE,
             window,
         });
@@ -823,8 +957,11 @@ impl App {
                 self.fetch_range(&thread, &tss).await?
             }
         };
+        // the header carries the disappearing-message timer, which may just have changed
+        let members = self.emit_header(&thread).await;
         if let Some(open) = self.current.as_mut() {
             open.window = window;
+            open.members = members;
         }
         if self.focused {
             if let Some(key) = self.current.as_ref().map(|o| o.key.clone()) {
@@ -869,7 +1006,18 @@ impl App {
         });
         let key = open.key.clone();
         let can_older = open.has_more && open.window.len() < MAX_WINDOW;
+        let next_expiry = built.next_expiry;
         let mut items = built.items;
+        for op in self.ops.iter().filter(|o| o.thread_key == key) {
+            let row = op.row.to_string();
+            if let Some(m) = items.iter_mut().find(|m| m.id == row) {
+                match &op.op {
+                    Op::React(e) => view::set_my_reaction(m, e.as_deref()),
+                    Op::Edit(t) => view::set_edited_text(m, t),
+                    Op::Delete => view::set_deleted(m),
+                }
+            }
+        }
         let mut prev = open.window.last().map(|(t, _)| *t);
         for p in self.pending.iter().filter(|p| p.thread_key == key) {
             if open.window.iter().any(|(t, _)| *t == p.ts) {
@@ -883,7 +1031,290 @@ impl App {
                 self.request_thumb(k, ptr, fit);
             }
         }
+        self.next_expiry = next_expiry;
         (self.emit)(Event::Messages { key, items, can_older, scroll });
+    }
+
+    /// Emits the conversation header; returns the group members (empty for 1:1).
+    async fn emit_header(&mut self, thread: &Thread) -> Vec<Uuid> {
+        let name = self.thread_name(thread).await;
+        let mut members = Vec::new();
+        let mut parts = Vec::new();
+        match thread {
+            Thread::Group(k) => {
+                if let Ok(Some(g)) = self.store.group(*k).await {
+                    members = g.members.iter().map(|m| Uuid::from(m.aci)).collect();
+                    parts.push(format!("멤버 {}명", g.members.len()));
+                }
+            }
+            Thread::Contact(id) => {
+                if let Some(p) = self.store.contact_by_id(id).await.ok().flatten().and_then(|c| c.phone_number) {
+                    parts.push(p.to_string());
+                }
+            }
+        }
+        if let Ok(Some((t, _))) = self.store.expire_timer(thread).await {
+            if t > 0 {
+                parts.push(format!("사라지는 메시지 {}", view::timer_label(t)));
+            }
+        }
+        (self.emit)(Event::Header { name, sub: parts.join(" · ") });
+        members
+    }
+
+    // ---- typing indicators ----
+
+    fn typing_enabled(&self) -> bool {
+        self.persist.typing_indicators != Some(false)
+    }
+
+    async fn typing_received(&mut self, who: Uuid, t: &TypingMessage) {
+        if who == self.me || !self.typing_enabled() {
+            return;
+        }
+        let Some(open) = self.current.as_ref() else { return };
+        let here = match (&t.group_id, &open.group_id) {
+            (Some(g), Some(o)) => g.as_slice() == o.as_slice(),
+            (None, None) => matches!(&open.thread, Thread::Contact(id) if id.raw_uuid() == who),
+            _ => false,
+        };
+        if !here {
+            return;
+        }
+        // presage can't send "online only": stale indicators arrive when a device reconnects
+        let fresh = t.timestamp.is_none_or(|ts| view::now_ms().saturating_sub(ts) < TYPING_TIMEOUT.as_millis() as u64);
+        if t.action == Some(typing_message::Action::Started as i32) && fresh {
+            self.typing.insert(who, Instant::now());
+        } else {
+            self.typing.remove(&who);
+        }
+        self.emit_typing().await;
+    }
+
+    async fn emit_typing(&mut self) {
+        let mut who: Vec<Uuid> = self.typing.keys().copied().collect();
+        who.sort();
+        let is_group = self.current.as_ref().is_some_and(|o| o.is_group);
+        let text = match who.as_slice() {
+            [] => String::new(),
+            _ if !is_group => "입력 중…".into(),
+            [a] => format!("{} 입력 중…", self.name(*a).await),
+            [a, b] => format!("{}, {} 입력 중…", self.name(*a).await, self.name(*b).await),
+            many => format!("{}명이 입력 중…", many.len()),
+        };
+        if text != self.typing_shown {
+            self.typing_shown = text.clone();
+            (self.emit)(Event::Typing(text));
+        }
+    }
+
+    /// The composer changed: tell the open thread we are typing (or stopped).
+    fn composing(&mut self, active: bool) {
+        if !active {
+            if let Some(c) = self.composing.take() {
+                self.send_typing(c.thread, false);
+            }
+            return;
+        }
+        if !self.typing_enabled() {
+            return;
+        }
+        let Some(open) = self.current.as_ref() else { return };
+        if open.members.len() > TYPING_MAX_GROUP || matches!(&open.thread, Thread::Contact(id) if id.raw_uuid() == self.me) {
+            return;
+        }
+        let now = Instant::now();
+        if let Some(c) = self.composing.as_mut().filter(|c| c.key == open.key) {
+            c.last_edit = now;
+            if c.last_sent.elapsed() >= TYPING_RESEND {
+                c.last_sent = now;
+                let thread = c.thread.clone();
+                self.send_typing(thread, true);
+            }
+            return;
+        }
+        if let Some(old) = self.composing.take() {
+            self.send_typing(old.thread, false);
+        }
+        let Some(open) = self.current.as_ref() else { return };
+        let thread = open.thread.clone();
+        self.composing = Some(Composing { key: open.key.clone(), thread: thread.clone(), last_edit: now, last_sent: now });
+        self.send_typing(thread, true);
+    }
+
+    fn send_typing(&self, thread: Thread, started: bool) {
+        let Some(mut m) = self.manager.clone() else { return };
+        let ts = view::now_ms();
+        let action = if started { typing_message::Action::Started } else { typing_message::Action::Stopped };
+        let group_id = match &thread {
+            Thread::Group(k) => Some(group_identifier(k).to_vec()),
+            _ => None,
+        };
+        let msg = TypingMessage { timestamp: Some(ts), action: Some(action as i32), group_id };
+        tokio::task::spawn_local(async move {
+            let res = match thread {
+                Thread::Contact(id) => Box::pin(m.send_message(id, msg, ts)).await,
+                Thread::Group(key) => Box::pin(m.send_message_to_group(&key, msg, ts)).await,
+            };
+            if let Err(e) = res {
+                debug!("typing indicator: {e}");
+            }
+        });
+    }
+
+    // ---- reactions, edits, deletes ----
+
+    /// The stored message behind row `id` of the open window:
+    /// (row, sent timestamp, author, outgoing, data message).
+    fn target(&self, id: &str) -> Option<(u64, u64, Uuid, bool, DataMessage)> {
+        let row = id.parse::<u64>().ok()?;
+        let (_, c) = self.current.as_ref()?.window.iter().find(|(t, _)| *t == row)?;
+        let Kind::Msg { outgoing, dm } = view::classify(c, self.me) else { return None };
+        Some((row, c.timestamp(), c.metadata.sender.raw_uuid(), outgoing, dm.clone()))
+    }
+
+    async fn react(&mut self, id: &str, emoji: String, remove: bool) {
+        let Some((row, target, author, _, _)) = self.target(id) else { return };
+        let dm = DataMessage {
+            reaction: Some(Reaction {
+                emoji: Some(emoji.clone()),
+                remove: Some(remove),
+                target_author_aci: Some(author.to_string()),
+                target_sent_timestamp: Some(target),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        self.send_op(row, Op::React((!remove).then_some(emoji)), dm.into()).await;
+    }
+
+    async fn edit(&mut self, id: &str, text: String) {
+        let text = text.trim_end().to_string();
+        if text.trim().is_empty() {
+            return;
+        }
+        let Some((row, target, _, true, orig)) = self.target(id) else {
+            self.status("이 메시지는 수정할 수 없습니다");
+            return;
+        };
+        if view::now_ms().saturating_sub(row) >= view::EDIT_WINDOW_MS {
+            self.status("보낸 지 24시간이 지난 메시지는 수정할 수 없습니다");
+            return;
+        }
+        let dm = DataMessage {
+            body: Some(text.clone()),
+            quote: orig.quote,
+            expire_timer: orig.expire_timer,
+            expire_timer_version: orig.expire_timer_version,
+            ..Default::default()
+        };
+        let edit = EditMessage { target_sent_timestamp: Some(target), data_message: Some(dm) };
+        self.send_op(row, Op::Edit(text), edit.into()).await;
+    }
+
+    async fn delete(&mut self, id: &str) {
+        let Some((row, target, _, true, _)) = self.target(id) else { return };
+        if view::now_ms().saturating_sub(row) >= view::EDIT_WINDOW_MS {
+            self.status("보낸 지 24시간이 지난 메시지는 모두에게서 삭제할 수 없습니다");
+            return;
+        }
+        let dm = DataMessage { delete: Some(Delete { target_sent_timestamp: Some(target) }), ..Default::default() };
+        self.send_op(row, Op::Delete, dm.into()).await;
+    }
+
+    async fn send_op(&mut self, row: u64, op: Op, mut body: ContentBody) {
+        let Some(manager) = self.manager.clone() else { return };
+        let Some(open) = self.current.as_ref() else { return };
+        let (thread, thread_key) = (open.thread.clone(), open.key.clone());
+        let group_revision = self.group_revision(&thread).await;
+        let ts = self.next_send_ts();
+        match &mut body {
+            ContentBody::DataMessage(dm) => dm.timestamp = Some(ts),
+            ContentBody::EditMessage(EditMessage { data_message: Some(dm), .. }) => dm.timestamp = Some(ts),
+            _ => {}
+        }
+        self.ops.push(PendingOp { ts, thread_key, row, op });
+        self.emit_messages(Scroll::KeepIfNotAtBottom).await;
+        let tx = self.tx.clone();
+        tokio::task::spawn_local(async move {
+            let mut m = manager;
+            let res = Box::pin(deliver(&mut m, thread, body, ts, group_revision)).await;
+            let _ = tx.send(Internal::Sent(ts, res.map_err(|e| format!("{e:#}"))));
+        });
+    }
+
+    async fn group_revision(&self, thread: &Thread) -> u32 {
+        match thread {
+            Thread::Group(k) => self.store.group(*k).await.ok().flatten().map(|g| g.revision).unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    // ---- disappearing messages ----
+
+    /// Deletes expired disappearing messages (and their files) from the store, in the background.
+    fn sweep(&mut self) {
+        if self.sweeping || self.manager.is_none() {
+            return;
+        }
+        self.sweeping = true;
+        let (mut store, index, tx) = (self.store.clone(), self.index.clone(), self.tx.clone());
+        let mut state = self.persist.sweep.clone();
+        let (att_dir, thumb_dir) = (self.paths.attachments.clone(), self.paths.thumbs.clone());
+        tokio::task::spawn_local(async move {
+            let now = view::now_ms();
+            let mut changed = Vec::new();
+            let threads = index.threads().await.unwrap_or_default();
+            for row in threads {
+                let key = thread_key(&row.thread);
+                let mut st = state.get(&key).copied().unwrap_or_default();
+                let due = st.hold.is_some() && st.due <= now;
+                if !due && row.last_ts <= st.scanned {
+                    continue;
+                }
+                let mut cursor = st.scanned;
+                if due {
+                    // rescan from the oldest message whose timer was still running
+                    cursor = st.hold.unwrap_or(0).saturating_sub(1);
+                    st.hold = None;
+                }
+                if st.hold.is_none() {
+                    st.due = u64::MAX;
+                }
+                let mut deleted = false;
+                loop {
+                    let Ok(tss) = index.page_after(&row.thread, cursor, 200).await else { break };
+                    let (Some(&lo), Some(&hi)) = (tss.first(), tss.last()) else { break };
+                    let msgs: Vec<Content> = match store.messages(&row.thread, lo..=hi).await {
+                        Ok(it) => it.flatten().collect(),
+                        Err(_) => break,
+                    };
+                    for c in msgs {
+                        let Some(exp) = view::expires_at(&c) else { continue };
+                        let ts = c.metadata.client_timestamp.timestamp_millis() as u64;
+                        if exp <= now {
+                            remove_files(&c, ts, &att_dir, &thumb_dir);
+                            deleted |= store.delete_message(&row.thread, ts).await.unwrap_or(false);
+                        } else {
+                            st.hold = Some(st.hold.map_or(ts, |h| h.min(ts)));
+                            st.due = st.due.min(exp);
+                        }
+                    }
+                    cursor = cursor.max(hi);
+                    if tss.len() < 200 {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+                st.scanned = st.scanned.max(cursor);
+                state.insert(key.clone(), st);
+                if deleted {
+                    changed.push(key);
+                }
+                tokio::task::yield_now().await;
+            }
+            let _ = tx.send(Internal::Swept { sweep: state, changed });
+        });
     }
 
     fn attachment_path(&self, key: &str, ptr: &AttachmentPointer) -> PathBuf {
@@ -964,10 +1395,7 @@ impl App {
         };
         let content_type = sticker.content_type.filter(|c| !c.is_empty()).unwrap_or_else(|| "image/webp".into());
         let s = StickerSend { pack_id: pack.id, pack_key: pack.key, id: sticker_id, emoji: sticker.emoji, content_type, bytes };
-        let group_revision = match &thread {
-            Thread::Group(k) => self.store.group(*k).await.ok().flatten().map(|g| g.revision).unwrap_or(0),
-            _ => 0,
-        };
+        let group_revision = self.group_revision(&thread).await;
         let dir = self.paths.attachments.clone();
         let tx = self.tx.clone();
         let ts = self.next_send_ts();
@@ -1137,10 +1565,9 @@ impl App {
                 ..Default::default()
             })
         });
-        let group_revision = match &thread {
-            Thread::Group(k) => self.store.group(*k).await.ok().flatten().map(|g| g.revision).unwrap_or(0),
-            _ => 0,
-        };
+        let group_revision = self.group_revision(&thread).await;
+        // the message itself ends our typing indicator on the other side
+        self.composing = None;
         let ts = self.next_send_ts();
         let attachment = match files.as_slice() {
             [] => String::new(),
@@ -1168,7 +1595,7 @@ impl App {
 
     /// Unique, increasing send timestamps (they are the message ids).
     fn next_send_ts(&self) -> u64 {
-        let last = self.pending.iter().map(|p| p.ts).max().unwrap_or(0);
+        let last = self.pending.iter().map(|p| p.ts).chain(self.ops.iter().map(|o| o.ts)).max().unwrap_or(0);
         now_ms().max(last + 1)
     }
 
@@ -1261,7 +1688,7 @@ async fn send_task(
         timestamp: Some(ts),
         ..Default::default()
     };
-    deliver(&mut m, thread, dm, ts, group_revision).await
+    deliver(&mut m, thread, dm.into(), ts, group_revision).await
 }
 
 fn file_label(p: &Path) -> String {
@@ -1354,22 +1781,41 @@ async fn send_sticker_task(
         timestamp: Some(ts),
         ..Default::default()
     };
-    deliver(&mut m, thread, dm, ts, group_revision).await
+    deliver(&mut m, thread, dm.into(), ts, group_revision).await
 }
 
-async fn deliver(m: &mut Mgr, thread: Thread, mut dm: DataMessage, ts: u64, group_revision: u32) -> anyhow::Result<()> {
+async fn deliver(m: &mut Mgr, thread: Thread, mut body: ContentBody, ts: u64, group_revision: u32) -> anyhow::Result<()> {
     match thread {
-        Thread::Contact(id) => m.send_message(id, dm, ts).await?,
+        Thread::Contact(id) => m.send_message(id, body, ts).await?,
         Thread::Group(key) => {
-            dm.group_v2 = Some(GroupContextV2 {
-                master_key: Some(key.to_vec()),
-                revision: Some(group_revision),
-                ..Default::default()
-            });
-            m.send_message_to_group(&key, dm, ts).await?
+            let ctx = GroupContextV2 { master_key: Some(key.to_vec()), revision: Some(group_revision), ..Default::default() };
+            match &mut body {
+                ContentBody::DataMessage(dm) => dm.group_v2 = Some(ctx),
+                ContentBody::EditMessage(EditMessage { data_message: Some(dm), .. }) => dm.group_v2 = Some(ctx),
+                _ => {}
+            }
+            m.send_message_to_group(&key, body, ts).await?
         }
     }
     Ok(())
+}
+
+/// Identifier of a group as typing messages carry it.
+fn group_identifier(master_key: &[u8; 32]) -> [u8; 32] {
+    GroupSecretParams::derive_from_master_key(GroupMasterKey::new(*master_key)).get_group_identifier()
+}
+
+/// Downloaded attachments and thumbnails of an expired message.
+fn remove_files(c: &Content, ts: u64, attachments: &Path, thumbs: &Path) {
+    let Some(dm) = view::data_message(c) else { return };
+    let mut keys: Vec<String> = dm.attachments.iter().enumerate().map(|(i, a)| view::attachment_key(a, ts, i)).collect();
+    if let Some(data) = dm.sticker.as_ref().and_then(|s| s.data.as_ref()) {
+        keys.push(view::attachment_key(data, ts, 99));
+    }
+    for k in keys {
+        let _ = std::fs::remove_dir_all(attachments.join(&k));
+        let _ = std::fs::remove_file(thumbs.join(format!("{k}.png")));
+    }
 }
 
 fn make_thumb(key: &str, orig: &Path, thumb: &Path, fit: u32) -> anyhow::Result<Thumb> {

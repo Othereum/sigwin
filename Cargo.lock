@@ -3808,6 +3808,7 @@ dependencies = [
  "libsqlite3-sys",
  "mime_guess",
  "notify-rust",
+ "png",
  "presage",
  "presage-store-sqlite",
  "qrcode",

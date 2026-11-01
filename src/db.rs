@@ -115,6 +115,28 @@ impl Index {
         Ok(out)
     }
 
+    /// Timestamps of up to `limit` messages strictly newer than `after`, oldest first.
+    pub async fn page_after(&self, thread: &Thread, after: u64, limit: u32) -> anyhow::Result<Vec<u64>> {
+        let (gk, rid) = unzip(thread);
+        let rows = sqlx::query(
+            "SELECT ts FROM thread_messages
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND ts > ?
+             ORDER BY ts ASC LIMIT ?",
+        )
+        .bind(gk)
+        .bind(rid)
+        .bind(after.min(i64::MAX as u64) as i64)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r.try_get::<i64, _>("ts").ok())
+            .map(|t| t as u64)
+            .collect())
+    }
+
     /// Timestamps of up to `limit` messages strictly older than `before`, newest first.
     pub async fn page(&self, thread: &Thread, before: u64, limit: u32) -> anyhow::Result<Vec<u64>> {
         let (gk, rid) = unzip(thread);

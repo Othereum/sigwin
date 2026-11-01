@@ -2,6 +2,7 @@
 
 mod alloc;
 mod backend;
+mod clip;
 mod picker;
 mod db;
 mod emoji;
@@ -51,6 +52,10 @@ struct Ui {
     last: Vec<MsgDto>,
     files: Vec<PathBuf>,
     reply_to: Option<String>,
+    /// id of our message being edited in the composer
+    editing: Option<String>,
+    /// where pasted clipboard images are written
+    paste_dir: PathBuf,
     open_key: String,
     loading_older: bool,
     picking: bool,
@@ -193,12 +198,17 @@ fn apply(app: &AppWindow, ev: Event) {
                     ui.thumbs.clear();
                     ui.open_key = key.clone();
                     ui.reply_to = None;
+                    if ui.editing.take().is_some() {
+                        app.set_draft(SharedString::new());
+                    }
                 }
                 ui.loading_older = false;
                 switched
             });
             if switched {
                 app.set_reply_preview(SharedString::new());
+                app.set_edit_preview(SharedString::new());
+                app.set_menu_id(SharedString::new());
                 close_stickers(app);
             }
             app.set_current_key(key.into());
@@ -269,6 +279,7 @@ fn apply(app: &AppWindow, ev: Event) {
             });
         }
         Event::Status(s) => app.set_status_text(s.into()),
+        Event::Typing(t) => app.set_typing_text(t.into()),
         Event::StickerPacks(list) => {
             if !app.get_sticker_open() {
                 return;
@@ -389,6 +400,19 @@ fn main() -> anyhow::Result<()> {
                 }
             });
         }
+        if let Ok(what) = std::env::var("LITE_SIGNAL_DEMO_MENU") {
+            // message menu on an outgoing row, typing indicator, edit banner
+            let weak = app.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(400), move || {
+                let Some(app) = weak.upgrade() else { return };
+                app.set_typing_text("입력 중…".into());
+                if what == "edit" {
+                    app.invoke_edit_message("294".into());
+                } else {
+                    app.invoke_open_menu("297".into(), 520.0, 300.0);
+                }
+            });
+        }
         if std::env::var_os("LITE_SIGNAL_DEMO_STICKERS").is_some() {
             let weak = app.as_weak();
             slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
@@ -404,7 +428,12 @@ fn main() -> anyhow::Result<()> {
         let _backend = backend::spawn(data_dir(), cmd_rx, emit);
     }
 
-    UI.with_borrow_mut(|ui| ui.tx = Some(cmd_tx.clone()));
+    let paste_dir = data_dir().join("paste");
+    clip::clean(&paste_dir);
+    UI.with_borrow_mut(|ui| {
+        ui.tx = Some(cmd_tx.clone());
+        ui.paste_dir = paste_dir;
+    });
     wire(&app, cmd_tx);
     app.run()?;
     Ok(())
@@ -433,6 +462,16 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     let weak = app.as_weak();
     app.on_send(move |text| {
         let Some(app) = weak.upgrade() else { return };
+        if let Some(id) = UI.with_borrow_mut(|ui| ui.editing.take()) {
+            if text.trim().is_empty() {
+                UI.with_borrow_mut(|ui| ui.editing = Some(id));
+                return;
+            }
+            s(Command::Edit { id, text: text.to_string() });
+            app.set_draft(SharedString::new());
+            app.set_edit_preview(SharedString::new());
+            return;
+        }
         let (files, quote) = UI.with_borrow_mut(|ui| (std::mem::take(&mut ui.files), ui.reply_to.take()));
         if text.trim().is_empty() && files.is_empty() {
             return;
@@ -452,20 +491,115 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
         let weak = app.as_weak();
         picker::spawn(hwnd(&app), move |picked| {
             let _ = slint::invoke_from_event_loop(move || {
-                let names: Vec<SharedString> = UI.with_borrow_mut(|ui| {
-                    ui.picking = false;
-                    ui.files.extend(picked);
-                    ui.files
-                        .iter()
-                        .map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default().into())
-                        .collect()
-                });
+                UI.with_borrow_mut(|ui| ui.picking = false);
                 if let Some(app) = weak.upgrade() {
-                    app.set_pending_files(ModelRc::new(VecModel::from(names)));
-                    app.invoke_focus_composer();
+                    add_files(&app, picked);
                 }
             });
         });
+    });
+
+    let weak = app.as_weak();
+    app.on_paste_files(move || {
+        let Some(app) = weak.upgrade() else { return false };
+        match clip::probe() {
+            clip::Probe::Other => false,
+            clip::Probe::Files => {
+                add_files(&app, clip::files());
+                true
+            }
+            clip::Probe::Image => {
+                let dir = UI.with_borrow(|ui| ui.paste_dir.clone());
+                let weak = app.as_weak();
+                app.set_status_text("이미지 붙여넣는 중…".into());
+                // encoding a large screenshot takes a moment: keep the UI responsive
+                std::thread::spawn(move || {
+                    let res = clip::save_image(&dir);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let Some(app) = weak.upgrade() else { return };
+                        match res {
+                            Ok(p) => {
+                                app.set_status_text(SharedString::new());
+                                add_files(&app, vec![p]);
+                            }
+                            Err(e) => app.set_status_text(format!("붙여넣기 실패: {e:#}").into()),
+                        }
+                    });
+                });
+                true
+            }
+        }
+    });
+
+    let s = send.clone();
+    app.on_composing(move |active| {
+        if UI.with_borrow(|ui| ui.editing.is_none()) {
+            s(Command::Composing(active));
+        }
+    });
+
+    let weak = app.as_weak();
+    app.on_open_menu(move |id, x, y| {
+        let Some(app) = weak.upgrade() else { return };
+        let Some((mine, can_edit, can_delete)) = UI.with_borrow(|ui| {
+            let m = ui.last.iter().find(|m| m.id == id.as_str())?;
+            (!m.system && !m.deleted && !m.pending).then(|| (m.my_reaction.clone(), m.can_edit, m.can_delete))
+        }) else {
+            return;
+        };
+        app.set_menu_mine(mine.into());
+        app.set_menu_can_edit(can_edit);
+        app.set_menu_can_delete(can_delete);
+        app.set_menu_x(x);
+        app.set_menu_y(y);
+        app.set_menu_id(id);
+    });
+
+    let s = send.clone();
+    app.on_react(move |id, emoji| {
+        let mine = UI.with_borrow(|ui| ui.last.iter().find(|m| m.id == id.as_str()).map(|m| m.my_reaction.clone()));
+        let Some(mine) = mine else { return };
+        // the same emoji again takes the reaction back
+        s(Command::React { id: id.to_string(), remove: mine == emoji.as_str(), emoji: emoji.to_string() });
+    });
+
+    let weak = app.as_weak();
+    app.on_edit_message(move |id| {
+        let Some(app) = weak.upgrade() else { return };
+        let Some(text) = UI.with_borrow_mut(|ui| {
+            let text = ui.last.iter().find(|m| m.id == id.as_str() && m.can_edit)?.text.clone();
+            ui.editing = Some(id.to_string());
+            ui.reply_to = None;
+            Some(text)
+        }) else {
+            return;
+        };
+        app.set_reply_preview(SharedString::new());
+        app.set_edit_preview(text.replace('\n', " ").into());
+        app.set_draft(text.into());
+        app.invoke_focus_composer();
+        app.invoke_composer_to_end();
+    });
+
+    let weak = app.as_weak();
+    app.on_cancel_edit(move || {
+        UI.with_borrow_mut(|ui| ui.editing = None);
+        if let Some(app) = weak.upgrade() {
+            app.set_edit_preview(SharedString::new());
+            app.set_draft(SharedString::new());
+        }
+    });
+
+    let s = send.clone();
+    app.on_delete_message(move |id| {
+        let ok = rfd::MessageDialog::new()
+            .set_title("메시지 삭제")
+            .set_description("모든 사람에게서 이 메시지를 삭제할까요?")
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        if ok == rfd::MessageDialogResult::Yes {
+            s(Command::Delete(id.to_string()));
+        }
     });
 
     let weak = app.as_weak();
@@ -537,8 +671,12 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
         let Some(app) = weak.upgrade() else { return };
         let preview = UI.with_borrow_mut(|ui| {
             let m = ui.last.iter().find(|m| m.id == id.as_str())?;
-            if m.system || m.deleted {
+            if m.system || m.deleted || m.pending {
                 return None;
+            }
+            if ui.editing.take().is_some() {
+                app.set_edit_preview(SharedString::new());
+                app.set_draft(SharedString::new());
             }
             ui.reply_to = Some(m.id.clone());
             let who = if m.outgoing { "나".to_string() } else { m.sender.clone() };
@@ -620,6 +758,22 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     std::mem::forget(timer);
 }
 
+/// Adds files to the composer's pending attachments.
+fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
+    if files.is_empty() {
+        return;
+    }
+    let names: Vec<SharedString> = UI.with_borrow_mut(|ui| {
+        ui.files.extend(files);
+        ui.files
+            .iter()
+            .map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default().into())
+            .collect()
+    });
+    app.set_pending_files(ModelRc::new(VecModel::from(names)));
+    app.invoke_focus_composer();
+}
+
 fn hwnd(app: &AppWindow) -> isize {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let wh = app.window().window_handle();
@@ -689,6 +843,9 @@ fn demo(emit: backend::Emit) {
             image_key: if i == 298 || i == 297 { format!("demo-st-{}", i % 2) } else { String::new() },
             img_w: if i == 298 || i == 297 { 140 } else { 0 },
             img_h: if i == 298 || i == 297 { 140 } else { 0 },
+            my_reaction: if i % 9 == 0 { "❤️".into() } else { String::new() },
+            can_edit: outgoing && i != 297 && i != 298,
+            can_delete: outgoing,
             ..Default::default()
         });
         if i == 299 {

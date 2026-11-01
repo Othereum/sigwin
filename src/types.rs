@@ -67,6 +67,11 @@ pub struct MsgDto {
     pub receipt_info: String,
     /// sent by us, not yet confirmed by the server (or failed)
     pub pending: bool,
+    /// our own reaction on this message, empty if none
+    pub my_reaction: String,
+    /// ours, text only, young enough to edit / delete for everyone
+    pub can_edit: bool,
+    pub can_delete: bool,
 }
 
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
@@ -135,6 +140,8 @@ pub enum Event {
     OpenStickerPanel(String),
     /// the clicked sticker's pack is not installed: ask, then InstallPackFromMessage(msg id)
     AskInstallPack(String),
+    /// who is typing in the open thread, empty when nobody
+    Typing(String),
 }
 
 pub enum Command {
@@ -158,4 +165,12 @@ pub enum Command {
     InstallPackFromMessage(String),
     /// a sticker in the message list was clicked
     StickerClicked(String),
+    /// react to message `id`; `remove` takes back our reaction `emoji`
+    React { id: String, emoji: String, remove: bool },
+    /// replace the text of our message `id`
+    Edit { id: String, text: String },
+    /// delete our message `id` for everyone
+    Delete(String),
+    /// the composer was edited; false when it became empty
+    Composing(bool),
 }

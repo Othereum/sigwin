@@ -48,6 +48,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/types.rs` | `Command` / `Event` / DTOs crossing threads (all `Send`), thread keys `c:<uuid>` / `g:<hex>` |
 | `src/secret.rs` | random 256-bit DB key, stored DPAPI-protected (`db.key`) |
 | `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |
+| `src/clip.rs` | Ctrl+V: files (CF_HDROP) or images (PNG / DIB streamed to PNG under `paste/`) from the clipboard |
 | `src/alloc.rs` | counting global allocator + `PrivateUsage` |
 | `src/winhook.rs` | window-proc subclass: full repaint on restore/activate, focus events |
 | `src/emoji.rs` | emoji-only message detection (grapheme clusters) |
@@ -61,6 +62,9 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 - presage doesn't send delivery receipts. We batch them per sender in `pending_receipts`. Read receipts are deliberately not sent.
 - DB key is passed as a raw key `"x'<hex>'"`: a passphrase would trigger sqlcipher's PBKDF2 (seconds per connection). Keep `disable_statement_logging()`, otherwise sqlx logs the key; `sqlx` log level is `error`.
 - `install_sticker_pack` also syncs the pack to the user's phone. Don't call it in tests.
+- **Disappearing messages:** presage fills `expire_timer` on every outgoing `DataMessage` from the stored thread timer (`restore_thread_timer`), so leave it `None` when sending. It never deletes expired messages: `App::sweep` does (per-thread progress in `Persist.sweep`), and `view::build` hides expired rows right away. The timer runs from the send time (we don't track reads).
+- Received deletes for everyone are applied by presage (target replaced by a `NullMessage` with a nil sender). Edits are stored as `EditMessage`s and folded in `view::build` (author must match). Our own reactions, edits and deletes are `App.ops`, shown optimistically until `Internal::Sent`.
+- Typing indicators: presage can't send "online only", so offline devices get them late; we drop stale incoming ones and skip sending in groups over `TYPING_MAX_GROUP` (one send per member). Group typing messages carry the group *identifier* (`group_identifier`), not the master key.
 
 ## Slint gotchas
 - **Missing glyphs render as blank. There is no per-glyph font fallback.** Malgun Gothic (UI font) lacks `✓ ✕ ➤`; Segoe UI Symbol lacks Hangul. Icons use `font-family: "Segoe UI Symbol"`; the status text switches font based on its content. Check every new symbol in a screenshot.
@@ -70,6 +74,8 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 - A `Flickable`'s max size defaults to its content size and propagates up through layouts, which can shrink the window. Set `max-width: 100000px` on Flickables inside layouts.
 - Elements inside `if` can't be referenced by id from outside. Use `visible` and min/max sizes instead (see `composer-bar`).
 - Use `content-y` / `content-height` (the `viewport-*` names are deprecated).
+- `FocusScope` and a `Rectangle` without a layout don't take their child's size, and an explicit `min-height` overrides what a layout child would give. The composer gets its height from `min-height: min(composer.preferred-height, 140px)` on its FocusScope.
+- A read-only `TextInput` ignores right clicks, so they reach the bubble's `TouchArea` (`pointer-event`) even over text. Nested TouchAreas (image, attachment) forward right clicks themselves.
 - **Images are sampled nearest-neighbor** by the software renderer (RGBA textures, any scale). A downscaled sticker gets jagged outlines. Thumbnails shown smaller than their pixels are pre-resampled in the backend to the exact physical size (`downscale`: Lanczos3 in premultiplied alpha; `types::physical_px` uses the window scale factor). Give new image views a matching `fit` size.
 - **Software renderer and minimize:** it redraws only damaged regions, and UI updates arriving while minimized make it lose track of them. On restore the window was transparent except the last-changed bits. `winhook.rs` subclasses the window proc: on `WM_SIZE` restore and `WM_ACTIVATE` it flips `repaint-flip` (window background toggles between two identical-looking colors), which forces a full repaint. The same hook reports focus to the backend; polling is only a fallback. To reproduce, run `LITE_SIGNAL_DEMO=1 LITE_SIGNAL_DEMO_TICK=1`, minimize/restore with `ShowWindow`, and capture with `CopyFromScreen`. Don't use `PrintWindow` here: it forces a repaint and hides the bug.
 

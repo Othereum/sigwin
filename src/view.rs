@@ -14,6 +14,10 @@ use presage::store::ContentExt;
 use crate::types::MsgDto;
 
 pub const THUMB_MAX: u32 = 260;
+/// DataMessage.Flags.EXPIRATION_TIMER_UPDATE
+const EXPIRATION_TIMER_UPDATE: u32 = 2;
+/// Signal accepts edits and deletes for everyone up to a day after sending.
+pub const EDIT_WINDOW_MS: u64 = 24 * 3600 * 1000;
 pub const STICKER_SIZE: u32 = 140;
 
 pub enum Kind<'a> {
@@ -42,6 +46,12 @@ fn classify_data<'a>(dm: &'a DataMessage, outgoing: bool) -> Kind<'a> {
         || dm.gift_badge.is_some();
     if has_content {
         return Kind::Msg { outgoing, dm };
+    }
+    if dm.flags.unwrap_or(0) & EXPIRATION_TIMER_UPDATE != 0 {
+        return Kind::System(match dm.expire_timer.unwrap_or(0) {
+            0 => "사라지는 메시지를 껐습니다".into(),
+            t => format!("사라지는 메시지: {}", timer_label(t)),
+        });
     }
     if dm.group_call_update.is_some() {
         return Kind::System("그룹 통화가 시작되었습니다".into());
@@ -85,6 +95,44 @@ pub fn classify(c: &Content, me: Uuid) -> Kind<'_> {
         }
         _ => Kind::Skip,
     }
+}
+
+/// The data message carried by a stored content (plain, synced from another device, or an edit).
+pub fn data_message(c: &Content) -> Option<&DataMessage> {
+    match &c.body {
+        ContentBody::DataMessage(dm) => Some(dm),
+        ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(s)), .. }) => s
+            .message
+            .as_ref()
+            .or_else(|| s.edit_message.as_ref().and_then(|e| e.data_message.as_ref())),
+        ContentBody::EditMessage(e) => e.data_message.as_ref(),
+        _ => None,
+    }
+}
+
+/// When a disappearing message expires (ms). The timer runs from the send time: we don't
+/// track when it was read, so it may vanish here earlier than on the phone, never later.
+pub fn expires_at(c: &Content) -> Option<u64> {
+    let t = data_message(c)?.expire_timer.filter(|t| *t > 0)?;
+    Some((c.metadata.client_timestamp.timestamp_millis() as u64).saturating_add(t as u64 * 1000))
+}
+
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// "1주", "8시간", "30초" for an expire timer in seconds.
+pub fn timer_label(secs: u32) -> String {
+    const UNITS: [(u32, &str); 4] = [(604_800, "주"), (86_400, "일"), (3_600, "시간"), (60, "분")];
+    for (n, u) in UNITS {
+        if secs >= n && secs % n == 0 {
+            return format!("{}{u}", secs / n);
+        }
+    }
+    format!("{secs}초")
 }
 
 pub fn attachment_key(ptr: &AttachmentPointer, ts: u64, idx: usize) -> String {
@@ -146,6 +194,9 @@ fn body_text(dm: &DataMessage) -> String {
 
 /// One-line preview used in the thread list and notifications.
 pub fn snippet(c: &Content, me: Uuid) -> Option<String> {
+    if expires_at(c).is_some_and(|t| t <= now_ms()) {
+        return None;
+    }
     let text = match classify(c, me) {
         Kind::Msg { dm, outgoing } => {
             let mut t = body_text(dm);
@@ -226,6 +277,8 @@ pub struct Built {
     pub items: Vec<MsgDto>,
     /// image attachments that need a thumbnail: (key, pointer, square box in logical px to fit into, 0 = as is)
     pub wanted_thumbs: Vec<(String, AttachmentPointer, u32)>,
+    /// earliest time a still-shown disappearing message expires
+    pub next_expiry: Option<u64>,
 }
 
 /// `window` must be sorted by timestamp ascending.
@@ -239,7 +292,9 @@ pub fn build(
     name_of: &dyn Fn(&Uuid) -> String,
 ) -> Built {
     let mut reactions: HashMap<u64, Vec<(Uuid, String)>> = HashMap::new();
-    let mut edits: HashMap<u64, (u64, &DataMessage)> = HashMap::new();
+    let mut edits: HashMap<u64, (u64, &DataMessage, Uuid)> = HashMap::new();
+    let now = now_ms();
+    let mut next_expiry: Option<u64> = None;
 
     for (ts, c) in window {
         match classify(c, me) {
@@ -252,9 +307,10 @@ pub fn build(
                 }
             }
             Kind::Edit { target, dm } => {
-                let e = edits.entry(target).or_insert((*ts, dm));
+                let sender = c.metadata.sender.raw_uuid();
+                let e = edits.entry(target).or_insert((*ts, dm, sender));
                 if *ts >= e.0 {
-                    *e = (*ts, dm);
+                    *e = (*ts, dm, sender);
                 }
             }
             _ => {}
@@ -267,6 +323,12 @@ pub fn build(
     let mut prev_sender: Option<Uuid> = None;
 
     for (ts, c) in window {
+        if let Some(exp) = expires_at(c) {
+            if exp <= now {
+                continue;
+            }
+            next_expiry = Some(next_expiry.map_or(exp, |n| n.min(exp)));
+        }
         let kind = classify(c, me);
         let dt = local(*ts);
         let day = dt.date_naive();
@@ -274,9 +336,10 @@ pub fn build(
         match kind {
             Kind::Msg { outgoing, dm } => {
                 let sender = c.metadata.sender.raw_uuid();
+                // only the author may edit a message
                 let (dm, edited) = match edits.get(ts) {
-                    Some((_, e)) => (*e, true),
-                    None => (dm, false),
+                    Some((_, e, by)) if *by == sender => (*e, true),
+                    _ => (dm, false),
                 };
                 m.outgoing = outgoing;
                 m.text = body_text(dm);
@@ -329,7 +392,14 @@ pub fn build(
                         }
                     }
                     m.reactions = counts;
+                    m.my_reaction = r.iter().find(|(s, _)| *s == me).map(|(_, e)| e.clone()).unwrap_or_default();
                 }
+                let fresh = outgoing && now.saturating_sub(*ts) < EDIT_WINDOW_MS;
+                m.can_delete = fresh;
+                m.can_edit = fresh
+                    && dm.attachments.is_empty()
+                    && dm.sticker.is_none()
+                    && dm.body.as_deref().is_some_and(|b| !b.is_empty());
                 if !m.sticker && m.attachment.is_empty() && m.image_key.is_empty() && m.quote.is_empty() {
                     m.big_emoji = crate::emoji::only_emoji(&m.text, 5).is_some();
                 }
@@ -361,7 +431,48 @@ pub fn build(
         }
         items.push(m);
     }
-    Built { items, wanted_thumbs: wanted }
+    Built { items, wanted_thumbs: wanted, next_expiry }
+}
+
+/// Optimistic update while our reaction is being sent: set (or with `None` take back) our reaction.
+pub fn set_my_reaction(m: &mut MsgDto, emoji: Option<&str>) {
+    if !m.my_reaction.is_empty() {
+        if let Some(i) = m.reactions.iter().position(|(e, _)| *e == m.my_reaction) {
+            m.reactions[i].1 -= 1;
+            if m.reactions[i].1 == 0 {
+                m.reactions.remove(i);
+            }
+        }
+    }
+    m.my_reaction = emoji.unwrap_or_default().to_string();
+    if let Some(e) = emoji {
+        match m.reactions.iter_mut().find(|(x, _)| x == e) {
+            Some(r) => r.1 += 1,
+            None => m.reactions.push((e.to_string(), 1)),
+        }
+    }
+}
+
+/// Optimistic update while an edit is being sent.
+pub fn set_edited_text(m: &mut MsgDto, text: &str) {
+    m.text = text.to_string();
+    if !m.time.ends_with("수정됨") {
+        m.time = format!("{} · 수정됨", m.time);
+    }
+    m.big_emoji = m.attachment.is_empty() && m.quote.is_empty() && crate::emoji::only_emoji(&m.text, 5).is_some();
+}
+
+/// Optimistic update while a delete for everyone is being sent.
+pub fn set_deleted(m: &mut MsgDto) {
+    *m = MsgDto {
+        id: std::mem::take(&mut m.id),
+        time: std::mem::take(&mut m.time),
+        day_sep: std::mem::take(&mut m.day_sep),
+        // stored deletes lose their sender (presage blanks it), so they render like this too
+        deleted: true,
+        text: "삭제된 메시지입니다".into(),
+        ..Default::default()
+    };
 }
 
 
@@ -418,4 +529,33 @@ fn receipt_status(
     }
     info.push("※ 읽음 확인을 끈 사람은 '읽음'으로 표시되지 않습니다.".into());
     (status, info.join("\n\n"))
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timer_labels() {
+        assert_eq!(timer_label(30), "30초");
+        assert_eq!(timer_label(300), "5분");
+        assert_eq!(timer_label(8 * 3600), "8시간");
+        assert_eq!(timer_label(86_400), "1일");
+        assert_eq!(timer_label(4 * 604_800), "4주");
+        assert_eq!(timer_label(90), "90초");
+    }
+
+    #[test]
+    fn my_reaction_is_replaced_and_taken_back() {
+        let mut m = MsgDto { reactions: vec![("👍".into(), 2)], my_reaction: "👍".into(), ..Default::default() };
+        set_my_reaction(&mut m, Some("❤️"));
+        assert_eq!(m.reactions, vec![("👍".to_string(), 1), ("❤️".to_string(), 1)]);
+        // idempotent: applying the same pending op twice changes nothing
+        set_my_reaction(&mut m, Some("❤️"));
+        assert_eq!(m.reactions, vec![("👍".to_string(), 1), ("❤️".to_string(), 1)]);
+        set_my_reaction(&mut m, None);
+        assert_eq!(m.reactions, vec![("👍".to_string(), 1)]);
+        assert!(m.my_reaction.is_empty());
+    }
 }
