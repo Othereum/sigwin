@@ -70,7 +70,10 @@ fn main() -> anyhow::Result<()> {
     }
     let age_timer = Box::leak(Box::new(slint::Timer::default()));
     age_timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(30), || {
-        UI.with_borrow(|ui| refresh_times(ui));
+        UI.with_borrow(|ui| {
+            refresh_times(ui);
+            drafts::refresh_draft_times(ui);
+        });
     });
     UI.with_borrow(|ui| {
         app.set_threads(ModelRc::from(ui.threads.clone()));
@@ -103,10 +106,13 @@ fn main() -> anyhow::Result<()> {
         ui.paste_dir = paste_dir;
         ui.settings = prefs;
         ui.settings_path = settings_path;
+        ui.drafts_path = data_dir().join("drafts.json");
+        ui.drafts = drafts::load(&ui.drafts_path);
     });
     apply_theme(&app, true);
     wire(&app, cmd_tx);
     app.run()?;
+    drafts::save_on_exit(&app);
     // plain copies of opened attachments; the backend also empties this on start (crashes,
     // files another app still held)
     backend::files::clear_open(&data_dir());

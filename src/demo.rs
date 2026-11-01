@@ -244,6 +244,15 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         });
     } else {
         emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), can_older: false, scroll: Scroll::Bottom });
+        // clicking another thread shows the same rows under its key (drafts follow the key)
+        let (emit, items) = (emit.clone(), items.clone());
+        std::thread::spawn(move || {
+            while let Some(c) = cmd_rx.blocking_recv() {
+                if let Command::OpenThread(key) = c {
+                    emit(Event::Messages { key, items: items.clone(), can_older: false, scroll: Scroll::Bottom });
+                }
+            }
+        });
     }
     emit(Event::Pins(pins));
     if reload && std::env::var_os("SIGWIN_DEMO_OLDER").is_none() {

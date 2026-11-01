@@ -12,6 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::types::{Command, Event, MsgDto, Scroll, ThreadDto};
 use crate::*;
 
+pub(crate) mod drafts;
 mod rows;
 mod scroll;
 mod window;
@@ -26,6 +27,11 @@ pub(crate) use wire::*;
 #[derive(Default)]
 pub(crate) struct Ui {
     pub(crate) threads: Rc<VecModel<ThreadItem>>,
+    /// the backend's last thread list; `threads` is this with drafts merged in
+    thread_dtos: Vec<ThreadDto>,
+    /// unsent composer contents by thread key (`drafts.json`)
+    pub(crate) drafts: HashMap<String, drafts::Draft>,
+    pub(crate) drafts_path: PathBuf,
     pub(crate) messages: Rc<VecModel<MsgItem>>,
     /// thumbnails for the open thread only; cleared on thread switch to bound memory
     thumbs: HashMap<String, Image>,
@@ -152,11 +158,12 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         }
         Event::LinkStatus(s) => app.set_link_status(s.into()),
         Event::Ready => app.set_page("main".into()),
-        Event::Threads(list) => UI.with_borrow(|ui| {
+        Event::Threads(list) => UI.with_borrow_mut(|ui| {
             let total: u32 = list.iter().map(|t| t.unread).sum();
             app.set_total_unread(total as i32);
             badge::set_count(total);
-            ui.threads.set_vec(list.iter().map(|t| thread_item(t, &ui.avatars)).collect::<Vec<_>>());
+            ui.thread_dtos = list;
+            drafts::show_threads(ui);
             header_avatar(app, ui);
         }),
         Event::Header { name, sub } => {
@@ -165,29 +172,27 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         }
         Event::Members(list) => UI.with_borrow_mut(|ui| ui.members = list),
         Event::Messages { key, items, can_older, scroll } => {
-            let switched = UI.with_borrow_mut(|ui| {
+            let restored = UI.with_borrow_mut(|ui| {
                 let switched = ui.open_key != key;
+                let mut restored = None;
                 if switched {
                     ui.thumbs.clear();
                     ui.sender_avatars.clear();
                     ui.revealed.clear();
                     sigwin_clear_plain_styles();
+                    // the composer moves into the old thread's draft, the new one's comes back
+                    restored = Some(drafts::switch(app, ui, &key));
                     ui.open_key = key.clone();
-                    ui.reply_to = None;
-                    ui.picked.clear();
                     ui.mention_rows.clear();
                     ui.typing.clear();
-                    if ui.editing.take().is_some() {
-                        app.set_draft(SharedString::new());
-                    }
                 }
-                switched
+                restored
             });
-            if switched {
+            let switched = restored.is_some();
+            if let Some(d) = restored {
+                drafts::restore(app, d);
                 app.set_pin_index(0);
                 app.set_flash_id(SharedString::new());
-                app.set_reply_preview(SharedString::new());
-                app.set_edit_preview(SharedString::new());
                 app.set_menu_id(SharedString::new());
                 app.set_mention_items(ModelRc::default());
                 close_stickers(app);

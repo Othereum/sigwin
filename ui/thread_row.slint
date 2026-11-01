@@ -48,12 +48,23 @@ export component ThreadRow inherits Rectangle {
             }
             HorizontalLayout {
                 spacing: 6px;
-                Text {
-                    text: item.snippet;
-                    color: Theme.subtle;
-                    font-size: 12.5px;
-                    overflow: elide;
+                HorizontalLayout {
+                    spacing: 3px;
                     horizontal-stretch: 1;
+                    if item.draft: Text {
+                        text: "작성 중:";
+                        color: Theme.subtle;
+                        font-size: 12.5px;
+                        font-italic: true;
+                        horizontal-stretch: 0;
+                    }
+                    Text {
+                        text: item.snippet;
+                        color: Theme.subtle;
+                        font-size: 12.5px;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
                 }
                 if item.unread > 0: Rectangle {
                     horizontal-stretch: 0;

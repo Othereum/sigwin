@@ -257,6 +257,7 @@ pub(crate) fn thread_item(t: &ThreadDto, avatars: &HashMap<String, Image>) -> Th
         initial: if t.is_group && t.name.is_empty() { "#".into() } else { initial(&t.name).into() },
         color: tint(&t.key),
         is_group: t.is_group,
+        draft: false,
     }
 }
 

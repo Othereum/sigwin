@@ -77,6 +77,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         app.set_draft(SharedString::new());
         app.set_pending_files(ModelRc::default());
         app.set_reply_preview(SharedString::new());
+        drafts::drop_if_empty(&app);
     });
 
     let weak = app.as_weak();
@@ -196,9 +197,13 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let s = send.clone();
+    let weak = app.as_weak();
     app.on_composing(move |active| {
         if UI.with_borrow(|ui| ui.editing.is_none()) {
             s(Command::Composing(active));
+        }
+        if let Some(app) = weak.upgrade().filter(|_| !active) {
+            drafts::drop_if_empty(&app);
         }
     });
 
@@ -207,6 +212,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         UI.with_borrow_mut(|ui| ui.files.clear());
         if let Some(app) = weak.upgrade() {
             app.set_pending_files(ModelRc::default());
+            drafts::drop_if_empty(&app);
         }
     });
 
@@ -242,6 +248,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         UI.with_borrow_mut(|ui| ui.reply_to = None);
         if let Some(app) = weak.upgrade() {
             app.set_reply_preview(SharedString::new());
+            drafts::drop_if_empty(&app);
         }
     });
 }
@@ -471,10 +478,7 @@ pub(crate) fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
     }
     let names: Vec<SharedString> = UI.with_borrow_mut(|ui| {
         ui.files.extend(files);
-        ui.files
-            .iter()
-            .map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default().into())
-            .collect()
+        drafts::file_names(&ui.files)
     });
     app.set_pending_files(ModelRc::new(VecModel::from(names)));
     app.invoke_focus_composer();

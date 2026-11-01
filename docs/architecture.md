@@ -11,6 +11,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/gui.rs` | UI-only state in `thread_local! UI`, `apply(Event)` |
 | `src/gui/rows.rs` | `MsgDto` / `ThreadDto` → Slint rows: rich text (styles, mentions, links, spoilers), `update_rows` diffing |
 | `src/gui/scroll.rs` | message list scrolling: `stick_to_bottom`, `jump_to_row` / `seek_row`, `hold_older` |
+| `src/gui/drafts.rs` | per-thread composer drafts (text, mentions, reply, files) in `drafts.json`, saved on thread switch and exit; merged into the backend's thread list ("작성 중:", sorted by draft time when newer than the last message, like Signal Desktop's `shouldShowDraft`) |
 | `src/gui/wire.rs` | Slint callbacks → `Command`s, one `wire_*` per area (threads, composer, messages, stickers, settings) |
 | `src/gui/window.rs` | theme, zoom, native window handle, focus hook (`hook_window`) |
 | `src/demo.rs` | demo modes: fake backend with synthetic data, `SIGWIN_DEMO_*` extras, self-test |
