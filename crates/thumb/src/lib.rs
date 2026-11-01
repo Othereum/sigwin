@@ -44,6 +44,25 @@ pub fn downscale(img: RgbaImage, px: u32) -> RgbaImage {
     if w.max(h) <= px || w == 0 || h == 0 {
         return img;
     }
+    resample(img, px, image::imageops::FilterType::Lanczos3)
+}
+
+/// Resamples so the longer side is exactly `px`: down with Lanczos3, up with Catmull-Rom (no
+/// ringing). For images drawn at a fixed size: the renderer would scale them nearest-neighbor.
+pub fn fit(img: RgbaImage, px: u32) -> RgbaImage {
+    let (w, h) = img.dimensions();
+    if w.max(h) == px || w == 0 || h == 0 {
+        return img;
+    }
+    if w.max(h) > px {
+        return resample(img, px, image::imageops::FilterType::Lanczos3);
+    }
+    resample(img, px, image::imageops::FilterType::CatmullRom)
+}
+
+/// Resamples in premultiplied alpha so the longer side is `px`.
+fn resample(img: RgbaImage, px: u32, filter: image::imageops::FilterType) -> RgbaImage {
+    let (w, h) = img.dimensions();
     let s = px as f32 / w.max(h) as f32;
     let (nw, nh) = (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1));
     let mut pm = image::Rgba32FImage::new(w, h);
@@ -51,7 +70,7 @@ pub fn downscale(img: RgbaImage, px: u32) -> RgbaImage {
         let a = p[3] as f32 / 255.0;
         *d = image::Rgba([p[0] as f32 / 255.0 * a, p[1] as f32 / 255.0 * a, p[2] as f32 / 255.0 * a, a]);
     }
-    let small = image::imageops::resize(&pm, nw, nh, image::imageops::FilterType::Lanczos3);
+    let small = image::imageops::resize(&pm, nw, nh, filter);
     let mut out = RgbaImage::new(nw, nh);
     for (d, p) in out.pixels_mut().zip(small.pixels()) {
         let a = p[3].clamp(0.0, 1.0);
@@ -83,7 +102,7 @@ pub struct Animation {
 /// Decoding stops here: long animations would take seconds to resample.
 const MAX_FRAMES: usize = 500;
 
-/// Decodes an animated WebP / APNG / GIF, each frame downscaled to `px` (see `downscale`).
+/// Decodes an animated WebP / APNG / GIF, each frame resampled to `px` (see `fit`).
 /// `None` when the image is a still (one frame, or a format without animation). If the frames
 /// would take more than `max_bytes`, every other frame is dropped (its time goes to the one before)
 /// until they fit.
@@ -117,7 +136,7 @@ pub fn animation(bytes: &[u8], px: u32, max_bytes: usize) -> ImageResult<Option<
         let ms = if d == 0 { 0 } else { n / d };
         // like browsers: "as fast as possible" delays play at 10 fps
         anim.delays.push(if ms <= 10 { 100 } else { ms });
-        anim.frames.push(downscale(f.into_buffer(), px));
+        anim.frames.push(fit(f.into_buffer(), px));
     }
     if anim.frames.len() < 2 {
         return Ok(None);
@@ -232,6 +251,23 @@ mod tests {
         // edge pixels must not pick up the green of transparent neighbours
         assert!(out.pixels().all(|p| p[3] == 0 || p[1] < 8), "green fringe");
         assert_eq!(downscale(RgbaImage::new(50, 40), 130).dimensions(), (50, 40));
+    }
+
+    #[test]
+    fn fit_scales_both_ways_without_fringes() {
+        let disc = |s: u32| {
+            RgbaImage::from_fn(s, s, |x, y| {
+                let (dx, dy) = (x as f32 - s as f32 / 2.0, y as f32 - s as f32 / 2.0);
+                if dx * dx + dy * dy < (s as f32 / 3.0).powi(2) { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 255, 0, 0]) }
+            })
+        };
+        let up = fit(disc(112), 140);
+        assert_eq!(up.dimensions(), (140, 140));
+        assert!(up.pixels().all(|p| p[3] == 0 || p[1] < 8), "green fringe");
+        // smooth edge: some partly transparent pixels
+        assert!(up.pixels().any(|p| p[3] > 0 && p[3] < 255));
+        assert_eq!(fit(disc(260), 140).dimensions(), (140, 140));
+        assert_eq!(fit(RgbaImage::new(70, 35), 140).dimensions(), (140, 70));
     }
 
     #[test]

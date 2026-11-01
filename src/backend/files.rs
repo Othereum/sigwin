@@ -118,8 +118,8 @@ pub(crate) fn save_cached(path: &Path, png: image::ImageResult<Vec<u8>>) {
 }
 
 /// Decodes (sniffing the format, file names may lie) and downsizes to `max`, caching the result as PNG.
-/// With `fit` > 0 the result is then resampled so its longer side is exactly `fit` logical px on screen:
-/// the software renderer scales images nearest-neighbor, which shreds downscaled stickers.
+/// With `fit` > 0 the result is then resampled (down or up) so its longer side is exactly `fit` logical
+/// px on screen: the software renderer scales images nearest-neighbor, which shreds stickers.
 pub(super) fn make_thumb_from(
     key: &str,
     bytes: impl FnOnce() -> anyhow::Result<Vec<u8>>,
@@ -137,7 +137,7 @@ pub(super) fn make_thumb_from(
         }
     };
     if fit > 0 {
-        rgba = sigwin_thumb::downscale(rgba, crate::types::physical_px(fit));
+        rgba = sigwin_thumb::fit(rgba, crate::types::physical_px(fit));
     }
     Ok(Thumb { key: key.to_string(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
 }

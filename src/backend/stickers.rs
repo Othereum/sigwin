@@ -231,7 +231,7 @@ impl App {
         let emit = self.emit.clone();
         tokio::task::spawn_blocking(move || {
             let img = sigwin_thumb::decode(&bytes).map(|i| {
-                sigwin_thumb::downscale(sigwin_thumb::to_rgba(&i), crate::types::physical_px(view::STICKER_SIZE))
+                sigwin_thumb::fit(sigwin_thumb::to_rgba(&i), crate::types::physical_px(view::STICKER_SIZE))
             });
             if let Ok(rgba) = img {
                 let t = Thumb { key: image_key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() };
@@ -379,7 +379,9 @@ impl StickerJob {
     /// The resampled result is cached too (`-<px>px.enc`): resampling costs ~10x the decode.
     pub(super) fn make(self, dir: &Path) -> anyhow::Result<Thumb> {
         let fitted = self.fitted(dir);
-        if let Ok(rgba) = load_cached(&fitted) {
+        // older caches kept small sources at their own size
+        let px = crate::types::physical_px(self.fit);
+        if let Ok(rgba) = load_cached(&fitted).map_err(drop).and_then(|i| if i.width().max(i.height()) == px { Ok(i) } else { Err(()) }) {
             return Ok(Thumb { key: self.key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() });
         }
         let source = self.source(dir);
