@@ -359,7 +359,7 @@ component Bubble inherits VerticalLayout {
     padding-top: m.show-sender || m.day-sep != "" || m.typing ? 8px : 2px;
     // the newest row gets extra room below so it doesn't touch the composer
     in property <bool> last;
-    padding-bottom: (m.typing ? 8px : (m.outgoing && m.readers.length > 0 ? 12px : 2px)) + (last ? 10px : 0px);
+    padding-bottom: (m.typing ? 8px : (m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 12px) : 2px)) + (last ? 10px : 0px);
     spacing: 4px;
     opacity: m.pending ? 0.6 : 1.0;
     // plain text: the time sits at the right of the last line instead of below
@@ -368,6 +368,7 @@ component Bubble inherits VerticalLayout {
     property <bool> bare: m.has-image && m.text == "" && m.quote == "" && m.attachment == "";
     // photo with text: the photo sits flush on top of the bubble, the text below it
     property <bool> flush: m.has-image && !m.sticker && m.text != "" && m.quote == "";
+    property <bool> no-bubble: m.sticker || m.big-emoji || bare;
     // height of the day separator above the message itself (centering a jump on the bubble)
     out property <length> lead: m.day-sep != "" ? root.padding-top + 36px + root.spacing : 0px;
 
@@ -617,7 +618,8 @@ component Bubble inherits VerticalLayout {
             // pane color), a "+N" circle for the rest; `Bubble.padding-bottom` makes room for the lower half
             if m.outgoing && m.readers.length > 0: Rectangle {
                 x: parent.width - self.width - 8px;
-                y: parent.height - 9px;
+                // no bubble (sticker, bare photo, big emoji): the time sits at the bottom edge, so go fully below it
+                y: root.no-bubble ? parent.height + 2px : parent.height - 9px;
                 width: 18px + (m.readers.length + (m.readers-more > 0 ? 1 : 0) - 1) * 11px;
                 height: 18px;
                 for r[i] in m.readers: Rectangle {
