@@ -524,7 +524,13 @@ fn text_content_widths_impl(
             shaping::content_widths_builder(text_item.font_request(item_rc), scale_factor);
 
         let paragraphs_without_linebreaks =
-            create_text_paragraphs(&layout_builder, font_ctx, text_item.text(), Color::default());
+            create_text_paragraphs(
+                &layout_builder,
+                font_ctx,
+                text_item.text(),
+                Color::default(),
+                Some(item_rc),
+            );
 
         // No line breaking needed: parley derives the content widths from the break
         // opportunities. Paragraphs stack vertically, so both widths are the widest.

@@ -18,6 +18,8 @@ slint = { version = "1.18.1", default-features = false, features = [
     "raw-window-handle-06",
     "image-default-formats",
 ] }
+# patched (see [patch.crates-io]): text styles API `styled_text::sigwin_*`
+i-slint-core = { version = "=1.18.1", default-features = false }
 raw-window-handle = "0.6"
 
 anyhow = "1"

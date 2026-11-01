@@ -45,6 +45,8 @@ struct GlyphCacheKey {
     coords_hash: u64,
     /// Horizontal sub-pixel bin.
     subpixel_bin: u8,
+    /// sigwin patch: synthetic italic skew (degrees, f32 bits)
+    skew_bits: u32,
 }
 
 struct RenderableGlyphWeightScale;
@@ -87,6 +89,8 @@ pub struct VectorFont {
     normalized_coords: Vec<i16>,
     /// Hash of normalized_coords for use in the glyph cache key.
     coords_hash: u64,
+    /// sigwin patch: synthetic italic skew in degrees (0 = upright)
+    skew: f32,
 }
 
 fn hash_coords(coords: &[i16]) -> u64 {
@@ -170,7 +174,14 @@ impl VectorFont {
             cap_height: (cap_height.cast() * scale).cast(),
             normalized_coords: normalized_coords.to_vec(),
             coords_hash,
+            skew: 0.0,
         }
+    }
+
+    /// sigwin patch: slants the glyphs (fontique's synthesis for an italic the font lacks).
+    pub fn with_skew(mut self, degrees: f32) -> Self {
+        self.skew = degrees;
+        self
     }
 
     pub fn render_vector_glyph(
@@ -189,6 +200,7 @@ impl VectorFont {
                 glyph_id,
                 coords_hash: self.coords_hash,
                 subpixel_bin,
+                skew_bits: self.skew.to_bits(),
             };
 
             if let Some(entry) = cache.get(&cache_key) {
@@ -214,6 +226,13 @@ impl VectorFont {
                 ])
                 .format(swash::zeno::Format::Alpha)
                 .offset(swash::zeno::Vector::new(subpixel_offset_x, 0.0))
+                // sigwin patch: synthetic italic
+                .transform((self.skew != 0.0).then(|| {
+                    swash::zeno::Transform::skew(
+                        swash::zeno::Angle::from_degrees(self.skew),
+                        swash::zeno::Angle::ZERO,
+                    )
+                }))
                 .render(&mut scaler, glyph_id.get())?;
 
                 let placement = image.placement;

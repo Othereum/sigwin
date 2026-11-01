@@ -80,6 +80,116 @@ pub fn get_raw_text(styled_text: &StyledText) -> alloc::borrow::Cow<'_, str> {
     }
 }
 
+/// sigwin patch: a span style for [`sigwin_styled`].
+#[cfg(feature = "std")]
+#[derive(Debug, Clone)]
+pub enum SigwinStyle {
+    Bold,
+    Italic,
+    Strike,
+    /// monospace font, same size, no capsule (see `shaping.rs`)
+    Mono,
+    /// text color; alpha 1 marks a spoiler: an opaque box of that RGB without glyphs (`draw.rs`)
+    Color(crate::Color),
+    /// underlined link reported by `link-clicked`
+    Link(alloc::string::String),
+    /// clickable like a link, but drawn as is
+    Hit(alloc::string::String),
+}
+
+/// sigwin patch: the paragraphs of plain `text`, split like a plain Text / TextInput does, so the
+/// byte offsets of both agree.
+#[cfg(feature = "std")]
+fn sigwin_paragraphs(text: &str) -> impl Iterator<Item = core::ops::Range<usize>> + '_ {
+    let mut start = 0;
+    text.split('\n').map(move |p| {
+        let end = start + p.len();
+        let range = if p.ends_with('\r') { start..end - 1 } else { start..end };
+        start = end + 1;
+        range
+    })
+}
+
+/// sigwin patch: styled text built from byte ranges of `text`, without markdown. Later spans win
+/// where they set the same property (colors).
+#[cfg(feature = "std")]
+pub fn sigwin_styled(text: &str, spans: &[(core::ops::Range<usize>, SigwinStyle)]) -> StyledText {
+    use i_slint_common::styled_text::{FormattedSpan, Style, StyledTextParagraph};
+    let paragraphs = sigwin_paragraphs(text).map(|p| {
+        let mut out = StyledTextParagraph {
+            text: text[p.clone()].into(),
+            formatting: alloc::vec::Vec::new(),
+            links: alloc::vec::Vec::new(),
+        };
+        for (r, style) in spans {
+            let (s, e) = (r.start.max(p.start), r.end.min(p.end));
+            if s >= e || !text.is_char_boundary(s) || !text.is_char_boundary(e) {
+                continue;
+            }
+            let range = s - p.start..e - p.start;
+            let style = match style {
+                SigwinStyle::Bold => Style::Strong,
+                SigwinStyle::Italic => Style::Emphasis,
+                SigwinStyle::Strike => Style::Strikethrough,
+                SigwinStyle::Mono => Style::Code,
+                SigwinStyle::Color(c) => Style::Color(c.as_argb_encoded()),
+                SigwinStyle::Link(url) => {
+                    out.links.push((range.clone(), url.clone()));
+                    Style::Link
+                }
+                SigwinStyle::Hit(url) => {
+                    out.links.push((range, url.clone()));
+                    continue;
+                }
+            };
+            out.formatting.push(FormattedSpan { range, style });
+        }
+        out
+    });
+    StyledText { paragraphs: paragraphs.collect() }
+}
+
+#[cfg(feature = "std")]
+std::thread_local! {
+    static SIGWIN_PLAIN: core::cell::RefCell<std::collections::HashMap<alloc::string::String, StyledText>> =
+        Default::default();
+}
+
+/// sigwin patch: plain Text and read-only TextInput items showing exactly `text` are shaped with
+/// the formatting of `styled` (built from the same text with [`sigwin_styled`]; links are ignored).
+/// `None` removes it. Register before the item first lays out: shaped text is cached.
+#[cfg(feature = "std")]
+pub fn sigwin_set_plain_style(text: &str, styled: Option<StyledText>) {
+    SIGWIN_PLAIN.with_borrow_mut(|m| match styled {
+        Some(s) => {
+            m.insert(text.into(), s);
+        }
+        None => {
+            m.remove(text);
+        }
+    });
+}
+
+/// sigwin patch: forgets every [`sigwin_set_plain_style`].
+#[cfg(feature = "std")]
+pub fn sigwin_clear_plain_styles() {
+    SIGWIN_PLAIN.with_borrow_mut(|m| m.clear());
+}
+
+/// sigwin patch: the registered formatting of each paragraph of `text`.
+#[cfg(feature = "std")]
+pub(crate) fn sigwin_plain_style(
+    text: &str,
+) -> Option<alloc::vec::Vec<alloc::vec::Vec<i_slint_common::styled_text::FormattedSpan>>> {
+    SIGWIN_PLAIN.with_borrow(|m| {
+        if m.is_empty() {
+            return None;
+        }
+        let s = m.get(text)?;
+        Some(s.paragraphs.iter().map(|p| p.formatting.clone()).collect())
+    })
+}
+
 /// Bindings for cbindgen
 #[cfg(feature = "ffi")]
 pub mod ffi {

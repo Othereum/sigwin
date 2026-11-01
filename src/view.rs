@@ -195,26 +195,89 @@ pub fn mentioned(dm: &DataMessage) -> Vec<Uuid> {
     dm.body_ranges.iter().chain(quote).filter_map(mention_uuid).collect()
 }
 
-/// Replaces mention ranges (a U+FFFC placeholder in the text, offsets in UTF-16 units) with "@name".
+/// Replaces mention ranges (a U+FFFC placeholder in the text, offsets in UTF-16 units) with "@name",
+/// and spoilers with blocks (previews never show them).
 pub fn with_mentions(text: &str, ranges: &[BodyRange], name_of: &dyn Fn(&Uuid) -> String) -> String {
-    let mut out = String::new();
-    push_with_mentions(&mut out, text, ranges, name_of, &mut Vec::new());
-    out
+    let (mut out, mut styles) = (String::new(), Vec::new());
+    push_with_mentions(&mut out, text, ranges, name_of, &mut Vec::new(), &mut styles);
+    mask_spoilers(out, &styles)
 }
 
-/// Appends `text` to `out` with mentions replaced; records each "@name" as a byte range of `out`.
+/// Covers spoiler ranges with a fixed run of blocks (which hides their length too).
+pub fn mask_spoilers(mut text: String, styles: &[(usize, usize, u8)]) -> String {
+    let mut spoilers: Vec<(usize, usize)> =
+        styles.iter().filter(|s| s.2 == STYLE_SPOILER).map(|&(s, e, _)| (s, e)).collect();
+    spoilers.sort_unstable();
+    // merge overlapping ones
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (s, e) in spoilers {
+        match merged.last_mut() {
+            Some(last) if s <= last.1 => last.1 = last.1.max(e),
+            _ => merged.push((s, e)),
+        }
+    }
+    for &(s, e) in merged.iter().rev() {
+        text.replace_range(s..e, "■■■■");
+    }
+    text
+}
+
+/// Text styles of `BodyRange` (the proto's `Style` values).
+pub const STYLE_BOLD: u8 = 1;
+pub const STYLE_ITALIC: u8 = 2;
+pub const STYLE_SPOILER: u8 = 3;
+pub const STYLE_STRIKE: u8 = 4;
+pub const STYLE_MONO: u8 = 5;
+
+/// Appends `text` to `out` with mentions replaced; records each "@name" as a byte range of `out`,
+/// and each style range as (start, end, style) bytes of `out`.
 fn push_with_mentions(
     out: &mut String,
     text: &str,
     ranges: &[BodyRange],
     name_of: &dyn Fn(&Uuid) -> String,
     spans: &mut Vec<(usize, usize, String)>,
+    styles: &mut Vec<(usize, usize, u8)>,
+) {
+    let base = out.len();
+    // (UTF-16 offset in `text`, byte offset in `out`) at every char start, plus the end
+    let mut map: Vec<(usize, usize)> = Vec::new();
+    push_mentions(out, text, ranges, name_of, spans, &mut map);
+    map.push((text.encode_utf16().count(), out.len()));
+    let at = |u16: usize| match map.binary_search_by_key(&u16, |&(u, _)| u) {
+        Ok(i) => map[i].1,
+        // inside a surrogate pair: the char's end
+        Err(i) => map.get(i).map_or(out.len(), |&(_, b)| b),
+    };
+    for r in ranges {
+        let (Some(start), Some(AssociatedValue::Style(s))) = (r.start, &r.associated_value) else { continue };
+        let Ok(s @ STYLE_BOLD..=STYLE_MONO) = u8::try_from(*s) else { continue };
+        let start = start.max(0) as usize;
+        let (a, b) = (at(start), at(start + r.length.unwrap_or(0).max(0) as usize));
+        if b > a && a >= base {
+            styles.push((a, b, s));
+        }
+    }
+}
+
+fn push_mentions(
+    out: &mut String,
+    text: &str,
+    ranges: &[BodyRange],
+    name_of: &dyn Fn(&Uuid) -> String,
+    spans: &mut Vec<(usize, usize, String)>,
+    map: &mut Vec<(usize, usize)>,
 ) {
     let mut ms: Vec<(usize, usize, Uuid)> = ranges
         .iter()
         .filter_map(|r| Some((r.start? as usize, r.length.unwrap_or(0) as usize, mention_uuid(r)?)))
         .collect();
     if ms.is_empty() {
+        let mut pos = 0;
+        for (i, ch) in text.char_indices() {
+            map.push((pos, out.len() + i));
+            pos += ch.len_utf16();
+        }
         out.push_str(text);
         return;
     }
@@ -235,11 +298,15 @@ fn push_with_mentions(
             }
             next.next();
             if start == pos && pos >= skip_until {
+                map.push((pos, out.len()));
                 mention(out, &uuid);
                 skip_until = pos + len;
             }
         }
         if pos >= skip_until {
+            if map.last().is_none_or(|&(p, _)| p != pos) {
+                map.push((pos, out.len()));
+            }
             out.push(ch);
         }
         pos += ch.len_utf16();
@@ -253,12 +320,20 @@ fn push_with_mentions(
 }
 
 /// Body text of a data message, with placeholders for content we don't render.
+/// Spoilers are masked: this is for previews.
 fn body_text(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
-    body_text_spans(dm, name_of, &mut Vec::new())
+    let mut styles = Vec::new();
+    let t = body_text_spans(dm, name_of, &mut Vec::new(), &mut styles);
+    mask_spoilers(t, &styles)
 }
 
-/// `body_text`, recording where the mentions ended up (byte ranges).
-fn body_text_spans(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String, spans: &mut Vec<(usize, usize, String)>) -> String {
+/// `body_text`, recording where the mentions and styles ended up (byte ranges).
+fn body_text_spans(
+    dm: &DataMessage,
+    name_of: &dyn Fn(&Uuid) -> String,
+    spans: &mut Vec<(usize, usize, String)>,
+    styles: &mut Vec<(usize, usize, u8)>,
+) -> String {
     let mut parts: Vec<String> = Vec::new();
     if dm.is_view_once.unwrap_or(false) {
         parts.push("[한 번 보기 미디어 — 휴대폰에서 확인하세요]".into());
@@ -283,7 +358,7 @@ fn body_text_spans(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String, spans: &
         if !out.is_empty() {
             out.push('\n');
         }
-        push_with_mentions(&mut out, b, &dm.body_ranges, name_of, spans);
+        push_with_mentions(&mut out, b, &dm.body_ranges, name_of, spans, styles);
         return out;
     }
     parts.join("\n")
@@ -501,7 +576,7 @@ pub fn build(
                     _ => (dm, false),
                 };
                 m.outgoing = outgoing;
-                m.text = body_text_spans(dm, name_of, &mut m.mentions);
+                m.text = body_text_spans(dm, name_of, &mut m.mentions, &mut m.styles);
                 // stickers with image data render as a borderless picture instead of text
                 if let Some(data) = dm.sticker.as_ref().and_then(|s| s.data.as_ref()) {
                     let key = attachment_key(data, *ts, 99);
@@ -512,12 +587,14 @@ pub fn build(
                     m.sticker = true;
                     m.text.clear();
                     m.mentions.clear();
+                    m.styles.clear();
                     push_with_mentions(
                         &mut m.text,
                         dm.body.as_deref().unwrap_or_default(),
                         &dm.body_ranges,
                         name_of,
                         &mut m.mentions,
+                        &mut m.styles,
                     );
                 }
                 if !outgoing {
@@ -643,6 +720,7 @@ pub fn set_my_reaction(m: &mut MsgDto, emoji: Option<&str>) {
 pub fn set_edited_text(m: &mut MsgDto, text: &str) {
     m.text = text.to_string();
     m.mentions.clear();
+    m.styles.clear();
     if !m.time.ends_with("수정됨") {
         m.time = format!("{} · 수정됨", m.time);
     }
@@ -752,9 +830,36 @@ mod tests {
             ..Default::default()
         };
         let mut spans = Vec::new();
-        let t = body_text_spans(&dm, &name, &mut spans);
+        let t = body_text_spans(&dm, &name, &mut spans, &mut Vec::new());
         let got: Vec<&str> = spans.iter().map(|&(s, e, _)| &t[s..e]).collect();
         assert_eq!(got, ["@철수", "@영희"]);
+    }
+
+    #[test]
+    fn styles_follow_mentions() {
+        let a = Uuid::from_u128(1);
+        let name = |_: &Uuid| "철수".to_string();
+        let st = |start, length, s| BodyRange { start: Some(start), length: Some(length), associated_value: Some(AssociatedValue::Style(s)) };
+        let mention = BodyRange {
+            start: Some(3),
+            length: Some(1),
+            associated_value: Some(AssociatedValue::MentionAci(a.to_string())),
+        };
+        // "😀" is two UTF-16 units; the mention grows from 1 unit to "@철수"
+        let text = "😀 \u{FFFC} 굵게 끝";
+        let ranges = [mention, st(5, 2, 1), st(0, 2, 3), st(3, 1, 2), st(8, 1, 9)];
+        let (mut out, mut spans, mut styles) = (String::from("x\n"), Vec::new(), Vec::new());
+        push_with_mentions(&mut out, text, &ranges, &name, &mut spans, &mut styles);
+        assert_eq!(out, "x\n😀 @철수 굵게 끝");
+        let got: Vec<(&str, u8)> = styles.iter().map(|&(s, e, k)| (&out[s..e], k)).collect();
+        assert_eq!(got, [("굵게", 1), ("😀", 3), ("@철수", 2)]);
+        // no mentions
+        let mut out = String::new();
+        let mut styles = Vec::new();
+        push_with_mentions(&mut out, "ab한글", &[st(2, 2, 4)], &name, &mut Vec::new(), &mut styles);
+        assert_eq!(&out[styles[0].0..styles[0].1], "한글");
+        // previews mask spoilers, overlapping ones too
+        assert_eq!(with_mentions("ab 비밀 c 둘", &[st(3, 2, 3), st(8, 1, 3), st(7, 2, 3)], &name), "ab ■■■■ c■■■■");
     }
 
     #[test]

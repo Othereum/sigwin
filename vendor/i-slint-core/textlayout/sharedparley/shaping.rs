@@ -15,6 +15,7 @@ use super::*;
 /// text. Matches the convention used by GitHub-style markdown renderers — the
 /// glyphs sit a little smaller than body text, inside a translucent capsule
 /// that visually marks them as code.
+#[allow(dead_code)] // sigwin patch: code keeps its size
 const INLINE_CODE_FONT_SCALE: f32 = 0.85;
 
 /// sigwin patch: CJK fonts tried after the requested family (Japanese, Simplified, Traditional).
@@ -199,21 +200,14 @@ impl LayoutWithoutLineBreaksBuilder {
                         );
                     }
                     Style::Code => {
+                        // sigwin patch: monospace at the same size and without a capsule, like
+                        // Signal's monospace style (see `create_text_paragraphs`)
                         builder.push(
                             parley::StyleProperty::FontFamily(parley::style::FontFamily::Single(
                                 parley::style::FontFamilyName::Generic(
                                     parley::style::GenericFamily::Monospace,
                                 ),
                             )),
-                            span.range.clone(),
-                        );
-                        // Inline `code` reads as slightly smaller text on top of a
-                        // translucent capsule (drawn separately in `TextParagraph::draw`),
-                        // matching the convention used by common markdown renderers.
-                        builder.push(
-                            parley::StyleProperty::FontSize(
-                                self.pixel_size.get() * INLINE_CODE_FONT_SCALE,
-                            ),
                             span.range,
                         );
                     }
@@ -284,6 +278,7 @@ pub(super) fn create_text_paragraphs(
     font_context: &mut parley::FontContext,
     text: PlainOrStyledText,
     link_color: Color,
+    item_rc: Option<&crate::item_tree::ItemRc>,
 ) -> Vec<TextParagraph> {
     let paragraph_from_text =
         |font_context: &mut parley::FontContext,
@@ -291,11 +286,8 @@ pub(super) fn create_text_paragraphs(
          range: std::ops::Range<usize>,
          formatting: Vec<i_slint_common::styled_text::FormattedSpan>,
          links: Vec<(std::ops::Range<usize>, std::string::String)>| {
-            let code_ranges: alloc::vec::Vec<Range<usize>> = formatting
-                .iter()
-                .filter(|s| matches!(s.style, i_slint_common::styled_text::Style::Code))
-                .map(|s| s.range.clone())
-                .collect();
+            // sigwin patch: no inline code capsules
+            let code_ranges: alloc::vec::Vec<Range<usize>> = alloc::vec::Vec::new();
 
             let layout = layout_builder.build(font_context, text, formatting, Some(link_color));
 
@@ -306,12 +298,25 @@ pub(super) fn create_text_paragraphs(
 
     match text {
         PlainOrStyledText::Plain(ref text) => {
+            // sigwin patch: formatting registered for this exact text (`sigwin_set_plain_style`),
+            // not for text being edited
+            let editable = item_rc
+                .and_then(|rc| rc.downcast::<crate::items::TextInput>())
+                .is_some_and(|ti| !ti.as_pin_ref().read_only());
+            let mut styles = if editable {
+                None
+            } else {
+                crate::styled_text::sigwin_plain_style(text)
+            }
+            .map(|v| v.into_iter());
             for range in paragraph_ranges(text) {
+                let formatting =
+                    styles.as_mut().and_then(|s| s.next()).unwrap_or_default();
                 paragraphs.push(paragraph_from_text(
                     font_context,
                     &text[range.clone()],
                     range,
-                    Default::default(),
+                    formatting,
                     Default::default(),
                 ));
             }
@@ -395,7 +400,7 @@ pub(super) fn shape_paragraphs(
     font_context: &mut parley::FontContext,
 ) -> Vec<TextParagraph> {
     let builder = shaping_builder(text, item_rc, text_wrap, scale_factor);
-    create_text_paragraphs(&builder, font_context, text.text(), text.link_color())
+    create_text_paragraphs(&builder, font_context, text.text(), text.link_color(), item_rc)
 }
 
 pub(super) struct TextParagraph {

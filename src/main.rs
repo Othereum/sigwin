@@ -24,6 +24,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use i_slint_core::styled_text::{sigwin_clear_plain_styles, sigwin_set_plain_style, sigwin_styled, SigwinStyle};
 use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -92,6 +93,8 @@ struct Ui {
     typing_row: bool,
     settings: settings::Settings,
     settings_path: PathBuf,
+    /// messages whose spoilers were clicked open, open thread only
+    revealed: std::collections::HashSet<String>,
 }
 
 /// Brings the message model from `ui.last` to `items` touching only the rows that differ.
@@ -110,7 +113,7 @@ fn update_rows(ui: &mut Ui, items: &[MsgDto], dark: bool) {
     let max = old.len().min(items.len());
     let pre = old.iter().zip(items).take_while(|(a, b)| a.id == b.id).count();
     let suf = old.iter().rev().zip(items.iter().rev()).take(max - pre).take_while(|(a, b)| a.id == b.id).count();
-    let item = |m: &MsgDto| to_item(m, &ui.thumbs, &ui.sender_avatars, dark);
+    let item = |m: &MsgDto| to_item(m, &ui.thumbs, &ui.sender_avatars, &ui.revealed, dark);
     for i in (0..pre).chain(old.len() - suf..old.len()) {
         let j = if i < pre { i } else { i + items.len() - old.len() };
         if old[i] != items[j] {
@@ -229,40 +232,67 @@ thread_local! {
     static JUMP: slint::Timer = slint::Timer::default();
 }
 
-/// Message text with the @mentions colored and links underlined. The styled text is drawn
-/// over a TextInput whose own glyphs are transparent, so selection keeps working; only
-/// colors and underlines change, never the font, so both lay out identically.
-fn rich_text(m: &MsgDto, links: &[(usize, usize)], dark: bool) -> slint::StyledText {
-    use slint::private_unstable_api::re_exports::parse_markdown;
+/// Prefix of the link that opens a message's spoilers; the message id follows.
+const SPOILER_URL: &str = "sigwin-spoiler:";
+
+/// Font styles of a message (bold, italic, strikethrough, monospace) as styled text spans.
+fn font_spans(m: &MsgDto) -> Vec<(std::ops::Range<usize>, SigwinStyle)> {
+    m.styles
+        .iter()
+        .filter_map(|&(s, e, k)| {
+            let style = match k {
+                view::STYLE_BOLD => SigwinStyle::Bold,
+                view::STYLE_ITALIC => SigwinStyle::Italic,
+                view::STYLE_STRIKE => SigwinStyle::Strike,
+                view::STYLE_MONO => SigwinStyle::Mono,
+                _ => return None,
+            };
+            Some((s..e, style))
+        })
+        .collect()
+}
+
+/// Spoiler ranges still hidden.
+fn hidden_spoilers(m: &MsgDto, revealed: &std::collections::HashSet<String>) -> Vec<(usize, usize)> {
+    if m.deleted || revealed.contains(&m.id) {
+        return Vec::new();
+    }
+    m.styles.iter().filter(|s| s.2 == view::STYLE_SPOILER).map(|&(s, e, _)| (s, e)).collect()
+}
+
+/// Message text with the @mentions colored, links underlined and spoilers covered. The styled
+/// text is drawn over a TextInput whose own glyphs are transparent, so selection keeps working.
+/// Both get the same font styles (the TextInput through `sigwin_set_plain_style`), so they lay
+/// out identically; the rest only changes colors, underlines and boxes.
+fn rich_text(m: &MsgDto, links: &[(usize, usize)], spoilers: &[(usize, usize)], dark: bool) -> slint::StyledText {
     // link color comes from the StyledText's `link-color`
     let mention = match (m.outgoing, dark) {
-        (true, _) => "#ffe27a",
-        (false, true) => "#7aa7ff",
-        (false, false) => "#1f5fd6",
+        (true, _) => Color::from_rgb_u8(0xff, 0xe2, 0x7a),
+        (false, true) => Color::from_rgb_u8(0x7a, 0xa7, 0xff),
+        (false, false) => Color::from_rgb_u8(0x1f, 0x5f, 0xd6),
     };
-    let mut spans: Vec<(usize, usize, bool)> = m.mentions.iter().map(|&(s, e, _)| (s, e, false)).collect();
-    spans.extend(links.iter().map(|&(s, e)| (s, e, true)));
-    spans.sort_unstable();
-    // placeholders are filled with plain text verbatim, so user text is never parsed as markdown
-    const P: char = '\u{e541}';
-    let mut fmt = String::from(P);
-    let mut args = Vec::with_capacity(spans.len() * 2 + 1);
-    let mut at = 0;
-    for (s, e, is_link) in spans {
-        let (Some(before), Some(part)) = (m.text.get(at..s), m.text.get(s..e)) else { continue };
-        args.push(slint::StyledText::from_plain_text(before));
-        args.push(slint::StyledText::from_plain_text(part));
-        if is_link {
-            // a markdown link: the StyledText underlines it and reports clicks with the URL
-            args.push(slint::StyledText::from_plain_text(&link::target(part)));
-            fmt.push_str(&format!("[{P}]({P}){P}"));
-        } else {
-            fmt.push_str(&format!("<font color=\"{mention}\">{P}</font>{P}"));
+    // alpha 1 = spoiler box of this color (patched i-slint-core)
+    let (r, g, b) = match (m.outgoing, dark) {
+        (true, _) => (0xa9, 0xbf, 0xf8),
+        (false, true) => (0x6a, 0x6a, 0x72),
+        (false, false) => (0xb4, 0xb4, 0xbc),
+    };
+    let spoiler = Color::from_argb_u8(1, r, g, b);
+    let covered = |s: usize, e: usize| spoilers.iter().any(|&(a, b)| s < b && a < e);
+    let mut spans = font_spans(m);
+    spans.extend(m.mentions.iter().map(|&(s, e, _)| (s..e, SigwinStyle::Color(mention))));
+    for &(s, e) in links.iter().filter(|&&(s, e)| !covered(s, e)) {
+        if let Some(part) = m.text.get(s..e) {
+            // the StyledText underlines it and reports clicks with the URL
+            spans.push((s..e, SigwinStyle::Link(link::target(part))));
         }
-        at = e;
     }
-    args.push(slint::StyledText::from_plain_text(&m.text[at..]));
-    parse_markdown(&fmt, &args)
+    let url = format!("{SPOILER_URL}{}", m.id);
+    for &(s, e) in spoilers {
+        spans.push((s..e, SigwinStyle::Color(spoiler)));
+        spans.push((s..e, SigwinStyle::Hit(url.clone())));
+    }
+    sigwin_styled(&m.text, &spans)
 }
 
 /// The photos (first `MAX_READER_PHOTOS`) of those who read a message; keys `r:<uuid>` in `senders`.
@@ -284,7 +314,13 @@ fn reader_items(m: &MsgDto, senders: &HashMap<String, Image>) -> ModelRc<ReaderI
     ModelRc::new(VecModel::from(rows))
 }
 
-fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, senders: &HashMap<String, Image>, dark: bool) -> MsgItem {
+fn to_item(
+    m: &MsgDto,
+    thumbs: &HashMap<String, Image>,
+    senders: &HashMap<String, Image>,
+    revealed: &std::collections::HashSet<String>,
+    dark: bool,
+) -> MsgItem {
     let image = thumbs.get(&m.image_key).cloned();
     let avatar = if m.show_avatar { senders.get(&m.sender_key).cloned() } else { None };
     let reactions: Vec<ReactionItem> = m
@@ -293,7 +329,13 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, senders: &HashMap<String
         .map(|(e, n)| ReactionItem { emoji: e.as_str().into(), count: *n as i32 })
         .collect();
     let links = if m.deleted { Vec::new() } else { link::find(&m.text) };
-    let has_rich = !m.mentions.is_empty() || !links.is_empty();
+    let fonts = if m.deleted { Vec::new() } else { font_spans(m) };
+    if !fonts.is_empty() {
+        // the TextInput lays out with the same font styles as the StyledText over it
+        sigwin_set_plain_style(&m.text, Some(sigwin_styled(&m.text, &fonts)));
+    }
+    let spoilers = hidden_spoilers(m, revealed);
+    let has_rich = !m.mentions.is_empty() || !links.is_empty() || !spoilers.is_empty();
     MsgItem {
         reactions: ModelRc::new(VecModel::from(reactions)),
         big_emoji: m.big_emoji,
@@ -302,7 +344,7 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, senders: &HashMap<String
         sender_color: tint(&m.sender_key),
         text: m.text.as_str().into(),
         has_rich,
-        rich: if has_rich { rich_text(m, &links, dark) } else { Default::default() },
+        rich: if has_rich { rich_text(m, &links, &spoilers, dark) } else { Default::default() },
         time: {
             let t = m.id.parse::<u64>().map_or(m.time.clone(), |ts| view::bubble_time(ts, &m.time));
             if m.pinned { format!("📌 {t}").into() } else { t.into() }
@@ -472,7 +514,7 @@ fn show_rows(app: &AppWindow, items: Vec<MsgDto>, can_older: bool, scroll: Scrol
         }
         let dark = app.global::<Theme>().get_dark();
         if rebuild {
-            ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.sender_avatars, dark)).collect::<Vec<_>>());
+            ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.sender_avatars, &ui.revealed, dark)).collect::<Vec<_>>());
             ui.typing_row = false;
         } else {
             update_rows(ui, &items, dark);
@@ -601,6 +643,8 @@ fn apply(app: &AppWindow, ev: Event) {
                 if switched {
                     ui.thumbs.clear();
                     ui.sender_avatars.clear();
+                    ui.revealed.clear();
+                    sigwin_clear_plain_styles();
                     ui.open_key = key.clone();
                     ui.reply_to = None;
                     ui.picked.clear();
@@ -851,11 +895,26 @@ fn apply_theme(app: &AppWindow, startup: bool) {
     }
 }
 
+/// Shows the spoilers of message `id` (clicked).
+fn reveal_spoilers(app: &AppWindow, id: &str) {
+    use slint::Model;
+    let dark = app.global::<Theme>().get_dark();
+    UI.with_borrow_mut(|ui| {
+        ui.revealed.insert(id.to_string());
+        if let Some(i) = ui.last.iter().position(|m| m.id == id) {
+            if i < ui.messages.row_count() {
+                let item = to_item(&ui.last[i], &ui.thumbs, &ui.sender_avatars, &ui.revealed, dark);
+                ui.messages.set_row_data(i, item);
+            }
+        }
+    });
+}
+
 /// Rebuild the message rows (their mention colors depend on the theme).
 fn refresh_rows(app: &AppWindow) {
     let dark = app.global::<Theme>().get_dark();
     UI.with_borrow_mut(|ui| {
-        let rows: Vec<MsgItem> = ui.last.iter().map(|m| to_item(m, &ui.thumbs, &ui.sender_avatars, dark)).collect();
+        let rows: Vec<MsgItem> = ui.last.iter().map(|m| to_item(m, &ui.thumbs, &ui.sender_avatars, &ui.revealed, dark)).collect();
         ui.messages.set_vec(rows);
         ui.typing_row = false;
         sync_typing(ui);
@@ -1408,7 +1467,11 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
             }
             ui.reply_to = Some(m.id.clone());
             let who = if m.outgoing { "나".to_string() } else { m.sender.clone() };
-            let body = if m.text.is_empty() { m.attachment.clone() } else { m.text.replace('\n', " ") };
+            let body = if m.text.is_empty() {
+                m.attachment.clone()
+            } else {
+                view::mask_spoilers(m.text.clone(), &m.styles).replace('\n', " ")
+            };
             Some(if who.is_empty() { body } else { format!("{who}: {body}") })
         });
         if let Some(p) = preview {
@@ -1483,7 +1546,11 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     let s = send.clone();
     app.on_clear_thumbs(move || s(Command::ClearThumbs));
 
-    app.global::<Links>().on_open(|url| link::open(&url));
+    let weak = app.as_weak();
+    app.global::<Links>().on_open(move |url| match url.strip_prefix(SPOILER_URL) {
+        Some(id) => reveal_spoilers(&weak.unwrap(), id),
+        None => link::open(&url),
+    });
 
     if headless::active() {
         return; // no native window to hook
@@ -1652,6 +1719,25 @@ fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Co
         let m = &mut items[i];
         m.text = text.into();
         m.mentions = text.match_indices('@').map(|(s, _)| (s, s + text[s..].find(' ').unwrap(), String::new())).collect();
+    }
+    // text styles, incoming and outgoing: bold, italic, strikethrough, plain, spoiler, monospace
+    for i in [288usize, 287] {
+        let text = "굵게 기울임 취소선 보통 스포일러 내용 mono(iiWW) 끝 www.naver.com";
+        let m = &mut items[i];
+        m.text = text.into();
+        let at = |w: &str| {
+            let s = text.find(w).unwrap();
+            (s, s + w.len())
+        };
+        let mut st = |w, k| {
+            let (s, e) = at(w);
+            m.styles.push((s, e, k));
+        };
+        st("굵게", view::STYLE_BOLD);
+        st("기울임", view::STYLE_ITALIC);
+        st("취소선", view::STYLE_STRIKE);
+        st("스포일러 내용", view::STYLE_SPOILER);
+        st("mono(iiWW)", view::STYLE_MONO);
     }
     emit(Event::Ready);
     emit(Event::Threads(threads));
@@ -1837,7 +1923,7 @@ mod tests {
         for (old, new) in cases {
             let mut ui = Ui::default();
             ui.last = rows(old);
-            ui.messages.set_vec(ui.last.iter().map(|m| to_item(m, &HashMap::new(), &HashMap::new(), false)).collect::<Vec<_>>());
+            ui.messages.set_vec(ui.last.iter().map(|m| to_item(m, &HashMap::new(), &HashMap::new(), &Default::default(), false)).collect::<Vec<_>>());
             let new = rows(new);
             update_rows(&mut ui, &new, false);
             let got: Vec<String> = ui.messages.iter().map(|m| m.text.to_string()).collect();

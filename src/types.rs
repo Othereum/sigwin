@@ -83,6 +83,8 @@ pub struct MsgDto {
     pub can_delete: bool,
     /// "@name" byte ranges in `text` (drawn highlighted) and who they mention (ACI uuid)
     pub mentions: Vec<(usize, usize, String)>,
+    /// text style byte ranges in `text`: (start, end, `view::STYLE_*`)
+    pub styles: Vec<(usize, usize, u8)>,
     /// pinned in this thread (a pin marker next to the time)
     pub pinned: bool,
     /// same sender, minute and status as the next row: the footer's time / status is redundant

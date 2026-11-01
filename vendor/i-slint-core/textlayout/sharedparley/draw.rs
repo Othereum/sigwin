@@ -527,6 +527,28 @@ impl TextParagraph {
         let synthesis = run.synthesis();
         let brush = &glyph_run.style().brush;
 
+        // sigwin patch: a color with alpha 1 marks a spoiler. Draw an opaque box of its RGB over
+        // the run's line band instead of the glyphs, even when selected.
+        if let Some(c) = brush.override_fill_color.filter(|c| c.alpha() == 1) {
+            let metrics = run.metrics();
+            let scale_factor = item_renderer.scale_factor();
+            let pad = (LogicalLength::new(1.0) * scale_factor).get();
+            let top = glyph_run.baseline() - metrics.ascent - pad;
+            let height = metrics.ascent + metrics.descent + 2.0 * pad;
+            let rect = PhysicalRect::new(
+                PhysicalPoint::from_lengths(
+                    PhysicalLength::new(glyph_run.offset()),
+                    PhysicalLength::new(top) + para_y,
+                ),
+                PhysicalSize::new(glyph_run.advance().max(0.0), height.max(1.0)),
+            );
+            let color = Color::from_argb_u8(255, c.red(), c.green(), c.blue());
+            if let Some(b) = item_renderer.platform_brush_for_color(&color) {
+                item_renderer.fill_rectangle(rect, b, LogicalLength::new(4.0) * scale_factor, None);
+            }
+            return;
+        }
+
         let (fill_brush, stroke_style) = match override_fill_brush {
             // Selection wins over a `Style::Color` span and over a link color: text under the
             // highlight has to stay legible against the selection background.
