@@ -36,7 +36,7 @@ use crate::types::{
 };
 use crate::view::{self, Kind, THUMB_MAX};
 
-type Mgr = Manager<SqliteStore, Registered>;
+pub(crate) type Mgr = Manager<SqliteStore, Registered>;
 pub type Emit = Arc<dyn Fn(Event) + Send + Sync>;
 
 const PAGE: u32 = 60;
@@ -84,6 +84,9 @@ struct Persist {
     /// disappearing-message sweep progress per thread
     #[serde(default)]
     sweep: HashMap<String, SweepState>,
+    /// thread key -> what we know about its photo
+    #[serde(default)]
+    avatars: HashMap<String, crate::avatar::State>,
 }
 
 #[derive(Default, Clone, Copy, Serialize, Deserialize)]
@@ -106,6 +109,7 @@ enum Internal {
     PackInstalled(Result<String, String>),
     ReceiptsIndexed,
     Swept { sweep: HashMap<String, SweepState>, changed: Vec<String> },
+    Avatars(crate::avatar::Done),
 }
 
 /// A reaction, edit or delete we sent that presage has not stored yet. Shown optimistically.
@@ -189,6 +193,9 @@ struct App {
     recv_task: Option<JoinHandle<()>>,
     /// delivery receipts to send, batched per sender
     pending_receipts: HashMap<ServiceId, Vec<u64>>,
+    /// threads whose photo was loaded (or is queued) this session
+    avatars_done: HashSet<String>,
+    avatars_running: bool,
 }
 
 /// Messages that produce a visible row.
@@ -281,6 +288,8 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         link_task: None,
         recv_task: None,
         pending_receipts: HashMap::new(),
+        avatars_done: HashSet::new(),
+        avatars_running: false,
     };
 
     if app.store.is_registered().await {
@@ -537,6 +546,18 @@ impl App {
                 self.current_dirty = true;
             }
             Internal::PackInstalled(Err(e)) => self.status(format!("스티커 팩 추가 실패: {e}")),
+            Internal::Avatars(done) => {
+                self.avatars_running = false;
+                self.persist.avatars.extend(done.state);
+                self.persist_dirty = true;
+                if done.profiles_refreshed {
+                    // refetched profiles may carry new names
+                    self.names.clear();
+                    self.threads_dirty = true;
+                }
+                // threads that showed up meanwhile
+                self.load_avatars();
+            }
             Internal::Swept { sweep, changed } => {
                 self.sweeping = false;
                 self.persist.sweep = sweep;
@@ -817,7 +838,41 @@ impl App {
         list.sort_by(|a, b| b.0.cmp(&a.0));
         self.threads = list.into_iter().map(|(_, t)| t).collect();
         self.emit_threads().await;
+        self.load_avatars();
         Ok(())
+    }
+
+    /// Loads the photos of listed threads not seen yet this session, in the background.
+    fn load_avatars(&mut self) {
+        if self.avatars_running {
+            return;
+        }
+        let Some(manager) = self.manager.clone() else { return };
+        let me = thread_key(&Thread::Contact(ServiceId::Aci(self.me.into())));
+        let todo: Vec<(String, Thread)> = self
+            .threads
+            .iter()
+            .filter(|t| t.key != me && !self.avatars_done.contains(&t.key))
+            .filter_map(|t| parse_thread_key(&t.key).map(|th| (t.key.clone(), th)))
+            .collect();
+        if todo.is_empty() {
+            return;
+        }
+        self.avatars_done.extend(todo.iter().map(|(k, _)| k.clone()));
+        self.avatars_running = true;
+        let job = crate::avatar::Job {
+            store: self.store.clone(),
+            index: self.index.clone(),
+            manager,
+            emit: self.emit.clone(),
+            dir: self.paths.thumbs.clone(),
+            state: todo.iter().filter_map(|(k, _)| self.persist.avatars.get(k).map(|s| (k.clone(), s.clone()))).collect(),
+        };
+        let tx = self.tx.clone();
+        tokio::task::spawn_local(async move {
+            let done = Box::pin(job.run(todo)).await;
+            let _ = tx.send(Internal::Avatars(done));
+        });
     }
 
     /// `view::snippet` with @mention names resolved.
@@ -1667,6 +1722,7 @@ impl App {
         self.current = None;
         self.threads.clear();
         self.names.clear();
+        self.avatars_done.clear();
         self.persist = Persist::default();
         self.save_persist();
         let _ = std::fs::remove_dir_all(&self.paths.attachments);
@@ -1909,7 +1965,7 @@ fn make_thumb_from(
 
 /// High-quality downscale so the longer side is `px` (never upscales). Filters in premultiplied
 /// alpha, otherwise transparent pixels' colors bleed into sticker edges as dark fringes.
-fn downscale(img: image::RgbaImage, px: u32) -> image::RgbaImage {
+pub(crate) fn downscale(img: image::RgbaImage, px: u32) -> image::RgbaImage {
     let (w, h) = img.dimensions();
     if w.max(h) <= px || w == 0 || h == 0 {
         return img;

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod alloc;
+mod avatar;
 mod backend;
 mod clip;
 mod picker;
@@ -52,6 +53,8 @@ struct Ui {
     messages: Rc<VecModel<MsgItem>>,
     /// thumbnails for the open thread only; cleared on thread switch to bound memory
     thumbs: HashMap<String, Image>,
+    /// round photos by thread key, for the whole session (~6KB each at 40px)
+    avatars: HashMap<String, Image>,
     last: Vec<MsgDto>,
     files: Vec<PathBuf>,
     reply_to: Option<String>,
@@ -208,8 +211,11 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, dark: bool) -> MsgItem {
     }
 }
 
-fn thread_item(t: &ThreadDto) -> ThreadItem {
+fn thread_item(t: &ThreadDto, avatars: &HashMap<String, Image>) -> ThreadItem {
+    let photo = avatars.get(&t.key);
     ThreadItem {
+        has_photo: photo.is_some(),
+        photo: photo.cloned().unwrap_or_default(),
         key: t.key.as_str().into(),
         name: t.name.as_str().into(),
         snippet: t.snippet.as_str().into(),
@@ -261,7 +267,7 @@ fn apply(app: &AppWindow, ev: Event) {
         Event::Ready => app.set_page("main".into()),
         Event::Threads(list) => UI.with_borrow(|ui| {
             app.set_total_unread(list.iter().map(|t| t.unread as i32).sum());
-            ui.threads.set_vec(list.iter().map(thread_item).collect::<Vec<_>>());
+            ui.threads.set_vec(list.iter().map(|t| thread_item(t, &ui.avatars)).collect::<Vec<_>>());
         }),
         Event::Header { name, sub } => {
             app.set_current_name(name.into());
@@ -328,6 +334,30 @@ fn apply(app: &AppWindow, ev: Event) {
                 app.invoke_focus_composer();
             }
         }
+        Event::Avatar(t) => UI.with_borrow_mut(|ui| {
+            let img = (t.width > 0).then(|| {
+                Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height))
+            });
+            let changed = match img.clone() {
+                Some(i) => {
+                    ui.avatars.insert(t.key.clone(), i);
+                    true
+                }
+                None => ui.avatars.remove(&t.key).is_some(),
+            };
+            if !changed {
+                return;
+            }
+            for i in 0..slint::Model::row_count(&*ui.threads) {
+                if let Some(mut row) = slint::Model::row_data(&*ui.threads, i) {
+                    if row.key.as_str() == t.key {
+                        row.has_photo = img.is_some();
+                        row.photo = img.clone().unwrap_or_default();
+                        slint::Model::set_row_data(&*ui.threads, i, row);
+                    }
+                }
+            }
+        }),
         Event::Thumb(t) => {
             let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
             let img = Image::from_rgba8(buf);
@@ -1046,6 +1076,21 @@ fn demo(emit: backend::Emit) {
     }
     emit(Event::Ready);
     emit(Event::Threads(threads));
+    // photos on some threads, through the same crop/resample/circle path as real ones
+    for i in [0u32, 2, 3, 7] {
+        let src = image::RgbaImage::from_fn(320, 240, |x, y| {
+            let (cx, cy) = (x as f32 - 160.0, y as f32 - 110.0);
+            let face = cx * cx + cy * cy < 60.0f32.powi(2);
+            if face { image::Rgba([250, 210, 170, 255]) } else { image::Rgba([(x / 2) as u8, (40 * i) as u8, (y / 2 + 60) as u8, 255]) }
+        });
+        let mut png = Vec::new();
+        if src.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).is_ok() {
+            if let Ok(r) = avatar::round(&png, types::physical_px(avatar::SIZE)) {
+                let t = types::Thumb { key: format!("c:demo-{i}"), width: r.width(), height: r.height(), rgba: r.into_raw() };
+                emit(Event::Avatar(Arc::new(t)));
+            }
+        }
+    }
     emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
     let names = ["김민준", "이서연", "박지훈", "Alice Kim", "Bob", "김지원", "최유나"];
     emit(Event::Members(names.iter().enumerate().map(|(i, n)| (format!("00000000-0000-0000-0000-00000000000{i}"), n.to_string())).collect()));

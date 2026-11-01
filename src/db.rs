@@ -51,6 +51,28 @@ impl Index {
         Ok(Self { pool })
     }
 
+    /// Drops presage's cached profile, so the next `retrieve_profile_by_uuid` fetches it again.
+    pub async fn forget_profile(&self, uuid: uuid::Uuid) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM profiles WHERE uuid = ?").bind(uuid.as_bytes().to_vec()).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn forget_profile_avatar(&self, uuid: uuid::Uuid) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM profile_avatars WHERE uuid = ?")
+            .bind(uuid.as_bytes().to_vec())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn forget_group_avatar(&self, master_key: &[u8; 32]) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM group_avatars WHERE group_master_key = ?")
+            .bind(master_key.to_vec())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// level: 1 delivered, 2 read/viewed. Never downgrades.
     pub async fn record_receipts(&self, who: uuid::Uuid, targets: &[u64], level: u8) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;

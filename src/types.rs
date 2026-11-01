@@ -137,6 +137,8 @@ pub enum Event {
     Members(Vec<crate::mention::Member>),
     Messages { key: String, items: Vec<MsgDto>, can_older: bool, scroll: Scroll },
     Thumb(Arc<Thumb>),
+    /// round photo of a thread (key = thread key); width 0 = none
+    Avatar(Arc<Thumb>),
     Status(String),
     StickerPacks(Vec<PackDto>),
     StickerGrid { pack: String, items: Vec<StickerDto> },

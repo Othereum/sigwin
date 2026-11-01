@@ -9,6 +9,8 @@ export struct ThreadItem {
     initial: string,
     color: color,
     is-group: bool,
+    photo: image,
+    has-photo: bool,
 }
 
 export struct ReactionItem {
@@ -89,15 +91,26 @@ component Avatar inherits Rectangle {
     in property <string> initial;
     in property <color> tint;
     in property <length> size: 40px;
+    // pre-cut round by the backend (avatar.rs) at the exact physical size
+    in property <image> photo;
+    in property <bool> has-photo;
     width: size;
     height: size;
     border-radius: size / 2;
-    background: tint;
+    background: has-photo ? transparent : tint;
     Text {
+        visible: !has-photo;
         text: initial;
         color: white;
         font-size: size * 0.42;
         font-weight: 600;
+    }
+    Image {
+        visible: has-photo;
+        width: size;
+        height: size;
+        source: photo;
+        image-fit: fill;
     }
 }
 
@@ -143,6 +156,8 @@ component ThreadRow inherits Rectangle {
             y: (parent.height - self.height) / 2;
             initial: item.initial;
             tint: item.color;
+            photo: item.photo;
+            has-photo: item.has-photo;
         }
         VerticalLayout {
             alignment: center;
