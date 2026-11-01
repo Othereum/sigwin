@@ -78,7 +78,7 @@ struct Ui {
     pack_dtos: Vec<types::PackDto>,
     stickers: Rc<VecModel<StickerItem>>,
     grid: Vec<types::StickerDto>,
-    /// picker thumbnails; dropped when the panel closes
+    /// pack cover images (grid images live only in `stickers` rows); dropped when the panel closes
     sticker_thumbs: HashMap<String, Image>,
     tx: Option<UnboundedSender<Command>>,
     /// who can be @mentioned in the open thread
@@ -766,6 +766,8 @@ fn apply(app: &AppWindow, ev: Event) {
                         slint::Model::set_row_data(&*ui.packs, i, pack_item(p, &ui.sticker_thumbs));
                     }
                 }
+                // grid images live only in the model rows; ones for a pack no longer shown are
+                // dropped here (the backend sends the grid before its images)
                 for (i, s) in ui.grid.iter().enumerate() {
                     if let Some(img) = fresh.get(&s.key) {
                         if let Some(mut row) = slint::Model::row_data(&*ui.stickers, i) {
@@ -774,7 +776,6 @@ fn apply(app: &AppWindow, ev: Event) {
                         }
                     }
                 }
-                ui.sticker_thumbs.extend(fresh);
             });
         }
         Event::Thumb(t) => {
@@ -867,7 +868,7 @@ fn apply(app: &AppWindow, ev: Event) {
                     .map(|s| StickerItem {
                         id: s.id as i32,
                         emoji: s.emoji.as_str().into(),
-                        img: ui.sticker_thumbs.get(&s.key).cloned().unwrap_or_default(),
+                        img: Image::default(),
                     })
                     .collect();
                 ui.stickers.set_vec(rows);

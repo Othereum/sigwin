@@ -216,6 +216,8 @@ struct App {
     avatars_done: HashSet<String>,
     avatars_running: bool,
     avatar_queue: std::collections::VecDeque<crate::avatar::Want>,
+    /// bumped per opened sticker pack: image work for an older grid stops
+    grid_gen: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// Messages that produce a visible row.
@@ -313,6 +315,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         avatars_done: HashSet::new(),
         avatars_running: false,
         avatar_queue: Default::default(),
+        grid_gen: Default::default(),
     };
 
     if app.store.is_registered().await {
@@ -1860,7 +1863,6 @@ impl App {
             };
             out.push(PackDto { id, title, installed: true, cover_key });
         }
-        self.sticker_thumbs(jobs);
         debug!(ms = started.elapsed().as_millis() as u64, packs = out.len(), loaded, "sticker packs");
         for (id, _, title) in BLESSED_PACKS {
             if !installed.contains(*id) {
@@ -1868,6 +1870,7 @@ impl App {
             }
         }
         (self.emit)(Event::StickerPacks(out));
+        self.sticker_thumbs(jobs, false);
     }
 
     /// The grid comes from `ls_stickers` and the thumb files when all are cached; otherwise the
@@ -1901,9 +1904,10 @@ impl App {
                 warn!("cache stickers: {e}");
             }
         }
-        self.sticker_thumbs(jobs);
         debug!(ms = started.elapsed().as_millis() as u64, stickers = items.len(), from_cache, "open pack");
+        // grid first: the UI only keeps images for the grid it shows
         (self.emit)(Event::StickerGrid { pack: hex_id.to_string(), items });
+        self.sticker_thumbs(jobs, true);
     }
 
     fn sticker_cover_path(&self, pack_hex: &str, id: u32) -> PathBuf {
@@ -1912,18 +1916,25 @@ impl App {
 
     /// Picker images, made on both blocking threads (interleaved, so the top of the grid fills
     /// first) and sent in batches: one UI update per ~30ms instead of one per sticker.
-    fn sticker_thumbs(&self, jobs: Vec<StickerJob>) {
+    /// `grid`: these are a pack's grid, which supersedes the previous grid's unfinished work.
+    fn sticker_thumbs(&self, jobs: Vec<StickerJob>, grid: bool) {
+        use std::sync::atomic::Ordering::Relaxed;
         let mut lanes: [Vec<StickerJob>; 2] = Default::default();
         for (i, j) in jobs.into_iter().filter(|j| j.bytes.is_some() || j.has_cache(&self.paths.thumbs)).enumerate() {
             lanes[i % 2].push(j);
         }
+        let mine = if grid { self.grid_gen.fetch_add(1, Relaxed) + 1 } else { 0 };
         for lane in lanes.into_iter().filter(|l| !l.is_empty()) {
             let emit = self.emit.clone();
             let dir = self.paths.thumbs.clone();
+            let cur = self.grid_gen.clone();
             tokio::task::spawn_blocking(move || {
                 let mut batch = Vec::new();
                 let mut last = std::time::Instant::now();
                 for j in lane {
+                    if grid && cur.load(Relaxed) != mine {
+                        return;
+                    }
                     let key = j.key.clone();
                     match j.make(&dir) {
                         Ok(t) => batch.push(t),
