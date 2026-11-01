@@ -6349,6 +6349,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sigwin-thumb",
+ "sigwin-vault",
  "slint",
  "slint-build",
  "sqlx",
@@ -6367,6 +6368,16 @@ name = "sigwin-thumb"
 version = "0.1.0"
 dependencies = [
  "image",
+]
+
+[[package]]
+name = "sigwin-vault"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "getrandom 0.3.4",
+ "hkdf",
+ "sha2 0.11.1",
 ]
 
 [[package]]

@@ -2,8 +2,6 @@
 //! main crate at opt-level 0 (slint's generated code), and generic/inlined pixel code is compiled
 //! in the crate that calls it: unoptimized, a 260px Lanczos resample took ~37ms instead of ~1ms.
 
-use std::path::Path;
-
 pub use image::{DynamicImage, ImageResult, RgbaImage};
 
 /// Decodes, sniffing the format (file names and content types may lie).
@@ -16,9 +14,23 @@ pub fn decode_thumb(bytes: &[u8], max: u32) -> ImageResult<DynamicImage> {
     Ok(decode(bytes)?.thumbnail(max, max))
 }
 
-/// Reads an image file as RGBA.
-pub fn open_rgba(path: &Path) -> ImageResult<RgbaImage> {
-    Ok(image::open(path)?.to_rgba8())
+/// Decodes to RGBA.
+pub fn decode_rgba(bytes: &[u8]) -> ImageResult<RgbaImage> {
+    Ok(decode(bytes)?.to_rgba8())
+}
+
+/// Encodes as PNG in memory (cache files are encrypted before they reach the disk).
+pub fn png(img: &DynamicImage) -> ImageResult<Vec<u8>> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png)?;
+    Ok(out.into_inner())
+}
+
+pub fn png_rgba(img: &RgbaImage) -> ImageResult<Vec<u8>> {
+    use image::ImageEncoder;
+    let mut out = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut out).write_image(img.as_raw(), img.width(), img.height(), image::ExtendedColorType::Rgba8)?;
+    Ok(out)
 }
 
 pub fn to_rgba(img: &DynamicImage) -> RgbaImage {

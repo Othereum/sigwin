@@ -194,7 +194,7 @@ fn cached(dir: &Path, owner: &str, key: &str, bytes: &[u8], px: u32) -> Option<T
     let prefix = format!("av-{:016x}-{px}-", hash(owner));
     let name = format!("{prefix}{:016x}.png", hash(bytes));
     let path = dir.join(&name);
-    if let Ok(rgba) = sigwin_thumb::open_rgba(&path) {
+    if let Ok(rgba) = crate::backend::load_cached(&path) {
         return Some(Thumb { key: key.into(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() });
     }
     let rgba = match round(bytes, px) {
@@ -215,7 +215,7 @@ fn cached(dir: &Path, owner: &str, key: &str, bytes: &[u8], px: u32) -> Option<T
             }
         }
     }
-    let _ = rgba.save(&path);
+    crate::backend::save_cached(&path, sigwin_thumb::png_rgba(&rgba));
     Some(Thumb { key: key.into(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
 }
 

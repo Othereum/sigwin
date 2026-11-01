@@ -49,9 +49,11 @@ unicode-segmentation = "1"
 png = "0.18"
 # decode/resample: a separate crate so it stays optimized in the `fast` profile
 sigwin-thumb = { path = "crates/thumb" }
+# encrypted attachment/thumbnail cache files: own crate for the same reason
+sigwin-vault = { path = "crates/vault" }
 
 [workspace]
-members = ["crates/thumb"]
+members = ["crates/thumb", "crates/vault"]
 
 [features]
 # optional GPU renderers for comparison; pick at runtime with SLINT_BACKEND=winit-femtovg|winit-skia|winit-software
@@ -110,6 +112,8 @@ opt-level = 3
 [profile.dev.package.zune-jpeg]
 opt-level = 3
 [profile.dev.package.sigwin-thumb]
+opt-level = 3
+[profile.dev.package.sigwin-vault]
 opt-level = 3
 
 # day-to-day builds: optimized like release (dependencies are compiled once and cached),

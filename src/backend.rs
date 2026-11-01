@@ -58,6 +58,8 @@ pub struct Paths {
     pub state: PathBuf,
     pub attachments: PathBuf,
     pub thumbs: PathBuf,
+    /// plain copies of attachments handed to other apps
+    pub open: PathBuf,
 }
 
 impl Paths {
@@ -68,6 +70,7 @@ impl Paths {
             state: dir.join("state.json"),
             attachments: dir.join("attachments"),
             thumbs: dir.join("thumbs"),
+            open: dir.join("open"),
         }
     }
 }
@@ -98,6 +101,9 @@ struct Persist {
     /// pin messages stored before the pin index existed have been indexed
     #[serde(default)]
     pins_indexed: bool,
+    /// attachment and thumbnail caches written before they were encrypted have been sealed
+    #[serde(default)]
+    files_sealed: bool,
 }
 
 #[derive(Default, Clone, Copy, Serialize, Deserialize)]
@@ -262,6 +268,10 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
     emit(Event::Loading("저장소 여는 중…".into()));
 
     let pass = crate::secret::load_or_create(&paths.key)?;
+    // the cache files are encrypted with keys derived from the DB key
+    let root: [u8; 32] = hex::decode(&pass).ok().and_then(|k| k.try_into().ok()).context("db key is not 32 bytes")?;
+    sigwin_vault::init(root);
+    clear_dir(&paths.open);
     let options = SqliteConnectOptions::new()
         .filename(&paths.db)
         .create_if_missing(true)
@@ -275,10 +285,27 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         .context("opening database")?;
     let index = Index::open(options).await.context("opening index")?;
 
-    let persist: Persist = std::fs::read(&paths.state)
+    let mut persist: Persist = std::fs::read(&paths.state)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
+    let sealed_now = !persist.files_sealed && {
+        emit(Event::Loading("첨부파일 캐시 암호화 중…".into()));
+        let (att, thumbs) = (paths.attachments.clone(), paths.thumbs.clone());
+        let started = std::time::Instant::now();
+        match tokio::task::spawn_blocking(move || seal_legacy_files(&att, &thumbs)).await {
+            Ok(Ok(())) => {
+                info!(ms = started.elapsed().as_millis() as u64, "cache files sealed");
+                true
+            }
+            Ok(Err(e)) => {
+                warn!("seal cache files: {e:#}");
+                false
+            }
+            Err(_) => false,
+        }
+    };
+    persist.files_sealed |= sealed_now;
 
     let (tx, mut rx) = unbounded_channel();
     let mut app = App {
@@ -317,6 +344,9 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         avatar_queue: Default::default(),
         grid_gen: Default::default(),
     };
+    if sealed_now {
+        app.save_persist();
+    }
 
     if app.store.is_registered().await {
         match Manager::load_registered(app.store.clone()).await {
@@ -1812,9 +1842,6 @@ impl App {
         });
     }
 
-    fn attachment_path(&self, key: &str, ptr: &AttachmentPointer) -> PathBuf {
-        attachment_path(&self.paths.attachments, key, ptr)
-    }
 
     // ---- stickers ----
 
@@ -2051,7 +2078,7 @@ impl App {
 
     fn request_thumb(&self, key: String, ptr: AttachmentPointer, fit: u32) {
         let thumb_path = self.paths.thumbs.join(format!("{key}.png"));
-        let orig_path = self.attachment_path(&key, &ptr);
+        let orig_path = attachment_path(&self.paths.attachments, &key);
         let manager = self.manager.clone();
         let emit = self.emit.clone();
         let tx = self.tx.clone();
@@ -2061,10 +2088,7 @@ impl App {
                     let Some(m) = manager else { return };
                     match m.get_attachment(&ptr).await {
                         Ok(data) => {
-                            if let Some(p) = orig_path.parent() {
-                                let _ = std::fs::create_dir_all(p);
-                            }
-                            if let Err(e) = std::fs::write(&orig_path, &data) {
+                            if let Err(e) = sigwin_vault::write(&orig_path, &data) {
                                 warn!("save attachment: {e}");
                             }
                         }
@@ -2099,10 +2123,11 @@ impl App {
             .attachments
             .iter()
             .enumerate()
-            .map(|(i, a)| (self.attachment_path(&view::attachment_key(a, ts, i), a), a.clone()))
+            .map(|(i, a)| (attachment_path(&self.paths.attachments, &view::attachment_key(a, ts, i)), a.clone()))
             .collect();
         let manager = self.manager.clone();
         let tx = self.tx.clone();
+        let open_dir = self.paths.open.clone();
         tokio::task::spawn_local(async move {
             for (path, ptr) in jobs {
                 if !path.exists() {
@@ -2110,10 +2135,7 @@ impl App {
                     let Some(m) = manager.as_ref() else { return };
                     match m.get_attachment(&ptr).await {
                         Ok(data) => {
-                            if let Some(p) = path.parent() {
-                                let _ = std::fs::create_dir_all(p);
-                            }
-                            if let Err(e) = std::fs::write(&path, &data) {
+                            if let Err(e) = sigwin_vault::write(&path, &data) {
                                 let _ = tx.send(Internal::Status(format!("저장 실패: {e}")));
                                 continue;
                             }
@@ -2124,8 +2146,17 @@ impl App {
                         }
                     }
                 }
-                let _ = tx.send(Internal::Status(String::new()));
-                open_with_default_app(&path);
+                let (name, dir) = (attachment_name(&ptr), open_dir.clone());
+                match tokio::task::spawn_blocking(move || decrypt_for_open(&path, &dir, &name)).await {
+                    Ok(Ok(plain)) => {
+                        let _ = tx.send(Internal::Status(String::new()));
+                        open_with_default_app(&plain);
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx.send(Internal::Status(format!("첨부파일을 열 수 없습니다: {e}")));
+                    }
+                    Err(_) => {}
+                }
             }
         });
     }
@@ -2214,6 +2245,7 @@ impl App {
         self.save_persist();
         let _ = std::fs::remove_dir_all(&self.paths.attachments);
         let _ = std::fs::remove_dir_all(&self.paths.thumbs);
+        clear_dir(&self.paths.open);
         let _ = std::fs::create_dir_all(&self.paths.attachments);
         let _ = std::fs::create_dir_all(&self.paths.thumbs);
         (self.emit)(Event::Threads(Vec::new()));
@@ -2420,11 +2452,10 @@ async fn send_sticker_task(
         .pop()
         .context("upload returned nothing")??;
     // keep a local copy so our own sticker renders without downloading it back
-    let path = attachment_path(&attachments_dir, &view::attachment_key(&ptr, ts, 99), &ptr);
-    if let Some(p) = path.parent() {
-        let _ = std::fs::create_dir_all(p);
+    let path = attachment_path(&attachments_dir, &view::attachment_key(&ptr, ts, 99));
+    if let Err(e) = sigwin_vault::write(&path, &s.bytes) {
+        warn!("save sticker: {e}");
     }
-    let _ = std::fs::write(&path, &s.bytes);
     let dm = DataMessage {
         sticker: Some(presage::proto::data_message::Sticker {
             pack_id: Some(s.pack_id),
@@ -2470,13 +2501,24 @@ fn remove_files(c: &Content, ts: u64, attachments: &Path, thumbs: &Path) {
         keys.push(view::attachment_key(data, ts, 99));
     }
     for k in keys {
-        let _ = std::fs::remove_dir_all(attachments.join(&k));
+        let _ = std::fs::remove_file(attachment_path(attachments, &k));
         let _ = std::fs::remove_file(thumbs.join(format!("{k}.png")));
     }
 }
 
 fn make_thumb(key: &str, orig: &Path, thumb: &Path, fit: u32) -> anyhow::Result<Thumb> {
-    make_thumb_from(key, || Ok(std::fs::read(orig)?), THUMB_MAX, thumb, fit)
+    make_thumb_from(key, || Ok(sigwin_vault::read(orig)?), THUMB_MAX, thumb, fit)
+}
+
+/// A cached (encrypted) PNG.
+pub(crate) fn load_cached(path: &Path) -> anyhow::Result<image::RgbaImage> {
+    Ok(sigwin_thumb::decode_rgba(&sigwin_vault::read(path)?)?)
+}
+
+pub(crate) fn save_cached(path: &Path, png: image::ImageResult<Vec<u8>>) {
+    if let Err(e) = png.map_err(anyhow::Error::from).and_then(|b| Ok(sigwin_vault::write_cache(path, &b)?)) {
+        warn!("save {}: {e}", path.display());
+    }
 }
 
 /// Decodes (sniffing the format, file names may lie) and downsizes to `max`, caching the result as PNG.
@@ -2489,14 +2531,14 @@ fn make_thumb_from(
     thumb: &Path,
     fit: u32,
 ) -> anyhow::Result<Thumb> {
-    let mut rgba = if thumb.exists() {
-        sigwin_thumb::open_rgba(thumb)?
-    } else {
-        let img = sigwin_thumb::decode_thumb(&bytes()?, max)?;
-        if let Err(e) = img.save(thumb) {
-            warn!("save thumb: {e}");
+    let cached = if thumb.exists() { load_cached(thumb).ok() } else { None };
+    let mut rgba = match cached {
+        Some(rgba) => rgba,
+        None => {
+            let img = sigwin_thumb::decode_thumb(&bytes()?, max)?;
+            save_cached(thumb, sigwin_thumb::png(&img));
+            sigwin_thumb::to_rgba(&img)
         }
-        sigwin_thumb::to_rgba(&img)
     };
     if fit > 0 {
         rgba = sigwin_thumb::downscale(rgba, crate::types::physical_px(fit));
@@ -2504,8 +2546,14 @@ fn make_thumb_from(
     Ok(Thumb { key: key.to_string(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
 }
 
-fn attachment_path(dir: &Path, key: &str, ptr: &AttachmentPointer) -> PathBuf {
-    let name = ptr.file_name.as_deref().filter(|n| !n.is_empty()).map(sanitize).unwrap_or_else(|| {
+/// Encrypted copy of a downloaded attachment. The name says nothing about the file: its real
+/// name only appears on the plain copy made to open it (`attachment_name`).
+fn attachment_path(dir: &Path, key: &str) -> PathBuf {
+    dir.join(format!("{key}.enc"))
+}
+
+fn attachment_name(ptr: &AttachmentPointer) -> String {
+    ptr.file_name.as_deref().filter(|n| !n.is_empty()).map(sanitize).unwrap_or_else(|| {
         let ext = ptr
             .content_type
             .as_deref()
@@ -2513,8 +2561,52 @@ fn attachment_path(dir: &Path, key: &str, ptr: &AttachmentPointer) -> PathBuf {
             .and_then(|e| e.first().copied())
             .unwrap_or("bin");
         format!("attachment.{ext}")
-    });
-    dir.join(key).join(name)
+    })
+}
+
+/// Plain copy of an attachment for an outside app, in its own folder under `open/` (emptied on
+/// every start; files still open in another app then are left until the next one).
+fn decrypt_for_open(src: &Path, open_dir: &Path, name: &str) -> std::io::Result<PathBuf> {
+    let mut r = [0u8; 8];
+    getrandom::fill(&mut r).map_err(|e| std::io::Error::other(e.to_string()))?;
+    let dir = open_dir.join(hex::encode(r));
+    std::fs::create_dir_all(&dir)?;
+    let dst = dir.join(name);
+    sigwin_vault::decrypt_file(src, &dst)?;
+    Ok(dst)
+}
+
+/// Caches written before they were encrypted: attachments lived in `<key>/<original name>`,
+/// thumbnails were plain PNGs. Err leaves the rest for the next start.
+fn seal_legacy_files(attachments: &Path, thumbs: &Path) -> anyhow::Result<()> {
+    let mut failed = 0;
+    for e in std::fs::read_dir(attachments)?.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            let dst = attachment_path(attachments, &e.file_name().to_string_lossy());
+            let src = std::fs::read_dir(&p)?.flatten().map(|f| f.path()).find(|f| f.is_file());
+            if let Some(src) = src.filter(|_| !dst.exists()) {
+                if let Err(e) = sigwin_vault::encrypt_file(&src, &dst, true) {
+                    warn!("encrypt {}: {e}", src.display());
+                    failed += 1;
+                    continue;
+                }
+            }
+            let _ = std::fs::remove_dir_all(&p);
+        }
+    }
+    for e in std::fs::read_dir(thumbs)?.flatten() {
+        let p = e.path();
+        if p.is_file() && !sigwin_vault::is_sealed(&p) {
+            if let Err(e) = sigwin_vault::encrypt_file(&p, &p, false) {
+                // only a cache: drop it rather than keep it plain
+                warn!("encrypt {}: {e}", p.display());
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+    anyhow::ensure!(failed == 0, "{failed} attachments left unencrypted");
+    Ok(())
 }
 
 /// Logical sizes the picker shows stickers at (ui/app.slint: `cell - 12px`, pack tab cover).
@@ -2558,16 +2650,14 @@ impl StickerJob {
     /// The resampled result is cached too (`-<px>px.png`): resampling costs ~10x the decode.
     fn make(self, dir: &Path) -> anyhow::Result<Thumb> {
         let fitted = self.fitted(dir);
-        if let Ok(rgba) = sigwin_thumb::open_rgba(&fitted) {
+        if let Ok(rgba) = load_cached(&fitted) {
             return Ok(Thumb { key: self.key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() });
         }
         let source = self.source(dir);
         let bytes = self.bytes;
         let t = make_thumb_from(&self.key, || bytes.context("no sticker bytes"), THUMB_MAX, &source, self.fit)?;
         if let Some(img) = image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone()) {
-            if let Err(e) = img.save(&fitted) {
-                warn!("save fitted thumb: {e}");
-            }
+            save_cached(&fitted, sigwin_thumb::png_rgba(&img));
         }
         Ok(t)
     }
@@ -2692,6 +2782,31 @@ fn notify(title: String, body: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seals_legacy_cache_files() {
+        sigwin_vault::init([3; 32]);
+        let dir = std::env::temp_dir().join(format!("sigwin-seal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (att, thumbs) = (dir.join("attachments"), dir.join("thumbs"));
+        std::fs::create_dir_all(att.join("abc")).unwrap();
+        std::fs::create_dir_all(&thumbs).unwrap();
+        std::fs::write(att.join("abc").join("계약서.pdf"), b"pdf bytes").unwrap();
+        std::fs::write(thumbs.join("abc.png"), b"png bytes").unwrap();
+        sigwin_vault::write(&thumbs.join("new.png"), b"already sealed").unwrap();
+
+        seal_legacy_files(&att, &thumbs).unwrap();
+        assert!(!att.join("abc").exists());
+        assert_eq!(sigwin_vault::read(&attachment_path(&att, "abc")).unwrap(), b"pdf bytes");
+        assert_eq!(sigwin_vault::read(&thumbs.join("abc.png")).unwrap(), b"png bytes");
+        assert_eq!(sigwin_vault::read(&thumbs.join("new.png")).unwrap(), b"already sealed");
+
+        let open = dir.join("open");
+        let plain = decrypt_for_open(&attachment_path(&att, "abc"), &open, "계약서.pdf").unwrap();
+        assert_eq!(plain.file_name().unwrap(), "계약서.pdf");
+        assert_eq!(std::fs::read(&plain).unwrap(), b"pdf bytes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn combines_profile_names() {
