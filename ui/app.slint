@@ -974,6 +974,10 @@ export component AppWindow inherits Window {
                                         cursor-position-changed => {
                                             root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
                                         }
+                                        // IME composition (Hangul) changes neither text nor cursor: follow it too
+                                        changed preedit-text => {
+                                            root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
+                                        }
                                         single-line: false;
                                         wrap: word-wrap;
                                         color: Theme.text;
