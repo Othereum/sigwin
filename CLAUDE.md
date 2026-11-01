@@ -31,7 +31,7 @@ cargo test
 - presage and presage-store-sqlite are git deps pinned to one `rev`. Bump both together, and keep the `[patch.crates-io] libsqlite3-sys` entry in sync with presage's workspace.
 
 ## Verifying UI without an account
-Use the demo modes (synthetic data, no backend): `SIGWIN_DEMO=1`, plus `SIGWIN_DEMO_STICKERS=1|add`, `SIGWIN_DEMO_INFO=1`, `SIGWIN_DEMO_MENU=1|edit` or `SIGWIN_DEMO_SETTINGS=1`. Layout and glyph bugs only show up visually; a successful compile proves nothing about them.
+Use the demo modes (synthetic data, no backend): `SIGWIN_DEMO=1`, plus `SIGWIN_DEMO_STICKERS=1|add`, `SIGWIN_DEMO_INFO=1`, `SIGWIN_DEMO_MENU=1|edit|pin` or `SIGWIN_DEMO_SETTINGS=1`. Layout and glyph bugs only show up visually; a successful compile proves nothing about them.
 
 **Run them headless** (`src/headless.rs`): the user works on this PC, so never pop up a window, take focus or move the real mouse. `SIGWIN_HEADLESS="<steps>"` (or `@file`) renders offscreen with the same software renderer and fonts, feeds scripted input, and exits after the last step:
 ```
@@ -78,6 +78,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 - `install_sticker_pack` also syncs the pack to the user's phone. Don't call it in tests.
 - **Disappearing messages:** presage fills `expire_timer` on every outgoing `DataMessage` from the stored thread timer (`restore_thread_timer`), so leave it `None` when sending. It never deletes expired messages: `App::sweep` does (per-thread progress in `Persist.sweep`), and `view::build` hides expired rows right away. The timer runs from the send time (we don't track reads).
 - Received deletes for everyone are applied by presage (target replaced by a `NullMessage` with a nil sender). Which deleted rows were ours comes from `ls_deleted_mine` (filled when our delete is sent or synced from our phone) or a missing `server_guid` (presage-sent rows have none). Edits are stored as `EditMessage`s and folded in `view::build` (author must match). Our own reactions, edits and deletes are `App.ops`, shown optimistically until `Internal::Sent`.
+- **Pinned messages:** presage stores `PinMessage`/`UnpinMessage` data messages but keeps no pin state. Ours is `ls_pins` (thread key, target sent ts), filled live in `content()` via `record_pin`, backfilled once (`Persist.pins_indexed`); our own pins are written when sending and undone if the send fails. `load_pins` (every `emit_messages`) drops expired pins, pins of deleted messages and everything past `MAX_PINS`. Jumping to a pin loads older pages (`extend_older`) up to `MAX_WINDOW`; the UI then homes in on the row (`jump_to_row`), since a ListView only knows the positions of rows on screen.
 - Typing indicators: presage can't send "online only", so offline devices get them late; we drop stale incoming ones and skip sending in groups over `TYPING_MAX_GROUP` (one send per member). Group typing messages carry the group *identifier* (`group_identifier`), not the master key.
 
 ## Slint gotchas

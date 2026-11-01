@@ -16,7 +16,7 @@ use presage::libsignal_service::sender::AttachmentSpec;
 use presage::manager::Registered;
 use presage::model::messages::Received;
 use presage::libsignal_service::zkgroup::groups::{GroupMasterKey, GroupSecretParams};
-use presage::proto::data_message::{Delete, Quote, Reaction};
+use presage::proto::data_message::{pin_message::PinDuration, Delete, PinMessage, Quote, Reaction, UnpinMessage};
 use presage::proto::sync_message::Content as SyncContent;
 use presage::proto::{
     receipt_message, typing_message, AttachmentPointer, BodyRange, EditMessage, ReceiptMessage, SyncMessage, TypingMessage,
@@ -32,7 +32,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::db::Index;
 use crate::types::{
-    parse_thread_key, thread_key, Command, Event, MsgDto, PackDto, Scroll, StickerDto, Thumb, ThreadDto, STICKER_THUMB_PREFIX,
+    parse_thread_key, thread_key, Command, Event, MsgDto, PackDto, PinDto, Scroll, StickerDto, Thumb, ThreadDto, STICKER_THUMB_PREFIX,
 };
 use crate::view::{self, Kind, THUMB_MAX};
 
@@ -49,6 +49,8 @@ const TYPING_IDLE: Duration = Duration::from_secs(5);
 const TYPING_TIMEOUT: Duration = Duration::from_secs(15);
 /// how often to look for expired disappearing messages
 const SWEEP_EVERY: Duration = Duration::from_secs(300);
+/// Signal keeps at most this many pinned messages per chat; a newer pin pushes out the oldest
+const MAX_PINS: usize = 3;
 
 pub struct Paths {
     pub db: PathBuf,
@@ -93,6 +95,9 @@ struct Persist {
     /// thread key -> what we know about its photo
     #[serde(default)]
     avatars: HashMap<String, crate::avatar::State>,
+    /// pin messages stored before the pin index existed have been indexed
+    #[serde(default)]
+    pins_indexed: bool,
 }
 
 #[derive(Default, Clone, Copy, Serialize, Deserialize)]
@@ -114,6 +119,7 @@ enum Internal {
     Status(String),
     PackInstalled(Result<String, String>),
     ReceiptsIndexed,
+    PinsIndexed,
     Swept { sweep: HashMap<String, SweepState>, changed: Vec<String> },
     Avatars(crate::avatar::Done),
 }
@@ -133,6 +139,9 @@ enum Op {
     Edit(String),
     /// sent timestamp of the target
     Delete(u64),
+    /// already written to the pin index; undone if sending fails
+    Pin { target: u64 },
+    Unpin { target: u64, author: Uuid, at: u64, expires: u64 },
 }
 
 /// We are typing in this thread (typing indicator sent).
@@ -191,6 +200,8 @@ struct App {
     composing: Option<Composing>,
     /// a disappearing message in the open window expires then
     next_expiry: Option<u64>,
+    /// a pin of the open thread runs out then
+    pin_expiry: Option<u64>,
     sweeping: bool,
     focused: bool,
     synced: bool,
@@ -211,7 +222,7 @@ struct App {
 fn displayable(window: &[(u64, Content)], me: Uuid) -> usize {
     window
         .iter()
-        .filter(|(_, c)| matches!(view::classify(c, me), Kind::Msg { .. } | Kind::System(_) | Kind::Deleted))
+        .filter(|(_, c)| matches!(view::classify(c, me), Kind::Msg { .. } | Kind::System(_) | Kind::Deleted | Kind::Pin { .. }))
         .count()
 }
 
@@ -290,6 +301,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         typing_shown: String::new(),
         composing: None,
         next_expiry: None,
+        pin_expiry: None,
         sweeping: false,
         focused: true,
         synced: false,
@@ -359,6 +371,45 @@ impl App {
         if !self.persist.receipts_indexed {
             self.backfill_receipts();
         }
+        if !self.persist.pins_indexed {
+            self.backfill_pins();
+        }
+    }
+
+    /// One-time: index pin messages presage stored before we kept our own pin index.
+    /// Walks every thread oldest first in pages, so pins and unpins apply in order.
+    fn backfill_pins(&self) {
+        let (store, index, me, tx) = (self.store.clone(), self.index.clone(), self.me, self.tx.clone());
+        tokio::task::spawn_local(async move {
+            let Ok(threads) = index.threads().await else { return };
+            let mut n = 0usize;
+            for row in threads {
+                let key = thread_key(&row.thread);
+                let mut after = 0u64;
+                loop {
+                    let Ok(tss) = index.page_after(&row.thread, after, 200).await else { break };
+                    let (Some(&first), Some(&last)) = (tss.first(), tss.last()) else { break };
+                    after = last;
+                    if let Ok(msgs) = store.messages(&row.thread, first..=last).await {
+                        let mut msgs: Vec<Content> = msgs.flatten().collect();
+                        msgs.sort_by_key(|c| c.metadata.client_timestamp.timestamp_millis());
+                        for c in &msgs {
+                            match record_pin(&index, &key, c, me).await {
+                                Ok(true) => n += 1,
+                                Ok(false) => {}
+                                Err(e) => warn!("index pins: {e:#}"),
+                            }
+                        }
+                    }
+                    if (tss.len() as u32) < 200 {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            }
+            info!("pin index backfilled: {n} pin messages");
+            let _ = tx.send(Internal::PinsIndexed);
+        });
     }
 
     /// One-time: index receipts presage stored before we kept our own receipt index.
@@ -465,6 +516,13 @@ impl App {
             Command::React { id, emoji, remove } => self.react(&id, emoji, remove).await,
             Command::Edit { id, text, mentions } => self.edit(&id, text, &mentions).await,
             Command::Delete(id) => self.delete(&id).await,
+            Command::Pin { id, secs } => self.pin(&id, secs).await,
+            Command::Unpin(id) => self.unpin(&id).await,
+            Command::JumpTo(id) => {
+                if let Err(e) = self.jump_to(&id).await {
+                    warn!("jump to {id}: {e:#}");
+                }
+            }
             Command::Composing(active) => self.composing(active),
             Command::SettingsOpened => {
                 self.emit_account().await;
@@ -570,10 +628,23 @@ impl App {
                 warn!("send {ts} failed: {e}");
                 if let Some(i) = self.ops.iter().position(|o| o.ts == ts) {
                     // nothing to retry from: drop the optimistic change
-                    let what = match self.ops.remove(i).op {
+                    let op = self.ops.remove(i);
+                    let what = match op.op {
                         Op::React(_) => "반응",
                         Op::Edit(_) => "수정",
                         Op::Delete(_) => "삭제",
+                        Op::Pin { target } => {
+                            if let Err(e) = self.index.unpin(&op.thread_key, target, ts).await {
+                                warn!("undo pin: {e:#}");
+                            }
+                            "고정"
+                        }
+                        Op::Unpin { target, author, at, expires } => {
+                            if let Err(e) = self.index.pin(&op.thread_key, target, author, at, expires).await {
+                                warn!("undo unpin: {e:#}");
+                            }
+                            "고정 해제"
+                        }
                     };
                     self.status(format!("{what} 실패: {e}"));
                     self.emit_messages(Scroll::KeepIfNotAtBottom).await;
@@ -593,6 +664,11 @@ impl App {
             Internal::PackInstalled(Ok(id)) => {
                 self.status("스티커 팩을 추가했습니다");
                 (self.emit)(Event::OpenStickerPanel(id));
+            }
+            Internal::PinsIndexed => {
+                self.persist.pins_indexed = true;
+                self.persist_dirty = true;
+                self.current_dirty = true;
             }
             Internal::ReceiptsIndexed => {
                 self.persist.receipts_indexed = true;
@@ -719,6 +795,9 @@ impl App {
         let Ok(thread) = Thread::try_from(&c) else { return };
         let key = thread_key(&thread);
         let is_open = self.current.as_ref().is_some_and(|o| o.key == key);
+        if let Err(e) = record_pin(&self.index, &key, &c, self.me).await {
+            warn!("record pin: {e:#}");
+        }
         let kind = view::classify(&c, self.me);
         match kind {
             Kind::Msg { outgoing: false, .. } => {
@@ -763,6 +842,10 @@ impl App {
             self.next_expiry = None;
             self.current_dirty = true;
             self.sweep();
+        }
+        if self.pin_expiry.is_some_and(|t| t <= view::now_ms()) {
+            self.pin_expiry = None;
+            self.current_dirty = true;
         }
         if self.composing.as_ref().is_some_and(|c| c.last_edit.elapsed() >= TYPING_IDLE) {
             if let Some(c) = self.composing.take() {
@@ -1112,9 +1195,17 @@ impl App {
     }
 
     async fn load_older(&mut self) -> anyhow::Result<()> {
-        let Some(open) = self.current.as_ref() else { return Ok(()) };
+        if self.extend_older().await? {
+            self.emit_messages(Scroll::Older).await;
+        }
+        Ok(())
+    }
+
+    /// Prepends older rows to the open window; false when there is nothing more to load.
+    async fn extend_older(&mut self) -> anyhow::Result<bool> {
+        let Some(open) = self.current.as_ref() else { return Ok(false) };
         if !open.has_more || open.window.len() >= MAX_WINDOW {
-            return Ok(());
+            return Ok(false);
         }
         let oldest = open.window.first().map(|(t, _)| *t).unwrap_or(u64::MAX >> 1);
         let thread = open.thread.clone();
@@ -1127,13 +1218,38 @@ impl App {
             more.append(&mut older);
             older = more;
         }
-        let Some(open) = self.current.as_mut() else { return Ok(()) };
+        let Some(open) = self.current.as_mut() else { return Ok(false) };
         open.has_more = tss.len() as u32 == PAGE;
         let mut w = older;
         w.append(&mut open.window);
         open.window = w;
-        self.emit_messages(Scroll::Older).await;
-        Ok(())
+        Ok(true)
+    }
+
+    /// Scrolls to the message with sent timestamp `id`, loading older rows until it is in the window.
+    async fn jump_to(&mut self, id: &str) -> anyhow::Result<()> {
+        let target: u64 = id.parse()?;
+        let mut loaded = false;
+        loop {
+            let Some(open) = self.current.as_ref() else { return Ok(()) };
+            if let Some((row, _)) = open.window.iter().find(|(_, c)| c.timestamp() == target) {
+                let row = row.to_string();
+                if loaded {
+                    self.emit_messages(Scroll::Keep).await;
+                }
+                (self.emit)(Event::JumpTo(row));
+                return Ok(());
+            }
+            let passed = open.window.first().is_some_and(|(t, _)| *t < target);
+            if passed || !self.extend_older().await? {
+                if loaded {
+                    self.emit_messages(Scroll::Keep).await;
+                }
+                self.status(if passed { "메시지를 찾을 수 없습니다" } else { "너무 오래된 메시지라 이동할 수 없습니다" });
+                return Ok(());
+            }
+            loaded = true;
+        }
     }
 
     async fn reload_window(&mut self) -> anyhow::Result<()> {
@@ -1217,6 +1333,17 @@ impl App {
         let can_older = open.has_more && open.window.len() < MAX_WINDOW;
         let next_expiry = built.next_expiry;
         let mut items = built.items;
+        // rows by sent timestamp, for the pin marks
+        let rows: HashMap<u64, String> = open.window.iter().map(|(t, c)| (c.timestamp(), t.to_string())).collect();
+        let pins = self.load_pins().await;
+        for p in &pins {
+            let Some(row) = p.id.parse().ok().and_then(|t: u64| rows.get(&t)) else { continue };
+            if let Some(m) = items.iter_mut().find(|m| &m.id == row) {
+                m.pinned = true;
+            }
+        }
+        (self.emit)(Event::Pins(pins));
+        let Some(open) = self.current.as_ref() else { return };
         for op in self.ops.iter().filter(|o| o.thread_key == key) {
             let row = op.row.to_string();
             if let Some(m) = items.iter_mut().find(|m| m.id == row) {
@@ -1224,6 +1351,7 @@ impl App {
                     Op::React(e) => view::set_my_reaction(m, e.as_deref()),
                     Op::Edit(t) => view::set_edited_text(m, t),
                     Op::Delete(_) => view::set_deleted(m),
+                    Op::Pin { .. } | Op::Unpin { .. } => {}
                 }
             }
         }
@@ -1437,6 +1565,111 @@ impl App {
         }
         let dm = DataMessage { delete: Some(Delete { target_sent_timestamp: Some(target) }), ..Default::default() };
         self.send_op(row, Op::Delete(target), dm.into()).await;
+    }
+
+    async fn pin(&mut self, id: &str, secs: Option<u32>) {
+        let Some((row, target, author, _, _)) = self.target(id) else { return };
+        let Some(key) = self.current.as_ref().map(|o| o.key.clone()) else { return };
+        let ts = self.next_send_ts();
+        let expires = secs.map_or(0, |s| ts + s as u64 * 1000);
+        if let Err(e) = self.index.pin(&key, target, author, ts, expires).await {
+            warn!("pin: {e:#}");
+            return;
+        }
+        let dm = DataMessage {
+            pin_message: Some(PinMessage {
+                target_author_aci_binary: Some(author.as_bytes().to_vec()),
+                target_sent_timestamp: Some(target),
+                pin_duration: Some(match secs {
+                    Some(s) => PinDuration::PinDurationSeconds(s),
+                    None => PinDuration::PinDurationForever(true),
+                }),
+            }),
+            ..Default::default()
+        };
+        self.send_op(row, Op::Pin { target }, dm.into()).await;
+    }
+
+    /// `id`: sent timestamp of the pinned message (from the pin bar; it may be outside the window)
+    /// or its row in the window (from the message menu).
+    async fn unpin(&mut self, id: &str) {
+        let Ok(id) = id.parse::<u64>() else { return };
+        let Some(open) = self.current.as_ref() else { return };
+        let key = open.key.clone();
+        let by_row = open.window.iter().find(|(t, _)| *t == id).map(|(_, c)| c.timestamp());
+        let pins = self.index.pins(&key).await.unwrap_or_default();
+        let Some(&(target, author, at, expires)) =
+            pins.iter().find(|p| p.0 == id).or_else(|| pins.iter().find(|p| Some(p.0) == by_row))
+        else {
+            return;
+        };
+        if let Err(e) = self.index.unpin(&key, target, u64::MAX >> 1).await {
+            warn!("unpin: {e:#}");
+            return;
+        }
+        let dm = DataMessage {
+            unpin_message: Some(UnpinMessage {
+                target_author_aci_binary: Some(author.as_bytes().to_vec()),
+                target_sent_timestamp: Some(target),
+            }),
+            ..Default::default()
+        };
+        let row = self
+            .current
+            .as_ref()
+            .and_then(|o| o.window.iter().find(|(_, c)| c.timestamp() == target).map(|(t, _)| *t))
+            .unwrap_or(target);
+        self.send_op(row, Op::Unpin { target, author, at, expires }, dm.into()).await;
+    }
+
+    /// Pins of the open thread that are still showable, newest first. Drops expired ones, pins of
+    /// deleted or vanished messages, and everything past `MAX_PINS` from the index.
+    async fn load_pins(&mut self) -> Vec<PinDto> {
+        self.pin_expiry = None;
+        let Some((key, thread)) = self.current.as_ref().map(|o| (o.key.clone(), o.thread.clone())) else { return Vec::new() };
+        let rows = match self.index.pins(&key).await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("pins: {e:#}");
+                return Vec::new();
+            }
+        };
+        let now = view::now_ms();
+        let mut out = Vec::new();
+        let mut kept = 0;
+        for (target, author, at, expires) in rows {
+            let gone = (expires != 0 && expires <= now) || kept >= MAX_PINS;
+            let c = if gone { None } else { self.store.message(&thread, target).await.ok().flatten() };
+            let gone = gone
+                || c.as_ref().is_some_and(|c| {
+                    matches!(view::classify(c, self.me), Kind::Deleted) || view::expires_at(c).is_some_and(|t| t <= now)
+                });
+            if gone {
+                if let Err(e) = self.index.unpin(&key, target, at).await {
+                    warn!("drop pin: {e:#}");
+                }
+                continue;
+            }
+            kept += 1;
+            if expires != 0 {
+                self.pin_expiry = Some(self.pin_expiry.map_or(expires, |t| t.min(expires)));
+            }
+            // pinned before this device was linked: nothing to show
+            let Some(dm) = c.as_ref().and_then(|c| match view::classify(c, self.me) {
+                Kind::Msg { dm, .. } => Some(dm.clone()),
+                _ => None,
+            }) else {
+                continue;
+            };
+            for u in view::mentioned(&dm) {
+                self.name(u).await;
+            }
+            let sender = if author == self.me { "나".to_string() } else { self.name(author).await };
+            let names = &self.names;
+            let text = view::one_line(&dm, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()));
+            out.push(PinDto { id: target.to_string(), sender, text });
+        }
+        out
     }
 
     async fn send_op(&mut self, row: u64, op: Op, mut body: ContentBody) {
@@ -1858,6 +2091,20 @@ impl App {
 
 /// Delivery receipts, then read receipts (unless turned off on the phone) and one read sync
 /// to our other devices so they clear their unread state too.
+/// Applies a stored pin or unpin message to the pin index; true if `c` was one.
+async fn record_pin(index: &Index, key: &str, c: &Content, me: Uuid) -> anyhow::Result<bool> {
+    let at = c.timestamp();
+    match view::classify(c, me) {
+        Kind::Pin { target, author, secs } => {
+            let expires = secs.map_or(0, |s| at + s as u64 * 1000);
+            index.pin(key, target, author, at, expires).await?;
+        }
+        Kind::Unpin { target } => index.unpin(key, target, at).await?,
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
 async fn send_receipts(
     mut m: Mgr,
     delivered: HashMap<ServiceId, Vec<u64>>,

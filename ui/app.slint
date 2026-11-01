@@ -55,6 +55,13 @@ export struct MsgItem {
     typing: bool,
 }
 
+export struct PinItem {
+    // sent timestamp of the pinned message
+    id: string,
+    sender: string,
+    text: string,
+}
+
 export struct MentionItem {
     name: string,
     initial: string,
@@ -223,6 +230,8 @@ component ThreadRow inherits Rectangle {
 component Bubble inherits VerticalLayout {
     in property <MsgItem> m;
     in property <length> max-w;
+    // briefly outlined after jumping to it (pinned message bar)
+    in property <bool> flash;
     callback attachment-clicked(string);
     callback reply(string);
     callback show-info(string);
@@ -317,8 +326,8 @@ component Bubble inherits VerticalLayout {
             max-width: root.max-w;
             border-radius: 14px;
             background: m.deleted || m.sticker || m.big-emoji ? transparent : (m.outgoing ? Theme.bubble-out : Theme.bubble-in);
-            border-width: m.deleted ? 1px : 0px;
-            border-color: Theme.border;
+            border-width: root.flash ? 3px : m.deleted ? 1px : 0px;
+            border-color: root.flash ? #f5b400 : Theme.border;
             bta := TouchArea {
                 double-clicked => { root.reply(m.id); }
                 pointer-event(e) => {
@@ -1024,6 +1033,21 @@ export component AppWindow inherits Window {
     // picked row, composer text, cursor
     callback mention-pick(int, string, int);
 
+    // pinned messages of the open thread (newest first); the bar shows pins[pin-index]
+    in property <[PinItem]> pins;
+    in-out property <int> pin-index;
+    // the bar was clicked: scroll to that message
+    callback pin-clicked(string);
+    callback unpin(string);
+    // jump to a row: the row with this id reports its y in the list (whenever jump-probe changes)
+    in-out property <string> jump-id;
+    in-out property <length> jump-y: -1px;
+    in-out property <int> jump-probe;
+    // some other instantiated row (to estimate where the target is while it isn't instantiated)
+    in-out property <int> seen-index: -1;
+    in-out property <length> seen-y;
+    // flash the jumped-to row
+    in-out property <string> flash-id;
     // message menu (right click); menu-id is "" when closed
     in-out property <string> menu-id;
     in property <length> menu-x;
@@ -1031,7 +1055,12 @@ export component AppWindow inherits Window {
     in property <string> menu-mine;
     in property <bool> menu-can-edit;
     in property <bool> menu-can-delete;
+    in property <bool> menu-pinned;
+    // the menu shows the pin durations instead of the actions
+    in-out property <bool> menu-pin-step;
     callback open-menu(string, length, length);
+    // seconds, 0 = until unpinned
+    callback pin-message(string, int);
     callback react(string, string);
     callback edit-message(string);
     callback delete-message(string);
@@ -1069,6 +1098,17 @@ export component AppWindow inherits Window {
     }
     public function content-height() -> length {
         return msg-list.content-height;
+    }
+    // scroll so that content position y sits a third down the visible list
+    public function scroll-to-y(y: length) {
+        msg-list.content-y = max(msg-list.visible-height - msg-list.content-height, min(0px, msg-list.visible-height / 3 - y));
+    }
+    // where content position y currently is on screen (0 = top of the list)
+    public function list-pos(y: length) -> length {
+        return y + msg-list.content-y;
+    }
+    public function list-visible-height() -> length {
+        return msg-list.visible-height;
     }
     public function shift-by(d: length) {
         msg-list.content-y = max(msg-list.visible-height - msg-list.content-height, min(0px, msg-list.content-y - d));
@@ -1178,6 +1218,62 @@ export component AppWindow inherits Window {
                 }
                 Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
             }
+            if root.current-key != "" && root.pins.length > 0: Rectangle {
+                property <int> idx: Math.min(root.pin-index, root.pins.length - 1);
+                height: 48px;
+                background: pin-ta.has-hover ? Theme.hover : Theme.pane;
+                pin-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.pin-clicked(root.pins[idx].id);
+                        // like the official apps: each click moves on to the next (older) pin
+                        root.pin-index = Math.mod(idx + 1, root.pins.length);
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    // one segment per pin, the shown one highlighted
+                    VerticalLayout {
+                        width: 3px;
+                        padding-top: 8px;
+                        padding-bottom: 8px;
+                        spacing: 2px;
+                        for p[i] in root.pins: Rectangle {
+                            border-radius: 1.5px;
+                            background: i == idx ? Theme.accent : Theme.border;
+                        }
+                    }
+                    Text { text: "📌"; font-size: 15px; vertical-alignment: center; }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: root.pins.length > 1 ? "고정된 메시지 " + (idx + 1) + "/" + root.pins.length : "고정된 메시지";
+                            color: Theme.accent;
+                            font-size: 11.5px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: root.pins[idx].sender + ": " + root.pins[idx].text;
+                            color: Theme.text;
+                            font-size: 12.5px;
+                            overflow: elide;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+                        TextButton {
+                            width: self.min-width;
+                            text: "고정 해제";
+                            clicked => { root.unpin(root.pins[idx].id); }
+                        }
+                    }
+                }
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+            }
             Rectangle {
                 visible: root.current-key != "";
                 vertical-stretch: 1;
@@ -1198,9 +1294,20 @@ export component AppWindow inherits Window {
                             root.load-older();
                         }
                     }
-                    for m in root.messages: Bubble {
+                    for m[i] in root.messages: Bubble {
                         m: m;
                         max-w: min(560px, msg-list.visible-width * 0.75);
+                        flash: m.id == root.flash-id;
+                        property <int> probe: root.jump-probe;
+                        changed probe => {
+                            if (m.id == root.jump-id) {
+                                root.jump-y = self.y;
+                            } else if (self.y + msg-list.content-y >= 0 && self.y + msg-list.content-y < msg-list.visible-height) {
+                                // recycled rows off screen keep stale positions
+                                root.seen-index = i;
+                                root.seen-y = self.y;
+                            }
+                        }
                         attachment-clicked(id) => { root.attachment-clicked(id); }
                         reply(id) => { root.reply(id); }
                         show-info(t) => { root.info-text = t; }
@@ -1522,21 +1629,54 @@ export component AppWindow inherits Window {
                     }
                 }
                 Rectangle { height: 1px; background: Theme.border; }
-                MenuRow {
+                if root.menu-pin-step: HorizontalLayout {
+                    padding-left: 10px;
+                    Text {
+                        height: 28px;
+                        text: "고정할 기간";
+                        color: Theme.subtle;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+                for d in root.menu-pin-step ? [
+                    { label: "24시간", secs: 86400 },
+                    { label: "7일", secs: 604800 },
+                    { label: "30일", secs: 2592000 },
+                    { label: "해제할 때까지", secs: 0 },
+                ] : []: MenuRow {
+                    text: d.label;
+                    clicked => {
+                        root.pin-message(root.menu-id, d.secs);
+                        root.menu-id = "";
+                    }
+                }
+                if !root.menu-pin-step: MenuRow {
                     text: "답장";
                     clicked => {
                         root.reply(root.menu-id);
                         root.menu-id = "";
                     }
                 }
-                if root.menu-can-edit: MenuRow {
+                if !root.menu-pin-step: MenuRow {
+                    text: root.menu-pinned ? "고정 해제" : "고정";
+                    clicked => {
+                        if (root.menu-pinned) {
+                            root.unpin(root.menu-id);
+                            root.menu-id = "";
+                        } else {
+                            root.menu-pin-step = true;
+                        }
+                    }
+                }
+                if root.menu-can-edit && !root.menu-pin-step: MenuRow {
                     text: "수정";
                     clicked => {
                         root.edit-message(root.menu-id);
                         root.menu-id = "";
                     }
                 }
-                if root.menu-can-delete: MenuRow {
+                if root.menu-can-delete && !root.menu-pin-step: MenuRow {
                     text: "모두에게서 삭제";
                     danger: true;
                     clicked => {

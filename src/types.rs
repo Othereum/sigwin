@@ -78,6 +78,17 @@ pub struct MsgDto {
     pub can_delete: bool,
     /// "@name" byte ranges in `text` (drawn highlighted) and who they mention (ACI uuid)
     pub mentions: Vec<(usize, usize, String)>,
+    /// pinned in this thread (a pin marker next to the time)
+    pub pinned: bool,
+}
+
+/// A pinned message of the open thread, for the bar above the message list.
+#[derive(Debug, Clone, Default)]
+pub struct PinDto {
+    /// sent timestamp of the pinned message (may be outside the loaded window)
+    pub id: String,
+    pub sender: String,
+    pub text: String,
 }
 
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
@@ -127,6 +138,8 @@ pub enum Scroll {
     Bottom,
     KeepIfNotAtBottom,
     Older,
+    /// leave the scroll position alone (a `JumpTo` follows)
+    Keep,
 }
 
 pub enum Event {
@@ -140,6 +153,10 @@ pub enum Event {
     /// who can be @mentioned in the open thread: (uuid, name); empty outside groups
     Members(Vec<crate::mention::Member>),
     Messages { key: String, items: Vec<MsgDto>, can_older: bool, scroll: Scroll },
+    /// pinned messages of the open thread, newest first
+    Pins(Vec<PinDto>),
+    /// scroll the message list to row `id` (already in the last `Messages`) and flash it
+    JumpTo(String),
     Thumb(Arc<Thumb>),
     /// round photo of a thread (key = thread key); width 0 = none
     Avatar(Arc<Thumb>),
@@ -187,6 +204,12 @@ pub enum Command {
     Edit { id: String, text: String, mentions: Vec<crate::mention::Member> },
     /// delete our message `id` for everyone
     Delete(String),
+    /// pin message `id` (row) for `secs` seconds, None = until unpinned
+    Pin { id: String, secs: Option<u32> },
+    /// unpin; `id` is the pinned message's sent timestamp (`PinDto::id`)
+    Unpin(String),
+    /// show the pinned message with this sent timestamp, loading older rows if needed
+    JumpTo(String),
     /// the composer was edited; false when it became empty
     Composing(bool),
     /// the settings page opened: send Account and Storage

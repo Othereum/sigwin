@@ -230,7 +230,7 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, senders: &HashMap<String
         text: m.text.as_str().into(),
         has_rich,
         rich: if has_rich { rich_text(m, &links, dark) } else { Default::default() },
-        time: m.time.as_str().into(),
+        time: if m.pinned { format!("📌 {}", m.time).into() } else { m.time.as_str().into() },
         outgoing: m.outgoing,
         show_sender: m.show_sender,
         avatar_col: m.avatar_col,
@@ -288,6 +288,65 @@ fn header_avatar(app: &AppWindow, ui: &Ui) {
     app.set_current_tint(row.color);
     app.set_current_has_photo(row.has_photo);
     app.set_current_photo(row.photo);
+}
+
+/// Scrolls the message list until row `id` sits a third down the view, then flashes it.
+/// Rows have different heights and only visible ones exist, so this homes in over a few frames:
+/// the row reports its y once instantiated; until then, any visible row and the average
+/// row height give an estimate.
+fn jump_to_row(app: &AppWindow, id: String) {
+    thread_local! {
+        static TIMER: slint::Timer = slint::Timer::default();
+    }
+    let Some(idx) = UI.with_borrow(|ui| ui.last.iter().position(|m| m.id == id)) else { return };
+    app.set_jump_id(id.as_str().into());
+    app.set_jump_y(-1.0);
+    app.set_seen_index(-1);
+    let estimate = move |app: &AppWindow| {
+        let n = slint::Model::row_count(&app.get_messages()).max(1) as f32;
+        let avg = app.invoke_content_height() / n;
+        let (si, sy) = (app.get_seen_index(), app.get_seen_y());
+        if si >= 0 { sy + (idx as f32 - si as f32) * avg } else { idx as f32 * avg }
+    };
+    app.invoke_scroll_to_y(estimate(app));
+    let weak = app.as_weak();
+    let mut ticks = 0u32;
+    app.set_jump_probe(app.get_jump_probe() + 1);
+    TIMER.with(|t| {
+        t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(16), move || {
+            let Some(app) = weak.upgrade() else { return };
+            ticks += 1;
+            // the ListView re-estimates row positions whenever it scrolls, so chasing an exact y
+            // never settles: stop as soon as the row is on screen
+            let y = app.get_jump_y();
+            let mut done = ticks >= 60;
+            if y >= 0.0 {
+                let pos = app.invoke_list_pos(y);
+                if pos >= 0.0 && pos <= app.invoke_list_visible_height() * 0.7 {
+                    done = true;
+                } else {
+                    app.invoke_scroll_to_y(y);
+                }
+            } else if app.get_seen_index() >= 0 {
+                app.invoke_scroll_to_y(estimate(&app));
+            }
+            app.set_jump_y(-1.0);
+            app.set_seen_index(-1);
+            app.set_jump_probe(app.get_jump_probe() + 1);
+            if done {
+                TIMER.with(|t| t.stop());
+                let id = app.get_jump_id();
+                app.set_jump_id(SharedString::new());
+                app.set_flash_id(id.clone());
+                let weak = app.as_weak();
+                slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
+                    if let Some(app) = weak.upgrade().filter(|a| a.get_flash_id() == id) {
+                        app.set_flash_id(SharedString::new());
+                    }
+                });
+            }
+        });
+    });
 }
 
 fn qr_image(url: &str) -> Option<Image> {
@@ -359,6 +418,8 @@ fn apply(app: &AppWindow, ev: Event) {
                 switched
             });
             if switched {
+                app.set_pin_index(0);
+                app.set_flash_id(SharedString::new());
                 app.set_reply_preview(SharedString::new());
                 app.set_edit_preview(SharedString::new());
                 app.set_menu_id(SharedString::new());
@@ -390,7 +451,7 @@ fn apply(app: &AppWindow, ev: Event) {
             match scroll {
                 Scroll::Bottom => stick_to_bottom(app),
                 Scroll::KeepIfNotAtBottom if near_bottom => stick_to_bottom(app),
-                Scroll::KeepIfNotAtBottom => {}
+                Scroll::KeepIfNotAtBottom | Scroll::Keep => {}
                 Scroll::Older => {
                     let weak = app.as_weak();
                     // let the ListView lay out the new rows before measuring
@@ -405,6 +466,17 @@ fn apply(app: &AppWindow, ev: Event) {
                 app.invoke_focus_composer();
             }
         }
+        Event::Pins(list) => {
+            let items: Vec<PinItem> = list
+                .iter()
+                .map(|p| PinItem { id: p.id.as_str().into(), sender: p.sender.as_str().into(), text: p.text.as_str().into() })
+                .collect();
+            if app.get_pin_index() >= items.len() as i32 {
+                app.set_pin_index(0);
+            }
+            app.set_pins(ModelRc::new(VecModel::from(items)));
+        }
+        Event::JumpTo(id) => jump_to_row(app, id),
         Event::Avatar(t) => UI.with_borrow_mut(|ui| {
             let img = (t.width > 0).then(|| {
                 Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height))
@@ -760,6 +832,9 @@ fn main() -> anyhow::Result<()> {
                 apply(&app, Event::Typing { group: true, who: vec![("demo-a".into(), "김민준".into())] });
                 if what == "edit" {
                     app.invoke_edit_message("294".into());
+                } else if what == "pin" {
+                    app.invoke_open_menu("297".into(), 520.0, 300.0);
+                    app.set_menu_pin_step(true);
                 } else {
                     app.invoke_open_menu("297".into(), 520.0, 300.0);
                 }
@@ -975,12 +1050,14 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     let weak = app.as_weak();
     app.on_open_menu(move |id, x, y| {
         let Some(app) = weak.upgrade() else { return };
-        let Some((mine, can_edit, can_delete)) = UI.with_borrow(|ui| {
+        let Some((mine, can_edit, can_delete, pinned)) = UI.with_borrow(|ui| {
             let m = ui.last.iter().find(|m| m.id == id.as_str())?;
-            (!m.system && !m.deleted && !m.pending).then(|| (m.my_reaction.clone(), m.can_edit, m.can_delete))
+            (!m.system && !m.deleted && !m.pending).then(|| (m.my_reaction.clone(), m.can_edit, m.can_delete, m.pinned))
         }) else {
             return;
         };
+        app.set_menu_pinned(pinned);
+        app.set_menu_pin_step(false);
         app.set_menu_mine(mine.into());
         app.set_menu_can_edit(can_edit);
         app.set_menu_can_delete(can_delete);
@@ -1029,6 +1106,23 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
             app.set_edit_preview(SharedString::new());
             app.set_draft(SharedString::new());
         }
+    });
+
+    let s = send.clone();
+    app.on_pin_message(move |id, secs| {
+        s(Command::Pin { id: id.to_string(), secs: (secs > 0).then_some(secs as u32) });
+    });
+
+    let s = send.clone();
+    app.on_unpin(move |id| s(Command::Unpin(id.to_string())));
+
+    let s = send.clone();
+    let weak = app.as_weak();
+    let demo = std::env::var_os("SIGWIN_DEMO").is_some();
+    app.on_pin_clicked(move |id| match weak.upgrade() {
+        // no backend: demo pin ids are row ids
+        Some(app) if demo => jump_to_row(&app, id.to_string()),
+        _ => s(Command::JumpTo(id.to_string())),
     });
 
     let s = send.clone();
@@ -1386,7 +1480,15 @@ fn demo(emit: backend::Emit) {
         m.big_emoji = emoji::only_emoji(&m.text, 5).is_some();
     }
     view::mark_avatar_runs(&mut items);
+    for i in [150usize, 290] {
+        items[i].pinned = true;
+    }
+    let pins = [(290usize, "이서연"), (150, "나")]
+        .iter()
+        .map(|&(i, who)| types::PinDto { id: i.to_string(), sender: who.into(), text: items[i].text.replace('\n', " ") })
+        .collect();
     emit(Event::Messages { key: "c:demo-1".into(), items, can_older: false, scroll: Scroll::Bottom });
+    emit(Event::Pins(pins));
     // one sender with a photo, the other falls back to the initial
     photo(format!("{}demo-a", avatar::MSG_PREFIX), 1, avatar::MSG_SIZE);
     emit(Event::Status("데모 모드".into()));

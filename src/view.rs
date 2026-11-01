@@ -8,6 +8,7 @@ use presage::libsignal_service::content::{Content, ContentBody, DataMessage};
 use presage::libsignal_service::prelude::Uuid;
 use presage::proto::sync_message::{Content as SyncContent, Sent};
 use presage::proto::body_range::AssociatedValue;
+use presage::proto::data_message::pin_message::PinDuration;
 use presage::proto::{receipt_message, AttachmentPointer, BodyRange, EditMessage, ReceiptMessage, SyncMessage};
 
 use presage::store::ContentExt;
@@ -28,6 +29,9 @@ pub enum Kind<'a> {
     Edit { target: u64, dm: &'a DataMessage },
     Receipt { read: bool, targets: &'a [u64] },
     Deleted,
+    /// `secs` None = until unpinned
+    Pin { target: u64, author: Uuid, secs: Option<u32> },
+    Unpin { target: u64 },
     Skip,
 }
 
@@ -37,6 +41,17 @@ fn classify_data<'a>(dm: &'a DataMessage, outgoing: bool) -> Kind<'a> {
             return Kind::Reaction { target, emoji: emoji.clone(), remove: r.remove.unwrap_or(false) };
         }
         return Kind::Skip;
+    }
+    if let Some(p) = &dm.pin_message {
+        let (Some(target), Some(author)) = (p.target_sent_timestamp, p.parse_target_author_aci()) else { return Kind::Skip };
+        let secs = match p.pin_duration {
+            Some(PinDuration::PinDurationSeconds(s)) if s > 0 => Some(s),
+            _ => None,
+        };
+        return Kind::Pin { target, author: author.into(), secs };
+    }
+    if let Some(target) = dm.unpin_message.as_ref().and_then(|u| u.target_sent_timestamp) {
+        return Kind::Unpin { target };
     }
     let has_content = dm.body.as_deref().is_some_and(|b| !b.is_empty())
         || !dm.attachments.is_empty()
@@ -281,25 +296,41 @@ pub fn snippet(c: &Content, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> Opti
     }
     let text = match classify(c, me) {
         Kind::Msg { dm, outgoing } => {
-            let mut t = body_text(dm, name_of);
-            if t.is_empty() {
-                t = dm
-                    .attachments
-                    .first()
-                    .map(|a| {
-                        let l = attachment_label(a);
-                        if is_image(a) { format!("📷 {l}") } else { format!("📎 {l}") }
-                    })
-                    .unwrap_or_default();
-            }
-            let t = t.replace('\n', " ");
+            let t = one_line(dm, name_of);
             if outgoing { format!("나: {t}") } else { t }
         }
         Kind::System(s) => s,
+        Kind::Pin { .. } => pin_label(c, me, name_of),
         Kind::Deleted => "삭제된 메시지".into(),
         _ => return None,
     };
     Some(text)
+}
+
+/// A message's text on one line, or what it carries when it has no text.
+pub fn one_line(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
+    let mut t = body_text(dm, name_of);
+    if t.is_empty() {
+        t = dm
+            .attachments
+            .first()
+            .map(|a| {
+                let l = attachment_label(a);
+                if is_image(a) { format!("📷 {l}") } else { format!("📎 {l}") }
+            })
+            .unwrap_or_default();
+    }
+    t.replace('\n', " ")
+}
+
+/// Timeline line for a pin message.
+fn pin_label(c: &Content, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> String {
+    let who = c.metadata.sender.raw_uuid();
+    if who == me {
+        "메시지를 고정했습니다".into()
+    } else {
+        format!("{}님이 메시지를 고정했습니다", name_of(&who))
+    }
 }
 
 fn local(ts: u64) -> DateTime<Local> {
@@ -526,6 +557,11 @@ pub fn build(
                 m.text = s;
                 prev_sender = None;
             }
+            Kind::Pin { .. } => {
+                m.system = true;
+                m.text = pin_label(c, me, name_of);
+                prev_sender = None;
+            }
             Kind::Deleted => {
                 // rows presage stored for messages sent from this PC have no server guid
                 let mine = my_deletes.contains(ts) || c.metadata.server_guid.is_none();
@@ -688,6 +724,37 @@ mod tests {
         let t = body_text_spans(&dm, &name, &mut spans);
         let got: Vec<&str> = spans.iter().map(|&(s, e, _)| &t[s..e]).collect();
         assert_eq!(got, ["@철수", "@영희"]);
+    }
+
+    #[test]
+    fn pins_are_classified() {
+        use presage::proto::data_message::{PinMessage, UnpinMessage};
+        let author = Uuid::from_u128(7);
+        let pin = |d| DataMessage {
+            pin_message: Some(PinMessage {
+                target_author_aci_binary: Some(author.as_bytes().to_vec()),
+                target_sent_timestamp: Some(42),
+                pin_duration: d,
+            }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            classify_data(&pin(Some(PinDuration::PinDurationSeconds(86400))), false),
+            Kind::Pin { target: 42, author: a, secs: Some(86400) } if a == author
+        ));
+        assert!(matches!(
+            classify_data(&pin(Some(PinDuration::PinDurationForever(true))), true),
+            Kind::Pin { secs: None, .. }
+        ));
+        // no target author: ignored
+        let mut bad = pin(None);
+        bad.pin_message.as_mut().unwrap().target_author_aci_binary = None;
+        assert!(matches!(classify_data(&bad, false), Kind::Skip));
+        let unpin = DataMessage {
+            unpin_message: Some(UnpinMessage { target_author_aci_binary: None, target_sent_timestamp: Some(42) }),
+            ..Default::default()
+        };
+        assert!(matches!(classify_data(&unpin, false), Kind::Unpin { target: 42 }));
     }
 
     #[test]

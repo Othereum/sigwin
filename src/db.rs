@@ -48,7 +48,70 @@ impl Index {
         sqlx::query("CREATE TABLE IF NOT EXISTS ls_deleted_mine (ts INTEGER PRIMARY KEY) WITHOUT ROWID")
             .execute(&pool)
             .await?;
+        // pinned messages per thread: presage stores pin/unpin messages but doesn't track the state.
+        // `expires` 0 = until unpinned
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_pins (
+                thread TEXT NOT NULL,
+                target_ts INTEGER NOT NULL,
+                author BLOB NOT NULL,
+                pinned_at INTEGER NOT NULL,
+                expires INTEGER NOT NULL,
+                PRIMARY KEY (thread, target_ts)
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
         Ok(Self { pool })
+    }
+
+    /// A pin sent at `at`; an older pin of the same message is replaced, a newer one kept.
+    pub async fn pin(&self, thread: &str, target: u64, author: uuid::Uuid, at: u64, expires: u64) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO ls_pins (thread, target_ts, author, pinned_at, expires) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT (thread, target_ts) DO UPDATE SET
+                author = excluded.author, pinned_at = excluded.pinned_at, expires = excluded.expires
+             WHERE excluded.pinned_at >= ls_pins.pinned_at",
+        )
+        .bind(thread)
+        .bind(target as i64)
+        .bind(author.as_bytes().as_slice())
+        .bind(at as i64)
+        .bind(expires as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// An unpin sent at `at` (`u64::MAX >> 1`: unconditionally) removes pins made before it.
+    pub async fn unpin(&self, thread: &str, target: u64, at: u64) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM ls_pins WHERE thread = ? AND target_ts = ? AND pinned_at <= ?")
+            .bind(thread)
+            .bind(target as i64)
+            .bind(at.min(i64::MAX as u64) as i64)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Pins of a thread, newest first: (target ts, target author, pinned at, expires or 0).
+    pub async fn pins(&self, thread: &str) -> anyhow::Result<Vec<(u64, uuid::Uuid, u64, u64)>> {
+        let rows = sqlx::query(
+            "SELECT target_ts, author, pinned_at, expires FROM ls_pins WHERE thread = ? ORDER BY pinned_at DESC",
+        )
+        .bind(thread)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let ts: i64 = r.try_get("target_ts").ok()?;
+                let author: Vec<u8> = r.try_get("author").ok()?;
+                let at: i64 = r.try_get("pinned_at").ok()?;
+                let exp: i64 = r.try_get("expires").ok()?;
+                Some((ts as u64, uuid::Uuid::from_slice(&author).ok()?, at as u64, exp as u64))
+            })
+            .collect())
     }
 
     /// Drops presage's cached profile, so the next `retrieve_profile_by_uuid` fetches it again.
