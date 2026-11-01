@@ -837,6 +837,15 @@ export component AppWindow inherits Window {
                 msg-list := ListView {
                     width: parent.width;
                     height: parent.height;
+                    // the composer growing (or a resize) shrinks the list: if it was at the
+                    // bottom before, keep it there so the last message isn't hidden
+                    property <length> last-vh;
+                    changed visible-height => {
+                        if (self.last-vh > 0 && self.content-height + self.content-y - self.last-vh <= 120px) {
+                            root.scroll-to-bottom();
+                        }
+                        self.last-vh = self.visible-height;
+                    }
                     scrolled => {
                         if (self.content-y >= -4px && root.can-load-older) {
                             root.load-older();
