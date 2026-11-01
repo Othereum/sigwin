@@ -32,7 +32,7 @@ cargo test
 Layout and glyph bugs only show up visually; a successful compile proves nothing about them. Use the demo modes (`SIGWIN_DEMO=1`, synthetic data, no backend) **headless**: the user works on this PC, so never pop up a window, take focus or move the real mouse. `SIGWIN_HEADLESS="<steps>"` renders offscreen and writes PNG shots (`shot PATH`). Step syntax, demo variants and what headless can't cover: `docs/headless.md`.
 
 ## Architecture in brief
-UI thread (Slint) sends `Command`s to a backend thread (tokio current_thread + `LocalSet`) that owns the `!Send` presage `Manager`; results come back as `Event`s via `upgrade_in_event_loop`. `main.rs` = UI wiring, `backend.rs` = Signal logic, `view.rs` = message rows, `db.rs` = own SQL, `types.rs` = cross-thread types, `ui/app.slint` = the whole UI. Full file table: `docs/architecture.md`.
+UI thread (Slint) sends `Command`s to a backend thread (tokio current_thread + `LocalSet`) that owns the `!Send` presage `Manager`; results come back as `Event`s via `upgrade_in_event_loop`. `gui/` = UI wiring and rows, `backend/` = Signal logic, `view.rs` = message rows, `db.rs` = own SQL, `types.rs` = cross-thread types, `ui/app.slint` = the whole UI. Full file table: `docs/architecture.md`.
 
 ## Vendor patches: last resort
 Every hunk under `vendor/` has to be re-applied by hand on each Slint / presage upgrade, and a missed one fails silently. Keep the count down:

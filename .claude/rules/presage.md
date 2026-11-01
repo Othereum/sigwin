@@ -1,6 +1,7 @@
 ---
 paths:
   - src/backend.rs
+  - src/backend/**
   - src/view.rs
   - src/db.rs
   - src/types.rs

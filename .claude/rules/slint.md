@@ -2,6 +2,9 @@
 paths:
   - ui/**
   - src/main.rs
+  - src/gui.rs
+  - src/gui/**
+  - src/demo.rs
   - src/winhook.rs
   - src/headless.rs
   - vendor/i-slint-*/**
@@ -11,7 +14,7 @@ paths:
 
 - **Missing glyphs render as blank. There is no per-glyph font fallback.** Malgun Gothic (UI font) lacks `✓ ✕ ➤`; Segoe UI Symbol lacks Hangul. Icons use `font-family: "Segoe UI Symbol"`; the status text switches font based on its content. Check every new symbol in a screenshot.
 - **Color emoji are plain text everywhere** (reactions, emoji-only messages at 40px, inline): the patched renderer draws them in one consistent flat style. Don't add a separate emoji path (see `docs/decisions.md`). Windows has no flag emoji (🇰🇷 renders as "KR").
-- Text styles, links and spoilers depend on the vendored core patch (`main::to_item` registers styled text, `main::rich_text` builds link spans). Details in `vendor/PATCHES.md`.
+- Text styles, links and spoilers depend on the vendored core patch (`gui::rows::to_item` registers styled text, `gui::rows::rich_text` builds link spans). Details in `vendor/PATCHES.md`.
 - Don't use `EmbedResourcesKind::EmbedForSoftwareRenderer`: it bakes only glyphs that appear in `.slint` files, so runtime Korean text loses characters.
 - A `Flickable`'s max size defaults to its content size and propagates up through layouts, which can shrink the window. Set `max-width: 100000px` on Flickables inside layouts.
 - Elements inside `if` can't be referenced by id from outside. Use `visible` and min/max sizes instead (see `composer-bar`).
