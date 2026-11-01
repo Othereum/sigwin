@@ -92,6 +92,37 @@ struct Ui {
     settings_path: PathBuf,
 }
 
+/// Brings the message model from `ui.last` to `items` touching only the rows that differ.
+/// Replacing the whole model makes the ListView drop every row and re-seek, which snaps the
+/// scroll position to a row boundary on every reload (receipts, reactions, typing).
+fn update_rows(ui: &mut Ui, items: &[MsgDto], dark: bool) {
+    use slint::Model;
+    if ui.typing_row {
+        let n = ui.messages.row_count();
+        if n > 0 {
+            ui.messages.remove(n - 1);
+        }
+        ui.typing_row = false;
+    }
+    let old = &ui.last;
+    let max = old.len().min(items.len());
+    let pre = old.iter().zip(items).take_while(|(a, b)| a.id == b.id).count();
+    let suf = old.iter().rev().zip(items.iter().rev()).take(max - pre).take_while(|(a, b)| a.id == b.id).count();
+    let item = |m: &MsgDto| to_item(m, &ui.thumbs, &ui.sender_avatars, dark);
+    for i in (0..pre).chain(old.len() - suf..old.len()) {
+        let j = if i < pre { i } else { i + items.len() - old.len() };
+        if old[i] != items[j] {
+            ui.messages.set_row_data(i, item(&items[j]));
+        }
+    }
+    for _ in pre..old.len() - suf {
+        ui.messages.remove(pre);
+    }
+    for (k, m) in items[pre..items.len() - suf].iter().enumerate() {
+        ui.messages.insert(pre + k, item(m));
+    }
+}
+
 /// Put the typing bubble at the end of the message list, or take it away.
 fn sync_typing(ui: &mut Ui) {
     if ui.typing_row {
@@ -295,7 +326,7 @@ fn header_avatar(app: &AppWindow, ui: &Ui) {
     app.set_current_photo(row.photo);
 }
 
-/// Scrolls the message list until row `id` sits about a third down the view, then flashes it.
+/// Scrolls the message list until row `id` is centered in the view, then flashes it.
 ///
 /// Only rows on screen exist, and after every layout the ListView rescales all positions by the
 /// average height of those rows, so positions from different frames don't match. So this
@@ -313,6 +344,7 @@ fn jump_to_row(app: &AppWindow, id: String) {
     app.set_jump_probe(app.get_jump_probe() + 1);
     let weak = app.as_weak();
     let mut ticks = 0u32;
+    let mut last_pos: Option<f32> = None;
     JUMP.with(|t| {
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(20), move || {
             let Some(app) = weak.upgrade() else { return };
@@ -324,15 +356,20 @@ fn jump_to_row(app: &AppWindow, id: String) {
                 return;
             }
             let vh = app.invoke_list_visible_height();
-            let mut done = ticks >= 60;            if app.get_jump_found() {
+            let mut done = ticks >= 60;
+            if app.get_jump_found() {
                 let pos = app.get_jump_pos();
-                if pos >= 0.0 && pos <= vh * 0.6 {
+                // centered; a row taller than the view starts at the top
+                let want = ((vh - app.get_jump_h()) / 2.0).max(0.0);
+                // close enough, or the list can't scroll further (row near either end)
+                if (pos - want).abs() <= 4.0 || last_pos.is_some_and(|p: f32| (p - pos).abs() < 1.0) {
                     done = true;
                 } else {
-                    app.invoke_shift_by(pos - vh / 3.0);
+                    app.invoke_shift_by(pos - want);
                 }
+                last_pos = Some(pos);
             } else {
-                // the row may have gone (the list was reloaded without it)
+                last_pos = None;
                 // rows above may have been added since (older history, a reload)
                 let jid = app.get_jump_id();
                 let idx = UI.with_borrow(|ui| ui.last.iter().position(|m| m.id == jid.as_str())).unwrap_or(idx);
@@ -449,8 +486,12 @@ fn apply(app: &AppWindow, ev: Event) {
                     }
                 }
                 let dark = app.global::<Theme>().get_dark();
-                ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.sender_avatars, dark)).collect::<Vec<_>>());
-                ui.typing_row = false;
+                if switched || scroll == Scroll::Older {
+                    ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.sender_avatars, dark)).collect::<Vec<_>>());
+                    ui.typing_row = false;
+                } else {
+                    update_rows(ui, &items, dark);
+                }
                 sync_typing(ui);
                 ui.last = items;
             });
@@ -1591,4 +1632,36 @@ fn demo_stickers(emit: backend::Emit) {
         }
         emit(Event::Thumb(Arc::new(demo_blob("sp_p1_0", 96, 200))));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rows(ids: &[&str]) -> Vec<MsgDto> {
+        ids.iter().map(|s| MsgDto { id: s.trim_end_matches('*').into(), text: s.to_string(), ..Default::default() }).collect()
+    }
+
+    #[test]
+    fn rows_update_in_place() {
+        use slint::Model;
+        let cases: [(&[&str], &[&str]); 6] = [
+            (&["1", "2", "3"], &["1", "2*", "3", "4"]),
+            (&["1", "2", "3"], &["0", "1", "3*"]),
+            (&["1", "2", "3"], &["1", "2", "3"]),
+            (&["1", "2", "3"], &[]),
+            (&[], &["1"]),
+            (&["1", "2", "2b", "3"], &["1", "9", "3"]),
+        ];
+        for (old, new) in cases {
+            let mut ui = Ui::default();
+            ui.last = rows(old);
+            ui.messages.set_vec(ui.last.iter().map(|m| to_item(m, &HashMap::new(), &HashMap::new(), false)).collect::<Vec<_>>());
+            let new = rows(new);
+            update_rows(&mut ui, &new, false);
+            let got: Vec<String> = ui.messages.iter().map(|m| m.text.to_string()).collect();
+            let want: Vec<String> = new.iter().map(|m| m.text.clone()).collect();
+            assert_eq!(got, want, "{old:?} -> {new:?}");
+        }
+    }
 }

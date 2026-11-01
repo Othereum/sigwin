@@ -243,9 +243,12 @@ component Bubble inherits VerticalLayout {
     padding-bottom: m.typing ? 8px : 2px;
     spacing: 4px;
     opacity: m.pending ? 0.6 : 1.0;
+    // height of the day separator above the message itself (centering a jump on the bubble)
+    out property <length> lead: m.day-sep != "" ? root.padding-top + 36px + root.spacing : 0px;
 
     if m.day-sep != "": HorizontalLayout {
         alignment: center;
+        height: 36px;
         padding-top: 6px;
         padding-bottom: 6px;
         Rectangle {
@@ -1045,6 +1048,7 @@ export component AppWindow inherits Window {
     in-out property <string> jump-id;
     in-out property <bool> jump-found;
     in-out property <length> jump-pos;
+    in-out property <length> jump-h;
     in-out property <int> jump-probe;
     // flash the jumped-to row
     in-out property <string> flash-id;
@@ -1296,7 +1300,8 @@ export component AppWindow inherits Window {
                         property <int> probe: root.jump-probe;
                         changed probe => {
                             if (m.id == root.jump-id) {
-                                root.jump-pos = self.y + msg-list.content-y;
+                                root.jump-pos = self.y + self.lead + msg-list.content-y;
+                                root.jump-h = self.height - self.lead;
                                 root.jump-found = true;
                             }
                         }

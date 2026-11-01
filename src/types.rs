@@ -39,7 +39,7 @@ pub struct ThreadDto {
     pub is_group: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct MsgDto {
     pub id: String,
     pub sender: String,
