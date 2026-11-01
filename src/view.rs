@@ -15,7 +15,7 @@ use presage::store::ContentExt;
 
 use crate::types::MsgDto;
 
-pub const THUMB_MAX: u32 = 260;
+pub const THUMB_MAX: u32 = 400;
 /// DataMessage.Flags.EXPIRATION_TIMER_UPDATE
 const EXPIRATION_TIMER_UPDATE: u32 = 2;
 /// Signal accepts edits and deletes for everyone up to a day after sending.

@@ -244,11 +244,12 @@ component MsgMeta inherits HorizontalLayout {
     in property <MsgItem> m;
     callback info(string);
     spacing: 4px;
+    property <bool> bare: m.has-image && m.text == "" && m.quote == "" && m.attachment == "";
     Text {
         text: m.time;
         font-size: 10.5px;
         vertical-alignment: bottom;
-        color: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? #ffffffb0 : Theme.subtle;
+        color: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted && !root.bare ? #ffffffb0 : Theme.subtle;
         TouchArea {
             enabled: m.outgoing;
             mouse-cursor: m.outgoing ? pointer : default;
@@ -261,7 +262,7 @@ component MsgMeta inherits HorizontalLayout {
         font-family: m.status == "✓" || m.status == "✓✓" ? "Segoe UI Symbol" : "Malgun Gothic";
         font-size: 12px;
         vertical-alignment: bottom;
-        color: m.sticker || m.big-emoji ? Theme.subtle : #ffffffd0;
+        color: m.sticker || m.big-emoji || root.bare ? Theme.subtle : #ffffffd0;
         TouchArea {
             mouse-cursor: pointer;
             clicked => { root.info(m.receipt-info); }
@@ -289,6 +290,8 @@ component Bubble inherits VerticalLayout {
     opacity: m.pending ? 0.6 : 1.0;
     // plain text: the time sits at the right of the last line instead of below
     property <bool> inline-time: m.text != "" && !m.big-emoji && !m.sticker;
+    // a photo alone: no bubble around it, the picture itself is the message
+    property <bool> bare: m.has-image && m.text == "" && m.quote == "" && m.attachment == "";
     // height of the day separator above the message itself (centering a jump on the bubble)
     out property <length> lead: m.day-sep != "" ? root.padding-top + 36px + root.spacing : 0px;
 
@@ -374,7 +377,7 @@ component Bubble inherits VerticalLayout {
         Rectangle {
             max-width: root.max-w;
             border-radius: 14px;
-            background: m.deleted || m.sticker || m.big-emoji ? transparent : (m.outgoing ? Theme.bubble-out : Theme.bubble-in);
+            background: m.deleted || m.sticker || m.big-emoji || root.bare ? transparent : (m.outgoing ? Theme.bubble-out : Theme.bubble-in);
             border-width: root.flash ? 3px : m.deleted ? 1px : 0px;
             border-color: root.flash ? #f5b400 : Theme.border;
             bta := TouchArea {
@@ -386,9 +389,9 @@ component Bubble inherits VerticalLayout {
                 }
             }
             VerticalLayout {
-                padding: 9px;
-                padding-left: 12px;
-                padding-right: 12px;
+                padding: root.bare ? 0px : 9px;
+                padding-left: root.bare ? 0px : 12px;
+                padding-right: root.bare ? 0px : 12px;
                 spacing: 4px;
                 if m.show-sender && !m.outgoing: Text {
                     text: m.sender;

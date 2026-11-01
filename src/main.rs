@@ -1692,7 +1692,7 @@ fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Co
         // like a real account: photos make rows very uneven in height
         for (i, m) in items.iter_mut().enumerate().filter(|(i, _)| i % 9 == 4 && *i < 290) {
             m.image_key = format!("demo-photo-{i}");
-            (m.img_w, m.img_h) = if i % 2 == 0 { (260, 195) } else { (195, 260) };
+            (m.img_w, m.img_h) = if i % 2 == 0 { (400, 300) } else { (300, 400) };
         }
     }
     if let Ok(v) = std::env::var("SIGWIN_DEMO_OLDER") {
