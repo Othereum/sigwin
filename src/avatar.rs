@@ -28,6 +28,10 @@ use crate::types::{Event, Thumb};
 pub const SIZE: u32 = 40;
 /// next to incoming group messages (ui/app.slint `Bubble`)
 pub const MSG_SIZE: u32 = 28;
+/// who read a message, under the bubble (ui/app.slint `Bubble`)
+pub const READ_SIZE: u32 = 16;
+/// Emitted key prefix of a reader avatar: `r:<uuid>`.
+pub const READ_PREFIX: &str = "r:";
 /// Emitted key prefix of a message-list avatar: `m:<uuid>`.
 pub const MSG_PREFIX: &str = "m:";
 

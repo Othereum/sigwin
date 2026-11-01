@@ -249,6 +249,25 @@ fn rich_text(m: &MsgDto, links: &[(usize, usize)], dark: bool) -> slint::StyledT
     parse_markdown(&fmt, &args)
 }
 
+/// The photos (first `MAX_READER_PHOTOS`) of those who read a message; keys `r:<uuid>` in `senders`.
+fn reader_items(m: &MsgDto, senders: &HashMap<String, Image>) -> ModelRc<ReaderItem> {
+    let rows: Vec<ReaderItem> = m
+        .readers
+        .iter()
+        .take(types::MAX_READER_PHOTOS)
+        .map(|(uuid, name)| {
+            let photo = senders.get(&format!("{}{uuid}", avatar::READ_PREFIX)).cloned();
+            ReaderItem {
+                has_photo: photo.is_some(),
+                photo: photo.unwrap_or_default(),
+                initial: initial(name).into(),
+                tint: tint(uuid),
+            }
+        })
+        .collect();
+    ModelRc::new(VecModel::from(rows))
+}
+
 fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, senders: &HashMap<String, Image>, dark: bool) -> MsgItem {
     let image = thumbs.get(&m.image_key).cloned();
     let avatar = if m.show_avatar { senders.get(&m.sender_key).cloned() } else { None };
@@ -277,6 +296,8 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, senders: &HashMap<String
         avatar: avatar.unwrap_or_default(),
         initial: initial(&m.sender).into(),
         status: m.status.as_str().into(),
+        readers: reader_items(m, senders),
+        readers_more: m.readers.len().saturating_sub(types::MAX_READER_PHOTOS) as i32,
         quote: m.quote.as_str().into(),
         attachment: m.attachment.as_str().into(),
         has_image: !m.image_key.is_empty(),
@@ -289,6 +310,7 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, senders: &HashMap<String
         sticker: m.sticker,
         receipt_info: m.receipt_info.as_str().into(),
         pending: m.pending,
+        hide_time: m.hide_time,
         typing: false,
     }
 }
@@ -611,6 +633,19 @@ fn apply(app: &AppWindow, ev: Event) {
             let img = (t.width > 0).then(|| {
                 Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height))
             });
+            if let Some(uuid) = t.key.strip_prefix(avatar::READ_PREFIX) {
+                let Some(img) = img else { return };
+                ui.sender_avatars.insert(t.key.clone(), img);
+                for (i, m) in ui.last.iter().enumerate() {
+                    if m.readers.iter().take(types::MAX_READER_PHOTOS).any(|(u, _)| u == uuid) {
+                        if let Some(mut row) = slint::Model::row_data(&*ui.messages, i) {
+                            row.readers = reader_items(m, &ui.sender_avatars);
+                            slint::Model::set_row_data(&*ui.messages, i, row);
+                        }
+                    }
+                }
+                return;
+            }
             if let Some(uuid) = t.key.strip_prefix(avatar::MSG_PREFIX) {
                 let Some(img) = img else { return };
                 ui.sender_avatars.insert(uuid.to_string(), img.clone());
@@ -1546,7 +1581,13 @@ fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Co
             time: "오후 3:12".into(),
             outgoing,
             show_sender: !outgoing && i % 4 == 1,
-            status: if outgoing { ["✓", "✓✓", "읽음 2"][(i as usize / 3) % 3].into() } else { String::new() },
+            status: if outgoing { ["✓", "✓✓", "✓✓"][(i as usize / 3) % 3].into() } else { String::new() },
+            readers: if outgoing && (i as usize / 3) % 3 == 2 {
+                let all = [("demo-a", "이서연"), ("demo-b", "김민준"), ("demo-c", "박지훈"), ("demo-d", "최승민"), ("demo-e", "권준영")];
+                all.iter().take(if i % 2 == 0 { 2 } else { 5 }).map(|(u, n)| (u.to_string(), n.to_string())).collect()
+            } else {
+                Vec::new()
+            },
             receipt_info: if outgoing { "읽음 (2)
 김민준, 이서연
 
@@ -1675,6 +1716,7 @@ fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Co
     }
     // one sender with a photo, the other falls back to the initial
     photo(format!("{}demo-a", avatar::MSG_PREFIX), 1, avatar::MSG_SIZE);
+    photo(format!("{}demo-a", avatar::READ_PREFIX), 1, avatar::READ_SIZE);
     emit(Event::Status("데모 모드".into()));
     emit(Event::Account {
         name: "홍길동".into(),

@@ -39,6 +39,9 @@ pub struct ThreadDto {
     pub is_group: bool,
 }
 
+/// reader photos drawn next to a message; the rest is a "+N"
+pub const MAX_READER_PHOTOS: usize = 3;
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MsgDto {
     pub id: String,
@@ -80,6 +83,10 @@ pub struct MsgDto {
     pub mentions: Vec<(usize, usize, String)>,
     /// pinned in this thread (a pin marker next to the time)
     pub pinned: bool,
+    /// same sender, minute and status as the next row: the footer's time / status is redundant
+    pub hide_time: bool,
+    /// who has read it (outgoing only): (uuid, name), by name
+    pub readers: Vec<(String, String)>,
 }
 
 /// A pinned message of the open thread, for the bar above the message list.

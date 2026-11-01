@@ -396,7 +396,14 @@ pub struct Built {
 
 /// `window` must be sorted by timestamp ascending.
 /// Group rows from others get a photo column; the photo sits on the last row of each sender's run.
+/// Rows followed by one of the same run and minute drop their time / status (`hide_time`).
 pub fn mark_avatar_runs(items: &mut [MsgDto]) {
+    // Whoever read a message has read everything before it: a reader's photo stays on the newest
+    // message they read only.
+    let mut seen = std::collections::HashSet::new();
+    for m in items.iter_mut().rev().filter(|m| m.outgoing && !m.readers.is_empty()) {
+        m.readers.retain(|(u, _)| seen.insert(u.clone()));
+    }
     for i in 0..items.len() {
         let m = &items[i];
         let col = !m.outgoing && !m.system;
@@ -405,8 +412,19 @@ pub fn mark_avatar_runs(items: &mut [MsgDto]) {
             && items.get(i + 1).is_none_or(|n| {
                 n.outgoing || n.system || n.sender_key != m.sender_key || !n.day_sep.is_empty()
             });
+        let hide_time = !m.pinned
+            && !m.system
+            && items.get(i + 1).is_some_and(|n| {
+                !n.system
+                    && n.outgoing == m.outgoing
+                    && n.sender_key == m.sender_key
+                    && n.day_sep.is_empty()
+                    && n.time == m.time
+                    && n.status == m.status
+            });
         items[i].avatar_col = col;
         items[i].show_avatar = last;
+        items[i].hide_time = hide_time;
     }
 }
 
@@ -543,8 +561,9 @@ pub fn build(
                     m.big_emoji = crate::emoji::only_emoji(&m.text, 5).is_some();
                 }
                 if outgoing {
-                    let (status, info) = receipt_status(status.get(&c.timestamp()).or_else(|| status.get(ts)), is_group, members, me, name_of);
+                    let (status, info, readers) = receipt_status(status.get(&c.timestamp()).or_else(|| status.get(ts)), members, me, name_of);
                     m.status = status;
+                    m.readers = readers;
                     m.receipt_info = info;
                 }
                 if edited {
@@ -643,14 +662,16 @@ pub fn outgoing_stub(ts: u64, prev_ts: Option<u64>) -> MsgDto {
 /// Status label for an outgoing message, plus a "who has it" breakdown.
 fn receipt_status(
     recv: Option<&HashMap<Uuid, u8>>,
-    is_group: bool,
     members: &[Uuid],
     me: Uuid,
     name_of: &dyn Fn(&Uuid) -> String,
-) -> (String, String) {
+) -> (String, String, Vec<(String, String)>) {
     let empty = HashMap::new();
     let recv = recv.unwrap_or(&empty);
-    let mut read: Vec<String> = recv.iter().filter(|(_, s)| **s >= 2).map(|(u, _)| name_of(u)).collect();
+    let mut readers: Vec<(String, String)> =
+        recv.iter().filter(|(_, s)| **s >= 2).map(|(u, _)| (name_of(u), u.to_string())).collect();
+    readers.sort();
+    let mut read: Vec<String> = readers.iter().map(|(n, _)| n.clone()).collect();
     let mut delivered: Vec<String> = recv.iter().filter(|(_, s)| **s == 1).map(|(u, _)| name_of(u)).collect();
     let mut pending: Vec<String> =
         members.iter().filter(|u| **u != me && !recv.contains_key(u)).map(|u| name_of(u)).collect();
@@ -658,15 +679,8 @@ fn receipt_status(
     delivered.sort();
     pending.sort();
 
-    let status = if !is_group {
-        if !read.is_empty() { "읽음".into() } else if !delivered.is_empty() { "✓✓".into() } else { "✓".into() }
-    } else if !read.is_empty() {
-        format!("읽음 {}", read.len())
-    } else if !delivered.is_empty() {
-        "✓✓".into()
-    } else {
-        "✓".into()
-    };
+    // read shows as ✓✓ too: the readers' photos under the bubble tell them apart
+    let status = if !read.is_empty() || !delivered.is_empty() { "✓✓" } else { "✓" }.to_string();
 
     let mut info = Vec::new();
     if !read.is_empty() {
@@ -682,7 +696,7 @@ fn receipt_status(
         info.push("서버로 전송됨. 아직 상대 기기에 전달되지 않았습니다.".into());
     }
     info.push("※ 읽음 확인을 끈 사람은 '읽음'으로 표시되지 않습니다.".into());
-    (status, info.join("\n\n"))
+    (status, info.join("\n\n"), readers.into_iter().map(|(n, u)| (u, n)).collect())
 }
 
 

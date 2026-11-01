@@ -1010,6 +1010,15 @@ impl App {
                 self.avatar_queue.push_front(crate::avatar::Want { key, thread, size: crate::avatar::MSG_SIZE });
             }
         }
+        // readers' photos (the first MAX_READER_PHOTOS of each message are drawn)
+        for (uuid, _) in items.iter().flat_map(|m| m.readers.iter().take(crate::types::MAX_READER_PHOTOS)) {
+            let Ok(u) = uuid.parse::<Uuid>() else { continue };
+            let key = format!("{}{u}", crate::avatar::READ_PREFIX);
+            if self.avatars_done.insert(key.clone()) {
+                let thread = Thread::Contact(ServiceId::Aci(u.into()));
+                self.avatar_queue.push_front(crate::avatar::Want { key, thread, size: crate::avatar::READ_SIZE });
+            }
+        }
         self.run_avatars();
     }
 
@@ -1168,8 +1177,9 @@ impl App {
         let members = self.emit_header(&thread).await;
         self.thumbs_requested.clear();
         // the UI drops message-list avatars on thread switch
-        self.avatars_done.retain(|k| !k.starts_with(crate::avatar::MSG_PREFIX));
-        self.avatar_queue.retain(|w| !w.key.starts_with(crate::avatar::MSG_PREFIX));
+        let in_list = |k: &str| k.starts_with(crate::avatar::MSG_PREFIX) || k.starts_with(crate::avatar::READ_PREFIX);
+        self.avatars_done.retain(|k| !in_list(k));
+        self.avatar_queue.retain(|w| !in_list(&w.key));
         // leaving a thread we were typing in
         if let Some(c) = self.composing.take() {
             self.send_typing(c.thread, false);

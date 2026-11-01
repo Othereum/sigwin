@@ -19,6 +19,13 @@ export struct ReactionItem {
 
 }
 
+export struct ReaderItem {
+    photo: image,
+    has-photo: bool,
+    initial: string,
+    tint: color,
+}
+
 export struct MsgItem {
     id: string,
     sender: string,
@@ -37,6 +44,9 @@ export struct MsgItem {
     has-avatar: bool,
     initial: string,
     status: string,
+    // photos of those who read it (outgoing; replaces the status text) and how many more there are
+    readers: [ReaderItem],
+    readers-more: int,
     quote: string,
     reactions: [ReactionItem],
     big-emoji: bool,
@@ -51,6 +61,8 @@ export struct MsgItem {
     sticker: bool,
     receipt-info: string,
     pending: bool,
+    // same run and minute as the next row: no time / status footer
+    hide-time: bool,
     // the "someone is typing" bubble at the end of the list
     typing: bool,
 }
@@ -227,6 +239,36 @@ component ThreadRow inherits Rectangle {
     }
 }
 
+// time + delivery status of a message; clicking either shows who has it
+component MsgMeta inherits HorizontalLayout {
+    in property <MsgItem> m;
+    callback info(string);
+    spacing: 4px;
+    Text {
+        text: m.time;
+        font-size: 10.5px;
+        vertical-alignment: bottom;
+        color: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? #ffffffb0 : Theme.subtle;
+        TouchArea {
+            enabled: m.outgoing;
+            mouse-cursor: m.outgoing ? pointer : default;
+            clicked => { root.info(m.receipt-info); }
+        }
+    }
+    if m.outgoing && m.status != "": Text {
+        text: m.status;
+        // ✓ is missing from the UI font; Hangul ("읽음") is missing from the symbol font
+        font-family: m.status == "✓" || m.status == "✓✓" ? "Segoe UI Symbol" : "Malgun Gothic";
+        font-size: 12px;
+        vertical-alignment: bottom;
+        color: m.sticker || m.big-emoji ? Theme.subtle : #ffffffd0;
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.info(m.receipt-info); }
+        }
+    }
+}
+
 component Bubble inherits VerticalLayout {
     in property <MsgItem> m;
     in property <length> max-w;
@@ -243,6 +285,8 @@ component Bubble inherits VerticalLayout {
     padding-bottom: m.typing ? 8px : 2px;
     spacing: 4px;
     opacity: m.pending ? 0.6 : 1.0;
+    // plain text: the time sits at the right of the last line instead of below
+    property <bool> inline-time: m.text != "" && !m.big-emoji && !m.sticker;
     // height of the day separator above the message itself (centering a jump on the bubble)
     out property <length> lead: m.day-sep != "" ? root.padding-top + 36px + root.spacing : 0px;
 
@@ -418,32 +462,39 @@ component Bubble inherits VerticalLayout {
                 // the TextInput under it is transparent, keeping selection. The StyledText takes only
                 // events over a link (patched i-slint-core); the rest falls through to the TextInput,
                 // and right clicks, which a read-only TextInput ignores, on to the bubble's TouchArea.
-                if m.text != "": Rectangle {
-                    VerticalLayout {
-                        TextInput {
-                            text: m.text;
-                            read-only: true;
-                            single-line: false;
-                            wrap: word-wrap;
-                            color: m.has-rich ? transparent : m.deleted ? Theme.subtle : (m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? white : Theme.text);
-                            font-italic: m.deleted;
-                            // emoji-only messages are shown large (color comes from the patched renderer)
-                            font-size: m.big-emoji ? 40px : 14px;
-                            selection-background-color: m.outgoing ? #ffffff60 : #2c6bed60;
-                            selection-foreground-color: m.has-rich ? transparent : m.outgoing ? white : Theme.text;
+                if m.text != "": HorizontalLayout {
+                    spacing: 8px;
+                    if m.text != "": Rectangle {
+                        VerticalLayout {
+                            TextInput {
+                                text: m.text;
+                                read-only: true;
+                                single-line: false;
+                                wrap: word-wrap;
+                                color: m.has-rich ? transparent : m.deleted ? Theme.subtle : (m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? white : Theme.text);
+                                font-italic: m.deleted;
+                                // emoji-only messages are shown large (color comes from the patched renderer)
+                                font-size: m.big-emoji ? 40px : 14px;
+                                selection-background-color: m.outgoing ? #ffffff60 : #2c6bed60;
+                                selection-foreground-color: m.has-rich ? transparent : m.outgoing ? white : Theme.text;
+                            }
+                        }
+                        if m.has-rich: StyledText {
+                            width: parent.width;
+                            height: parent.height;
+                            text: m.rich;
+                            default-color: m.outgoing && !m.sticker ? white : Theme.text;
+                            default-font-size: 14px;
+                            link-color: m.outgoing ? white : Theme.dark ? #7aa7ff : #1f5fd6;
+                            link-clicked(url) => { Links.open(url); }
                         }
                     }
-                    if m.has-rich: StyledText {
-                        width: parent.width;
-                        height: parent.height;
-                        text: m.rich;
-                        default-color: m.outgoing && !m.sticker ? white : Theme.text;
-                        default-font-size: 14px;
-                        link-color: m.outgoing ? white : Theme.dark ? #7aa7ff : #1f5fd6;
-                        link-clicked(url) => { Links.open(url); }
+                    if root.inline-time && !m.hide-time: MsgMeta {
+                        m: m;
+                        info(t) => { root.show-info(t); }
                     }
                 }
-                HorizontalLayout {
+                if (!m.hide-time && !root.inline-time) || m.reactions.length > 0: HorizontalLayout {
                     alignment: end;
                     spacing: 4px;
                     if m.reactions.length > 0: HorizontalLayout {
@@ -464,29 +515,48 @@ component Bubble inherits VerticalLayout {
                             }
                         }
                     }
-                    Text {
-                        text: m.time;
-                        font-size: 10.5px;
-                        color: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? #ffffffb0 : Theme.subtle;
-                        TouchArea {
-                            enabled: m.outgoing;
-                            mouse-cursor: m.outgoing ? pointer : default;
-                            clicked => { root.show-info(m.receipt-info); }
-                        }
-                    }
-                    if m.outgoing && m.status != "": Text {
-                        text: m.status;
-                        // ✓ is missing from the UI font; Hangul ("읽음") is missing from the symbol font
-                        font-family: m.status == "✓" || m.status == "✓✓" ? "Segoe UI Symbol" : "Malgun Gothic";
-                        font-size: 12px;
-                        color: m.sticker || m.big-emoji ? Theme.subtle : #ffffffd0;
-                        TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.show-info(m.receipt-info); }
-                        }
+                    if !m.hide-time && !root.inline-time: MsgMeta {
+                        m: m;
+                        info(t) => { root.show-info(t); }
                     }
                 }
             }
+        }
+    }
+    // who read it: overlapping round photos under the bubble (ringed in the pane color), "+N" for the rest
+    if m.outgoing && m.readers.length > 0: HorizontalLayout {
+        alignment: end;
+        padding-right: 4px;
+        spacing: 4px;
+        Rectangle {
+            width: 18px + (m.readers.length - 1) * 11px;
+            height: 18px;
+            for r[i] in m.readers: Rectangle {
+                x: i * 11px;
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                background: Theme.pane;
+                Avatar {
+                    x: 1px;
+                    y: 1px;
+                    size: 16px;
+                    initial: r.initial;
+                    tint: r.tint;
+                    photo: r.photo;
+                    has-photo: r.has-photo;
+                }
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.show-info(m.receipt-info); }
+            }
+        }
+        if m.readers-more > 0: Text {
+            text: "+" + m.readers-more;
+            font-size: 11px;
+            vertical-alignment: center;
+            color: Theme.subtle;
         }
     }
 }
