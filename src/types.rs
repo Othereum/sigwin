@@ -153,6 +153,10 @@ pub enum Event {
     /// who is typing in the open thread as (uuid, name), sorted; empty when nobody.
     /// Shown as a "…" bubble at the end of the message list.
     Typing { group: bool, who: Vec<(String, String)> },
+    /// for the settings page; `receipts` / `typing` are the phone's settings (None = not synced yet)
+    Account { name: String, number: String, device: String, receipts: Option<bool>, typing: Option<bool> },
+    /// bytes on disk
+    Storage { db: u64, attachments: u64, thumbs: u64 },
 }
 
 pub enum Command {
@@ -185,4 +189,8 @@ pub enum Command {
     Delete(String),
     /// the composer was edited; false when it became empty
     Composing(bool),
+    /// the settings page opened: send Account and Storage
+    SettingsOpened,
+    /// empty the thumbnail cache (rebuilt from attachments and stored photos on demand)
+    ClearThumbs,
 }

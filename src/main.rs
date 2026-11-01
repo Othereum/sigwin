@@ -12,6 +12,7 @@ mod headless;
 mod link;
 mod mention;
 mod secret;
+mod settings;
 mod toast;
 mod types;
 mod view;
@@ -87,6 +88,8 @@ struct Ui {
     typing_group: bool,
     /// the last row of `messages` is the typing bubble (not in `last`)
     typing_row: bool,
+    settings: settings::Settings,
+    settings_path: PathBuf,
 }
 
 /// Put the typing bubble at the end of the message list, or take it away.
@@ -533,6 +536,20 @@ fn apply(app: &AppWindow, ev: Event) {
                 send_cmd(Command::InstallPackFromMessage(msg_id));
             }
         }
+        Event::Account { name, number, device, receipts, typing } => {
+            let state = |v: Option<bool>| if v == Some(false) { "꺼짐" } else { "켜짐" };
+            let pending = if receipts.is_none() || typing.is_none() { " (아직 받지 못함)" } else { "" };
+            let phone = format!("{} · {} — 휴대폰 Signal 앱의 설정을 따릅니다{pending}", state(receipts), state(typing));
+            app.set_account_name(name.into());
+            app.set_account_number(number.into());
+            app.set_account_device(device.into());
+            app.set_account_phone(phone.into());
+        }
+        Event::Storage { db, attachments, thumbs } => {
+            app.set_storage_text(
+                format!("메시지 DB {}  ·  첨부파일 {}  ·  썸네일 캐시 {}", size_text(db), size_text(attachments), size_text(thumbs)).into(),
+            );
+        }
         Event::StickerGrid { pack, items } => {
             if !app.get_sticker_open() {
                 return;
@@ -552,6 +569,87 @@ fn apply(app: &AppWindow, ev: Event) {
             });
         }
     }
+}
+
+fn size_text(b: u64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    match b as f64 {
+        x if x >= 1024.0 * MB => format!("{:.1}GB", x / 1024.0 / MB),
+        x if x >= 10.0 * MB => format!("{:.0}MB", x / MB),
+        x if x >= 0.1 * MB => format!("{:.1}MB", x / MB),
+        x => format!("{:.0}KB", (x / 1024.0).ceil()),
+    }
+}
+
+/// Light / dark per the setting. "System" is Slint's default binding at startup; switching
+/// back to it at runtime reads the current Windows setting (the binding can't be restored).
+fn apply_theme(app: &AppWindow, startup: bool) {
+    if headless::active() {
+        return; // SIGWIN_HEADLESS_THEME decides
+    }
+    match UI.with_borrow(|ui| ui.settings.theme) {
+        1 => app.invoke_set_dark(false),
+        2 => app.invoke_set_dark(true),
+        _ if !startup => app.invoke_set_dark(settings::system_dark()),
+        _ => {}
+    }
+}
+
+/// Rebuild the message rows (their mention colors depend on the theme).
+fn refresh_rows(app: &AppWindow) {
+    let dark = app.global::<Theme>().get_dark();
+    UI.with_borrow_mut(|ui| {
+        let rows: Vec<MsgItem> = ui.last.iter().map(|m| to_item(m, &ui.thumbs, &ui.sender_avatars, dark)).collect();
+        ui.messages.set_vec(rows);
+        ui.typing_row = false;
+        sync_typing(ui);
+    });
+}
+
+/// Window scale = the monitor's DPI scale x the zoom setting. winit only knows the former and
+/// resets to it on DPI changes (`winhook` calls this again then).
+pub(crate) fn apply_zoom(app: &AppWindow) {
+    if headless::active() {
+        return;
+    }
+    let h = hwnd(app);
+    if h == 0 {
+        types::set_ui_scale(app.window().scale_factor());
+        return;
+    }
+    let zoom = UI.with_borrow(|ui| ui.settings.zoom) as f32 / 100.0;
+    let sf = monitor_scale(h) * zoom;
+    let w = app.window();
+    if (w.scale_factor() - sf).abs() > 0.001 {
+        let size = w.size();
+        w.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: sf });
+        w.dispatch_event(slint::platform::WindowEvent::Resized { size: size.to_logical(sf) });
+        winhook::repaint_all(app);
+    }
+    // thumbnails are pre-scaled to physical pixels: the renderer samples images nearest-neighbor
+    types::set_ui_scale(sf);
+}
+
+#[cfg(windows)]
+fn monitor_scale(hwnd: isize) -> f32 {
+    // SAFETY: plain query on our own window
+    let dpi = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForWindow(hwnd as _) };
+    if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
+}
+
+#[cfg(not(windows))]
+fn monitor_scale(_: isize) -> f32 {
+    1.0
+}
+
+/// Settings -> the page's controls.
+fn show_settings(app: &AppWindow, s: &settings::Settings) {
+    app.set_set_notify(s.notify);
+    app.set_set_preview(s.preview as i32);
+    app.set_set_badge(s.badge);
+    app.set_set_theme(s.theme as i32);
+    app.set_set_zoom(settings::ZOOMS.iter().position(|&z| z == s.zoom).unwrap_or(1) as i32);
+    app.set_enter_sends(s.enter_sends);
 }
 
 /// `SIGWIN_DATA`, else `%LOCALAPPDATA%\Sigwin\data`. The folder of the old name
@@ -667,6 +765,14 @@ fn main() -> anyhow::Result<()> {
                 }
             });
         }
+        if std::env::var_os("SIGWIN_DEMO_SETTINGS").is_some() {
+            let weak = app.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
+                if let Some(app) = weak.upgrade() {
+                    app.invoke_open_settings();
+                }
+            });
+        }
         if std::env::var_os("SIGWIN_DEMO_STICKERS").is_some() {
             let weak = app.as_weak();
             slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
@@ -684,10 +790,19 @@ fn main() -> anyhow::Result<()> {
 
     let paste_dir = data_dir().join("paste");
     clip::clean(&paste_dir);
+    let settings_path = settings::path(&data_dir());
+    let prefs = settings::Settings::load(&settings_path);
+    prefs.publish();
+    badge::set_enabled(prefs.badge);
+    show_settings(&app, &prefs);
+    app.set_version(format!("Sigwin {}", env!("CARGO_PKG_VERSION")).into());
     UI.with_borrow_mut(|ui| {
         ui.tx = Some(cmd_tx.clone());
         ui.paste_dir = paste_dir;
+        ui.settings = prefs;
+        ui.settings_path = settings_path;
     });
+    apply_theme(&app, true);
     wire(&app, cmd_tx);
     app.run()?;
     Ok(())
@@ -1039,6 +1154,48 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
         }
     });
 
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.on_open_settings(move || {
+        let Some(app) = weak.upgrade() else { return };
+        app.set_menu_id(SharedString::new());
+        app.set_mention_items(ModelRc::default());
+        // typing must not go to the composer hidden under the page
+        app.invoke_blur_composer();
+        app.set_settings_open(true);
+        s(Command::SettingsOpened);
+    });
+
+    let weak = app.as_weak();
+    app.on_settings_changed(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let new = settings::Settings {
+            notify: app.get_set_notify(),
+            preview: app.get_set_preview().clamp(0, 2) as u8,
+            badge: app.get_set_badge(),
+            theme: app.get_set_theme().clamp(0, 2) as u8,
+            zoom: settings::ZOOMS.get(app.get_set_zoom().max(0) as usize).copied().unwrap_or(100),
+            enter_sends: app.get_enter_sends(),
+        };
+        let (old, path) = UI.with_borrow_mut(|ui| (std::mem::replace(&mut ui.settings, new.clone()), ui.settings_path.clone()));
+        if old == new {
+            return;
+        }
+        new.publish();
+        badge::set_enabled(new.badge);
+        if old.theme != new.theme {
+            apply_theme(&app, false);
+            refresh_rows(&app);
+        }
+        if old.zoom != new.zoom {
+            apply_zoom(&app);
+        }
+        new.save(&path);
+    });
+
+    let s = send.clone();
+    app.on_clear_thumbs(move || s(Command::ClearThumbs));
+
     app.global::<Links>().on_open(|url| link::open(&url));
 
     if headless::active() {
@@ -1058,8 +1215,8 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
             return; // native window not created yet
         }
         this.stop();
-        // thumbnails are pre-scaled to physical pixels: the renderer samples images nearest-neighbor
-        types::set_ui_scale(app.window().scale_factor());
+        // the zoom setting on top of the monitor's scale; also tells the backend the scale
+        apply_zoom(&app);
         let last = std::rc::Rc::new(std::cell::Cell::new(true));
         let s2 = send.clone();
         let l2 = last.clone();
@@ -1233,6 +1390,14 @@ fn demo(emit: backend::Emit) {
     // one sender with a photo, the other falls back to the initial
     photo(format!("{}demo-a", avatar::MSG_PREFIX), 1, avatar::MSG_SIZE);
     emit(Event::Status("데모 모드".into()));
+    emit(Event::Account {
+        name: "홍길동".into(),
+        number: "+821012345678".into(),
+        device: "Sigwin".into(),
+        receipts: Some(true),
+        typing: None,
+    });
+    emit(Event::Storage { db: 23 * 1024 * 1024, attachments: 148 * 1024 * 1024, thumbs: 3_400_000 });
     if std::env::var_os("SIGWIN_DEMO_STICKERS").is_some() {
         demo_stickers(emit);
     }

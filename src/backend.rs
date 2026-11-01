@@ -466,7 +466,50 @@ impl App {
             Command::Edit { id, text, mentions } => self.edit(&id, text, &mentions).await,
             Command::Delete(id) => self.delete(&id).await,
             Command::Composing(active) => self.composing(active),
+            Command::SettingsOpened => {
+                self.emit_account().await;
+                self.emit_storage();
+            }
+            Command::ClearThumbs => {
+                let dir = self.paths.thumbs.clone();
+                let _ = tokio::task::spawn_blocking(move || clear_dir(&dir)).await;
+                self.thumbs_requested.clear();
+                self.emit_storage();
+            }
         }
+    }
+
+    async fn emit_account(&mut self) {
+        let Some(m) = self.manager.as_ref() else { return };
+        let reg = m.registration_data();
+        let number = reg.phone_number.to_string();
+        let device = reg.device_name().unwrap_or_default().to_string();
+        let mut name = self.name(self.me).await;
+        if name == number || name.starts_with("알 수 없음") {
+            name.clear();
+        }
+        (self.emit)(Event::Account {
+            name,
+            number,
+            device,
+            receipts: self.persist.read_receipts,
+            typing: self.persist.typing_indicators,
+        });
+    }
+
+    fn emit_storage(&self) {
+        let emit = self.emit.clone();
+        let db = self.paths.db.clone();
+        let (att, thumbs) = (self.paths.attachments.clone(), self.paths.thumbs.clone());
+        tokio::task::spawn_blocking(move || {
+            // the WAL and other sidecars belong to the DB too
+            let db_size = ["", "-wal", "-shm"]
+                .iter()
+                .filter_map(|s| std::fs::metadata(format!("{}{s}", db.display())).ok())
+                .map(|m| m.len())
+                .sum();
+            emit(Event::Storage { db: db_size, attachments: dir_size(&att), thumbs: dir_size(&thumbs) });
+        });
     }
 
     fn start_link(&mut self, name: String) {
@@ -690,7 +733,7 @@ impl App {
                     *self.persist.unread.entry(key.clone()).or_default() += 1;
                     self.persist_dirty = true;
                 }
-                if self.synced && !(is_open && self.focused) {
+                if self.synced && !(is_open && self.focused) && crate::settings::notify_enabled() {
                     let title = self.thread_name(&thread).await;
                     let body = self.snippet(&c).await.unwrap_or_default();
                     let title = match (&thread, &c.metadata.sender) {
@@ -2204,7 +2247,28 @@ fn open_with_default_app(path: &Path) {
     }
 }
 
+fn dir_size(dir: &Path) -> u64 {
+    let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
+    rd.flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => dir_size(&e.path()),
+            Ok(_) => e.metadata().map(|m| m.len()).unwrap_or(0),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+/// Removes the folder's contents, keeping the folder.
+fn clear_dir(dir: &Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        let _ = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
+    }
+}
+
 fn notify(title: String, body: String) {
+    let Some((title, body)) = crate::settings::toast_text(title, body) else { return };
     tokio::task::spawn_blocking(move || {
         if let Err(e) = crate::toast::notification().summary(&title).body(&body).show() {
             debug!("notification: {e}");

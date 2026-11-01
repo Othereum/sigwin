@@ -10,6 +10,14 @@ use std::cell::Cell;
 thread_local! {
     static HWND: Cell<isize> = const { Cell::new(0) };
     static COUNT: Cell<u32> = const { Cell::new(0) };
+    static ENABLED: Cell<bool> = const { Cell::new(true) };
+}
+
+/// The user's setting: off clears the overlay.
+pub fn set_enabled(on: bool) {
+    if ENABLED.replace(on) != on {
+        refresh();
+    }
 }
 
 /// The native window exists: remember it and show the current count.
@@ -31,7 +39,7 @@ pub fn refresh() {
         return;
     }
     #[cfg(windows)]
-    if let Err(e) = win::apply(hwnd, COUNT.get()) {
+    if let Err(e) = win::apply(hwnd, if ENABLED.get() { COUNT.get() } else { 0 }) {
         tracing::debug!("taskbar badge: {e:#}");
     }
 }

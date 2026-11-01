@@ -31,7 +31,7 @@ cargo test
 - presage and presage-store-sqlite are git deps pinned to one `rev`. Bump both together, and keep the `[patch.crates-io] libsqlite3-sys` entry in sync with presage's workspace.
 
 ## Verifying UI without an account
-Use the demo modes (synthetic data, no backend): `SIGWIN_DEMO=1`, plus `SIGWIN_DEMO_STICKERS=1|add`, `SIGWIN_DEMO_INFO=1` or `SIGWIN_DEMO_MENU=1|edit`. Layout and glyph bugs only show up visually; a successful compile proves nothing about them.
+Use the demo modes (synthetic data, no backend): `SIGWIN_DEMO=1`, plus `SIGWIN_DEMO_STICKERS=1|add`, `SIGWIN_DEMO_INFO=1`, `SIGWIN_DEMO_MENU=1|edit` or `SIGWIN_DEMO_SETTINGS=1`. Layout and glyph bugs only show up visually; a successful compile proves nothing about them.
 
 **Run them headless** (`src/headless.rs`): the user works on this PC, so never pop up a window, take focus or move the real mouse. `SIGWIN_HEADLESS="<steps>"` (or `@file`) renders offscreen with the same software renderer and fonts, feeds scripted input, and exits after the last step:
 ```
@@ -64,6 +64,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/link.rs` | URL detection in message text, opening links (clicks come from StyledText `link-clicked`) |
 | `src/avatar.rs` | profile/group photos (thread list + header 40px, next to group messages 28px as `m:<uuid>`): fetch (presage caches them forever, so profiles are refetched every 3 days and group photos when the path changes), crop round, cache `thumbs/av-*` |
 | `src/emoji.rs` | emoji-only message detection (grapheme clusters) |
+| `src/settings.rs` | user settings (`settings.json`, UI thread); notification mode for the backend via an atomic. Zoom = monitor DPI scale x setting, applied by dispatching `ScaleFactorChanged` (`main::apply_zoom`, re-applied by `winhook` on `WM_DPICHANGED`). Headless ignores theme and zoom |
 | `src/toast.rs` | notifications: own AppUserModelID `Sigwin` registered under HKCU (name + icon), otherwise toasts show as "Windows PowerShell" |
 | `ui/app.slint` | the whole UI |
 

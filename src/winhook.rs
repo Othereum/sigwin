@@ -5,6 +5,7 @@
 //!   only the last-changed bits over a transparent background. We force a full repaint.
 //! - Activation changes: tell the backend whether the window is in the foreground
 //!   (replaces polling).
+//! - DPI change: winit resets the scale factor to the monitor's; re-apply the zoom setting.
 
 use std::cell::{Cell, RefCell};
 
@@ -89,7 +90,17 @@ unsafe extern "system" fn subclass_proc(
                 schedule_repaint();
             }
         }
-        WM_DPICHANGED => crate::badge::refresh(),
+        WM_DPICHANGED => {
+            crate::badge::refresh();
+            // winit is about to apply the monitor's scale: put the user's zoom back on top after it
+            let _ = slint::invoke_from_event_loop(|| {
+                APP.with_borrow(|a| {
+                    if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
+                        crate::apply_zoom(&app);
+                    }
+                });
+            });
+        }
         m if m == taskbar_created() => crate::badge::refresh(),
         _ => {}
     }
