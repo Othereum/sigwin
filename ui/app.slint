@@ -66,7 +66,7 @@ export struct StickerItem {
 
 // clickable links in message text (see src/link.rs)
 export global Links {
-    callback cursor-moved(string, int, int);
+    callback open(string);
 }
 
 export global Theme {
@@ -330,26 +330,12 @@ component Bubble inherits VerticalLayout {
                         }
                     }
                 }
-                // With @mentions or links the visible glyphs come from a StyledText underneath (same font and
-                // size, only colors differ, so it lays out like the TextInput) and the TextInput on
-                // top is transparent, keeping selection. StyledText swallows every mouse event, so a
-                // TouchArea between them takes the right clicks the read-only TextInput ignores.
+                // With @mentions or links the visible glyphs come from a StyledText on top (same font
+                // and size, only colors and underlines differ, so it lays out like the TextInput) and
+                // the TextInput under it is transparent, keeping selection. The StyledText takes only
+                // events over a link (patched i-slint-core); the rest falls through to the TextInput,
+                // and right clicks, which a read-only TextInput ignores, on to the bubble's TouchArea.
                 if m.text != "": Rectangle {
-                    if m.has-rich: StyledText {
-                        width: parent.width;
-                        height: parent.height;
-                        text: m.rich;
-                        default-color: m.outgoing && !m.sticker ? white : Theme.text;
-                        default-font-size: 14px;
-                    }
-                    if m.has-rich: TouchArea {
-                        double-clicked => { root.reply(m.id); }
-                        pointer-event(e) => {
-                            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
-                                root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
-                            }
-                        }
-                    }
                     VerticalLayout {
                         TextInput {
                             text: m.text;
@@ -361,13 +347,17 @@ component Bubble inherits VerticalLayout {
                             // emoji-only messages are shown large (color comes from the patched renderer)
                             font-size: m.big-emoji ? 40px : 14px;
                             selection-background-color: m.outgoing ? #ffffff60 : #2c6bed60;
-                            selection-foreground-color: m.outgoing ? white : Theme.text;
-                            cursor-position-changed => {
-                                if (m.has-rich) {
-                                    Links.cursor-moved(m.text, self.cursor-position-byte-offset, self.anchor-position-byte-offset);
-                                }
-                            }
+                            selection-foreground-color: m.has-rich ? transparent : m.outgoing ? white : Theme.text;
                         }
+                    }
+                    if m.has-rich: StyledText {
+                        width: parent.width;
+                        height: parent.height;
+                        text: m.rich;
+                        default-color: m.outgoing && !m.sticker ? white : Theme.text;
+                        default-font-size: 14px;
+                        link-color: m.outgoing ? white : Theme.dark ? #7aa7ff : #1f5fd6;
+                        link-clicked(url) => { Links.open(url); }
                     }
                 }
                 HorizontalLayout {

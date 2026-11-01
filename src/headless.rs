@@ -315,9 +315,6 @@ impl State {
                 for _ in 0..n {
                     self.send(WindowEvent::PointerPressed { position: pos(x, y), button }, pump);
                     self.send(WindowEvent::PointerReleased { position: pos(x, y), button }, pump);
-                    if let Some(url) = crate::link::released() {
-                        crate::link::open(&url);
-                    }
                 }
                 self.idle(Duration::from_millis(30), pump);
             }
@@ -332,9 +329,6 @@ impl State {
                     self.idle(Duration::from_millis(16), pump);
                 }
                 self.send(WindowEvent::PointerReleased { position: pos(x2, y2), button: b }, pump);
-                if let Some(url) = crate::link::released() {
-                    crate::link::open(&url);
-                }
             }
             Step::Wheel(x, y, n) => {
                 self.send(WindowEvent::PointerMoved { position: pos(x, y) }, pump);

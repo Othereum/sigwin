@@ -5,7 +5,6 @@
 //!   only the last-changed bits over a transparent background. We force a full repaint.
 //! - Activation changes: tell the backend whether the window is in the foreground
 //!   (replaces polling).
-//! - Left button release: completes a click on a link in message text (`link.rs`).
 
 use std::cell::{Cell, RefCell};
 
@@ -66,17 +65,8 @@ unsafe extern "system" fn subclass_proc(
 ) -> windows_sys::Win32::Foundation::LRESULT {
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, WA_INACTIVE, WM_ACTIVATE, WM_LBUTTONUP, WM_SIZE,
+        SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, WA_INACTIVE, WM_ACTIVATE, WM_SIZE,
     };
-    if msg == WM_LBUTTONUP {
-        // let Slint see the release first, then open a link if it was a click on one
-        // SAFETY: forwarding to the next handler in the subclass chain
-        let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
-        if let Some(url) = crate::link::released() {
-            crate::link::open(&url);
-        }
-        return r;
-    }
     match msg {
         WM_SIZE => match wparam as u32 {
             SIZE_MINIMIZED => MINIMIZED.set(true),

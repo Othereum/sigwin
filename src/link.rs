@@ -1,16 +1,9 @@
 //! Clickable links in message text.
 //!
-//! The visible text is a read-only TextInput (so selection works), which grabs every left
-//! press and has no click callback. A click is detected from its side effects instead: the
-//! press moves the cursor (`cursor-position-changed`) with anchor == cursor, a drag moves it
-//! again with anchor != cursor, and the release comes from the window proc (`winhook.rs`)
-//! or the headless driver. Press inside a link + release without a drag = open the link.
-
-use std::cell::RefCell;
-
-thread_local! {
-    static ARMED: RefCell<Option<String>> = const { RefCell::new(None) };
-}
+//! `find` locates URLs; `main::rich_text` turns them into markdown links in the StyledText
+//! drawn over the message's TextInput. The vendored i-slint-core patch makes that StyledText
+//! take only the mouse events over a link (pointer cursor, `link-clicked`), so selection in
+//! the TextInput underneath keeps working everywhere else.
 
 /// Byte ranges of the URLs in `text` (http(s)://… and www.…).
 pub fn find(text: &str) -> Vec<(usize, usize)> {
@@ -65,20 +58,6 @@ pub fn target(url: &str) -> String {
     if url.to_ascii_lowercase().starts_with("www.") { format!("https://{url}") } else { url.to_string() }
 }
 
-/// The TextInput's cursor moved (press or drag).
-pub fn cursor_moved(text: &str, cursor: usize, anchor: usize) {
-    let hit = (cursor == anchor)
-        .then(|| find(text).into_iter().find(|&(s, e)| s <= cursor && cursor < e))
-        .flatten()
-        .map(|(s, e)| target(&text[s..e]));
-    ARMED.with_borrow_mut(|a| *a = hit);
-}
-
-/// Left button released: the link to open, if the press was a click on one.
-pub fn released() -> Option<String> {
-    ARMED.with_borrow_mut(Option::take)
-}
-
 pub fn open(url: &str) {
     // only web links ever reach here (see `find`); never pass anything else to the shell
     if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -95,7 +74,7 @@ pub fn open(url: &str) {
         use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
         let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
         let (verb, file) = (wide("open"), wide(url));
-        // off the UI thread: called from the window proc, and the shell may take a while
+        // off the UI thread: the shell may take a while
         std::thread::spawn(move || {
             // SAFETY: valid NUL-terminated UTF-16 strings that outlive the call
             unsafe {
@@ -128,20 +107,5 @@ mod tests {
         assert!(urls("https:// nothing, www. and awww.x").is_empty());
         assert!(urls("plain text 한글").is_empty());
         assert_eq!(urls("@이서연 넵 🙂 자료는 https://signal.org/ko/ 그리고 www.naver.com."), ["https://signal.org/ko/", "www.naver.com"]);
-    }
-
-    #[test]
-    fn click_vs_drag() {
-        let t = "go https://x.io now";
-        cursor_moved(t, 5, 5);
-        assert_eq!(released().as_deref(), Some("https://x.io"));
-        assert_eq!(released(), None);
-        cursor_moved(t, 5, 5);
-        cursor_moved(t, 8, 5); // dragged
-        assert_eq!(released(), None);
-        cursor_moved(t, 1, 1); // outside
-        assert_eq!(released(), None);
-        cursor_moved("www.a.kr", 0, 0);
-        assert_eq!(released().as_deref(), Some("https://www.a.kr"));
     }
 }

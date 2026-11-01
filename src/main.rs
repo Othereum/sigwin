@@ -136,14 +136,15 @@ thread_local! {
 }
 
 /// Message text with the @mentions colored and links underlined. The styled text is drawn
-/// under a TextInput whose own glyphs are transparent, so selection keeps working; only
+/// over a TextInput whose own glyphs are transparent, so selection keeps working; only
 /// colors and underlines change, never the font, so both lay out identically.
 fn rich_text(m: &MsgDto, links: &[(usize, usize)], dark: bool) -> slint::StyledText {
     use slint::private_unstable_api::re_exports::parse_markdown;
-    let (mention, link) = match (m.outgoing, dark) {
-        (true, _) => ("#ffe27a", "#ffffff"),
-        (false, true) => ("#7aa7ff", "#7aa7ff"),
-        (false, false) => ("#1f5fd6", "#1f5fd6"),
+    // link color comes from the StyledText's `link-color`
+    let mention = match (m.outgoing, dark) {
+        (true, _) => "#ffe27a",
+        (false, true) => "#7aa7ff",
+        (false, false) => "#1f5fd6",
     };
     let mut spans: Vec<(usize, usize, bool)> = m.mentions.iter().map(|&(s, e, _)| (s, e, false)).collect();
     spans.extend(links.iter().map(|&(s, e)| (s, e, true)));
@@ -158,7 +159,9 @@ fn rich_text(m: &MsgDto, links: &[(usize, usize)], dark: bool) -> slint::StyledT
         args.push(slint::StyledText::from_plain_text(before));
         args.push(slint::StyledText::from_plain_text(part));
         if is_link {
-            fmt.push_str(&format!("<u><font color=\"{link}\">{P}</font></u>{P}"));
+            // a markdown link: the StyledText underlines it and reports clicks with the URL
+            args.push(slint::StyledText::from_plain_text(&link::target(part)));
+            fmt.push_str(&format!("[{P}]({P}){P}"));
         } else {
             fmt.push_str(&format!("<font color=\"{mention}\">{P}</font>{P}"));
         }
@@ -880,9 +883,7 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
         }
     });
 
-    app.global::<Links>().on_cursor_moved(|text, cursor, anchor| {
-        link::cursor_moved(&text, cursor.max(0) as usize, anchor.max(0) as usize);
-    });
+    app.global::<Links>().on_open(|url| link::open(&url));
 
     if headless::active() {
         return; // no native window to hook
