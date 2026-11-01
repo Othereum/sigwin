@@ -2759,6 +2759,11 @@ fn is_cjk(s: &str) -> bool {
     })
 }
 
+/// Deletes the plain copies of opened attachments under the data folder `dir`.
+pub fn clear_open(dir: &Path) {
+    clear_dir(&Paths::new(dir).open);
+}
+
 /// Removes the folder's contents, keeping the folder.
 fn clear_dir(dir: &Path) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };

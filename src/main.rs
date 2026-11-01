@@ -1113,6 +1113,9 @@ fn main() -> anyhow::Result<()> {
     apply_theme(&app, true);
     wire(&app, cmd_tx);
     app.run()?;
+    // plain copies of opened attachments; the backend also empties this on start (crashes,
+    // files another app still held)
+    backend::clear_open(&data_dir());
     Ok(())
 }
 
