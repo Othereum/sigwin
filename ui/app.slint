@@ -1495,7 +1495,8 @@ export component AppWindow inherits Window {
                                         font-size: 14px;
                                         max-height: 140px;
                                     }
-                                    if root.draft == "": Text {
+                                    // hide as soon as IME composition starts (preedit isn't in text yet)
+                                    if root.draft == "" && composer.preedit-text == "": Text {
                                         x: 0;
                                         y: 0;
                                         text: root.edit-preview != "" ? "수정할 내용 입력 (Esc 취소)" : root.enter-sends ? "메시지 입력 (Enter 전송, Shift+Enter 줄바꿈)" : "메시지 입력 (Ctrl+Enter 전송)";
