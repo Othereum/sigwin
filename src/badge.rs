@@ -36,9 +36,9 @@ pub fn refresh() {
     }
 }
 
-/// Text shown in the badge: one or two characters fit the 16px circle.
+/// Text shown in the badge: up to two digits, then "99+".
 fn label(n: u32) -> String {
-    if n > 9 { "9+".into() } else { n.to_string() }
+    if n > 99 { "99+".into() } else { n.to_string() }
 }
 
 #[cfg(windows)]
@@ -174,18 +174,29 @@ mod win {
                 return out;
             }
             let old_bmp = SelectObject(dc, bmp);
-            let em = if text.chars().count() > 1 { 0.6 } else { 0.78 };
             let face: Vec<u16> = "Segoe UI".encode_utf16().chain(Some(0)).collect();
-            let font = CreateFontW(
-                -((s as f32 * em).round() as i32),
-                0, 0, 0, FW_BOLD as i32, 0, 0, 0,
-                DEFAULT_CHARSET as u32, OUT_TT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32,
-                ANTIALIASED_QUALITY as u32, 0, face.as_ptr(),
-            );
-            let old_font = SelectObject(dc, font);
+            let t: Vec<u16> = text.encode_utf16().collect();
+            // largest font (up to 78% of the icon) whose text fits the circle's width
+            let max_w = (s as f32 * 0.76).round() as i32;
+            let mut h = (s as f32 * 0.78).round() as i32;
+            let (font, old_font) = loop {
+                let font = CreateFontW(
+                    -h, 0, 0, 0, FW_BOLD as i32, 0, 0, 0,
+                    DEFAULT_CHARSET as u32, OUT_TT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32,
+                    ANTIALIASED_QUALITY as u32, 0, face.as_ptr(),
+                );
+                let old = SelectObject(dc, font);
+                let mut ext = windows_sys::Win32::Foundation::SIZE { cx: 0, cy: 0 };
+                GetTextExtentPoint32W(dc, t.as_ptr(), t.len() as i32, &mut ext);
+                if ext.cx <= max_w || h <= 6 {
+                    break (font, old);
+                }
+                SelectObject(dc, old);
+                DeleteObject(font);
+                h -= 1;
+            };
             SetTextColor(dc, 0x00ff_ffff);
             SetBkMode(dc, TRANSPARENT as i32);
-            let t: Vec<u16> = text.encode_utf16().collect();
             let mut rc = RECT { left: 0, top: 0, right: s, bottom: s };
             DrawTextW(dc, t.as_ptr(), t.len() as i32, &mut rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
             GdiFlush();
@@ -266,7 +277,7 @@ mod tests {
     #[test]
     fn renders() {
         for size in [16usize, 20, 24, 32] {
-            for n in [1u32, 7, 23] {
+            for n in [1u32, 7, 23, 88, 150] {
                 let px = super::render(&super::label(n), size);
                 assert_eq!(px.len(), size * size * 4);
                 // the text left white pixels inside the circle
