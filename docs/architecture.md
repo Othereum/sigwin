@@ -25,4 +25,5 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/emoji.rs` | emoji-only message detection (grapheme clusters) |
 | `src/settings.rs` | user settings (`settings.json`, UI thread); notification mode for the backend via an atomic. Zoom = monitor DPI scale x setting, applied by dispatching `ScaleFactorChanged` (`main::apply_zoom`, re-applied by `winhook` on `WM_DPICHANGED`). Headless ignores theme and zoom |
 | `src/toast.rs` | notifications: own AppUserModelID `Sigwin` registered under HKCU (name + icon), otherwise toasts show as "Windows PowerShell" |
+| `crates/thumb` | decode / resample (`downscale`, `square`). Own crate because the `fast` profile builds `sigwin` at opt-level 0 and generic pixel code compiles in the calling crate: a 200-sticker pack resampled in 7.4s there, 0.34s here. Picker thumbs are also cached at their final size (`thumbs/sp_*-<px>px.png`) |
 | `ui/app.slint` | the whole UI |

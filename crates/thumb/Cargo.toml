@@ -1,0 +1,9 @@
+[package]
+name = "sigwin-thumb"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Pixel work for sigwin (decode, resample), kept out of the main crate so it is optimized in every profile"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }

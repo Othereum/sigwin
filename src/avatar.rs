@@ -20,7 +20,7 @@ use presage_store_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::backend::{downscale, Emit, Mgr};
+use crate::backend::{Emit, Mgr};
 use crate::db::Index;
 use crate::types::{Event, Thumb};
 
@@ -194,8 +194,7 @@ fn cached(dir: &Path, owner: &str, key: &str, bytes: &[u8], px: u32) -> Option<T
     let prefix = format!("av-{:016x}-{px}-", hash(owner));
     let name = format!("{prefix}{:016x}.png", hash(bytes));
     let path = dir.join(&name);
-    if let Ok(img) = image::open(&path) {
-        let rgba = img.to_rgba8();
+    if let Ok(rgba) = sigwin_thumb::open_rgba(&path) {
         return Some(Thumb { key: key.into(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() });
     }
     let rgba = match round(bytes, px) {
@@ -222,16 +221,9 @@ fn cached(dir: &Path, owner: &str, key: &str, bytes: &[u8], px: u32) -> Option<T
 
 /// Center-crops to a square, resamples to `px` and cuts an antialiased circle.
 pub fn round(bytes: &[u8], px: u32) -> anyhow::Result<image::RgbaImage> {
-    let img = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.decode()?;
-    let (w, h) = (img.width(), img.height());
-    anyhow::ensure!(w > 0 && h > 0, "empty image");
-    let s = w.min(h);
-    let square = img.crop_imm((w - s) / 2, (h - s) / 2, s, s).to_rgba8();
-    let mut out = downscale(square, px);
-    if out.width() != px {
-        // smaller than the target: upscale smoothly instead of letting the renderer pixelate it
-        out = image::imageops::resize(&out, px, px, image::imageops::FilterType::CatmullRom);
-    }
+    let img = sigwin_thumb::decode(bytes)?;
+    anyhow::ensure!(img.width() > 0 && img.height() > 0, "empty image");
+    let mut out = sigwin_thumb::square(&img, px);
     mask_circle(&mut out);
     Ok(out)
 }

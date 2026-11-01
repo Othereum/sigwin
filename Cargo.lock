@@ -6348,6 +6348,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sigwin-thumb",
  "slint",
  "slint-build",
  "sqlx",
@@ -6359,6 +6360,13 @@ dependencies = [
  "uuid",
  "windows-sys 0.59.0",
  "winresource",
+]
+
+[[package]]
+name = "sigwin-thumb"
+version = "0.1.0"
+dependencies = [
+ "image",
 ]
 
 [[package]]

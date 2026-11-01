@@ -1907,15 +1907,27 @@ impl App {
     }
 
     /// `base` names the disk cache, `key` the emitted image (a pack cover and its grid cell differ in size).
+    /// The resampled result is cached too (`-<px>px.png`): resampling costs ~40x the decode.
     fn sticker_thumb(&self, base: &str, key: String, bytes: Option<Vec<u8>>, fit: u32) {
         let thumb_path = self.paths.thumbs.join(format!("{base}-{THUMB_MAX}.png"));
-        if bytes.is_none() && !thumb_path.exists() {
+        let fitted = self.paths.thumbs.join(format!("{base}-{}px.png", crate::types::physical_px(fit)));
+        if bytes.is_none() && !fitted.exists() && !thumb_path.exists() {
             return;
         }
         let emit = self.emit.clone();
         tokio::task::spawn_blocking(move || {
-            let k = key.clone();
-            match make_thumb_from(&k, || bytes.context("no sticker bytes"), THUMB_MAX, &thumb_path, fit) {
+            let res = match sigwin_thumb::open_rgba(&fitted) {
+                Ok(rgba) => Ok(Thumb { key: key.clone(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() }),
+                Err(_) => make_thumb_from(&key, || bytes.context("no sticker bytes"), THUMB_MAX, &thumb_path, fit)
+                    .inspect(|t| {
+                        if let Some(img) = image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone()) {
+                            if let Err(e) = img.save(&fitted) {
+                                warn!("save fitted thumb: {e}");
+                            }
+                        }
+                    }),
+            };
+            match res {
                 Ok(t) => emit(Event::Thumb(Arc::new(t))),
                 Err(e) => debug!("sticker thumb {key}: {e}"),
             }
@@ -1953,8 +1965,9 @@ impl App {
         let bytes = s.bytes.clone();
         let emit = self.emit.clone();
         tokio::task::spawn_blocking(move || {
-            let img = image::load_from_memory(&bytes)
-                .map(|i| downscale(i.to_rgba8(), crate::types::physical_px(view::STICKER_SIZE)));
+            let img = sigwin_thumb::decode(&bytes).map(|i| {
+                sigwin_thumb::downscale(sigwin_thumb::to_rgba(&i), crate::types::physical_px(view::STICKER_SIZE))
+            });
             if let Ok(rgba) = img {
                 let t = Thumb { key: image_key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() };
                 emit(Event::Thumb(Arc::new(t)));
@@ -2445,48 +2458,19 @@ fn make_thumb_from(
     thumb: &Path,
     fit: u32,
 ) -> anyhow::Result<Thumb> {
-    let img = if thumb.exists() {
-        image::open(thumb)?
+    let mut rgba = if thumb.exists() {
+        sigwin_thumb::open_rgba(thumb)?
     } else {
-        let data = bytes()?;
-        let img = image::ImageReader::new(std::io::Cursor::new(data))
-            .with_guessed_format()?
-            .decode()?
-            .thumbnail(max, max);
+        let img = sigwin_thumb::decode_thumb(&bytes()?, max)?;
         if let Err(e) = img.save(thumb) {
             warn!("save thumb: {e}");
         }
-        img
+        sigwin_thumb::to_rgba(&img)
     };
-    let mut rgba = img.to_rgba8();
     if fit > 0 {
-        rgba = downscale(rgba, crate::types::physical_px(fit));
+        rgba = sigwin_thumb::downscale(rgba, crate::types::physical_px(fit));
     }
     Ok(Thumb { key: key.to_string(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
-}
-
-/// High-quality downscale so the longer side is `px` (never upscales). Filters in premultiplied
-/// alpha, otherwise transparent pixels' colors bleed into sticker edges as dark fringes.
-pub(crate) fn downscale(img: image::RgbaImage, px: u32) -> image::RgbaImage {
-    let (w, h) = img.dimensions();
-    if w.max(h) <= px || w == 0 || h == 0 {
-        return img;
-    }
-    let s = px as f32 / w.max(h) as f32;
-    let (nw, nh) = (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1));
-    let mut pm = image::Rgba32FImage::new(w, h);
-    for (d, p) in pm.pixels_mut().zip(img.pixels()) {
-        let a = p[3] as f32 / 255.0;
-        *d = image::Rgba([p[0] as f32 / 255.0 * a, p[1] as f32 / 255.0 * a, p[2] as f32 / 255.0 * a, a]);
-    }
-    let small = image::imageops::resize(&pm, nw, nh, image::imageops::FilterType::Lanczos3);
-    let mut out = image::RgbaImage::new(nw, nh);
-    for (d, p) in out.pixels_mut().zip(small.pixels()) {
-        let a = p[3].clamp(0.0, 1.0);
-        let un = |c: f32| if a > 0.0 { (c / a).clamp(0.0, 1.0) * 255.0 + 0.5 } else { 0.0 };
-        *d = image::Rgba([un(p[0]) as u8, un(p[1]) as u8, un(p[2]) as u8, (a * 255.0 + 0.5) as u8]);
-    }
-    out
 }
 
 fn attachment_path(dir: &Path, key: &str, ptr: &AttachmentPointer) -> PathBuf {
@@ -2637,21 +2621,6 @@ fn notify(title: String, body: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn downscale_fits_long_side_and_keeps_transparency() {
-        // opaque red disc on a transparent background with garbage (green) color in the clear pixels
-        let img = image::RgbaImage::from_fn(260, 200, |x, y| {
-            let (dx, dy) = (x as f32 - 130.0, y as f32 - 100.0);
-            if dx * dx + dy * dy < 80.0 * 80.0 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 255, 0, 0]) }
-        });
-        let out = downscale(img, 130);
-        assert_eq!(out.dimensions(), (130, 100));
-        assert_eq!(out.get_pixel(0, 0)[3], 0);
-        // edge pixels must not pick up the green of transparent neighbours
-        assert!(out.pixels().all(|p| p[3] == 0 || p[1] < 8), "green fringe");
-        assert_eq!(downscale(image::RgbaImage::new(50, 40), 130).dimensions(), (50, 40));
-    }
 
     #[test]
     fn combines_profile_names() {
