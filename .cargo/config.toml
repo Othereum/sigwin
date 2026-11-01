@@ -3,5 +3,6 @@
 # the Windows build script still insists on OpenSSL paths, so point it at empty dirs.
 OPENSSL_LIB_DIR = { value = "build-support/no-openssl/lib", relative = true }
 OPENSSL_INCLUDE_DIR = { value = "build-support/no-openssl/include", relative = true }
-LIBCLANG_PATH = 'C:/Program Files/LLVM/bin'
-PROTOC = 'C:/Users/seokj/AppData/Local/Microsoft/WinGet/Packages/Google.Protobuf_Microsoft.Winget.Source_8wekyb3d8bbwe/bin/protoc.exe'
+# default LLVM install dir (winget LLVM.LLVM); protoc is found on PATH (winget Google.Protobuf),
+# or set PROTOC / LIBCLANG_PATH in the environment to override.
+LIBCLANG_PATH = { value = 'C:/Program Files/LLVM/bin', force = false }

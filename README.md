@@ -91,7 +91,7 @@ cargo build --release        # 배포용: thin LTO (재빌드 약 2.5분)
 cargo test
 ```
 - 빌드 결과는 `target\fast\` 또는 `target\release\`에 생깁니다.
-- `.cargo/config.toml`에 `PROTOC`·`LIBCLANG_PATH` 경로가 고정되어 있습니다. 경로가 다르면 수정하세요.
+- `protoc`는 `PATH`에서 찾습니다(winget 설치 후 새 터미널을 여세요). LLVM은 기본 설치 경로(`C:\Program Files\LLVM\bin`)를 쓰며, 다른 곳에 있으면 환경 변수 `LIBCLANG_PATH`(protoc는 `PROTOC`)로 지정하세요.
 - SQLCipher는 순수 Rust 암호화 provider(`bundled-sqlcipher-custom-crypto`)를 쓰므로 OpenSSL이 필요 없습니다. Windows 빌드 스크립트가 경로 검사만 하기 때문에 `build-support/no-openssl`의 빈 폴더를 지정해 두었습니다.
 - 앱이 실행 중이면 exe가 잠겨서 빌드가 실패합니다. 먼저 앱을 종료하세요.
 
@@ -127,4 +127,4 @@ target\release\sigwin.exe   # 배포용 빌드
 - `☺`: 스티커, `📎`: 파일 첨부, `⚙`: 설정(연결 해제 포함)
 
 ## 라이선스
-AGPL-3.0-only (presage, libsignal과 동일)
+AGPL-3.0-only (presage, libsignal과 동일). 전문은 [`LICENSE`](LICENSE)에 있습니다.
