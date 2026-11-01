@@ -855,6 +855,9 @@ fn demo(emit: backend::Emit) {
             m.receipt_info = "서버로 보내는 중입니다.".into();
         }
     }
+    // deleted for everyone: by us (right) and by someone else (left)
+    view::set_deleted(&mut items[293]);
+    items[292] = MsgDto { id: "292".into(), time: "오후 3:12".into(), deleted: true, text: "삭제된 메시지입니다".into(), ..Default::default() };
     emit(Event::Ready);
     emit(Event::Threads(threads));
     emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });

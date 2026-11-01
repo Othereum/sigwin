@@ -121,7 +121,8 @@ enum Op {
     /// None: reaction taken back
     React(Option<String>),
     Edit(String),
-    Delete,
+    /// sent timestamp of the target
+    Delete(u64),
 }
 
 /// We are typing in this thread (typing indicator sent).
@@ -491,6 +492,11 @@ impl App {
             Internal::Sent(ts, Ok(())) => {
                 // presage stored the message before returning: swap the stub for the real row now
                 self.pending.retain(|p| p.ts != ts);
+                if let Some(Op::Delete(target)) = self.ops.iter().find(|o| o.ts == ts).map(|o| &o.op) {
+                    if let Err(e) = self.index.record_my_delete(*target).await {
+                        warn!("record delete: {e:#}");
+                    }
+                }
                 self.ops.retain(|o| o.ts != ts);
                 if let Err(e) = self.reload_window().await {
                     warn!("reload window: {e:#}");
@@ -504,7 +510,7 @@ impl App {
                     let what = match self.ops.remove(i).op {
                         Op::React(_) => "반응",
                         Op::Edit(_) => "수정",
-                        Op::Delete => "삭제",
+                        Op::Delete(_) => "삭제",
                     };
                     self.status(format!("{what} 실패: {e}"));
                     self.emit_messages(Scroll::KeepIfNotAtBottom).await;
@@ -593,6 +599,15 @@ impl App {
                     self.typing.clear();
                     self.composing = None;
                     self.emit_typing().await;
+                }
+            }
+        }
+
+        // we deleted a message for everyone from another device
+        if c.metadata.sender.raw_uuid() == self.me {
+            if let Some(target) = view::data_message(&c).and_then(|dm| dm.delete.as_ref()?.target_sent_timestamp) {
+                if let Err(e) = self.index.record_my_delete(target).await {
+                    warn!("record delete: {e:#}");
                 }
             }
         }
@@ -987,6 +1002,10 @@ impl App {
             }
             Err(e) => warn!("receipts: {e:#}"),
         }
+        let my_deletes = self.index.my_deletes_between(from, to).await.unwrap_or_else(|e| {
+            warn!("deletes: {e:#}");
+            Default::default()
+        });
         let Some(open) = self.current.as_ref() else { return };
         // resolve names first (async), then build synchronously
         let mut senders: Vec<Uuid> = open.window.iter().map(|(_, c)| c.metadata.sender.raw_uuid()).collect();
@@ -1001,7 +1020,7 @@ impl App {
         }
         let Some(open) = self.current.as_ref() else { return };
         let names = &self.names;
-        let built = view::build(&open.window, self.me, open.is_group, &open.members, &receipts, &|u| {
+        let built = view::build(&open.window, self.me, open.is_group, &open.members, &receipts, &my_deletes, &|u| {
             names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())
         });
         let key = open.key.clone();
@@ -1014,7 +1033,7 @@ impl App {
                 match &op.op {
                     Op::React(e) => view::set_my_reaction(m, e.as_deref()),
                     Op::Edit(t) => view::set_edited_text(m, t),
-                    Op::Delete => view::set_deleted(m),
+                    Op::Delete(_) => view::set_deleted(m),
                 }
             }
         }
@@ -1219,7 +1238,7 @@ impl App {
             return;
         }
         let dm = DataMessage { delete: Some(Delete { target_sent_timestamp: Some(target) }), ..Default::default() };
-        self.send_op(row, Op::Delete, dm.into()).await;
+        self.send_op(row, Op::Delete(target), dm.into()).await;
     }
 
     async fn send_op(&mut self, row: u64, op: Op, mut body: ContentBody) {

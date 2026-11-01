@@ -44,6 +44,10 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        // presage blanks the sender of a message deleted for everyone: remember which were ours
+        sqlx::query("CREATE TABLE IF NOT EXISTS ls_deleted_mine (ts INTEGER PRIMARY KEY) WITHOUT ROWID")
+            .execute(&pool)
+            .await?;
         Ok(Self { pool })
     }
 
@@ -63,6 +67,21 @@ impl Index {
         }
         tx.commit().await?;
         Ok(())
+    }
+
+    pub async fn record_my_delete(&self, ts: u64) -> anyhow::Result<()> {
+        sqlx::query("INSERT OR IGNORE INTO ls_deleted_mine (ts) VALUES (?)").bind(ts as i64).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Our messages deleted for everyone, sent within [from, to].
+    pub async fn my_deletes_between(&self, from: u64, to: u64) -> anyhow::Result<std::collections::HashSet<u64>> {
+        let rows = sqlx::query("SELECT ts FROM ls_deleted_mine WHERE ts BETWEEN ? AND ?")
+            .bind(from as i64)
+            .bind(to as i64)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().filter_map(|r| r.try_get::<i64, _>("ts").ok()).map(|t| t as u64).collect())
     }
 
     /// Receipts for messages sent within [from, to].

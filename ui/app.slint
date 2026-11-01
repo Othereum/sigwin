@@ -321,7 +321,7 @@ component Bubble inherits VerticalLayout {
                     read-only: true;
                     single-line: false;
                     wrap: word-wrap;
-                    color: m.deleted ? Theme.subtle : (m.outgoing && !m.sticker && !m.big-emoji ? white : Theme.text);
+                    color: m.deleted ? Theme.subtle : (m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? white : Theme.text);
                     font-italic: m.deleted;
                     // emoji-only messages are shown large (color comes from the patched renderer)
                     font-size: m.big-emoji ? 40px : 14px;
@@ -344,7 +344,7 @@ component Bubble inherits VerticalLayout {
                             if r.count > 1: Text {
                                 text: r.count;
                                 font-size: 11px;
-                                color: m.outgoing && !m.sticker && !m.big-emoji ? white : Theme.text;
+                                color: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? white : Theme.text;
                                 vertical-alignment: center;
                             }
                         }
@@ -352,7 +352,7 @@ component Bubble inherits VerticalLayout {
                     Text {
                         text: m.time;
                         font-size: 10.5px;
-                        color: m.outgoing && !m.sticker && !m.big-emoji ? #ffffffb0 : Theme.subtle;
+                        color: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? #ffffffb0 : Theme.subtle;
                         TouchArea {
                             enabled: m.outgoing;
                             mouse-cursor: m.outgoing ? pointer : default;

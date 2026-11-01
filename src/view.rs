@@ -289,6 +289,8 @@ pub fn build(
     members: &[Uuid],
     // target ts -> recipient -> 1 delivered / 2 read (from the receipt index)
     status: &HashMap<u64, HashMap<Uuid, u8>>,
+    // our messages deleted for everyone (the stored row no longer says who sent it)
+    my_deletes: &std::collections::HashSet<u64>,
     name_of: &dyn Fn(&Uuid) -> String,
 ) -> Built {
     let mut reactions: HashMap<u64, Vec<(Uuid, String)>> = HashMap::new();
@@ -419,8 +421,11 @@ pub fn build(
                 prev_sender = None;
             }
             Kind::Deleted => {
+                // rows presage stored for messages sent from this PC have no server guid
+                let mine = my_deletes.contains(ts) || c.metadata.server_guid.is_none();
                 m.deleted = true;
-                m.text = "삭제된 메시지입니다".into();
+                m.outgoing = mine;
+                m.text = if mine { DELETED_MINE } else { DELETED_OTHER }.into();
                 prev_sender = None;
             }
             _ => continue,
@@ -462,15 +467,18 @@ pub fn set_edited_text(m: &mut MsgDto, text: &str) {
     m.big_emoji = m.attachment.is_empty() && m.quote.is_empty() && crate::emoji::only_emoji(&m.text, 5).is_some();
 }
 
+const DELETED_MINE: &str = "내가 삭제한 메시지입니다";
+const DELETED_OTHER: &str = "삭제된 메시지입니다";
+
 /// Optimistic update while a delete for everyone is being sent.
 pub fn set_deleted(m: &mut MsgDto) {
     *m = MsgDto {
         id: std::mem::take(&mut m.id),
         time: std::mem::take(&mut m.time),
         day_sep: std::mem::take(&mut m.day_sep),
-        // stored deletes lose their sender (presage blanks it), so they render like this too
+        outgoing: true,
         deleted: true,
-        text: "삭제된 메시지입니다".into(),
+        text: DELETED_MINE.into(),
         ..Default::default()
     };
 }
