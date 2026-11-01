@@ -1109,6 +1109,18 @@ export component AppWindow inherits Window {
     public function list-visible-height() -> length {
         return msg-list.visible-height;
     }
+    public function check-older() {
+        if (msg-list.content-y >= -4px && root.can-load-older) {
+            root.load-older();
+        }
+    }
+    public function list-content-y() -> length {
+        return msg-list.content-y;
+    }
+    // no clamping: the content height is still the old estimate right after a model change
+    public function set-content-y-raw(y: length) {
+        msg-list.content-y = y;
+    }
     public function shift-by(d: length) {
         msg-list.content-y = max(msg-list.visible-height - msg-list.content-height, min(0px, msg-list.content-y - d));
     }
@@ -1288,9 +1300,19 @@ export component AppWindow inherits Window {
                         }
                         self.last-vh = self.visible-height;
                     }
+                    // load older history at the top. `scrolled` fires when a wheel notch starts
+                    // its 180ms animation, before content-y gets there, so content-y itself is
+                    // watched too, once the user has scrolled this thread
+                    property <bool> user-scrolled;
+                    property <string> key: root.current-key;
+                    changed key => { self.user-scrolled = false; }
                     scrolled => {
-                        if (self.content-y >= -4px && root.can-load-older) {
-                            root.load-older();
+                        self.user-scrolled = true;
+                        root.check-older();
+                    }
+                    changed content-y => {
+                        if (self.user-scrolled) {
+                            root.check-older();
                         }
                     }
                     for m in root.messages: Bubble {
