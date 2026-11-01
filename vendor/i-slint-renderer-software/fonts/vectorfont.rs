@@ -204,10 +204,10 @@ impl VectorFont {
                     .builder(font_ref)
                     .size(self.pixel_size.get() as f32)
                     .normalized_coords(&self.normalized_coords)
-                    // lite-signal patch: optional TrueType hinting (crisper small text)
+                    // sigwin patch: optional TrueType hinting (crisper small text)
                     .hint(text_tuning().hint)
                     .build();
-                // lite-signal patch: try color outlines (COLR v0, e.g. Segoe UI Emoji) first
+                // sigwin patch: try color outlines (COLR v0, e.g. Segoe UI Emoji) first
                 let image = swash::scale::Render::new(&[
                     swash::scale::Source::ColorOutline(0),
                     swash::scale::Source::Outline,
@@ -231,7 +231,7 @@ impl VectorFont {
                         )
                     } else {
                         let mut data = image.data;
-                        // lite-signal patch: DirectWrite-style enhanced contrast on coverage
+                        // sigwin patch: DirectWrite-style enhanced contrast on coverage
                         if let Some(lut) = &text_tuning().contrast_lut {
                             for a in data.iter_mut() {
                                 *a = lut[*a as usize];
@@ -349,9 +349,9 @@ impl super::GlyphRenderer for VectorFont {
     }
 }
 
-/// lite-signal patch: text rasterization tuning, read once from the environment.
+/// sigwin patch: text rasterization tuning, read once from the environment.
 /// Defaults (hinting on, contrast 0.5) look closest to native Windows text; override with
-/// `LITE_SIGNAL_HINT=0|1`, `LITE_SIGNAL_CONTRAST=<k>` (0 = off).
+/// `SIGWIN_HINT=0|1`, `SIGWIN_CONTRAST=<k>` (0 = off).
 struct TextTuning {
     hint: bool,
     contrast_lut: Option<[u8; 256]>,
@@ -360,8 +360,8 @@ struct TextTuning {
 fn text_tuning() -> &'static TextTuning {
     static TUNING: std::sync::OnceLock<TextTuning> = std::sync::OnceLock::new();
     TUNING.get_or_init(|| {
-        let hint = std::env::var("LITE_SIGNAL_HINT").map_or(true, |v| v != "0");
-        let k: f32 = std::env::var("LITE_SIGNAL_CONTRAST").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5);
+        let hint = std::env::var("SIGWIN_HINT").map_or(true, |v| v != "0");
+        let k: f32 = std::env::var("SIGWIN_CONTRAST").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5);
         let contrast_lut = (k > 0.0).then(|| {
             let mut lut = [0u8; 256];
             for (i, v) in lut.iter_mut().enumerate() {

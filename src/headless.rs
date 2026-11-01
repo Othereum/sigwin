@@ -1,7 +1,7 @@
 //! Offscreen test mode: no native window, no real input. The app renders with the same
 //! software renderer into a buffer, a script feeds it input, and `shot` saves PNGs.
 //!
-//! `LITE_SIGNAL_HEADLESS="<steps>"` (or `@<file>`), steps separated by `;` or newlines:
+//! `SIGWIN_HEADLESS="<steps>"` (or `@<file>`), steps separated by `;` or newlines:
 //!   size W H         window size in logical px (default 1000 680)
 //!   scale S          scale factor (default 1)
 //!   wait MS          let timers, animations and the backend run
@@ -13,8 +13,8 @@
 //!   key NAME         Enter Esc Tab Up Down Left Right Backspace Delete Home End PageUp PageDown,
 //!                    optionally with modifiers: ctrl+shift+Enter
 //!   shot PATH        save the window as PNG
-//! Theme: LITE_SIGNAL_HEADLESS_THEME=dark|light, default follows the system.
-//! The loop exits after the last step. Requires LITE_SIGNAL_DATA (never touch the real account).
+//! Theme: SIGWIN_HEADLESS_THEME=dark|light, default follows the system.
+//! The loop exits after the last step. Requires SIGWIN_DATA (never touch the real account).
 
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Key, Platform, PointerEventButton, WindowAdapter, WindowEvent};
@@ -155,9 +155,9 @@ pub fn active() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
 
-/// Theme for the offscreen window: `LITE_SIGNAL_HEADLESS_THEME=dark|light`, else the system's app theme.
+/// Theme for the offscreen window: `SIGWIN_HEADLESS_THEME=dark|light`, else the system's app theme.
 pub fn dark() -> bool {
-    match std::env::var("LITE_SIGNAL_HEADLESS_THEME").as_deref() {
+    match std::env::var("SIGWIN_HEADLESS_THEME").as_deref() {
         Ok("dark") => true,
         Ok("light") => false,
         _ => system_dark(),
@@ -184,12 +184,12 @@ fn system_dark() -> bool {
     false
 }
 
-/// Installs the offscreen platform if `LITE_SIGNAL_HEADLESS` is set. Call before creating the UI.
+/// Installs the offscreen platform if `SIGWIN_HEADLESS` is set. Call before creating the UI.
 pub fn install_if_requested() -> anyhow::Result<()> {
-    let Ok(spec) = std::env::var("LITE_SIGNAL_HEADLESS") else { return Ok(()) };
+    let Ok(spec) = std::env::var("SIGWIN_HEADLESS") else { return Ok(()) };
     anyhow::ensure!(
-        std::env::var_os("LITE_SIGNAL_DATA").is_some(),
-        "LITE_SIGNAL_HEADLESS requires LITE_SIGNAL_DATA (a scratch dir)"
+        std::env::var_os("SIGWIN_DATA").is_some(),
+        "SIGWIN_HEADLESS requires SIGWIN_DATA (a scratch dir)"
     );
     let script = match spec.strip_prefix('@') {
         Some(path) => std::fs::read_to_string(path)?,

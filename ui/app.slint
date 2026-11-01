@@ -601,7 +601,7 @@ component LinkPage inherits Rectangle {
     in property <image> qr;
     in property <bool> has-qr;
     in property <string> status;
-    in-out property <string> device-name: "lite-signal";
+    in-out property <string> device-name: "Sigwin";
     callback start-link(string);
     background: Theme.pane;
     VerticalLayout {
@@ -609,7 +609,7 @@ component LinkPage inherits Rectangle {
         spacing: 16px;
         padding: 32px;
         Text {
-            text: "lite-signal";
+            text: "Sigwin";
             font-size: 28px;
             font-weight: 700;
             color: Theme.text;
@@ -664,7 +664,7 @@ component LinkPage inherits Rectangle {
 
 export component AppWindow inherits Window {
     in property <int> total-unread;
-    title: total-unread > 0 ? "lite-signal (" + total-unread + ")" : "lite-signal";
+    title: total-unread > 0 ? "Sigwin (" + total-unread + ")" : "Sigwin";
     preferred-width: 1000px;
     preferred-height: 680px;
     min-width: 640px;

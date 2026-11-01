@@ -11,6 +11,7 @@ mod headless;
 mod link;
 mod mention;
 mod secret;
+mod toast;
 mod types;
 mod view;
 mod winhook;
@@ -503,13 +504,38 @@ fn apply(app: &AppWindow, ev: Event) {
     }
 }
 
+/// `SIGWIN_DATA`, else `%LOCALAPPDATA%\Sigwin\data`. The folder of the old name
+/// (`lite-signal\lite-signal\data`) is moved there once.
 fn data_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("LITE_SIGNAL_DATA") {
-        return PathBuf::from(d);
-    }
-    directories::ProjectDirs::from("dev", "lite-signal", "lite-signal")
-        .map(|p| p.data_local_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("lite-signal-data"))
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        if let Ok(d) = std::env::var("SIGWIN_DATA") {
+            return PathBuf::from(d);
+        }
+        let local = |org: &str, app: &str| {
+            directories::ProjectDirs::from("dev", org, app).map(|p| p.data_local_dir().to_path_buf())
+        };
+        let Some(dir) = local("", "Sigwin") else { return PathBuf::from("sigwin-data") };
+        if let Some(old) = local("lite-signal", "lite-signal").filter(|o| o.exists() && !dir.exists()) {
+            let moved = dir.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::rename(&old, &dir));
+            match moved {
+                Ok(()) => {
+                    tracing::info!("moved data folder {} -> {}", old.display(), dir.display());
+                    // drop the now-empty lite-signal\lite-signal and lite-signal folders
+                    for p in old.ancestors().skip(1).take(2) {
+                        let _ = std::fs::remove_dir(p);
+                    }
+                }
+                Err(e) => {
+                    // e.g. an old build still has the DB open: keep using it rather than relink
+                    tracing::warn!("can't move data folder {}: {e}; using it in place", old.display());
+                    return old;
+                }
+            }
+        }
+        dir
+    })
+    .clone()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -524,6 +550,9 @@ fn main() -> anyhow::Result<()> {
         .add_directive("sqlx=error".parse()?);
     tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
     headless::install_if_requested()?;
+    if !headless::active() {
+        toast::register();
+    }
 
     let app = AppWindow::new()?;
     if headless::active() {
@@ -541,9 +570,9 @@ fn main() -> anyhow::Result<()> {
     let emit: backend::Emit = Arc::new(move |ev: Event| {
         let _ = weak.upgrade_in_event_loop(move |app| apply(&app, ev));
     });
-    if std::env::var_os("LITE_SIGNAL_DEMO").is_some() {
+    if std::env::var_os("SIGWIN_DEMO").is_some() {
         demo(emit);
-        if std::env::var_os("LITE_SIGNAL_DEMO_TICK").is_some() {
+        if std::env::var_os("SIGWIN_DEMO_TICK").is_some() {
             // UI updates arriving continuously, like a live backend (also while minimized)
             let weak = app.as_weak();
             let n = std::cell::Cell::new(0u32);
@@ -555,7 +584,7 @@ fn main() -> anyhow::Result<()> {
                 }
             });
         }
-        if std::env::var_os("LITE_SIGNAL_DEMO_INFO").is_some() {
+        if std::env::var_os("SIGWIN_DEMO_INFO").is_some() {
             // "new messages below" badge, set late so a test can scroll up first
             let weak = app.as_weak();
             slint::Timer::single_shot(std::time::Duration::from_millis(4000), move || {
@@ -575,7 +604,7 @@ fn main() -> anyhow::Result<()> {
                 }
             });
         }
-        if let Ok(what) = std::env::var("LITE_SIGNAL_DEMO_MENU") {
+        if let Ok(what) = std::env::var("SIGWIN_DEMO_MENU") {
             // message menu on an outgoing row, typing indicator, edit banner
             let weak = app.as_weak();
             slint::Timer::single_shot(std::time::Duration::from_millis(400), move || {
@@ -588,7 +617,7 @@ fn main() -> anyhow::Result<()> {
                 }
             });
         }
-        if std::env::var_os("LITE_SIGNAL_DEMO_STICKERS").is_some() {
+        if std::env::var_os("SIGWIN_DEMO_STICKERS").is_some() {
             let weak = app.as_weak();
             slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
                 if let Some(app) = weak.upgrade() {
@@ -596,7 +625,7 @@ fn main() -> anyhow::Result<()> {
                 }
             });
         }
-        if std::env::var_os("LITE_SIGNAL_SELFTEST").is_some() {
+        if std::env::var_os("SIGWIN_SELFTEST").is_some() {
             selftest();
         }
     } else {
@@ -1153,12 +1182,12 @@ fn demo(emit: backend::Emit) {
     // one sender with a photo, the other falls back to the initial
     photo(format!("{}demo-a", avatar::MSG_PREFIX), 1, avatar::MSG_SIZE);
     emit(Event::Status("데모 모드".into()));
-    if std::env::var_os("LITE_SIGNAL_DEMO_STICKERS").is_some() {
+    if std::env::var_os("SIGWIN_DEMO_STICKERS").is_some() {
         demo_stickers(emit);
     }
 }
 
-/// LITE_SIGNAL_SELFTEST=1 (with demo): measure what the file dialog and toasts cost.
+/// SIGWIN_SELFTEST=1 (with demo): measure what the file dialog and toasts cost.
 fn selftest() {
     let step = std::rc::Rc::new(std::cell::Cell::new(0));
     let timer = Box::leak(Box::new(slint::Timer::default()));
@@ -1171,7 +1200,7 @@ fn selftest() {
                 picker::spawn(0, |f| eprintln!("selftest picked {} files", f.len()));
             }
             3 => {
-                let _ = notify_rust::Notification::new().summary("selftest").body("toast").show();
+                let _ = toast::notification().summary("selftest").body("toast").show();
             }
             _ => {}
         }
@@ -1199,7 +1228,7 @@ fn demo_stickers(emit: backend::Emit) {
         .map(|i| types::PackDto {
             id: format!("p{i}"),
             title: format!("추천 팩 {i}"),
-            installed: i < 2 && std::env::var("LITE_SIGNAL_DEMO_STICKERS").as_deref() != Ok("add"),
+            installed: i < 2 && std::env::var("SIGWIN_DEMO_STICKERS").as_deref() != Ok("add"),
             cover_key: format!("sp_p{i}_0"),
         })
         .collect();
@@ -1208,7 +1237,7 @@ fn demo_stickers(emit: backend::Emit) {
     // the panel is opened by main(); give it a moment before filling it
     slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
         emit(Event::StickerPacks(packs));
-        if std::env::var("LITE_SIGNAL_DEMO_STICKERS").as_deref() != Ok("add") {
+        if std::env::var("SIGWIN_DEMO_STICKERS").as_deref() != Ok("add") {
             emit(Event::StickerGrid { pack: "p0".into(), items });
         }
         for i in 0..20u32 {

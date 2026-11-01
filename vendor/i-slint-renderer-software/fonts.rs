@@ -49,7 +49,7 @@ pub struct RenderableVectorGlyph {
     pub alpha_map: Rc<[u8]>,
     pub pixel_stride: u16,
     pub glyph_origin_x: f32,
-    /// lite-signal patch: color glyph (COLR v0) as premultiplied RGBA; drawn as an image
+    /// sigwin patch: color glyph (COLR v0) as premultiplied RGBA; drawn as an image
     /// instead of a colorized alpha map.
     pub color: Option<i_slint_core::graphics::SharedImageBuffer>,
 }

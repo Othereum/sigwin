@@ -306,7 +306,7 @@ impl Item for StyledTextItem {
                 None,
             )
         };
-        // lite-signal patch: only take events over a link (left button or hover). Everything
+        // sigwin patch: only take events over a link (left button or hover). Everything
         // else is ignored so it reaches the items below, e.g. a transparent read-only
         // TextInput that keeps text selection working under the styled text.
         match event {

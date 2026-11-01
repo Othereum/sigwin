@@ -314,7 +314,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         }
     } else {
         (app.emit)(Event::NeedLink);
-        app.start_link("lite-signal".into());
+        app.start_link("Sigwin".into());
     }
 
     let mut tick = tokio::time::interval(Duration::from_millis(250));
@@ -476,7 +476,7 @@ impl App {
         let store = self.store.clone();
         let tx = self.tx.clone();
         let emit = self.emit.clone();
-        let name = if name.trim().is_empty() { "lite-signal".to_string() } else { name.trim().to_string() };
+        let name = if name.trim().is_empty() { "Sigwin".to_string() } else { name.trim().to_string() };
         (self.emit)(Event::LinkStatus("QR 코드 생성 중…".into()));
         self.link_task = Some(tokio::task::spawn_local(async move {
             let (url_tx, url_rx) = oneshot::channel::<url::Url>();
@@ -2207,7 +2207,7 @@ fn open_with_default_app(path: &Path) {
 
 fn notify(title: String, body: String) {
     tokio::task::spawn_blocking(move || {
-        if let Err(e) = notify_rust::Notification::new().summary(&title).body(&body).show() {
+        if let Err(e) = crate::toast::notification().summary(&title).body(&body).show() {
             debug!("notification: {e}");
         }
     });

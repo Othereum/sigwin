@@ -1,8 +1,8 @@
-# lite-signal
+# Sigwin
 
 Signal 프로토콜 호환 **경량 데스크톱 클라이언트**(비공식)입니다. Rust + [presage](https://github.com/whisperfish/presage) + [Slint](https://slint.dev)(소프트웨어 렌더러)로 만들었습니다.
 
-> Signal Messenger LLC와 무관한 비공식 클라이언트입니다. "Signal"은 Signal Messenger LLC의 상표입니다.
+> Signal과 무관한 비공식 클라이언트입니다. "Signal"은 Signal Technology Foundation의 상표입니다.
 
 ## 목표
 - 메모리 **100MB 이하** (Electron 기반 공식 클라이언트는 300~600MB)
@@ -43,7 +43,7 @@ Signal 프로토콜 호환 **경량 데스크톱 클라이언트**(비공식)입
 - 팩을 추가하면 공식 앱처럼 휴대폰에도 설치됩니다.
 
 ### 기타
-- Windows 알림, 창 제목에 안 읽은 메시지 수 표시
+- Windows 알림(알림 센터와 알림 설정에 "Sigwin"으로 표시), 창 제목에 안 읽은 메시지 수 표시
 - 로컬 DB는 **SQLCipher로 암호화**하며, 키는 Windows **DPAPI**로 보호합니다(현재 Windows 사용자만 복호화 가능)
 
 ### 미지원
@@ -55,7 +55,7 @@ Signal 프로토콜 호환 **경량 데스크톱 클라이언트**(비공식)입
 - 이미지는 260px 썸네일만 메모리에 올리고, 대화방을 바꾸면 해제합니다. 원본과 썸네일은 디스크에 캐시합니다.
 - 스티커 창의 미리보기는 창을 닫으면 해제합니다.
 - 프로필 사진은 표시 크기(40px)로 줄이고 원형으로 잘라서 디스크에 캐시합니다. 하나에 6~15KB입니다.
-- 파일 선택 대화상자는 **자식 프로세스**(`lite-signal.exe --pick-files`)에서 실행합니다. 셸 확장 DLL이 메인 프로세스에 남지 않습니다(측정 결과: 열려 있는 동안 +28MB, 닫은 후에도 +10MB 남던 것을 0으로).
+- 파일 선택 대화상자는 **자식 프로세스**(`sigwin.exe --pick-files`)에서 실행합니다. 셸 확장 DLL이 메인 프로세스에 남지 않습니다(측정 결과: 열려 있는 동안 +28MB, 닫은 후에도 +10MB 남던 것을 0으로).
 - 컬러 이모지는 Slint 소프트웨어 렌더러를 패치해서(`vendor/i-slint-renderer-software`) 글꼴의 COLR v0 컬러 레이어로 직접 그립니다. 추가 메모리는 기존 글리프 캐시(1MB 상한) 안에서 처리됩니다.
 - **Segment Heap** 매니페스트로 대량 동기화 후 해제된 메모리를 OS에 돌려줍니다.
 - 10초마다 `mem: rust heap …, private …`을 로그로 남깁니다(Rust 힙과 네이티브 메모리 구분).
@@ -83,19 +83,19 @@ cargo test
 
 ## 실행
 ```powershell
-target\fast\lite-signal.exe      # 개발용 빌드
-target\release\lite-signal.exe   # 배포용 빌드
+target\fast\sigwin.exe      # 개발용 빌드
+target\release\sigwin.exe   # 배포용 빌드
 ```
 | 환경 변수 | 용도 |
 |---|---|
-| `LITE_SIGNAL_DATA` | 데이터 폴더 (기본값 `%LOCALAPPDATA%\lite-signal\lite-signal\data`) |
-| `RUST_LOG` | 로그 레벨 (예: `info,lite_signal=debug`). 콘솔에서 실행하면 stderr로 출력 |
-| `LITE_SIGNAL_DEMO=1` | 계정 없이 가짜 데이터로 UI 확인 |
-| `LITE_SIGNAL_DEMO_STICKERS=1` / `=add` | 데모에서 스티커 창 열기 / 팩 추가 화면 열기 |
-| `LITE_SIGNAL_DEMO_INFO=1` | 데모에서 메시지 정보 창과 답장 바 띄우기 |
-| `LITE_SIGNAL_DEMO_TICK=1` | 데모에서 0.3초마다 UI 갱신 (최소화 중 갱신 재현용) |
-| `LITE_SIGNAL_HINT=0` / `LITE_SIGNAL_CONTRAST=<k>` | 글자 힌팅 끄기 / 대비 강화 정도 (기본: 힌팅 켬, 0.5. `0`이면 끔) |
-| `LITE_SIGNAL_SELFTEST=1` | (데모와 함께) 파일 대화상자와 알림의 메모리 비용 측정 |
+| `SIGWIN_DATA` | 데이터 폴더 (기본값 `%LOCALAPPDATA%\Sigwin\data`. 예전 이름 lite-signal의 폴더가 있으면 처음 실행할 때 옮김) |
+| `RUST_LOG` | 로그 레벨 (예: `info,sigwin=debug`). 콘솔에서 실행하면 stderr로 출력 |
+| `SIGWIN_DEMO=1` | 계정 없이 가짜 데이터로 UI 확인 |
+| `SIGWIN_DEMO_STICKERS=1` / `=add` | 데모에서 스티커 창 열기 / 팩 추가 화면 열기 |
+| `SIGWIN_DEMO_INFO=1` | 데모에서 메시지 정보 창과 답장 바 띄우기 |
+| `SIGWIN_DEMO_TICK=1` | 데모에서 0.3초마다 UI 갱신 (최소화 중 갱신 재현용) |
+| `SIGWIN_HINT=0` / `SIGWIN_CONTRAST=<k>` | 글자 힌팅 끄기 / 대비 강화 정도 (기본: 힌팅 켬, 0.5. `0`이면 끔) |
+| `SIGWIN_SELFTEST=1` | (데모와 함께) 파일 대화상자와 알림의 메모리 비용 측정 |
 
 데이터 폴더 구성: `signal.db3`(암호화 DB), `db.key`(DPAPI로 보호한 키), `state.json`(안 읽은 수, 미리보기 캐시), `attachments/`, `thumbs/`
 

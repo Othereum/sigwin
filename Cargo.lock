@@ -3792,42 +3792,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
-name = "lite-signal"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "chrono",
- "directories",
- "futures",
- "getrandom 0.3.4",
- "hex",
- "image",
- "libsqlite3-sys",
- "mime_guess",
- "notify-rust",
- "png",
- "presage",
- "presage-store-sqlite",
- "qrcode",
- "raw-window-handle",
- "rfd",
- "serde",
- "serde_json",
- "slint",
- "slint-build",
- "sqlx",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "unicode-segmentation",
- "url",
- "uuid",
- "windows-sys 0.59.0",
- "winresource",
-]
-
-[[package]]
 name = "litemap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6359,6 +6323,42 @@ checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
  "errno",
  "libc",
+]
+
+[[package]]
+name = "sigwin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "directories",
+ "futures",
+ "getrandom 0.3.4",
+ "hex",
+ "image",
+ "libsqlite3-sys",
+ "mime_guess",
+ "notify-rust",
+ "png",
+ "presage",
+ "presage-store-sqlite",
+ "qrcode",
+ "raw-window-handle",
+ "rfd",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "unicode-segmentation",
+ "url",
+ "uuid",
+ "windows-sys 0.59.0",
+ "winresource",
 ]
 
 [[package]]

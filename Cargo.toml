@@ -1,5 +1,5 @@
 [package]
-name = "lite-signal"
+name = "sigwin"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
@@ -80,9 +80,9 @@ strip = true
 panic = "abort"
 
 [patch.crates-io]
-# color emoji (COLR v0) in the software renderer: see vendor/i-slint-renderer-software, "lite-signal patch"
+# color emoji (COLR v0) in the software renderer: see vendor/i-slint-renderer-software, "sigwin patch"
 i-slint-renderer-software = { path = "vendor/i-slint-renderer-software" }
-# StyledText passes non-link mouse events through (clickable links over a selectable TextInput): see vendor/i-slint-core, "lite-signal patch"
+# StyledText passes non-link mouse events through (clickable links over a selectable TextInput): see vendor/i-slint-core, "sigwin patch"
 i-slint-core = { path = "vendor/i-slint-core" }
 libsqlite3-sys = { version = "0.36.0", git = "https://github.com/whisperfish/rusqlite", rev = "2a42b3354c9194700d08aa070f70a131a470e7dc" }
 

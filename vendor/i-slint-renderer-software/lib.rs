@@ -3283,7 +3283,7 @@ impl<T: ProcessScene> sharedparley::GlyphRenderer for SceneBuilder<'_, T> {
         // quantizes the glyph origin and the clip it cuts glyphs with. Truncating here puts a
         // selection highlight edge a whole pixel away from the glyph clip meant to line up with it,
         // as soon as the item's own offset lands on a fractional device pixel.
-        // lite-signal patch: keep thin fills (underlines are <1px at 14px) at least one pixel,
+        // sigwin patch: keep thin fills (underlines are <1px at 14px) at least one pixel,
         // otherwise rounding both edges drops them on every other line depending on its y
         let mut rounded = physical_rect.round();
         if rounded.size.height < 1.0 && physical_rect.size.height > 0.0 {
@@ -3405,7 +3405,7 @@ impl<T: ProcessScene> sharedparley::GlyphRenderer for SceneBuilder<'_, T> {
             };
 
             let source_rect = euclid::rect(0, 0, glyph.width.0, glyph.height.0);
-            // lite-signal patch: color glyphs are drawn as images, not colorized alpha maps
+            // sigwin patch: color glyphs are drawn as images, not colorized alpha maps
             let (data, colorize, alpha) = match glyph.color {
                 Some(image) => (
                     target_pixel_buffer::TextureDataContainer::Shared {

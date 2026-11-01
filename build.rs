@@ -12,8 +12,8 @@ fn main() {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("assets/icon.ico");
         res.set_manifest_file("assets/app.manifest");
-        res.set("ProductName", "lite-signal");
-        res.set("FileDescription", "lite-signal (unofficial Signal client)");
+        res.set("ProductName", "Sigwin");
+        res.set("FileDescription", "Sigwin (unofficial Signal client)");
         res.compile().expect("windows resource");
     }
 }
