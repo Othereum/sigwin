@@ -456,14 +456,6 @@ component Bubble inherits VerticalLayout {
             background: m.deleted || m.sticker || m.big-emoji || root.bare ? transparent : (m.outgoing ? Theme.bubble-out : Theme.bubble-in);
             border-width: root.flash ? 3px : m.deleted ? 1px : 0px;
             border-color: root.flash ? #f5b400 : Theme.border;
-            bta := TouchArea {
-                double-clicked => { root.reply(m.id); }
-                pointer-event(e) => {
-                    if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
-                        root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
-                    }
-                }
-            }
             if !m.pending && !m.deleted: tools := MsgTools {
                 x: m.outgoing ? -self.width : parent.width;
                 y: (parent.height - self.height) / 2;
@@ -471,7 +463,22 @@ component Bubble inherits VerticalLayout {
                 reply => { root.reply(m.id); }
                 more(x, y) => { root.menu(m.id, x, y + 28px); }
             }
-            VerticalLayout {
+            // TouchArea is the parent of the content (not a sibling below it): it sees hover even over
+            // the TextInput, and still takes the clicks the content ignores. It forwards the layout's size.
+            bta := TouchArea {
+                min-width: content.min-width;
+                max-width: content.max-width;
+                preferred-width: content.preferred-width;
+                min-height: content.min-height;
+                max-height: content.max-height;
+                preferred-height: content.preferred-height;
+                double-clicked => { root.reply(m.id); }
+                pointer-event(e) => {
+                    if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                        root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                    }
+                }
+            content := VerticalLayout {
                 spacing: 0px;
                 if root.flush: MsgImage {
                     m: m;
@@ -603,6 +610,7 @@ component Bubble inherits VerticalLayout {
                         info(t) => { root.show-info(t); }
                     }
                 }
+            }
             }
             }
             // who read it: overlapping round photos straddling the bubble's bottom edge (ringed in the
