@@ -95,6 +95,33 @@ fn close_stickers(app: &AppWindow) {
     });
 }
 
+/// Scroll the message list to the bottom and keep it there until its height settles.
+/// The ListView estimates unseen rows from the average row height; rows near the bottom
+/// only get their real (often taller: quotes, images) height once instantiated, which
+/// grows `content-height` after the first scroll.
+fn stick_to_bottom(app: &AppWindow) {
+    thread_local! {
+        static TIMER: slint::Timer = slint::Timer::default();
+    }
+    let weak = app.as_weak();
+    let mut last_h = -1.0f32;
+    let mut stable = 0u32;
+    let mut ticks = 0u32;
+    TIMER.with(|t| {
+        t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(16), move || {
+            let Some(app) = weak.upgrade() else { return };
+            app.invoke_scroll_to_bottom();
+            let h = app.invoke_content_height();
+            ticks += 1;
+            stable = if h == last_h { stable + 1 } else { 0 };
+            last_h = h;
+            if stable >= 3 || ticks >= 60 {
+                TIMER.with(|t| t.stop());
+            }
+        });
+    });
+}
+
 thread_local! {
     static UI: RefCell<Ui> = RefCell::default();
 }
@@ -219,23 +246,19 @@ fn apply(app: &AppWindow, ev: Event) {
                 ui.last = items;
             });
             app.set_can_load_older(can_older);
-            let weak = app.as_weak();
-            let do_scroll = move || {
-                let Some(app) = weak.upgrade() else { return };
-                match scroll {
-                    Scroll::Bottom => app.invoke_scroll_to_bottom(),
-                    Scroll::KeepIfNotAtBottom if near_bottom => app.invoke_scroll_to_bottom(),
-                    Scroll::KeepIfNotAtBottom => {}
-                    Scroll::Older => {
+            match scroll {
+                Scroll::Bottom => stick_to_bottom(app),
+                Scroll::KeepIfNotAtBottom if near_bottom => stick_to_bottom(app),
+                Scroll::KeepIfNotAtBottom => {}
+                Scroll::Older => {
+                    let weak = app.as_weak();
+                    // let the ListView lay out the new rows before measuring
+                    slint::Timer::single_shot(std::time::Duration::from_millis(16), move || {
+                        let Some(app) = weak.upgrade() else { return };
                         let grown = app.invoke_content_height() - before_h;
                         app.invoke_shift_by(grown);
-                    }
+                    });
                 }
-            };
-            // let the ListView lay out the new rows before measuring
-            slint::Timer::single_shot(std::time::Duration::from_millis(16), do_scroll.clone());
-            if scroll == Scroll::Bottom {
-                slint::Timer::single_shot(std::time::Duration::from_millis(120), do_scroll);
             }
             if switched {
                 app.invoke_focus_composer();
@@ -835,7 +858,8 @@ fn demo(emit: backend::Emit) {
 박지훈
 
 ※ 읽음 확인을 끈 사람은 '읽음'으로 표시되지 않습니다.".into() } else { String::new() },
-            quote: if i % 11 == 0 { "이전 메시지 인용".into() } else { String::new() },
+            // tall rows at the end check that scrolling to the bottom reaches it
+            quote: if i % 11 == 0 || i >= 298 { "이전 메시지 인용".into() } else { String::new() },
             reactions: if i % 9 == 0 { vec![("❤️".into(), 2), ("👍".into(), 1), ("😂".into(), 3)] } else { Vec::new() },
             attachment: if i % 13 == 0 { "보고서.pdf".into() } else { String::new() },
             day_sep: if i % 50 == 0 { "2026년 11월 1일 일요일".into() } else { String::new() },
