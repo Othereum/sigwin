@@ -1612,6 +1612,10 @@ export component AppWindow inherits Window {
                                         root.cancel-edit();
                                         return accept;
                                     }
+                                    if (event.text == Key.Escape && root.reply-preview != "") {
+                                        root.cancel-reply();
+                                        return accept;
+                                    }
                                     if (event.modifiers.control && (event.text == "v" || event.text == "V")) {
                                         if (root.paste-files()) {
                                             return accept;
