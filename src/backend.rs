@@ -927,6 +927,19 @@ impl App {
                 }
             }
         }
+        // our own profile key isn't filed under our uuid in the store: use the registration's
+        if name.is_empty() && uuid == self.me {
+            if let Some(m) = self.manager.as_mut() {
+                match Box::pin(m.retrieve_profile()).await {
+                    Ok(p) => {
+                        if let Some(n) = p.name {
+                            name = combine_names(&n.given_name, n.family_name.as_deref().unwrap_or(""));
+                        }
+                    }
+                    Err(e) => warn!("own profile: {e:#}"),
+                }
+            }
+        }
         if name.is_empty() {
             name = contact
                 .and_then(|c| c.phone_number)
