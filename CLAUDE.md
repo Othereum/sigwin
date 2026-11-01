@@ -59,7 +59,8 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/clip.rs` | Ctrl+V: files (CF_HDROP) or images (PNG / DIB streamed to PNG under `paste/`) from the clipboard |
 | `src/alloc.rs` | counting global allocator + `PrivateUsage` |
 | `src/headless.rs` | offscreen test platform: scripted input, PNG shots |
-| `src/winhook.rs` | window-proc subclass: full repaint on restore/activate, focus events |
+| `src/winhook.rs` | window-proc subclass: full repaint on restore/activate, focus events, re-applies the taskbar badge on `TaskbarButtonCreated` |
+| `src/badge.rs` | unread count as a taskbar overlay icon (`ITaskbarList3::SetOverlayIcon`, hand-rolled vtable; GDI-drawn red circle at the DPI's small-icon size) |
 | `src/link.rs` | URL detection in message text, opening links (clicks come from StyledText `link-clicked`) |
 | `src/avatar.rs` | profile/group photos (thread list + header 40px, next to group messages 28px as `m:<uuid>`): fetch (presage caches them forever, so profiles are refetched every 3 days and group photos when the path changes), crop round, cache `thumbs/av-*` |
 | `src/emoji.rs` | emoji-only message detection (grapheme clusters) |

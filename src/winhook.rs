@@ -65,7 +65,7 @@ unsafe extern "system" fn subclass_proc(
 ) -> windows_sys::Win32::Foundation::LRESULT {
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, WA_INACTIVE, WM_ACTIVATE, WM_SIZE,
+        SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, WA_INACTIVE, WM_ACTIVATE, WM_DPICHANGED, WM_SIZE,
     };
     match msg {
         WM_SIZE => match wparam as u32 {
@@ -89,10 +89,24 @@ unsafe extern "system" fn subclass_proc(
                 schedule_repaint();
             }
         }
+        WM_DPICHANGED => crate::badge::refresh(),
+        m if m == taskbar_created() => crate::badge::refresh(),
         _ => {}
     }
     // SAFETY: forwarding to the next handler in the subclass chain
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// "TaskbarButtonCreated": the taskbar button exists (again, after an Explorer restart).
+#[cfg(windows)]
+fn taskbar_created() -> u32 {
+    thread_local!(static ID: Cell<u32> = const { Cell::new(0) });
+    if ID.get() == 0 {
+        let name: Vec<u16> = "TaskbarButtonCreated".encode_utf16().chain(Some(0)).collect();
+        // SAFETY: NUL-terminated name
+        ID.set(unsafe { windows_sys::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW(name.as_ptr()) });
+    }
+    ID.get()
 }
 
 #[cfg(not(windows))]

@@ -2,6 +2,7 @@
 
 mod alloc;
 mod avatar;
+mod badge;
 mod backend;
 mod clip;
 mod picker;
@@ -294,7 +295,9 @@ fn apply(app: &AppWindow, ev: Event) {
         Event::LinkStatus(s) => app.set_link_status(s.into()),
         Event::Ready => app.set_page("main".into()),
         Event::Threads(list) => UI.with_borrow(|ui| {
-            app.set_total_unread(list.iter().map(|t| t.unread as i32).sum());
+            let total: u32 = list.iter().map(|t| t.unread).sum();
+            app.set_total_unread(total as i32);
+            badge::set_count(total);
             ui.threads.set_vec(list.iter().map(|t| thread_item(t, &ui.avatars)).collect::<Vec<_>>());
             header_avatar(app, ui);
         }),
@@ -1020,6 +1023,7 @@ fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
             }
         });
         tracing::info!(hwnd = h, hooked, "window hook");
+        badge::set_hwnd(h);
         if !hooked {
             // fallback: poll the foreground window
             let weak = app.as_weak();
