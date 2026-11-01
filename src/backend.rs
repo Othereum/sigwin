@@ -2316,7 +2316,9 @@ async fn deliver(m: &mut Mgr, thread: Thread, mut body: ContentBody, ts: u64, gr
                 ContentBody::EditMessage(EditMessage { data_message: Some(dm), .. }) => dm.group_v2 = Some(ctx),
                 _ => {}
             }
-            m.send_message_to_group(&key, body, ts).await?
+            let started = std::time::Instant::now();
+            m.send_message_to_group(&key, body, ts).await?;
+            debug!(ms = started.elapsed().as_millis() as u64, "group send done");
         }
     }
     Ok(())

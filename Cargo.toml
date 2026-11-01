@@ -86,6 +86,11 @@ i-slint-renderer-software = { path = "vendor/i-slint-renderer-software" }
 i-slint-core = { path = "vendor/i-slint-core" }
 libsqlite3-sys = { version = "0.36.0", git = "https://github.com/whisperfish/rusqlite", rev = "2a42b3354c9194700d08aa070f70a131a470e7dc" }
 
+# group sends go to the members concurrently instead of one round trip after another:
+# see vendor/libsignal-service, "sigwin patch". Same rev as presage pins (Cargo.lock).
+[patch."https://github.com/whisperfish/libsignal-service-rs"]
+libsignal-service = { path = "vendor/libsignal-service" }
+
 # keep debug builds usable: crypto is painfully slow unoptimized
 [profile.dev.package.sqlcipher-crypto-provider]
 opt-level = 3
