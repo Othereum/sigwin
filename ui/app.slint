@@ -51,6 +51,8 @@ export struct MsgItem {
     sticker: bool,
     receipt-info: string,
     pending: bool,
+    // the "someone is typing" bubble at the end of the list
+    typing: bool,
 }
 
 export struct MentionItem {
@@ -228,8 +230,8 @@ component Bubble inherits VerticalLayout {
     callback menu(string, length, length);
     padding-left: 16px;
     padding-right: 16px;
-    padding-top: m.show-sender || m.day-sep != "" ? 8px : 2px;
-    padding-bottom: 2px;
+    padding-top: m.show-sender || m.day-sep != "" || m.typing ? 8px : 2px;
+    padding-bottom: m.typing ? 8px : 2px;
     spacing: 4px;
     opacity: m.pending ? 0.6 : 1.0;
 
@@ -261,7 +263,43 @@ component Bubble inherits VerticalLayout {
         }
     }
 
-    if !m.system: HorizontalLayout {
+    // typing bubble: three dots lighting up in turn
+    if m.typing: HorizontalLayout {
+        alignment: start;
+        spacing: 8px;
+        if m.avatar-col: Avatar {
+            size: 28px;
+            initial: m.initial;
+            tint: m.sender-color;
+            photo: m.avatar;
+            has-photo: m.has-avatar;
+        }
+        dots := Rectangle {
+            border-radius: 14px;
+            background: Theme.bubble-in;
+            property <int> phase;
+            Timer {
+                interval: 350ms;
+                triggered => { dots.phase = Math.mod(dots.phase + 1, 4); }
+            }
+            HorizontalLayout {
+                padding: 11px;
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 5px;
+                alignment: center;
+                for i in 3: Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: Theme.subtle;
+                    opacity: dots.phase == i ? 1.0 : 0.4;
+                }
+            }
+        }
+    }
+
+    if !m.system && !m.typing: HorizontalLayout {
         alignment: m.outgoing ? end : start;
         spacing: 8px;
         if m.avatar-col: Rectangle {
@@ -715,8 +753,6 @@ export component AppWindow inherits Window {
     callback search-changed(string);
     callback unlink();
 
-    // who is typing in the open thread (shown in the header)
-    in property <string> typing-text;
     // the message being edited (banner above the composer)
     in property <string> edit-preview;
     callback cancel-edit();
@@ -870,8 +906,7 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         alignment: center;
                         Text { text: root.current-name; color: Theme.text; font-size: 15px; font-weight: 700; overflow: elide; }
-                        if root.typing-text != "": Text { text: root.typing-text; color: Theme.accent; font-size: 11.5px; overflow: elide; }
-                        if root.typing-text == "" && root.current-sub != "": Text { text: root.current-sub; color: Theme.subtle; font-size: 11.5px; overflow: elide; }
+                        if root.current-sub != "": Text { text: root.current-sub; color: Theme.subtle; font-size: 11.5px; overflow: elide; }
                     }
                 }
                 Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }

@@ -82,6 +82,36 @@ struct Ui {
     mention_rows: Vec<mention::Member>,
     /// members picked in the composer since it was last sent
     picked: Vec<mention::Member>,
+    /// who is typing in the open thread: (uuid, name), and whether it's a group
+    typing: Vec<(String, String)>,
+    typing_group: bool,
+    /// the last row of `messages` is the typing bubble (not in `last`)
+    typing_row: bool,
+}
+
+/// Put the typing bubble at the end of the message list, or take it away.
+fn sync_typing(ui: &mut Ui) {
+    if ui.typing_row {
+        let n = slint::Model::row_count(&*ui.messages);
+        if n > 0 {
+            ui.messages.remove(n - 1);
+        }
+        ui.typing_row = false;
+    }
+    let Some((uuid, name)) = ui.typing.first() else { return };
+    let avatar = if ui.typing_group { ui.sender_avatars.get(uuid).cloned() } else { None };
+    ui.messages.push(MsgItem {
+        id: "typing".into(),
+        typing: true,
+        avatar_col: ui.typing_group,
+        show_avatar: ui.typing_group,
+        has_avatar: avatar.is_some(),
+        avatar: avatar.unwrap_or_default(),
+        initial: initial(name).into(),
+        sender_color: tint(uuid),
+        ..Default::default()
+    });
+    ui.typing_row = true;
 }
 
 fn send_cmd(c: Command) {
@@ -218,6 +248,7 @@ fn to_item(m: &MsgDto, thumbs: &HashMap<String, Image>, senders: &HashMap<String
         sticker: m.sticker,
         receipt_info: m.receipt_info.as_str().into(),
         pending: m.pending,
+        typing: false,
     }
 }
 
@@ -316,6 +347,7 @@ fn apply(app: &AppWindow, ev: Event) {
                     ui.reply_to = None;
                     ui.picked.clear();
                     ui.mention_rows.clear();
+                    ui.typing.clear();
                     if ui.editing.take().is_some() {
                         app.set_draft(SharedString::new());
                     }
@@ -347,6 +379,8 @@ fn apply(app: &AppWindow, ev: Event) {
                 }
                 let dark = app.global::<Theme>().get_dark();
                 ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.sender_avatars, dark)).collect::<Vec<_>>());
+                ui.typing_row = false;
+                sync_typing(ui);
                 ui.last = items;
             });
             app.set_can_load_older(can_older);
@@ -383,6 +417,9 @@ fn apply(app: &AppWindow, ev: Event) {
                             slint::Model::set_row_data(&*ui.messages, i, row);
                         }
                     }
+                }
+                if ui.typing.first().is_some_and(|(u, _)| u == uuid) {
+                    sync_typing(ui);
                 }
                 return;
             }
@@ -447,7 +484,17 @@ fn apply(app: &AppWindow, ev: Event) {
             });
         }
         Event::Status(s) => app.set_status_text(s.into()),
-        Event::Typing(t) => app.set_typing_text(t.into()),
+        Event::Typing { group, who } => {
+            let near_bottom = app.get_near_bottom();
+            UI.with_borrow_mut(|ui| {
+                ui.typing = who;
+                ui.typing_group = group;
+                sync_typing(ui);
+            });
+            if near_bottom {
+                stick_to_bottom(app);
+            }
+        }
         Event::StickerPacks(list) => {
             if !app.get_sticker_open() {
                 return;
@@ -612,7 +659,7 @@ fn main() -> anyhow::Result<()> {
             let weak = app.as_weak();
             slint::Timer::single_shot(std::time::Duration::from_millis(400), move || {
                 let Some(app) = weak.upgrade() else { return };
-                app.set_typing_text("입력 중…".into());
+                apply(&app, Event::Typing { group: true, who: vec![("demo-a".into(), "김민준".into())] });
                 if what == "edit" {
                     app.invoke_edit_message("294".into());
                 } else {

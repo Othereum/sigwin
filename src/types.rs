@@ -150,8 +150,9 @@ pub enum Event {
     OpenStickerPanel(String),
     /// the clicked sticker's pack is not installed: ask, then InstallPackFromMessage(msg id)
     AskInstallPack(String),
-    /// who is typing in the open thread, empty when nobody
-    Typing(String),
+    /// who is typing in the open thread as (uuid, name), sorted; empty when nobody.
+    /// Shown as a "…" bubble at the end of the message list.
+    Typing { group: bool, who: Vec<(String, String)> },
 }
 
 pub enum Command {

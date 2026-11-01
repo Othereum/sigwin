@@ -1270,20 +1270,19 @@ impl App {
     }
 
     async fn emit_typing(&mut self) {
-        let mut who: Vec<Uuid> = self.typing.keys().copied().collect();
-        who.sort();
-        let is_group = self.current.as_ref().is_some_and(|o| o.is_group);
-        let text = match who.as_slice() {
-            [] => String::new(),
-            _ if !is_group => "입력 중…".into(),
-            [a] => format!("{} 입력 중…", self.name(*a).await),
-            [a, b] => format!("{}, {} 입력 중…", self.name(*a).await, self.name(*b).await),
-            many => format!("{}명이 입력 중…", many.len()),
-        };
-        if text != self.typing_shown {
-            self.typing_shown = text.clone();
-            (self.emit)(Event::Typing(text));
+        let mut ids: Vec<Uuid> = self.typing.keys().copied().collect();
+        ids.sort();
+        let group = self.current.as_ref().is_some_and(|o| o.is_group);
+        let key = ids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+        if key == self.typing_shown {
+            return;
         }
+        self.typing_shown = key;
+        let mut who = Vec::with_capacity(ids.len());
+        for u in ids {
+            who.push((u.to_string(), self.name(u).await));
+        }
+        (self.emit)(Event::Typing { group, who });
     }
 
     /// The composer changed: tell the open thread we are typing (or stopped).
