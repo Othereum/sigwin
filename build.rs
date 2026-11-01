@@ -13,7 +13,8 @@ fn main() {
         res.set_icon("assets/icon.ico");
         res.set_manifest_file("assets/app.manifest");
         res.set("ProductName", "Sigwin");
-        res.set("FileDescription", "Sigwin (unofficial Signal client)");
+        res.set("FileDescription", "Sigwin");
+        res.set("Comments", "Unofficial Signal-compatible desktop client");
         res.compile().expect("windows resource");
     }
 }
