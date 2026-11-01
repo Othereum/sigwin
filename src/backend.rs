@@ -81,6 +81,12 @@ struct Persist {
     /// the phone's "typing indicators" setting (configuration sync); None = not received yet
     #[serde(default)]
     typing_indicators: Option<bool>,
+    /// the phone's "read receipts" setting (configuration sync); None = not received yet
+    #[serde(default)]
+    read_receipts: Option<bool>,
+    /// thread key -> newest incoming message (sent ts) already marked read
+    #[serde(default)]
+    read_upto: HashMap<String, u64>,
     /// disappearing-message sweep progress per thread
     #[serde(default)]
     sweep: HashMap<String, SweepState>,
@@ -193,6 +199,8 @@ struct App {
     recv_task: Option<JoinHandle<()>>,
     /// delivery receipts to send, batched per sender
     pending_receipts: HashMap<ServiceId, Vec<u64>>,
+    /// incoming messages seen in the focused open thread: read receipts + read sync to our devices
+    pending_reads: Vec<(ServiceId, u64)>,
     /// threads whose photo was loaded (or is queued) this session
     avatars_done: HashSet<String>,
     avatars_running: bool,
@@ -289,6 +297,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         link_task: None,
         recv_task: None,
         pending_receipts: HashMap::new(),
+        pending_reads: Vec::new(),
         avatars_done: HashSet::new(),
         avatars_running: false,
         avatar_queue: Default::default(),
@@ -605,6 +614,11 @@ impl App {
                 let Some(sid) = ServiceId::parse_from_service_id_string(aci) else { continue };
                 if let Ok(Some(t)) = self.store.thread_for_sender_and_timestamp(&sid, ts).await {
                     let key = thread_key(&t);
+                    let upto = self.persist.read_upto.entry(key.clone()).or_default();
+                    if ts > *upto {
+                        *upto = ts;
+                        self.persist_dirty = true;
+                    }
                     if self.persist.unread.remove(&key).is_some() {
                         self.persist_dirty = true;
                         self.threads_dirty = true;
@@ -614,6 +628,11 @@ impl App {
         }
 
         if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Configuration(cfg)), .. }) = &c.body {
+            if let Some(on) = cfg.read_receipts {
+                info!(on, "read receipts setting");
+                self.persist.read_receipts = Some(on);
+                self.persist_dirty = true;
+            }
             if let Some(on) = cfg.typing_indicators {
                 info!(on, "typing indicators setting");
                 self.persist.typing_indicators = Some(on);
@@ -728,10 +747,12 @@ impl App {
             self.persist_dirty = false;
             self.save_persist();
         }
-        if !self.pending_receipts.is_empty() {
+        if !self.pending_receipts.is_empty() || !self.pending_reads.is_empty() {
             if let Some(m) = self.manager.clone() {
-                let batch = std::mem::take(&mut self.pending_receipts);
-                tokio::task::spawn_local(send_receipts(m, batch));
+                let delivered = std::mem::take(&mut self.pending_receipts);
+                let read = std::mem::take(&mut self.pending_reads);
+                let receipts = self.persist.read_receipts != Some(false);
+                tokio::task::spawn_local(send_receipts(m, delivered, read, receipts, self.me));
             }
         }
     }
@@ -957,10 +978,44 @@ impl App {
     }
 
     fn mark_read(&mut self, key: &str) {
-        if self.persist.unread.remove(key).is_some() {
+        let unread = self.persist.unread.remove(key);
+        if unread.is_some() {
             self.persist_dirty = true;
             self.threads_dirty = true;
         }
+        if self.focused {
+            self.queue_reads(key, unread.unwrap_or(0));
+        }
+    }
+
+    /// Queues read receipts for incoming messages in the open window newer than the thread's
+    /// watermark. Without a watermark (first time) only the last `unread` ones count.
+    fn queue_reads(&mut self, key: &str, unread: u32) {
+        let Some(open) = self.current.as_ref().filter(|o| o.key == key) else { return };
+        let me = self.me;
+        let incoming: Vec<(ServiceId, u64)> = open
+            .window
+            .iter()
+            .filter(|(_, c)| {
+                let s = c.metadata.sender.raw_uuid();
+                s != me && !s.is_nil() && matches!(view::classify(c, me), Kind::Msg { outgoing: false, .. })
+            })
+            .map(|(_, c)| (c.metadata.sender, c.timestamp()))
+            .collect();
+        let Some(newest) = incoming.iter().map(|(_, ts)| *ts).max() else { return };
+        let upto = self.persist.read_upto.get(key).copied();
+        if upto.is_some_and(|u| u >= newest) {
+            return;
+        }
+        match upto {
+            Some(u) => self.pending_reads.extend(incoming.into_iter().filter(|(_, ts)| *ts > u)),
+            None => {
+                let skip = incoming.len().saturating_sub(unread as usize);
+                self.pending_reads.extend(incoming.into_iter().skip(skip));
+            }
+        }
+        self.persist.read_upto.insert(key.to_string(), newest);
+        self.persist_dirty = true;
     }
 
     async fn fetch_range(&self, thread: &Thread, tss: &[u64]) -> anyhow::Result<Vec<(u64, Content)>> {
@@ -1764,19 +1819,62 @@ impl App {
     }
 }
 
-async fn send_receipts(mut m: Mgr, batch: HashMap<ServiceId, Vec<u64>>) {
-    for (to, timestamps) in batch {
-        let now = std::time::SystemTime::now()
+/// Delivery receipts, then read receipts (unless turned off on the phone) and one read sync
+/// to our other devices so they clear their unread state too.
+async fn send_receipts(
+    mut m: Mgr,
+    delivered: HashMap<ServiceId, Vec<u64>>,
+    read: Vec<(ServiceId, u64)>,
+    read_receipts: bool,
+    me: Uuid,
+) {
+    let now = || {
+        std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+            .unwrap_or(0)
+    };
+    for (to, timestamps) in delivered {
         let receipt = ReceiptMessage {
             r#type: Some(receipt_message::Type::Delivery as i32),
             timestamp: timestamps,
         };
-        if let Err(e) = Box::pin(m.send_message(to, receipt, now)).await {
+        if let Err(e) = Box::pin(m.send_message(to, receipt, now())).await {
             debug!("delivery receipt to {}: {e}", to.service_id_string());
         }
+    }
+    if read.is_empty() {
+        return;
+    }
+    if read_receipts {
+        let mut by_sender: HashMap<ServiceId, Vec<u64>> = HashMap::new();
+        for (to, ts) in &read {
+            by_sender.entry(*to).or_default().push(*ts);
+        }
+        for (to, timestamps) in by_sender {
+            debug!("read receipt to {} for {timestamps:?}", to.service_id_string());
+            let receipt = ReceiptMessage {
+                r#type: Some(receipt_message::Type::Read as i32),
+                timestamp: timestamps,
+            };
+            if let Err(e) = Box::pin(m.send_message(to, receipt, now())).await {
+                debug!("read receipt to {}: {e}", to.service_id_string());
+            }
+        }
+    }
+    let sync = SyncMessage {
+        read: read
+            .iter()
+            .map(|(sender, ts)| presage::proto::sync_message::Read {
+                sender_aci: Some(sender.service_id_string()),
+                timestamp: Some(*ts),
+                sender_aci_binary: Some(sender.raw_uuid().as_bytes().to_vec()),
+            })
+            .collect(),
+        ..Default::default()
+    };
+    if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, now())).await {
+        debug!("read sync: {e}");
     }
 }
 
