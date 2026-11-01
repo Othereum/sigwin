@@ -282,7 +282,7 @@ component Bubble inherits VerticalLayout {
     padding-left: 16px;
     padding-right: 16px;
     padding-top: m.show-sender || m.day-sep != "" || m.typing ? 8px : 2px;
-    padding-bottom: m.typing ? 8px : 2px;
+    padding-bottom: m.typing ? 8px : (m.outgoing && m.readers.length > 0 ? 12px : 2px);
     spacing: 4px;
     opacity: m.pending ? 0.6 : 1.0;
     // plain text: the time sits at the right of the last line instead of below
@@ -521,42 +521,54 @@ component Bubble inherits VerticalLayout {
                     }
                 }
             }
-        }
-    }
-    // who read it: overlapping round photos under the bubble (ringed in the pane color), "+N" for the rest
-    if m.outgoing && m.readers.length > 0: HorizontalLayout {
-        alignment: end;
-        padding-right: 4px;
-        spacing: 4px;
-        Rectangle {
-            width: 18px + (m.readers.length - 1) * 11px;
-            height: 18px;
-            for r[i] in m.readers: Rectangle {
-                x: i * 11px;
-                width: 18px;
+            // who read it: overlapping round photos straddling the bubble's bottom edge (ringed in the
+            // pane color), a "+N" circle for the rest; `Bubble.padding-bottom` makes room for the lower half
+            if m.outgoing && m.readers.length > 0: Rectangle {
+                x: parent.width - self.width - 8px;
+                y: parent.height - 9px;
+                width: 18px + (m.readers.length + (m.readers-more > 0 ? 1 : 0) - 1) * 11px;
                 height: 18px;
-                border-radius: 9px;
-                background: Theme.pane;
-                Avatar {
-                    x: 1px;
-                    y: 1px;
-                    size: 16px;
-                    initial: r.initial;
-                    tint: r.tint;
-                    photo: r.photo;
-                    has-photo: r.has-photo;
+                for r[i] in m.readers: Rectangle {
+                    x: i * 11px;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: Theme.pane;
+                    Avatar {
+                        x: 1px;
+                        y: 1px;
+                        size: 16px;
+                        initial: r.initial;
+                        tint: r.tint;
+                        photo: r.photo;
+                        has-photo: r.has-photo;
+                    }
+                }
+                if m.readers-more > 0: Rectangle {
+                    x: m.readers.length * 11px;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: Theme.pane;
+                    Rectangle {
+                        x: 1px;
+                        y: 1px;
+                        width: 16px;
+                        height: 16px;
+                        border-radius: 8px;
+                        background: Theme.hover;
+                        Text {
+                            text: "+" + m.readers-more;
+                            font-size: 9px;
+                            color: Theme.text;
+                        }
+                    }
+                }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.show-info(m.receipt-info); }
                 }
             }
-            TouchArea {
-                mouse-cursor: pointer;
-                clicked => { root.show-info(m.receipt-info); }
-            }
-        }
-        if m.readers-more > 0: Text {
-            text: "+" + m.readers-more;
-            font-size: 11px;
-            vertical-alignment: center;
-            color: Theme.subtle;
         }
     }
 }
