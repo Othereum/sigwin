@@ -134,7 +134,7 @@ pub(super) fn remove_files(c: &Content, ts: u64, attachments: &Path, thumbs: &Pa
 }
 
 pub(super) fn make_thumb(key: &str, orig: &Path, thumb: &Path, fit: u32) -> anyhow::Result<Thumb> {
-    make_thumb_from(key, || Ok(sigwin_vault::read(orig)?), THUMB_MAX, thumb, fit)
+    make_thumb_from(key, || Ok(sigwin_vault::read(orig)?), view::PHOTO_THUMB_MAX, thumb, fit)
 }
 
 /// A cached (encrypted) PNG.

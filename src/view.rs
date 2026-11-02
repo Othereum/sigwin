@@ -16,7 +16,13 @@ use presage::store::ContentExt;
 
 use crate::types::MsgDto;
 
+/// Decode size of stickers (also part of their cache file names).
 pub const THUMB_MAX: u32 = 400;
+/// Photo boxes in the chat, logical px (w, h): landscape and square vs portrait. A square comes out 300x300.
+const PHOTO_BOX_WIDE: (u32, u32) = (400, 300);
+const PHOTO_BOX_TALL: (u32, u32) = (300, 450);
+/// Decode size of photo thumbnails: the longest side a photo can show.
+pub const PHOTO_THUMB_MAX: u32 = PHOTO_BOX_TALL.1;
 /// DataMessage.Flags.EXPIRATION_TIMER_UPDATE
 const EXPIRATION_TIMER_UPDATE: u32 = 2;
 /// Signal accepts edits and deletes for everyone up to a day after sending.
@@ -550,10 +556,12 @@ fn day_label(dt: &DateTime<Local>) -> String {
 fn fit(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
     match (w, h) {
         (Some(w), Some(h)) if w > 0 && h > 0 => {
-            let s = (THUMB_MAX as f32 / w.max(h) as f32).min(1.0);
+            // scale into the box for its orientation, never up
+            let (bw, bh) = if h > w { PHOTO_BOX_TALL } else { PHOTO_BOX_WIDE };
+            let s = (bw as f32 / w as f32).min(bh as f32 / h as f32).min(1.0);
             (((w as f32 * s) as u32).max(40), ((h as f32 * s) as u32).max(40))
         }
-        _ => (THUMB_MAX, THUMB_MAX * 3 / 4),
+        _ => PHOTO_BOX_WIDE,
     }
 }
 
@@ -724,7 +732,8 @@ pub fn build(
                         let (w, h) = fit(a.width, a.height);
                         m.img_w = w;
                         m.img_h = h;
-                        wanted.push((key.clone(), a.clone(), 0));
+                        // pre-resample to the on-screen size (nearest-neighbor scaling is jagged)
+                        wanted.push((key.clone(), a.clone(), w.max(h)));
                         m.image_key = key;
                     } else if m.attachment.is_empty() {
                         m.attachment = attachment_label(a);
@@ -948,6 +957,19 @@ fn receipt_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn photo_size_caps() {
+        let f = |w, h| fit(Some(w), Some(h));
+        assert_eq!(f(3000, 3000), (300, 300)); // square
+        assert_eq!(f(4000, 3000), (400, 300)); // 4:3 unchanged
+        assert_eq!(f(3000, 4000), (300, 400)); // 3:4 is width-limited
+        assert_eq!(f(2000, 3000), (300, 450)); // 2:3
+        assert_eq!(f(900, 1600), (253, 450)); // 9:16
+        assert_eq!(f(1600, 900), (400, 225)); // 16:9 unchanged
+        assert_eq!(f(100, 100), (100, 100)); // never upscaled
+        assert_eq!(fit(None, None), (400, 300));
+    }
 
     #[test]
     fn mentions_become_names() {
