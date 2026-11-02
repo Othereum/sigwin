@@ -17,7 +17,7 @@
 - Images: decode to thumbnails (`THUMB_MAX` 260px, stickers in the picker 96px), cache them on disk under `thumbs/`. Keep `slint::Image`s only for what's on screen; clear them on thread switch or when the panel closes.
 - Animated sticker frames are decoded RGBA, so they're the costliest images: only for stickers shown on screen, all together under `ANIM_BUDGET` (24MB), and only the hovered sticker in the picker (`gui/anim.rs`).
 - Anything that loads heavy system DLLs (the file dialog) runs in a child process (`picker.rs`).
-- Measure, don't guess: the log prints `mem: rust heap …, private …` every 10s (`alloc.rs` counts Rust heap; the rest is native). `SIGWIN_DEMO=1 SIGWIN_SELFTEST=1` measures the dialog and notification cost.
+- Measure, don't guess: the log prints `mem: rust heap …, private …` every 10s at debug level (`sigwin=debug`; info only every 10 min, for users' log files) (`alloc.rs` counts Rust heap; the rest is native). `SIGWIN_DEMO=1 SIGWIN_SELFTEST=1` measures the dialog and notification cost.
 
 ## Build & run
 ```

@@ -380,7 +380,10 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
 
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // every 10s at debug (development); every 10 min at info, so the user's log file keeps a
+    // memory trend without being flooded
     let mut memtick = tokio::time::interval(Duration::from_secs(10));
+    let mut memticks = 0u32;
     let mut sweeptick = tokio::time::interval(SWEEP_EVERY);
     sweeptick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // relative times ("3분") in the thread list age
@@ -394,7 +397,14 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
             },
             Some(ev) = rx.recv() => Box::pin(app.internal(ev)).await,
             _ = tick.tick() => app.flush().await,
-            _ = memtick.tick() => info!("mem: {}", crate::alloc::report()),
+            _ = memtick.tick() => {
+                if memticks % 60 == 0 {
+                    info!("mem: {}", crate::alloc::report());
+                } else {
+                    debug!("mem: {}", crate::alloc::report());
+                }
+                memticks = memticks.wrapping_add(1);
+            }
             _ = sweeptick.tick() => app.sweep(),
             _ = agetick.tick() => {
                 let mut changed = false;
