@@ -273,15 +273,7 @@ mod win {
 
     pub fn uninstall(data_dir: &Path) {
         let Some(lay) = Layout::user() else { return };
-        let answer = message(
-            "Sigwin을 제거합니다.\n\n대화 기록과 계정 정보도 이 PC에서 삭제할까요?\n\n\
-             예: 모두 삭제\n아니요: 앱만 제거하고 데이터는 남겨 둡니다. 다시 설치하면 그대로 이어서 쓸 수 있습니다.",
-            MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2,
-        );
-        if answer == IDCANCEL || answer == 0 {
-            return;
-        }
-        let delete_data = answer == IDYES;
+        let Some(delete_data) = ask_uninstall() else { return };
         if !crate::instance::quit_running(data_dir) {
             message("실행 중인 Sigwin이 종료되지 않아 제거하지 못했습니다.\nSigwin을 닫은 뒤 다시 시도하세요.", MB_OK | MB_ICONERROR);
             return;
@@ -296,6 +288,70 @@ mod win {
                 "Sigwin을 제거했습니다.\n\n휴대폰 Signal 앱의 설정 > 연결된 기기에서도 Sigwin 연결을 해제하세요.",
                 MB_OK | MB_ICONINFORMATION,
             );
+        }
+    }
+
+    /// Some(delete the data too), or None for cancel.
+    fn ask_uninstall() -> Option<bool> {
+        const KEEP: i32 = 101;
+        const WIPE: i32 = 102;
+        let links = [
+            (KEEP, "앱만 제거\n대화 기록과 계정은 남겨 둡니다. 다시 설치하면 이어서 쓸 수 있습니다."),
+            (WIPE, "앱과 데이터 모두 삭제\n이 PC의 대화 기록과 계정 정보도 지웁니다."),
+        ];
+        match task_dialog("Sigwin을 제거합니다", &links) {
+            Some(choice) => choice.map(|id| id == WIPE),
+            None => {
+                // no common-controls v6: plain yes/no/cancel
+                let answer = message(
+                    "Sigwin을 제거합니다.\n\n대화 기록과 계정 정보도 이 PC에서 삭제할까요?\n\n\
+                     예: 모두 삭제\n아니요: 앱만 제거하고 데이터는 남겨 둡니다.",
+                    MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2,
+                );
+                (answer != IDCANCEL && answer != 0).then_some(answer == IDYES)
+            }
+        }
+    }
+
+    /// Command-link task dialog with a Cancel button; the first link is the default. Returns None
+    /// when `TaskDialogIndirect` is unavailable, Some(None) when cancelled.
+    fn task_dialog(instruction: &str, links: &[(i32, &str)]) -> Option<Option<i32>> {
+        use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+        use windows_sys::Win32::UI::Controls::{
+            TASKDIALOGCONFIG, TASKDIALOG_BUTTON, TDCBF_CANCEL_BUTTON, TDF_ALLOW_DIALOG_CANCELLATION,
+            TDF_USE_COMMAND_LINKS,
+        };
+        type Fn = unsafe extern "system" fn(*const TASKDIALOGCONFIG, *mut i32, *mut i32, *mut i32) -> i32;
+        let w = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+        let lib = w("comctl32.dll");
+        // SAFETY: the symbol has the documented TaskDialogIndirect signature; all pointers outlive the call
+        unsafe {
+            let h = LoadLibraryW(lib.as_ptr());
+            if h.is_null() {
+                return None;
+            }
+            let f: Fn = std::mem::transmute(GetProcAddress(h, c"TaskDialogIndirect".as_ptr().cast())?);
+            let texts: Vec<Vec<u16>> = links.iter().map(|l| w(l.1)).collect();
+            let buttons: Vec<TASKDIALOG_BUTTON> = links
+                .iter()
+                .zip(&texts)
+                .map(|(l, t)| TASKDIALOG_BUTTON { nButtonID: l.0, pszButtonText: t.as_ptr() })
+                .collect();
+            let (title, head) = (w("Sigwin"), w(instruction));
+            let mut cfg: TASKDIALOGCONFIG = std::mem::zeroed();
+            cfg.cbSize = std::mem::size_of::<TASKDIALOGCONFIG>() as u32;
+            cfg.dwFlags = TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION;
+            cfg.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+            cfg.pszWindowTitle = title.as_ptr();
+            cfg.pszMainInstruction = head.as_ptr();
+            cfg.cButtons = buttons.len() as u32;
+            cfg.pButtons = buttons.as_ptr();
+            cfg.nDefaultButton = links[0].0;
+            let mut picked = 0;
+            if f(&cfg, &mut picked, std::ptr::null_mut(), std::ptr::null_mut()) < 0 {
+                return None;
+            }
+            Some(links.iter().any(|l| l.0 == picked).then_some(picked))
         }
     }
 
