@@ -55,6 +55,7 @@ export component SettingsPage inherits Rectangle {
     callback changed();
     callback close();
     callback clear-thumbs();
+    callback open-logs();
     callback unlink();
     background: Theme.pane;
     // swallow clicks so nothing underneath reacts
@@ -185,6 +186,17 @@ export component SettingsPage inherits Rectangle {
                             Button {
                                 text: "비우기";
                                 clicked => { root.clear-thumbs(); }
+                            }
+                        }
+                    }
+                    SettingSection {
+                        title: "문제 해결";
+                        SettingRow {
+                            label: "로그 폴더";
+                            hint: "문제를 알릴 때 이 폴더의 파일을 함께 보내 주세요. 메시지 내용은 기록하지 않습니다.";
+                            Button {
+                                text: "열기";
+                                clicked => { root.open-logs(); }
                             }
                         }
                     }

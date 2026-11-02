@@ -16,6 +16,7 @@ mod install;
 mod instance;
 mod gui;
 mod link;
+mod logfile;
 mod mention;
 mod secret;
 mod settings;
@@ -62,8 +63,24 @@ fn main() -> anyhow::Result<()> {
         .add_directive("libsignal=warn".parse()?)
         .add_directive("presage=warn".parse()?)
         .add_directive("sqlx=error".parse()?);
-    tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
-    if std::env::args().any(|a| a == "--uninstall") {
+    // the uninstaller may delete the data folder, so it must not hold a file open in it
+    let uninstall = std::env::args().any(|a| a == "--uninstall");
+    let file = if uninstall {
+        None
+    } else {
+        logfile::LogFile::open(&data_dir()).map_err(|e| eprintln!("log file: {e}")).ok()
+    };
+    {
+        use tracing_subscriber::prelude::*;
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+            .with(file.map(|f| tracing_subscriber::fmt::layer().with_ansi(false).with_writer(f)))
+            .init();
+    }
+    logfile::install_panic_hook();
+    tracing::info!("Sigwin {} starting ({})", env!("CARGO_PKG_VERSION"), std::env::current_exe().unwrap_or_default().display());
+    if uninstall {
         install::uninstall(&data_dir());
         return Ok(());
     }
@@ -143,6 +160,12 @@ fn main() -> anyhow::Result<()> {
         }
     }
     app.on_restart_for_update(update::restart);
+    app.on_open_logs(|| {
+        let dir = logfile::dir(&data_dir());
+        if let Err(e) = std::process::Command::new("explorer").arg(&dir).spawn() {
+            tracing::warn!("open logs: {e}");
+        }
+    });
 
     let paste_dir = data_dir().join("paste");
     clip::clean(&paste_dir);

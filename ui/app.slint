@@ -86,6 +86,7 @@ export component AppWindow inherits Window {
     callback open-settings();
     callback settings-changed();
     callback clear-thumbs();
+    callback open-logs();
 
     // the message being edited (banner above the composer)
     in property <string> edit-preview;
@@ -679,6 +680,7 @@ export component AppWindow inherits Window {
         changed => { root.settings-changed(); }
         close => { root.settings-open = false; }
         clear-thumbs => { root.clear-thumbs(); }
+        open-logs => { root.open-logs(); }
         unlink => { root.unlink(); }
     }
 

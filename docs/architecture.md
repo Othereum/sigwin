@@ -26,12 +26,13 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/backend/stickers.rs` | sticker packs: picker thumbs, grids, sending, installing |
 | `src/backend/files.rs` | attachment / thumbnail caches (encrypted), opening attachments, `seal_legacy_files` |
 | `src/view.rs` | `Content` → `MsgDto` rows: folds reactions and edits, receipt status, day separators, snippets |
-| `src/db.rs` | own SQL on presage's DB: thread list by recency, timestamp paging, `ls_receipts` index |
+| `src/db.rs` | own SQL on presage's DB: thread list by recency, timestamp paging, `ls_receipts` index. Our `ls_*` tables are versioned in `ls_meta` (`SCHEMA`); their `CREATE` statements stay at version 1 and changes go through `migrate` steps, since auto-updates carry old DBs forward |
 | `src/types.rs` | `Command` / `Event` / DTOs crossing threads (all `Send`), thread keys `c:<uuid>` / `g:<hex>` |
 | `src/secret.rs` | random 256-bit DB key, stored DPAPI-protected (`db.key`) |
 | `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |
 | `src/instance.rs` | one process per data dir: a named event (`Local\Sigwin-<FNV hash of the dir>`); a second launch signals it (first comes to the front) and exits. A second `-quit` event lets the installer/uninstaller close a running app (normal exit path). Headless runs skip it |
 | `src/install.rs` | self-install: an exe run from outside `%LOCALAPPDATA%\Sigwin\` copies itself there (running copy renamed to `.old`), writes the HKCU Uninstall entry and a Start menu shortcut, starts the installed copy and exits; never overwrites a newer installed version (`DisplayVersion`). `--uninstall` asks (data kept by default), quits the app, removes registry/shortcut/files and self-deletes. Skipped for exes under this repo's `target\`, demo and headless |
+| `src/logfile.rs` | log file `<data>\logs\sigwin.log` (rotated to `.1` past 1MB) next to stderr, plus a panic hook; skipped for `--uninstall` (it may delete the data folder). Settings > 문제 해결 opens the folder |
 | `src/reg.rs` | HKCU registry helpers (set/get/delete) |
 | `src/update.rs` | self-update of the installed exe from GitHub Releases: own thread, a throwaway tokio runtime + reqwest per check (10s after start, then hourly by wall clock looked at every 5 min so sleep doesn't stall it, and on window focus once an hour has passed: `update::poke`; network failures retry after 5 min backing off to 1h; a release rejected by signature/missing asset is skipped until a newer tag); streams the exe to `sigwin.exe.new` while hashing, minisign check (trusted comment must be `sigwin <version>`), `self_replace`, then the sidebar restart bar. Restart spawns `--after <pid>` so the new process waits out the old one's instance lock. Release process: `docs/release.md` |
 | `src/clip.rs` | Ctrl+V: files (CF_HDROP) or images (PNG / DIB streamed to PNG under `paste/`) from the clipboard |
