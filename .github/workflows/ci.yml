@@ -5,7 +5,14 @@ name: ci
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "docs/**"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".claude/**"
+      - "scripts/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".github/workflows/release.yml"
 
 concurrency:
   group: ci
