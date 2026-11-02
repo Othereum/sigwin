@@ -401,6 +401,9 @@ fn update_visible_instances(
             debug_assert!(idx >= row_count);
             // Reached end of model with room to spare. Scroll up.
             content_y_value += listview_height - y;
+            // sigwin patch: move the layout start too, or the next pass lays out the same rows
+            // again and the view never scrolls up (upstream bug)
+            new_offset_y += listview_height - y;
             loop_count += 1;
             continue;
         }

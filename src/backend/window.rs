@@ -219,7 +219,6 @@ impl App {
                 m.pinned = true;
             }
         }
-        (self.emit)(Event::Pins(pins));
         let Some(open) = self.current.as_ref() else { return };
         for op in self.ops.iter().filter(|o| o.thread_key == key) {
             let row = op.row.to_string();
@@ -254,6 +253,9 @@ impl App {
         self.next_expiry = next_expiry;
         self.load_sender_avatars(&items);
         (self.emit)(Event::Messages { key, items, can_older, scroll });
+        // right after the rows (same UI turn): sent earlier, a thread switch showed the new
+        // thread's pin bar over the old rows for a frame
+        (self.emit)(Event::Pins(pins));
     }
 
     /// Emits the conversation header; returns the group members (empty for 1:1).

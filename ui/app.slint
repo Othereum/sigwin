@@ -184,6 +184,14 @@ export component AppWindow inherits Window {
     public function list-visible-height() -> length {
         return msg-list.visible-height;
     }
+    // a switched-to thread at the bottom from its first frame: the ListView lays out only when
+    // drawing, and the Flickable first clamps content-y to the (old thread's) content height.
+    // A huge content height avoids the clamp; past the end, the layout puts the last row at the
+    // bottom with real row heights above it (vendor patch) and sets both values right.
+    public function seek-end() {
+        msg-list.content-height = 10000000px;
+        msg-list.content-y = msg-list.visible-height - 10000000px;
+    }
     // prefetch within two screens of the top: rows inserted above the ones on screen keep the
     // view still, so a wheel scroll in progress never hits the top and waits
     public function check-older() {

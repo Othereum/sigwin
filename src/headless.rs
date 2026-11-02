@@ -40,6 +40,8 @@ enum Step {
     Type(String),
     Key(Vec<String>),
     Shot(String),
+    /// save every frame drawn from now on as `<dir>\NNNN.png`; empty: stop
+    Record(String),
 }
 
 fn parse(script: &str) -> anyhow::Result<Vec<Step>> {
@@ -86,6 +88,7 @@ fn parse(script: &str) -> anyhow::Result<Vec<Step>> {
             "type" => Step::Type(rest.to_string()),
             "key" => Step::Key(rest.split('+').map(|s| s.trim().to_string()).collect()),
             "shot" => Step::Shot(rest.to_string()),
+            "record" => Step::Record(rest.to_string()),
             _ => anyhow::bail!("unknown step: {line}"),
         });
     }
@@ -218,7 +221,7 @@ impl Platform for Headless {
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
         let w = self.window.borrow().clone().ok_or_else(|| PlatformError::Other("no window".into()))?;
-        let mut st = State { w, buf: Vec::new(), size: PhysicalSize::new(0, 0), scale: 1.0, logical: (1000.0, 680.0) };
+        let mut st = State { w, buf: Vec::new(), size: PhysicalSize::new(0, 0), scale: 1.0, logical: (1000.0, 680.0), record: None };
         loop {
             let Some(step) = self.steps.borrow_mut().pop_front() else { break };
             tracing::debug!(?step, "headless");
@@ -252,10 +255,24 @@ struct State {
     size: PhysicalSize,
     scale: f32,
     logical: (f32, f32),
+    /// `record`: target dir and frames saved so far
+    record: Option<(String, u32)>,
 }
 
 impl State {
     fn frame(&mut self) {
+        let drawn = self.draw();
+        if let (true, Some((dir, n))) = (drawn, self.record.as_mut()) {
+            let path = format!("{dir}\\{n:04}.png");
+            *n += 1;
+            if let Err(e) = self.save(&path) {
+                tracing::error!("headless record: {e:#}");
+            }
+        }
+    }
+
+    /// Draws if something changed; true when it did.
+    fn draw(&mut self) -> bool {
         let size = self.w.window().size();
         if size != self.size {
             self.size = size;
@@ -266,7 +283,7 @@ impl State {
         let buf = &mut self.buf;
         self.w.draw_if_needed(|r| {
             r.render(buf, width);
-        });
+        })
     }
 
     /// Runs the loop for `d` (at least one turn).
@@ -360,6 +377,12 @@ impl State {
                 self.idle(Duration::ZERO, pump);
                 self.save(&path)?;
                 tracing::info!(path, "headless shot");
+            }
+            Step::Record(dir) => {
+                if !dir.is_empty() {
+                    std::fs::create_dir_all(&dir)?;
+                }
+                self.record = (!dir.is_empty()).then_some((dir, 0));
             }
         }
         Ok(())

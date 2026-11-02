@@ -219,7 +219,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         items[i].pinned = true;
     }
     view::mark_runs(&mut items, true);
-    let pins = [(290usize, "이서연"), (150, "나")]
+    let pins: Vec<types::PinDto> = [(290usize, "이서연"), (150, "나")]
         .iter()
         .map(|&(i, who)| types::PinDto { id: i.to_string(), sender: who.into(), text: items[i].text.replace('\n', " ") })
         .collect();
@@ -275,7 +275,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), can_older: false, scroll: Scroll::Bottom });
         let notes = std::env::var("SIGWIN_DEMO_NOTIFY").ok().map(|v| demo_notify(emit.clone(), v.parse().unwrap_or(10)));
         // clicking another thread shows the same rows under its key (drafts follow the key)
-        let (emit, items) = (emit.clone(), items.clone());
+        let (emit, items, all_pins) = (emit.clone(), items.clone(), pins.clone());
         std::thread::spawn(move || {
             while let Some(c) = cmd_rx.blocking_recv() {
                 demo_frames(&emit, &c);
@@ -285,7 +285,13 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                     _ => None,
                 };
                 if let Some((key, msg)) = open {
-                    emit(Event::Messages { key, items: items.clone(), can_older: false, scroll: Scroll::Bottom });
+                    // threads differ in length, like real ones (scroll positions don't carry over)
+                    let n: usize = key.trim_start_matches("c:demo-").parse().unwrap_or(1);
+                    let items = if n == 1 { items.clone() } else { items[items.len() - (10 + n * 7).min(items.len())..].to_vec() };
+                    // pins only in the first thread, sent after the rows like App::emit_messages
+                    let pins = if key == "c:demo-1" { all_pins.clone() } else { Vec::new() };
+                    emit(Event::Messages { key, items, can_older: false, scroll: Scroll::Bottom });
+                    emit(Event::Pins(pins));
                     if let Some(m) = msg {
                         emit(Event::JumpTo(m.to_string()));
                     }

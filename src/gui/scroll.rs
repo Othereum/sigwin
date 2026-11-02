@@ -142,6 +142,10 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, can_older: bool, sc
         ui.last = items;
     });
     app.set_can_load_older(can_older);
+    if rebuild && scroll == Scroll::Bottom {
+        // otherwise the first frames lay out from the old thread's position
+        app.invoke_seek_end();
+    }
     match scroll {
         Scroll::Bottom => stick_to_bottom(app),
         Scroll::KeepIfNotAtBottom if near_bottom => stick_to_bottom(app),
