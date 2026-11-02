@@ -3290,6 +3290,15 @@ impl<T: ProcessScene> sharedparley::GlyphRenderer for SceneBuilder<'_, T> {
             rounded.origin.y = (physical_rect.origin.y + physical_rect.size.height / 2.0 - 0.5).round();
             rounded.size.height = 1.0;
         }
+        // sigwin patch: a fill far down a very tall text (selection, cursor, underline past
+        // 32767px) overflowed the i16 cast and panicked; cut it to the clip first
+        let clip_f = (self.current_state.clip.translate(self.current_state.offset.to_vector()).cast()
+            * self.scale_factor)
+            .round();
+        if rounded.try_cast::<i16>().is_none() {
+            let Some(r) = rounded.intersection(&clip_f) else { return };
+            rounded = r;
+        }
         let geometry: PhysicalRect = rounded.cast().transformed(self.rotation);
         // These fills reach the processor directly rather than through `draw_rectangle`, so they
         // have to bring the clip along themselves. Without it a text decoration, a selection

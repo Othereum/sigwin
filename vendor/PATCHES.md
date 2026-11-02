@@ -12,6 +12,7 @@ Re-vendor the matching version together with `i-slint-core` when upgrading Slint
 - Glyphs are rasterized with swash `Source::ColorOutline(0)` first and drawn as premultiplied RGBA images. That gives inline color emoji in all text from the COLR v0 layers that Segoe UI Emoji still ships (flat style).
 - Turns on TrueType **hinting** and a DirectWrite-style **enhanced contrast** curve (k=0.5) on glyph coverage. Without them, small Malgun Gothic text looked blurry and thin on dark backgrounds compared with native apps (compared at 3x zoom; k=0.75 looked too bold). `SIGWIN_HINT=0` / `SIGWIN_CONTRAST=<k>` override at runtime.
 - Keeps sub-pixel `fill_rectangle`s (text underlines) at least 1px: rounding both edges dropped the underline on every other line.
+- `fill_rectangle` cuts a fill to the clip before its i16 cast when it would overflow: a selection, cursor or underline past 32767px down a very tall text (a composer with thousands of lines, an expanded long message) panicked in euclid's `cast`. Upstream bug, still in 1.18.1.
 - Applies fontique's synthetic italic skew (`with_skew`; upstream ignored `Synthesis`, and Malgun Gothic has no italic).
 
 ## `vendor/i-slint-core` (Slint 1.18.1)
