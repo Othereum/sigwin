@@ -82,6 +82,9 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
 
 /// Synthetic data for checking layout and memory without a Signal account.
 pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Command>) {
+    if std::env::var_os("SIGWIN_DEMO_REAL").is_some() {
+        return demo_real(emit, cmd_rx);
+    }
     let threads: Vec<ThreadDto> = (0..40)
         .map(|i| ThreadDto {
             key: format!("c:demo-{i}"),
@@ -511,5 +514,84 @@ pub(crate) fn demo_stickers(emit: backend::Emit) {
         let mut thumbs: Vec<_> = (0..20u32).map(|i| demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8)).collect();
         thumbs.push(demo_blob("sp_p1_0", 96, 200));
         emit(Event::StickerThumbs(thumbs));
+    });
+}
+
+/// `SIGWIN_DEMO_REAL=1`: a believable chat list and conversation (for README screenshots).
+fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Command>) {
+    let th = |i: usize, name: &str, snippet: &str, time: &str, unread: u32, is_group: bool| ThreadDto {
+        key: format!("c:demo-{i}"),
+        name: name.into(),
+        snippet: snippet.into(),
+        time: time.into(),
+        ts: 0,
+        unread,
+        is_group,
+    };
+    let threads = vec![
+        th(1, "이서연", "그럼 토요일 11시에 합정역에서 봐요!", "오후 6:42", 0, false),
+        th(2, "가족 단톡방", "엄마: 이번 주말에 다들 올 수 있지?", "오후 5:58", 2, true),
+        th(3, "김민준", "사진 보냈어요", "오후 2:10", 0, false),
+        th(4, "프로젝트 팀", "박지훈: 리뷰 올렸습니다", "오전 11:30", 0, true),
+        th(5, "박지훈", "넵 확인했습니다", "어제", 0, false),
+        th(6, "최유나", "고마워요 :)", "어제", 0, false),
+        th(7, "독서 모임", "다음 책은 뭐로 할까요?", "11월 1일", 0, true),
+        th(8, "Alice Kim", "See you next week!", "10월 31일", 0, false),
+        th(9, "권준영", "ㅋㅋㅋㅋ 인정", "10월 29일", 0, false),
+    ];
+    let chat: [(bool, &str, &str); 14] = [
+        (false, "주말에 시간 돼요?", "오후 6:20"),
+        (true, "네 토요일 괜찮아요! 뭐 할까요?", "오후 6:21"),
+        (false, "전에 말했던 전시 보러 가요. 합정에 새로 생긴 갤러리인데 평이 좋더라고요", "오후 6:23"),
+        (true, "좋아요 👍", "오후 6:25"),
+        (true, "점심 먹고 갈까요, 아니면 보고 나서 먹을까요?", "오후 6:25"),
+        (false, "보고 나서 먹어요. 근처에 맛있는 파스타집 봐 뒀어요 🍝", "오후 6:31"),
+        (true, "완벽하네요", "오후 6:32"),
+        (false, "그럼 토요일 11시에 합정역에서 봐요!", "오후 6:42"),
+        (true, "네 그때 봬요 😊", "오후 6:42"),
+        (false, "참, 우산 챙겨요. 토요일에 비 온대요", "오후 6:44"),
+        (true, "헉 알려줘서 고마워요 ☔", "오후 6:45"),
+        (false, "ㅋㅋ 별말씀을", "오후 6:45"),
+        (true, "혹시 늦으면 연락할게요", "오후 6:46"),
+        (false, "넵 천천히 와요~", "오후 6:46"),
+    ];
+    let base = 1_762_000_000_000u64;
+    let mut items: Vec<MsgDto> = chat
+        .iter()
+        .enumerate()
+        .map(|(i, &(outgoing, text, time))| MsgDto {
+            id: i.to_string(),
+            ts: base + i as u64 * 60_000,
+            sender: if outgoing { String::new() } else { "이서연".into() },
+            sender_key: if outgoing { String::new() } else { "demo-a".into() },
+            text: text.into(),
+            time: time.into(),
+            outgoing,
+            status: if outgoing { "✓✓".into() } else { String::new() },
+            can_edit: outgoing,
+            can_delete: outgoing,
+            day_sep: if i == 0 { "2026년 11월 3일 화요일".into() } else { String::new() },
+            ..Default::default()
+        })
+        .collect();
+    items[3].reactions = vec![("❤️".into(), 1)];
+    items[10].reactions = vec![("😂".into(), 1)];
+    for m in items.iter_mut() {
+        m.big_emoji = emoji::only_emoji(&m.text, 5).is_some();
+    }
+    view::mark_runs(&mut items, false);
+    emit(Event::Ready);
+    emit(Event::Threads(threads));
+    emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
+    emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), can_older: false, scroll: Scroll::Bottom });
+    emit(Event::Pins(Vec::new()));
+    emit(Event::Account { name: "홍길동".into(), number: "+821012345678".into(), device: "Sigwin".into(), receipts: Some(true), typing: None });
+    std::thread::spawn(move || {
+        while let Some(c) = cmd_rx.blocking_recv() {
+            if let Command::OpenThread(key) = c {
+                emit(Event::Messages { key, items: items.clone(), can_older: false, scroll: Scroll::Bottom });
+                emit(Event::Pins(Vec::new()));
+            }
+        }
     });
 }
