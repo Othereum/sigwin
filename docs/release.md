@@ -2,23 +2,22 @@
 
 ## Publishing
 1. Bump `version` in `Cargo.toml` (and `Cargo.lock` via `cargo build`), commit.
-2. `git tag v<version>` and push the tag. `.github/workflows/release.yml` builds `--release`,
-   signs `sigwin.exe` with minisign (trusted comment `sigwin <version>`) and creates the GitHub
-   release with `sigwin.exe` + `sigwin.exe.minisig`.
+2. Push `main`, then run the `release` workflow on `main` (Actions > release > Run workflow, or
+   `gh workflow run release.yml`). It builds `--release`, signs `sigwin.exe` with minisign
+   (trusted comment `sigwin <version>`) and creates tag `v<version>` plus the GitHub release
+   with `sigwin.exe` + `sigwin.exe.minisig`. It fails if that release already exists.
 3. Installed apps check `releases/latest` 10s after start, then hourly (and when the window
    gains focus after an hour without a check), download and verify the exe, swap it in, and
    show "새 버전 … 준비됨 · 다시 시작" in the sidebar. Network failures retry after 5 min,
    backing off to an hour.
 
-A tag run can restore only caches saved on `main`, never another tag's: `.github/workflows/ci.yml`
-builds `--release` on every push to `main` to keep that cache warm. Push `main` and let it
-finish before tagging, or the release rebuilds every dependency.
+The workflow runs on `main`, so it restores and saves the same cache as `.github/workflows/ci.yml`
+(shared key `release`): no need to wait for CI before releasing.
 
-The tag must match `Cargo.toml` or the workflow fails. Only versions greater than the running
-one are installed, so a bad release is fixed by releasing a higher version, never by
-re-tagging. A release the app rejects (signature mismatch, missing `sigwin.exe` or
-`.minisig`) is skipped until a newer tag appears; it is remembered only until the app
-restarts, so each running app downloads a broken release at most once per launch.
+Only versions greater than the running one are installed, so a bad release is fixed by releasing
+a higher version, never by re-tagging. A release the app rejects (signature mismatch, missing
+`sigwin.exe` or `.minisig`) is skipped until a newer tag appears; it is remembered only until the
+app restarts, so each running app downloads a broken release at most once per launch.
 
 ## License notices
 The workflow generates third-party notices with `cargo about` (`build-support/about.toml`:

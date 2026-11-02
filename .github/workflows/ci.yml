@@ -1,5 +1,5 @@
-# Release build on every push to main. Its cache is the only one tag runs
-# (release.yml) can restore: without it each release rebuilds every dependency.
+# Release build on every push to main: catches build breaks and keeps main's cache
+# warm for release.yml (which also runs on main).
 name: ci
 
 on:
