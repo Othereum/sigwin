@@ -56,6 +56,19 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     app.on_send(move |text| {
         let Some(app) = weak.upgrade() else { return };
+        // before anything is cleared: the text stays in the composer to shorten
+        // (mentions and format markers only shrink it, so this never refuses what would fit)
+        if text.len() > crate::view::MAX_LONG_TEXT_BYTES {
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title("메시지가 너무 깁니다")
+                .set_description(format!(
+                    "한 메시지는 64KB까지 보낼 수 있습니다. 지금 {}KB입니다.\n나눠서 보내 주세요.",
+                    text.len().div_ceil(1024)
+                ))
+                .show();
+            return;
+        }
         if let Some(id) = UI.with_borrow_mut(|ui| ui.editing.take()) {
             if text.trim().is_empty() {
                 UI.with_borrow_mut(|ui| ui.editing = Some(id));
