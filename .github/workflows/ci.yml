@@ -1,0 +1,34 @@
+# Release build on every push to main. Its cache is the only one tag runs
+# (release.yml) can restore: without it each release rebuilds every dependency.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
+
+concurrency:
+  group: ci
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+
+      # LLVM and CMake come with the runner image
+      - name: Install protoc and NASM
+        shell: pwsh
+        run: |
+          choco install protoc nasm -y --no-progress
+          "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: Build
+        run: cargo build --release --locked

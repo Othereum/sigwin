@@ -10,6 +10,10 @@
    show "새 버전 … 준비됨 · 다시 시작" in the sidebar. Network failures retry after 5 min,
    backing off to an hour.
 
+A tag run can restore only caches saved on `main`, never another tag's: `.github/workflows/ci.yml`
+builds `--release` on every push to `main` to keep that cache warm. Push `main` and let it
+finish before tagging, or the release rebuilds every dependency.
+
 The tag must match `Cargo.toml` or the workflow fails. Only versions greater than the running
 one are installed, so a bad release is fixed by releasing a higher version, never by
 re-tagging. A release the app rejects (signature mismatch, missing `sigwin.exe` or
@@ -25,7 +29,7 @@ release is embedded) and publishes `licenses.html` with the release. Settings > 
 오픈소스 라이선스 opens the embedded copy. A new dependency under a license not in `accepted`
 fails the release: check it, then add it. Locally:
 `cargo about generate -c build-support/about.toml build-support/about.hbs -o target/licenses.html`
-(`cargo install cargo-about --features cli`).
+(`cargo install cargo-about --features cli`; CI downloads the pinned 0.9.3 binary).
 
 ## Signing key
 - Public key: `PUBLIC_KEY` in `src/update.rs`. Secret key: the `MINISIGN_KEY` repository

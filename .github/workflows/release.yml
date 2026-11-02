@@ -18,7 +18,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # tag runs can't see each other's caches, only main's: ci.yml keeps that one warm
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+          save-if: false
 
       - name: Check the tag matches Cargo.toml
         shell: pwsh
@@ -38,8 +42,11 @@ jobs:
       - name: Generate license notices
         shell: pwsh
         run: |
-          cargo install cargo-about --version 0.9.3 --locked --features cli
-          cargo about generate -c build-support/about.toml build-support/about.hbs -o licenses.html
+          Invoke-WebRequest https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.3/cargo-about-0.9.3-x86_64-pc-windows-msvc.tar.gz -OutFile cargo-about.tar.gz
+          $hash = (Get-FileHash cargo-about.tar.gz -Algorithm SHA256).Hash
+          if ($hash -ne "9E2942533EF1C592C4A70BDB384CAE1550A3F5FC9AE40379B6662E3D2F16FE02") { throw "cargo-about.tar.gz checksum $hash" }
+          tar -xzf cargo-about.tar.gz
+          .\cargo-about-0.9.3-x86_64-pc-windows-msvc\cargo-about.exe generate -c build-support/about.toml build-support/about.hbs -o licenses.html
           if ($LASTEXITCODE -ne 0) { throw "cargo about failed" }
           "SIGWIN_LICENSES=$PWD\licenses.html" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
