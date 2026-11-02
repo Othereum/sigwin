@@ -5,6 +5,7 @@
 ## Where things live
 - `docs/architecture.md`: thread model and per-file roles. Read before touching an unfamiliar module.
 - `docs/headless.md`: demo modes and headless UI verification (steps, syntax).
+- `docs/release.md`: publishing a release, the update signing key.
 - `docs/decisions.md`: measurements and rejected approaches (renderer comparison, DirectWrite emoji).
 - `vendor/PATCHES.md`: every vendor hunk and how to re-apply it.
 - `.claude/rules/presage.md`, `.claude/rules/slint.md`: gotchas, loaded automatically when you work on the matching files. Read them before changing backend/view/db or `ui/`.

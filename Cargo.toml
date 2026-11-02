@@ -50,6 +50,8 @@ png = "0.18"
 sigwin-thumb = { path = "crates/thumb" }
 # encrypted attachment/thumbnail cache files: own crate for the same reason
 sigwin-vault = { path = "crates/vault" }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+minisign-verify = "0.3.0"
 
 [workspace]
 members = ["crates/thumb", "crates/vault"]
@@ -82,10 +84,6 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
-# unoptimized ML-KEM can stack-overflow when decrypting PQXDH prekey messages
-[profile.dev.package.libcrux-ml-kem]
-opt-level = 3
-
 [profile.release]
 opt-level = 3
 lto = "thin"
@@ -105,16 +103,12 @@ libsqlite3-sys = { version = "0.36.0", git = "https://github.com/whisperfish/rus
 [patch."https://github.com/whisperfish/libsignal-service-rs"]
 libsignal-service = { path = "vendor/libsignal-service" }
 
-# keep debug builds usable: crypto is painfully slow unoptimized
-[profile.dev.package.sqlcipher-crypto-provider]
-opt-level = 3
-[profile.dev.package.aes]
-opt-level = 3
+[dev-dependencies]
+blake2 = "0.10"
+ed25519-dalek = "3.0.0"
 [profile.dev.package.sha2]
 opt-level = 3
 [profile.dev.package.image]
-opt-level = 3
-[profile.dev.package.zune-jpeg]
 opt-level = 3
 [profile.dev.package.sigwin-thumb]
 opt-level = 3
@@ -128,7 +122,3 @@ inherits = "release"
 lto = false
 codegen-units = 16
 incremental = true
-# this crate holds the huge slint-generated UI code: compile it lightly (dependencies stay optimized).
-# Pixel loops go in crates/thumb, which this doesn't cover.
-[profile.fast.package.sigwin]
-opt-level = 0

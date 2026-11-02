@@ -80,6 +80,9 @@ export component AppWindow inherits Window {
     in property <string> account-phone;
     in property <string> storage-text;
     in property <string> version;
+    // a newer version replaced the exe; restart to use it
+    in property <string> update-version;
+    callback restart-for-update();
     callback open-settings();
     callback settings-changed();
     callback clear-thumbs();
@@ -252,6 +255,35 @@ export component AppWindow inherits Window {
                         clicked => {
                             root.settings-open = false;
                             root.open-thread(t.key);
+                        }
+                    }
+                }
+                if root.update-version != "": Rectangle {
+                    height: 38px;
+                    background: upd-ta.has-hover ? Theme.hover : Theme.sidebar;
+                    Rectangle { y: 0; height: 1px; background: Theme.border; }
+                    upd-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.restart-for-update(); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        Text {
+                            text: "새 버전 " + root.update-version + " 준비됨";
+                            color: Theme.text;
+                            font-size: 12.5px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: "다시 시작";
+                            color: Theme.accent;
+                            font-size: 12.5px;
+                            font-weight: 600;
+                            vertical-alignment: center;
                         }
                     }
                 }

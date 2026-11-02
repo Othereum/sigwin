@@ -21,6 +21,7 @@ mod secret;
 mod settings;
 mod toast;
 mod types;
+mod update;
 mod view;
 mod winhook;
 
@@ -66,8 +67,10 @@ fn main() -> anyhow::Result<()> {
         install::uninstall(&data_dir());
         return Ok(());
     }
+    // started by the update restart: the old process still holds the instance lock briefly
+    update::wait_for_previous();
     headless::install_if_requested()?;
-    let demo = std::env::var_os("SIGWIN_DEMO").is_some();
+    let demo =std::env::var_os("SIGWIN_DEMO").is_some();
     if !headless::active() && !demo && !install::run(&data_dir()) {
         return Ok(());
     }
@@ -132,7 +135,14 @@ fn main() -> anyhow::Result<()> {
         demo::start(&app, emit, cmd_rx);
     } else {
         let _backend = backend::spawn(data_dir(), cmd_rx, emit);
+        if let Some(exe) = install::installed_self() {
+            let weak = app.as_weak();
+            update::spawn(exe, move |v| {
+                let _ = weak.upgrade_in_event_loop(move |app| app.set_update_version(v.into()));
+            });
+        }
     }
+    app.on_restart_for_update(update::restart);
 
     let paste_dir = data_dir().join("paste");
     clip::clean(&paste_dir);

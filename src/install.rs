@@ -22,6 +22,14 @@ pub fn run(data_dir: &Path) -> bool {
     }
 }
 
+/// The running exe when it is the installed copy (the only one that updates itself).
+pub fn installed_self() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    return win::installed_self();
+    #[cfg(not(windows))]
+    None
+}
+
 /// `sigwin.exe --uninstall`.
 pub fn uninstall(data_dir: &Path) {
     #[cfg(windows)]
@@ -31,7 +39,7 @@ pub fn uninstall(data_dir: &Path) {
 }
 
 /// "1.2.3" -> [1, 2, 3]; a pre-release suffix is ignored.
-fn version(v: &str) -> Vec<u64> {
+pub fn version(v: &str) -> Vec<u64> {
     v.split(['-', '+']).next().unwrap_or("").split('.').map(|p| p.trim().parse().unwrap_or(0)).collect()
 }
 
@@ -93,6 +101,12 @@ mod win {
         let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
         let (exe, target) = (exe.to_string_lossy().to_lowercase(), target.to_string_lossy().to_lowercase());
         exe.starts_with(&target)
+    }
+
+    pub fn installed_self() -> Option<PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        let lay = Layout::user()?;
+        (!is_dev_build(&exe) && same_path(&exe, &lay.exe)).then_some(lay.exe)
     }
 
     pub fn run(data_dir: &Path) -> bool {

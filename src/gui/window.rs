@@ -156,6 +156,9 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
         let hooked = winhook::install(&app, h, move |f| {
             if f != l2.get() {
                 l2.set(f);
+                if f {
+                    crate::update::poke();
+                }
                 s2(Command::WindowFocus(f));
             }
         });
@@ -171,6 +174,9 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
                 let f = is_foreground(&app);
                 if f != last.get() {
                     last.set(f);
+                    if f {
+                        crate::update::poke();
+                    }
                     s(Command::WindowFocus(f));
                 }
             });
