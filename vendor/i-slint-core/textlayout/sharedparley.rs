@@ -287,7 +287,8 @@ fn link_in_layout(layout: &Layout, cursor: PhysicalPoint) -> Option<std::string:
                 link_range.geometry_with(&paragraph.layout, |mut bounding_box, _line| {
                     bounding_box.y0 += paragraph_y;
                     bounding_box.y1 += paragraph_y;
-                    clicked = bounding_box.union(parley::BoundingBox::new(
+                    // sigwin patch: `|=`, a link wrapped over several lines was clickable on its last line only
+                    clicked |= bounding_box.union(parley::BoundingBox::new(
                         cursor.x.into(),
                         cursor.y.into(),
                         cursor.x.into(),
