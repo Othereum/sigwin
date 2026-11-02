@@ -13,9 +13,9 @@
    show "새 버전 … 준비됨 · 다시 시작" in the sidebar. Network failures retry after 5 min,
    backing off to an hour.
 
-Releases are built locally on purpose: CI took ~17 min (the release build alone ~10 min even
-with a warm cache) and would need the key in a GitHub secret. `.github/workflows/ci.yml` only
-checks that `main` builds. Should CI releasing ever come back, `GITHUB_TOKEN` can't create a tag
+Releases are built locally on purpose: the CI workflow took ~17 min (the release build alone
+~10 min even with a warm cache) and needed the key in a GitHub secret; there is no CI now. Should
+CI releasing ever come back (see git history for `release.yml`), `GITHUB_TOKEN` can't create a tag
 on a commit that changes `.github/workflows/` (403 "Resource not accessible by integration"),
 and its key would have to be a password-less copy in a repository secret.
 
