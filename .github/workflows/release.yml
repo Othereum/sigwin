@@ -33,6 +33,8 @@ jobs:
           gh release view "v$v" *> $null
           if ($LASTEXITCODE -eq 0) { throw "release v$v already exists: bump the version" }
           "VERSION=$v" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          # gh exits 1 when the release is absent (expected): don't let pwsh report it
+          exit 0
 
       # LLVM and CMake come with the runner image
       - name: Install protoc and NASM
