@@ -58,6 +58,7 @@ impl App {
             text: text.clone(),
             quote: quote_label,
             quote_author,
+            quote_id: quote.as_ref().and_then(|q| q.id).map(|i| i.to_string()).unwrap_or_default(),
             attachment,
             image_key: String::new(),
             error: None,
@@ -171,6 +172,7 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     (m.text, m.styles) = crate::format::parse(&p.text);
     m.quote = p.quote.clone();
     m.quote_author = p.quote_author.clone();
+    m.quote_id = p.quote_id.clone();
     m.attachment = p.attachment.clone();
     if !p.image_key.is_empty() {
         m.image_key = p.image_key.clone();

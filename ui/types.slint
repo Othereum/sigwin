@@ -51,6 +51,8 @@ export struct MsgItem {
     readers-more: int,
     quote: string,
     quote-author: string,
+    // sent timestamp of the quoted message (empty: not clickable)
+    quote-id: string,
     reactions: [ReactionItem],
     big-emoji: bool,
     attachment: string,

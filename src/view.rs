@@ -715,6 +715,7 @@ pub fn build(
                         .map(|t| with_mentions(t, &q.body_ranges, name_of))
                         .unwrap_or_else(|| "(첨부파일)".into());
                     m.quote_author = quote_author_name(q, me, name_of);
+                    m.quote_id = q.id.map(|i| i.to_string()).unwrap_or_default();
                 }
                 let mut others = 0;
                 for (i, a) in shown_attachments(dm) {

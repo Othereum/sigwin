@@ -359,8 +359,8 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let s = send.clone();
     let weak = app.as_weak();
     let demo = std::env::var_os("SIGWIN_DEMO").is_some();
-    app.on_pin_clicked(move |id| match weak.upgrade() {
-        // no backend: demo pin ids are row ids
+    app.on_show_message(move |id| match weak.upgrade() {
+        // no backend: demo pin and quote ids are row ids
         Some(app) if demo => jump_to_row(&app, id.to_string()),
         _ => s(Command::JumpTo(id.to_string())),
     });

@@ -111,8 +111,8 @@ export component AppWindow inherits Window {
     // pinned messages of the open thread (newest first); the bar shows pins[pin-index]
     in property <[PinItem]> pins;
     in-out property <int> pin-index;
-    // the bar was clicked: scroll to that message
-    callback pin-clicked(string);
+    // scroll to the message with this sent timestamp (pin bar, quote in a reply)
+    callback show-message(string);
     callback unpin(string);
     // jump to a row: whenever jump-probe changes, the row with this id (if instantiated) reports
     // where it is on screen (0 = top of the list). Its y and content-y are read together because
@@ -342,7 +342,7 @@ export component AppWindow inherits Window {
                 pin-ta := TouchArea {
                     mouse-cursor: pointer;
                     clicked => {
-                        root.pin-clicked(root.pins[idx].id);
+                        root.show-message(root.pins[idx].id);
                         // like the official apps: each click moves on to the next (older) pin
                         root.pin-index = Math.mod(idx + 1, root.pins.length);
                     }
@@ -435,6 +435,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         attachment-clicked(id) => { root.attachment-clicked(id); }
+                        quote-clicked(id) => { root.show-message(id); }
                         reply(id) => { root.reply(id); }
                         show-info(t) => { root.info-text = t; }
                         menu(id, x, y) => { root.open-menu(id, x, y); }

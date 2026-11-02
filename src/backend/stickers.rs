@@ -223,6 +223,7 @@ impl App {
             text: String::new(),
             quote: String::new(),
             quote_author: String::new(),
+            quote_id: String::new(),
             attachment: String::new(),
             image_key: image_key.clone(),
             error: None,

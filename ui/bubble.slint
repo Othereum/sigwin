@@ -137,6 +137,8 @@ export component Bubble inherits VerticalLayout {
     // briefly outlined after jumping to it (pinned message bar)
     in property <bool> flash;
     callback attachment-clicked(string);
+    // the quote in a reply: the quoted message's sent timestamp
+    callback quote-clicked(string);
     callback reply(string);
     callback show-info(string);
     // right click: message menu at (x, y) in window coordinates
@@ -299,7 +301,17 @@ export component Bubble inherits VerticalLayout {
                 }
                 if m.quote != "": Rectangle {
                     border-radius: 6px;
-                    background: m.outgoing ? #ffffff30 : (Theme.dark ? #ffffff14 : #00000010);
+                    background: m.outgoing ? (qta.has-hover ? #ffffff48 : #ffffff30) : Theme.dark ? (qta.has-hover ? #ffffff22 : #ffffff14) : (qta.has-hover ? #0000001c : #00000010);
+                    qta := TouchArea {
+                        enabled: m.quote-id != "";
+                        mouse-cursor: self.enabled ? pointer : default;
+                        clicked => { root.quote-clicked(m.quote-id); }
+                        pointer-event(e) => {
+                            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                                root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            }
+                        }
+                    }
                     HorizontalLayout {
                         Rectangle { width: 3px; background: m.outgoing ? white : Theme.accent; }
                         VerticalLayout {

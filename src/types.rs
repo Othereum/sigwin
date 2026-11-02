@@ -61,6 +61,8 @@ pub struct MsgDto {
     pub quote: String,
     /// who wrote the quoted message ("나" for us), empty if unknown
     pub quote_author: String,
+    /// sent timestamp of the quoted message, for jumping to it
+    pub quote_id: String,
     /// (emoji, count)
     pub reactions: Vec<(String, u32)>,
     /// the message is only 1..=5 emoji: shown large, without a bubble
