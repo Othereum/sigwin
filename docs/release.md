@@ -14,6 +14,10 @@
 The workflow runs on `main`, so it restores and saves the same cache as `.github/workflows/ci.yml`
 (shared key `release`): no need to wait for CI before releasing.
 
+`GITHUB_TOKEN` can't create a tag on a commit that changes `.github/workflows/` (403 "Resource not
+accessible by integration" at Publish). After editing a workflow, push a commit that doesn't touch
+it before running `release`.
+
 Only versions greater than the running one are installed, so a bad release is fixed by releasing
 a higher version, never by re-tagging. A release the app rejects (signature mismatch, missing
 `sigwin.exe` or `.minisig`) is skipped until a newer tag appears; it is remembered only until the
