@@ -74,6 +74,33 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogFile {
     }
 }
 
+/// Drops known false errors from dependencies, so the log file shows only real ones.
+pub struct Noise;
+
+/// libsignal-service logs this at ERROR for every group typing indicator: those are never
+/// synced to our own devices, which is expected.
+const NOISE: &[(&str, &str)] = &[("libsignal_service::sender", "could not create sync message from a group message")];
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Noise {
+    fn event_enabled(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) -> bool {
+        let meta = event.metadata();
+        if *meta.level() != tracing::Level::ERROR || !NOISE.iter().any(|(t, _)| *t == meta.target()) {
+            return true;
+        }
+        struct Msg(String);
+        impl tracing::field::Visit for Msg {
+            fn record_debug(&mut self, f: &tracing::field::Field, v: &dyn std::fmt::Debug) {
+                if f.name() == "message" {
+                    self.0 = format!("{v:?}");
+                }
+            }
+        }
+        let mut m = Msg(String::new());
+        event.record(&mut m);
+        !NOISE.iter().any(|(t, msg)| *t == meta.target() && m.0 == *msg)
+    }
+}
+
 /// Logs panics (message, location, backtrace) before the default hook runs.
 pub fn install_panic_hook() {
     let default = std::panic::take_hook();
@@ -88,6 +115,36 @@ pub fn install_panic_hook() {
 mod tests {
     use super::*;
     use tracing_subscriber::fmt::MakeWriter;
+
+    #[test]
+    fn drops_only_known_noise() {
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::prelude::*;
+        #[derive(Clone, Default)]
+        struct Buf(Arc<Mutex<Vec<u8>>>);
+        impl Write for Buf {
+            fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(b);
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let buf = Buf::default();
+        let w = buf.clone();
+        let sub = tracing_subscriber::registry()
+            .with(Noise)
+            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(move || w.clone()));
+        tracing::subscriber::with_default(sub, || {
+            tracing::error!(target: "libsignal_service::sender", "could not create sync message from a group message");
+            tracing::error!(target: "libsignal_service::sender", "failed to send a synchronization message");
+            tracing::error!("could not create sync message from a group message");
+        });
+        let out = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(out.lines().count(), 2, "{out}");
+        assert!(out.contains("failed to send"), "{out}");
+    }
 
     #[test]
     fn rotates_past_the_limit() {
