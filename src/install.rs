@@ -51,7 +51,7 @@ mod win {
     use anyhow::{bail, Context};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         MessageBoxW, IDCANCEL, IDYES, MB_DEFBUTTON2, MB_ICONERROR, MB_ICONINFORMATION, MB_ICONQUESTION, MB_OK,
-        MB_YESNOCANCEL,
+        MB_YESNO, MB_YESNOCANCEL,
     };
 
     use crate::reg;
@@ -125,7 +125,8 @@ mod win {
             return true;
         }
         match install_from(&lay, &exe, data_dir) {
-            Ok(()) => {
+            Ok(Step::Cancel) => {}
+            Ok(Step::Start) => {
                 if let Err(e) = std::process::Command::new(&lay.exe).current_dir(&lay.home).spawn() {
                     message(&format!("설치한 Sigwin을 실행하지 못했습니다.\n\n{e}"), MB_OK | MB_ICONERROR);
                 }
@@ -137,11 +138,30 @@ mod win {
         false
     }
 
-    fn install_from(lay: &Layout, src: &Path, data_dir: &Path) -> anyhow::Result<()> {
+    /// What `run` does next.
+    enum Step {
+        /// start the installed copy, then exit
+        Start,
+        /// exit
+        Cancel,
+    }
+
+    fn install_from(lay: &Layout, src: &Path, data_dir: &Path) -> anyhow::Result<Step> {
         let installed = reg::get_str(&lay.uninstall_key(), "DisplayVersion");
         if lay.exe.exists() && installed.as_deref().is_some_and(|v| super::version(v) >= super::version(VERSION)) {
             tracing::info!("install: {} already installed ({installed:?}), starting it", lay.exe.display());
-            return Ok(());
+            return Ok(Step::Start);
+        }
+        let what = if installed.is_some() { "업데이트" } else { "설치" };
+        let answer = message(
+            &format!(
+                "Sigwin {VERSION}을(를) {what}할까요?\n\n\
+                 {what}하고 시작 메뉴에 등록합니다."
+            ),
+            MB_YESNO | MB_ICONQUESTION,
+        );
+        if answer != IDYES {
+            return Ok(Step::Cancel);
         }
         if !crate::instance::quit_running(data_dir) {
             bail!("실행 중인 Sigwin이 종료되지 않았습니다. Sigwin을 닫은 뒤 다시 시도하세요.");
@@ -152,7 +172,7 @@ mod win {
             tracing::warn!("install: shortcut: {e:#}");
         }
         tracing::info!("install: installed {VERSION} to {}", lay.exe.display());
-        Ok(())
+        Ok(Step::Start)
     }
 
     /// Copies `src` to `lay.exe`. A running exe can't be overwritten but can be renamed.
