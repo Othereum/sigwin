@@ -11,6 +11,7 @@ mod db;
 mod emoji;
 mod headless;
 mod format;
+mod instance;
 mod gui;
 mod link;
 mod mention;
@@ -60,6 +61,18 @@ fn main() -> anyhow::Result<()> {
         .add_directive("sqlx=error".parse()?);
     tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
     headless::install_if_requested()?;
+    // headless runs are offscreen checks: they never hand off to a running app
+    let instance = if headless::active() {
+        None
+    } else {
+        match instance::claim(&data_dir()) {
+            Some(i) => Some(i),
+            None => {
+                tracing::info!("already running for {}: brought it to the front", data_dir().display());
+                return Ok(());
+            }
+        }
+    };
     if !headless::active() {
         toast::register();
         // left over from a crash: clicking them would do nothing
@@ -89,6 +102,12 @@ fn main() -> anyhow::Result<()> {
     let emit: backend::Emit = Arc::new(move |ev: Event| {
         let _ = weak.upgrade_in_event_loop(move |app| apply(&app, ev));
     });
+    if let Some(instance) = instance {
+        let weak = app.as_weak();
+        instance.on_activate(move || {
+            let _ = weak.upgrade_in_event_loop(|app| to_front(&app));
+        });
+    }
     let weak = app.as_weak();
     toast::init(backend::Paths::new(&data_dir()).open, move |hit| {
         let _ = weak.upgrade_in_event_loop(move |app| open_from_toast(&app, hit));

@@ -96,7 +96,7 @@ pub(crate) fn open_from_toast(app: &AppWindow, hit: Option<crate::toast::Click>)
 }
 
 #[cfg(windows)]
-fn to_front(app: &AppWindow) {
+pub(crate) fn to_front(app: &AppWindow) {
     use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow,
@@ -128,7 +128,7 @@ fn to_front(app: &AppWindow) {
 }
 
 #[cfg(not(windows))]
-fn to_front(app: &AppWindow) {
+pub(crate) fn to_front(app: &AppWindow) {
     app.show().ok();
 }
 

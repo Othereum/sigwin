@@ -30,6 +30,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/types.rs` | `Command` / `Event` / DTOs crossing threads (all `Send`), thread keys `c:<uuid>` / `g:<hex>` |
 | `src/secret.rs` | random 256-bit DB key, stored DPAPI-protected (`db.key`) |
 | `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |
+| `src/instance.rs` | one process per data dir: a named event (`Local\Sigwin-<FNV hash of the dir>`); a second launch signals it (first comes to the front) and exits. Headless runs skip it |
 | `src/clip.rs` | Ctrl+V: files (CF_HDROP) or images (PNG / DIB streamed to PNG under `paste/`) from the clipboard |
 | `src/alloc.rs` | counting global allocator + `PrivateUsage` |
 | `src/headless.rs` | offscreen test platform: scripted input, PNG shots |
