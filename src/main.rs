@@ -7,10 +7,12 @@ mod backend;
 mod clip;
 mod demo;
 mod picker;
+mod reg;
 mod db;
 mod emoji;
 mod headless;
 mod format;
+mod install;
 mod instance;
 mod gui;
 mod link;
@@ -60,7 +62,15 @@ fn main() -> anyhow::Result<()> {
         .add_directive("presage=warn".parse()?)
         .add_directive("sqlx=error".parse()?);
     tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::stderr).init();
+    if std::env::args().any(|a| a == "--uninstall") {
+        install::uninstall(&data_dir());
+        return Ok(());
+    }
     headless::install_if_requested()?;
+    let demo = std::env::var_os("SIGWIN_DEMO").is_some();
+    if !headless::active() && !demo && !install::run(&data_dir()) {
+        return Ok(());
+    }
     // headless runs are offscreen checks: they never hand off to a running app
     let instance = if headless::active() {
         None
@@ -104,15 +114,21 @@ fn main() -> anyhow::Result<()> {
     });
     if let Some(instance) = instance {
         let weak = app.as_weak();
-        instance.on_activate(move || {
-            let _ = weak.upgrade_in_event_loop(|app| to_front(&app));
-        });
+        instance.serve(
+            move || {
+                let _ = weak.upgrade_in_event_loop(|app| to_front(&app));
+            },
+            // installer or uninstaller: leave through the normal exit path below
+            || {
+                let _ = slint::quit_event_loop();
+            },
+        );
     }
     let weak = app.as_weak();
     toast::init(backend::Paths::new(&data_dir()).open, move |hit| {
         let _ = weak.upgrade_in_event_loop(move |app| open_from_toast(&app, hit));
     });
-    if std::env::var_os("SIGWIN_DEMO").is_some() {
+    if demo {
         demo::start(&app, emit, cmd_rx);
     } else {
         let _backend = backend::spawn(data_dir(), cmd_rx, emit);

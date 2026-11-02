@@ -251,12 +251,11 @@ pub fn register() {
 mod win {
     use std::path::PathBuf;
 
-    use anyhow::{bail, Context};
+    use anyhow::Context;
     use windows::core::{IInspectable, Interface, HSTRING};
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
     use windows::UI::Notifications::{ToastActivatedEventArgs, ToastNotification, ToastNotificationManager};
-    use windows_sys::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
 
     const ICON: &[u8] = include_bytes!("../assets/icon.png");
 
@@ -293,24 +292,16 @@ mod win {
         if std::fs::metadata(&icon).map(|m| m.len() != ICON.len() as u64).unwrap_or(true) {
             std::fs::write(&icon, ICON).context("writing icon")?;
         }
-        let key = format!(r"Software\Classes\AppUserModelId\{}", super::APP_ID);
-        set(&key, "DisplayName", "Sigwin")?;
-        set(&key, "IconUri", &icon.to_string_lossy())?;
+        let key = super::aumid_key(super::APP_ID);
+        crate::reg::set_str(&key, "DisplayName", "Sigwin")?;
+        crate::reg::set_str(&key, "IconUri", &icon.to_string_lossy())?;
         Ok(())
     }
+}
 
-    fn set(key: &str, name: &str, value: &str) -> anyhow::Result<()> {
-        let w = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
-        let (k, n, v) = (w(key), w(name), w(value));
-        // SAFETY: all pointers are NUL-terminated UTF-16 buffers alive for the call.
-        let rc = unsafe {
-            RegSetKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), n.as_ptr(), REG_SZ, v.as_ptr().cast(), (v.len() * 2) as u32)
-        };
-        if rc != 0 {
-            bail!("RegSetKeyValueW {name}: {rc}");
-        }
-        Ok(())
-    }
+/// Registry key of an AppUserModelID (the uninstaller removes it).
+pub fn aumid_key(id: &str) -> String {
+    format!(r"Software\Classes\AppUserModelId\{id}")
 }
 
 #[cfg(test)]

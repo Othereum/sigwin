@@ -1,15 +1,17 @@
 //! One process per data directory. Two instances would share one Signal device and DB.
 //!
-//! The first instance owns a named auto-reset event (`Local\Sigwin-<hash of data dir>`) and
-//! waits on it; a second launch finds the event, signals it (the first then comes to the
-//! front) and exits. The kernel object dies with its last handle, so a crash leaves no stale lock.
+//! The first instance owns two named auto-reset events (`Local\Sigwin-<hash of data dir>` and
+//! the same name with `-quit`) and waits on them. A second launch finds the first event,
+//! signals it (the first comes to the front) and exits. The installer and uninstaller signal
+//! the quit event to close a running app. The kernel objects die with their last handle, so a
+//! crash leaves no stale lock.
 
 use std::path::Path;
 
 /// Held by the first instance for the whole process.
 pub struct Instance {
     #[cfg(windows)]
-    event: isize,
+    events: [isize; 2],
 }
 
 /// `Some` for the first instance; `None` when another one owns `data_dir` and was asked to
@@ -18,10 +20,16 @@ pub fn claim(data_dir: &Path) -> Option<Instance> {
     imp::claim(&name(data_dir))
 }
 
+/// Asks the app running on `data_dir` (if any) to quit and waits for it. False if it is
+/// still running after the timeout.
+pub fn quit_running(data_dir: &Path) -> bool {
+    imp::quit_running(&name(data_dir))
+}
+
 impl Instance {
-    /// Calls `f` on a background thread each time another launch asks for the window.
-    pub fn on_activate(self, f: impl Fn() + Send + 'static) {
-        imp::wait(self, f);
+    /// Calls `activate` / `quit` on a background thread each time another process asks.
+    pub fn serve(self, activate: impl Fn() + Send + 'static, quit: impl Fn() + Send + 'static) {
+        imp::serve(self, activate, quit);
     }
 }
 
@@ -37,21 +45,34 @@ fn name(data_dir: &Path) -> String {
 
 #[cfg(windows)]
 mod imp {
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, WAIT_OBJECT_0};
-    use windows_sys::Win32::System::Threading::{CreateEventW, SetEvent, WaitForSingleObject, INFINITE};
+    use std::time::{Duration, Instant};
+
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{
+        CreateEventW, OpenEventW, SetEvent, WaitForMultipleObjects, EVENT_MODIFY_STATE, INFINITE,
+        SYNCHRONIZATION_SYNCHRONIZE,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
 
     use super::Instance;
 
+    fn w(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(Some(0)).collect()
+    }
+
+    fn quit_name(name: &str) -> String {
+        format!("{name}-quit")
+    }
+
     pub fn claim(name: &str) -> Option<Instance> {
-        let wide: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
-        // SAFETY: NUL-terminated name; the handle is closed below or kept for the process
+        let (main, quit) = (w(name), w(&quit_name(name)));
+        // SAFETY: NUL-terminated names; handles are closed below or kept for the process
         unsafe {
-            let event = CreateEventW(std::ptr::null(), 0, 0, wide.as_ptr());
+            let event = CreateEventW(std::ptr::null(), 0, 0, main.as_ptr());
             if event.is_null() {
                 // can't tell: running without the guard beats not running
                 tracing::warn!("instance: CreateEventW failed ({})", GetLastError());
-                return Some(Instance { event: 0 });
+                return Some(Instance { events: [0; 2] });
             }
             if GetLastError() == ERROR_ALREADY_EXISTS {
                 // we are the foreground launch: let the first instance take the foreground
@@ -60,25 +81,58 @@ mod imp {
                 CloseHandle(event);
                 return None;
             }
-            Some(Instance { event: event as isize })
+            let quit = CreateEventW(std::ptr::null(), 0, 0, quit.as_ptr());
+            Some(Instance { events: [event as isize, quit as isize] })
         }
     }
 
-    pub fn wait(inst: Instance, f: impl Fn() + Send + 'static) {
-        if inst.event == 0 {
+    pub fn serve(inst: Instance, activate: impl Fn() + Send + 'static, quit: impl Fn() + Send + 'static) {
+        let events = inst.events;
+        if events.contains(&0) {
             return;
         }
-        let event = inst.event;
         std::thread::Builder::new()
             .name("instance".into())
             .spawn(move || loop {
-                // SAFETY: the handle stays open for the process lifetime
-                if unsafe { WaitForSingleObject(event as _, INFINITE) } != WAIT_OBJECT_0 {
-                    return;
+                let handles = events.map(|h| h as HANDLE);
+                // SAFETY: the handles stay open for the process lifetime
+                match unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) } {
+                    WAIT_OBJECT_0 => activate(),
+                    r if r == WAIT_OBJECT_0 + 1 => quit(),
+                    _ => return,
                 }
-                f();
             })
             .ok();
+    }
+
+    fn open(name: &str, access: u32) -> HANDLE {
+        let n = w(name);
+        // SAFETY: NUL-terminated name
+        unsafe { OpenEventW(access, 0, n.as_ptr()) }
+    }
+
+    pub fn quit_running(name: &str) -> bool {
+        let quit = open(&quit_name(name), EVENT_MODIFY_STATE);
+        if quit.is_null() {
+            return true;
+        }
+        // SAFETY: a handle we just opened
+        unsafe {
+            SetEvent(quit);
+            CloseHandle(quit);
+        }
+        // the main event goes away when the process has exited
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while Instant::now() < deadline {
+            let h = open(name, SYNCHRONIZATION_SYNCHRONIZE);
+            if h.is_null() {
+                return true;
+            }
+            // SAFETY: a handle we just opened
+            unsafe { CloseHandle(h) };
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        false
     }
 }
 
@@ -90,7 +144,11 @@ mod imp {
         Some(Instance {})
     }
 
-    pub fn wait(_inst: Instance, _f: impl Fn() + Send + 'static) {}
+    pub fn serve(_inst: Instance, _activate: impl Fn() + Send + 'static, _quit: impl Fn() + Send + 'static) {}
+
+    pub fn quit_running(_name: &str) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
@@ -111,10 +169,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sigwin-instance-test-{}", std::process::id()));
         let first = claim(&dir).expect("first claim");
         let (tx, rx) = std::sync::mpsc::channel();
-        first.on_activate(move || tx.send(()).unwrap());
+        let quit_tx = tx.clone();
+        first.serve(move || tx.send("activate").unwrap(), move || quit_tx.send("quit").unwrap());
         assert!(claim(&dir).is_none());
-        rx.recv_timeout(std::time::Duration::from_secs(5)).expect("activation");
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok("activate"));
         assert!(claim(&dir).is_none());
-        rx.recv_timeout(std::time::Duration::from_secs(5)).expect("second activation");
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok("activate"));
+        // the "process" never exits in a test, so quit_running times out; only check the signal
+        std::thread::spawn(move || quit_running(&dir));
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok("quit"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn quit_running_without_app_returns_at_once() {
+        let dir = std::env::temp_dir().join(format!("sigwin-instance-none-{}", std::process::id()));
+        assert!(quit_running(&dir));
     }
 }

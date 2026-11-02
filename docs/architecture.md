@@ -30,7 +30,9 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/types.rs` | `Command` / `Event` / DTOs crossing threads (all `Send`), thread keys `c:<uuid>` / `g:<hex>` |
 | `src/secret.rs` | random 256-bit DB key, stored DPAPI-protected (`db.key`) |
 | `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |
-| `src/instance.rs` | one process per data dir: a named event (`Local\Sigwin-<FNV hash of the dir>`); a second launch signals it (first comes to the front) and exits. Headless runs skip it |
+| `src/instance.rs` | one process per data dir: a named event (`Local\Sigwin-<FNV hash of the dir>`); a second launch signals it (first comes to the front) and exits. A second `-quit` event lets the installer/uninstaller close a running app (normal exit path). Headless runs skip it |
+| `src/install.rs` | self-install: an exe run from outside `%LOCALAPPDATA%\Sigwin\` copies itself there (running copy renamed to `.old`), writes the HKCU Uninstall entry and a Start menu shortcut, starts the installed copy and exits; never overwrites a newer installed version (`DisplayVersion`). `--uninstall` asks (data kept by default), quits the app, removes registry/shortcut/files and self-deletes. Skipped for exes under this repo's `target\`, demo and headless |
+| `src/reg.rs` | HKCU registry helpers (set/get/delete) |
 | `src/clip.rs` | Ctrl+V: files (CF_HDROP) or images (PNG / DIB streamed to PNG under `paste/`) from the clipboard |
 | `src/alloc.rs` | counting global allocator + `PrivateUsage` |
 | `src/headless.rs` | offscreen test platform: scripted input, PNG shots |
