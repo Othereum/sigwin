@@ -38,6 +38,36 @@ impl App {
         });
     }
 
+    /// Downloads (or reads from the cache) a long message's full text.
+    pub(super) fn request_long_text(&self, key: String, ptr: AttachmentPointer) {
+        let path = attachment_path(&self.paths.attachments, &key);
+        let manager = self.manager.clone();
+        let tx = self.tx.clone();
+        tokio::task::spawn_local(async move {
+            let data = match sigwin_vault::read(&path) {
+                Ok(d) => Ok(d),
+                Err(_) => match manager {
+                    Some(m) => m.get_attachment(&ptr).await.map_err(|e| e.to_string()).inspect(|d| {
+                        if let Err(e) = sigwin_vault::write(&path, d) {
+                            warn!("save long text: {e}");
+                        }
+                    }),
+                    None => Err("offline".into()),
+                },
+            };
+            match data {
+                Ok(d) => {
+                    let text = view::trim_body(&String::from_utf8_lossy(&d), view::MAX_LONG_TEXT_BYTES).to_string();
+                    let _ = tx.send(Internal::LongText(key, text));
+                }
+                Err(e) => {
+                    warn!("download long text: {e}");
+                    let _ = tx.send(Internal::ThumbFailed(key));
+                }
+            }
+        });
+    }
+
     pub(super) fn open_attachment(&self, id: &str) {
         let Some(open) = self.current.as_ref() else { return };
         let Ok(ts) = id.parse::<u64>() else { return };
@@ -50,6 +80,7 @@ impl App {
             .attachments
             .iter()
             .enumerate()
+            .filter(|(_, a)| !view::is_long_text(a))
             .map(|(i, a)| (attachment_path(&self.paths.attachments, &view::attachment_key(a, ts, i)), a.clone()))
             .collect();
         let manager = self.manager.clone();

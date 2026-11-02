@@ -358,9 +358,15 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let weak = app.as_weak();
-    app.global::<Links>().on_open(move |url| match url.strip_prefix(SPOILER_URL) {
-        Some(id) => reveal_spoilers(&weak.unwrap(), id),
-        None => link::open(&url),
+    let s = send.clone();
+    app.global::<Links>().on_open(move |url| {
+        if let Some(id) = url.strip_prefix(SPOILER_URL) {
+            reveal_spoilers(&weak.unwrap(), id);
+        } else if let Some(id) = url.strip_prefix(MORE_URL) {
+            s(Command::ReadMore(id.to_string()));
+        } else {
+            link::open(&url);
+        }
     });
 }
 

@@ -32,6 +32,10 @@ impl App {
             })
             .unwrap_or_default();
         let (body, body_ranges) = crate::mention::encode(&text, &mentions);
+        if body.len() > view::MAX_LONG_TEXT_BYTES {
+            self.status("메시지가 너무 깁니다 (최대 64KB)");
+            return;
+        }
         let group_revision = self.group_revision(&thread).await;
         // the message itself ends our typing indicator on the other side
         self.composing = None;
@@ -52,9 +56,10 @@ impl App {
         });
         self.emit_messages(Scroll::Bottom).await;
         let tx = self.tx.clone();
+        let dir = self.paths.attachments.clone();
         tokio::task::spawn_local(async move {
             let started = std::time::Instant::now();
-            let res = Box::pin(send_task(manager, thread, body, body_ranges, files, quote, group_revision, ts)).await;
+            let res = Box::pin(send_task(manager, thread, body, body_ranges, files, quote, group_revision, ts, dir)).await;
             info!(ms = started.elapsed().as_millis() as u64, ok = res.is_ok(), "message sent");
             let _ = tx.send(Internal::Sent(ts, res.map_err(|e| format!("{e:#}"))));
         });
@@ -76,7 +81,10 @@ pub(super) async fn send_task(
     quote: Option<Quote>,
     group_revision: u32,
     ts: u64,
+    attachments_dir: PathBuf,
 ) -> anyhow::Result<()> {
+    let mut text = text;
+    let long = long_body(&mut m, &mut text, &attachments_dir).await?;
     let mut specs = Vec::new();
     for path in &files {
         let data = std::fs::read(path).with_context(|| format!("{} 읽기 실패", path.display()))?;
@@ -102,11 +110,10 @@ pub(super) async fn send_task(
             data,
         ));
     }
-    let attachments = if specs.is_empty() {
-        Vec::new()
-    } else {
-        m.upload_attachments(specs).await?.into_iter().collect::<Result<Vec<_>, _>>()?
-    };
+    let mut attachments: Vec<AttachmentPointer> = long.into_iter().collect();
+    if !specs.is_empty() {
+        attachments.extend(m.upload_attachments(specs).await?.into_iter().collect::<Result<Vec<_>, _>>()?);
+    }
     let dm = DataMessage {
         body: (!text.is_empty()).then_some(text),
         body_ranges,
@@ -116,6 +123,35 @@ pub(super) async fn send_task(
         ..Default::default()
     };
     deliver(&mut m, thread, dm.into(), ts, group_revision).await
+}
+
+/// Signal's long messages: past 2KB the body keeps only its start and the full text goes as a
+/// `text/x-signal-plain` attachment (first in the list, as Signal Desktop sends it). The text is
+/// cached right away, so our own copy shows in full without downloading it back.
+pub(super) async fn long_body(m: &mut Mgr, body: &mut String, attachments_dir: &Path) -> anyhow::Result<Option<AttachmentPointer>> {
+    if body.len() <= view::MAX_BODY_BYTES {
+        return Ok(None);
+    }
+    let data = body.as_bytes().to_vec();
+    let spec = AttachmentSpec {
+        content_type: view::LONG_TEXT.into(),
+        length: data.len(),
+        file_name: None,
+        preview: None,
+        voice_note: None,
+        borderless: None,
+        width: None,
+        height: None,
+        caption: None,
+        blur_hash: None,
+    };
+    let ptr = m.upload_attachments(vec![(spec, data.clone())]).await?.into_iter().next().context("no upload result")??;
+    let path = super::files::attachment_path(attachments_dir, &view::attachment_key(&ptr, 0, 0));
+    if let Err(e) = sigwin_vault::write(&path, &data) {
+        warn!("cache long text: {e}");
+    }
+    *body = view::trim_body(body, view::MAX_BODY_BYTES).to_string();
+    Ok(Some(ptr))
 }
 
 pub(super) fn file_label(p: &Path) -> String {

@@ -97,6 +97,8 @@ pub struct MsgDto {
     pub edited: bool,
     /// who has read it (outgoing only): (uuid, name), by name
     pub readers: Vec<(String, String)>,
+    /// the text is cut short: "더 읽기" shows more
+    pub more: bool,
 }
 
 /// A pinned message of the open thread, for the bar above the message list.
@@ -244,6 +246,8 @@ pub enum Command {
     /// `mentions`: members picked in the composer, their "@name"s become mentions
     Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member> },
     OpenAttachment(String),
+    /// "더 읽기" on a row: show more of its text
+    ReadMore(String),
     Search(String),
     WindowFocus(bool),
     Unlink,

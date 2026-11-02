@@ -105,6 +105,8 @@ pub(crate) fn pack_item(p: &types::PackDto, thumbs: &HashMap<String, Image>) -> 
 
 /// Prefix of the link that opens a message's spoilers; the message id follows.
 pub(crate) const SPOILER_URL: &str = "sigwin-spoiler:";
+/// "더 읽기" under a cut-short message
+pub(crate) const MORE_URL: &str = "sigwin-more:";
 
 /// Font styles of a message (bold, italic, strikethrough, monospace) as styled text spans.
 pub(crate) fn font_spans(m: &MsgDto) -> Vec<(std::ops::Range<usize>, SigwinStyle)> {
@@ -249,6 +251,7 @@ pub(crate) fn to_item(
         hide_time: m.hide_time,
         collapse_above: m.collapse_above,
         collapse_below: m.collapse_below,
+        more: m.more,
         typing: false,
     }
 }

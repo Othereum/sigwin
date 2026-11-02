@@ -159,6 +159,13 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         m.text = text.into();
         m.mentions = text.match_indices('@').map(|(s, _)| (s, s + text[s..].find(' ').unwrap(), String::new())).collect();
     }
+    // long messages cut short with "더 읽기", incoming and outgoing
+    for i in [286usize, 285] {
+        let m = &mut items[i];
+        m.text = format!("{}…", "긴 메시지의 앞부분입니다. ".repeat(25).trim_end());
+        m.more = true;
+        m.can_edit = false;
+    }
     // text styles, incoming and outgoing: bold, italic, strikethrough, plain, spoiler, monospace
     for i in [288usize, 287] {
         let text = "굵게 기울임 취소선 보통 스포일러 내용 mono(iiWW) 끝 www.naver.com";

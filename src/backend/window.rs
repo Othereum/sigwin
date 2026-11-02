@@ -31,6 +31,7 @@ impl App {
         let is_group = matches!(thread, Thread::Group(_));
         let members = self.emit_header(&thread).await;
         self.thumbs_requested.clear();
+        self.long = Default::default();
         // the UI drops message-list avatars on thread switch
         let in_list = |k: &str| k.starts_with(crate::avatar::MSG_PREFIX) || k.starts_with(crate::avatar::READ_PREFIX);
         self.avatars_done.retain(|k| !in_list(k));
@@ -191,7 +192,7 @@ impl App {
         }
         let Some(open) = self.current.as_ref() else { return };
         let names = &self.names;
-        let built = view::build(&open.window, self.me, &open.members, &receipts, &my_deletes, &|u| {
+        let built = view::build(&open.window, self.me, &open.members, &receipts, &my_deletes, &self.long, &|u| {
             names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())
         });
         let key = open.key.clone();
@@ -232,6 +233,11 @@ impl App {
         for (k, ptr, fit) in built.wanted_thumbs {
             if self.thumbs_requested.insert(k.clone()) {
                 self.request_thumb(k, ptr, fit);
+            }
+        }
+        for (k, ptr) in built.wanted_texts {
+            if self.thumbs_requested.insert(k.clone()) {
+                self.request_long_text(k, ptr);
             }
         }
         self.next_expiry = next_expiry;

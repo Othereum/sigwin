@@ -141,6 +141,8 @@ enum Internal {
     Linked(Result<Mgr, String>),
     Sent(u64, Result<(), String>),
     ThumbFailed(String),
+    /// a long message's full text: (attachment key, text)
+    LongText(String, String),
     Status(String),
     PackInstalled(Result<String, String>),
     ReceiptsIndexed,
@@ -216,7 +218,9 @@ struct App {
     current: Option<Open>,
     current_dirty: bool,
     threads_dirty: bool,
+    /// thumbnails and long texts asked for in the open thread
     thumbs_requested: HashSet<String>,
+    long: view::LongTexts,
     pending: Vec<Pending>,
     ops: Vec<PendingOp>,
     /// who is typing in the open thread
@@ -339,6 +343,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         current_dirty: false,
         threads_dirty: false,
         thumbs_requested: HashSet::new(),
+        long: Default::default(),
         pending: Vec::new(),
         ops: Vec::new(),
         typing: HashMap::new(),
@@ -466,6 +471,12 @@ impl App {
             }
             Command::Send { text, files, quote, mentions } => self.send(text, files, quote, mentions).await,
             Command::OpenAttachment(id) => self.open_attachment(&id),
+            Command::ReadMore(id) => {
+                if let Ok(row) = id.parse::<u64>() {
+                    *self.long.shown.entry(row).or_insert(view::READ_MORE_AT) += view::READ_MORE_STEP;
+                    self.emit_messages(Scroll::Keep).await;
+                }
+            }
             Command::Search(s) => {
                 self.search = s;
                 self.emit_threads().await;
@@ -642,6 +653,13 @@ impl App {
             Internal::ThumbFailed(key) => {
                 // allow a retry next time the thread is opened
                 self.thumbs_requested.remove(&key);
+            }
+            Internal::LongText(key, text) => {
+                // still the thread it was asked for
+                if self.thumbs_requested.contains(&key) {
+                    self.long.full.insert(key, text);
+                    self.emit_messages(Scroll::Keep).await;
+                }
             }
             Internal::Status(s) => self.status(s),
             Internal::PackInstalled(Ok(id)) => {

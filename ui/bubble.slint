@@ -389,6 +389,19 @@ export component Bubble inherits VerticalLayout {
                         info(t) => { root.show-info(t); }
                     }
                 }
+                if m.more: HorizontalLayout {
+                    alignment: start;
+                    Text {
+                        text: "더 읽기";
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: m.outgoing ? white : Theme.dark ? #7aa7ff : #1f5fd6;
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { Links.open("sigwin-more:" + m.id); }
+                        }
+                    }
+                }
                 if (!m.hide-time && !root.inline-time) || m.reactions.length > 0: HorizontalLayout {
                     alignment: end;
                     spacing: 4px;

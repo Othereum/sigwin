@@ -40,10 +40,23 @@ impl App {
             self.status("보낸 지 24시간이 지난 메시지는 수정할 수 없습니다");
             return;
         }
-        let (body, body_ranges) = crate::mention::encode(&text, mentions);
+        let (mut body, body_ranges) = crate::mention::encode(&text, mentions);
+        if body.len() > view::MAX_LONG_TEXT_BYTES {
+            self.status("메시지가 너무 깁니다 (최대 64KB)");
+            return;
+        }
+        let Some(mut m) = self.manager.clone() else { return };
+        let long = match long_body(&mut m, &mut body, &self.paths.attachments).await {
+            Ok(l) => l,
+            Err(e) => {
+                self.status(format!("수정 실패: {e:#}"));
+                return;
+            }
+        };
         let dm = DataMessage {
             body: Some(body),
             body_ranges,
+            attachments: long.into_iter().collect(),
             quote: orig.quote,
             expire_timer: orig.expire_timer,
             expire_timer_version: orig.expire_timer_version,

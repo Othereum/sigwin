@@ -158,6 +158,36 @@ pub fn attachment_key(ptr: &AttachmentPointer, ts: u64, idx: usize) -> String {
     }
 }
 
+/// Content type of a long message's full text: the body carries only its first 2KB.
+pub const LONG_TEXT: &str = "text/x-signal-plain";
+/// Signal's limits: inline body, and the long-text attachment.
+pub const MAX_BODY_BYTES: usize = 2 * 1024;
+pub const MAX_LONG_TEXT_BYTES: usize = 64 * 1024;
+
+pub fn is_long_text(ptr: &AttachmentPointer) -> bool {
+    ptr.content_type.as_deref() == Some(LONG_TEXT)
+}
+
+/// The long-text attachment of a message, with its cache key.
+pub fn long_text(dm: &DataMessage, ts: u64) -> Option<(String, &AttachmentPointer)> {
+    let (i, a) = dm.attachments.iter().enumerate().find(|(_, a)| is_long_text(a))?;
+    Some((attachment_key(a, ts, i), a))
+}
+
+/// Attachments shown as such (the long-text one is part of the body).
+fn shown_attachments(dm: &DataMessage) -> impl Iterator<Item = (usize, &AttachmentPointer)> {
+    dm.attachments.iter().enumerate().filter(|(_, a)| !is_long_text(a))
+}
+
+/// Cuts `text` to at most `max` bytes on a char boundary (the inline body of a long message).
+pub fn trim_body(text: &str, max: usize) -> &str {
+    let mut end = max.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 pub fn is_image(ptr: &AttachmentPointer) -> bool {
     matches!(
         ptr.content_type.as_deref(),
@@ -386,10 +416,9 @@ pub fn snippet(c: &Content, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> Opti
 pub fn one_line(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
     let mut t = body_text(dm, name_of);
     if t.is_empty() {
-        t = dm
-            .attachments
-            .first()
-            .map(|a| {
+        t = shown_attachments(dm)
+            .next()
+            .map(|(_, a)| {
                 let l = attachment_label(a);
                 if is_image(a) { format!("📷 {l}") } else { format!("📎 {l}") }
             })
@@ -482,6 +511,8 @@ pub struct Built {
     pub items: Vec<MsgDto>,
     /// image attachments that need a thumbnail: (key, pointer, square box in logical px to fit into, 0 = as is)
     pub wanted_thumbs: Vec<(String, AttachmentPointer, u32)>,
+    /// long-text attachments not in `LongTexts::full` yet: (key, pointer)
+    pub wanted_texts: Vec<(String, AttachmentPointer)>,
     /// earliest time a still-shown disappearing message expires
     pub next_expiry: Option<u64>,
 }
@@ -531,6 +562,7 @@ pub fn build(
     status: &HashMap<u64, HashMap<Uuid, u8>>,
     // our messages deleted for everyone (the stored row no longer says who sent it)
     my_deletes: &std::collections::HashSet<u64>,
+    long: &LongTexts,
     name_of: &dyn Fn(&Uuid) -> String,
 ) -> Built {
     let mut reactions: HashMap<u64, Vec<(Uuid, String)>> = HashMap::new();
@@ -561,6 +593,7 @@ pub fn build(
 
     let mut items = Vec::new();
     let mut wanted = Vec::new();
+    let mut wanted_texts = Vec::new();
     let mut prev_day = None;
 
     for (ts, c) in window {
@@ -583,7 +616,23 @@ pub fn build(
                     _ => (dm, false),
                 };
                 m.outgoing = outgoing;
-                m.text = body_text_spans(dm, name_of, &mut m.mentions, &mut m.styles);
+                // a long message: its full text replaces the 2KB body once downloaded
+                let full;
+                let mut text_dm = dm;
+                let mut text_missing = false;
+                if let Some((key, ptr)) = long_text(dm, *ts) {
+                    match long.full.get(&key) {
+                        Some(t) => {
+                            full = DataMessage { body: Some(t.clone()), ..dm.clone() };
+                            text_dm = &full;
+                        }
+                        None => {
+                            text_missing = true;
+                            wanted_texts.push((key, ptr.clone()));
+                        }
+                    }
+                }
+                m.text = body_text_spans(text_dm, name_of, &mut m.mentions, &mut m.styles);
                 // stickers with image data render as a borderless picture instead of text
                 if let Some(data) = dm.sticker.as_ref().and_then(|s| s.data.as_ref()) {
                     let key = attachment_key(data, *ts, 99);
@@ -617,7 +666,7 @@ pub fn build(
                         .unwrap_or_else(|| "(첨부파일)".into());
                 }
                 let mut others = 0;
-                for (i, a) in dm.attachments.iter().enumerate() {
+                for (i, a) in shown_attachments(dm) {
                     if m.image_key.is_empty() && is_image(a) {
                         let key = attachment_key(a, *ts, i);
                         let (w, h) = fit(a.width, a.height);
@@ -647,8 +696,12 @@ pub fn build(
                 }
                 let fresh = outgoing && now.saturating_sub(*ts) < EDIT_WINDOW_MS;
                 m.can_delete = fresh;
+                m.more = cut_for_read_more(&mut m, long.shown.get(ts).copied().unwrap_or(READ_MORE_AT));
+                // the composer is filled from the shown text: only when all of it is shown
                 m.can_edit = fresh
-                    && dm.attachments.is_empty()
+                    && !m.more
+                    && !text_missing
+                    && shown_attachments(dm).next().is_none()
                     && dm.sticker.is_none()
                     && dm.body.as_deref().is_some_and(|b| !b.is_empty());
                 if !m.sticker && m.attachment.is_empty() && m.image_key.is_empty() && m.quote.is_empty() {
@@ -695,7 +748,50 @@ pub fn build(
         m.readers.retain(|(u, _)| seen.insert(u.clone()));
     }
     // runs (`mark_runs`) are marked by the caller once pins, pending ops and stub rows are in
-    Built { items, wanted_thumbs: wanted, next_expiry }
+    Built { items, wanted_thumbs: wanted, wanted_texts, next_expiry }
+}
+
+/// Texts of long messages in the open window, and how much of each is shown.
+#[derive(Default)]
+pub struct LongTexts {
+    /// long-text attachment key -> full text
+    pub full: HashMap<String, String>,
+    /// row -> characters shown, for rows expanded with "더 읽기"
+    pub shown: HashMap<u64, usize>,
+}
+
+/// Signal Desktop's `MessageBodyReadMore`: 800 characters at first, 3000 more per click,
+/// and no cut that would hide fewer than 100.
+pub const READ_MORE_AT: usize = 800;
+pub const READ_MORE_STEP: usize = 3000;
+const READ_MORE_SLACK: usize = 100;
+
+/// Shortens a row's text to about `limit` characters (whole words, never inside a mention);
+/// true if something was cut.
+fn cut_for_read_more(m: &mut MsgDto, limit: usize) -> bool {
+    let Some((mut cut, _)) = m.text.char_indices().nth(limit) else { return false };
+    if m.text[cut..].chars().nth(READ_MORE_SLACK).is_none() {
+        return false;
+    }
+    // back up to a space so words and links stay whole, unless that loses too much
+    if let Some(sp) = m.text[..cut].rfind(char::is_whitespace) {
+        if m.text[sp..cut].chars().count() <= READ_MORE_SLACK {
+            cut = sp;
+        }
+    }
+    if let Some(&(s, _, _)) = m.mentions.iter().find(|(s, e, _)| *s < cut && cut < *e) {
+        cut = s;
+    }
+    m.text.truncate(cut);
+    let kept = m.text.trim_end().len();
+    m.text.truncate(kept);
+    m.text.push('…');
+    m.mentions.retain(|(_, e, _)| *e <= kept);
+    m.styles.retain_mut(|st| {
+        st.1 = st.1.min(kept);
+        st.0 < st.1
+    });
+    true
 }
 
 /// Optimistic update while our reaction is being sent: set (or with `None` take back) our reaction.
@@ -862,6 +958,61 @@ mod tests {
         assert_eq!(&out[styles[0].0..styles[0].1], "한글");
         // previews mask spoilers, overlapping ones too
         assert_eq!(with_mentions("ab 비밀 c 둘", &[st(3, 2, 3), st(8, 1, 3), st(7, 2, 3)], &name), "ab ■■■■ c■■■■");
+    }
+
+    #[test]
+    fn read_more_cuts_at_a_space() {
+        let words = "단어 ".repeat(400); // 1200 chars
+        let mut m = MsgDto { text: words.clone(), styles: vec![(0, words.len(), STYLE_BOLD)], ..Default::default() };
+        assert!(cut_for_read_more(&mut m, READ_MORE_AT));
+        assert!(m.text.ends_with("단어…"));
+        assert!(m.text.chars().count() <= READ_MORE_AT + 1);
+        let kept = m.text.len() - '…'.len_utf8();
+        assert_eq!(m.styles, [(0, kept, STYLE_BOLD)]);
+        // a little over the limit is shown whole
+        let mut m = MsgDto { text: "가".repeat(READ_MORE_AT + 50), ..Default::default() };
+        assert!(!cut_for_read_more(&mut m, READ_MORE_AT));
+        // no space nearby: cut mid-word, but never inside a mention
+        let text = format!("{}@철수 끝{}", "가".repeat(799), "나".repeat(300));
+        let at = text.find('@').unwrap();
+        let mut m = MsgDto { text, mentions: vec![(at, at + 7, "u".into())], ..Default::default() };
+        assert!(cut_for_read_more(&mut m, READ_MORE_AT));
+        assert!(m.mentions.is_empty());
+        assert_eq!(m.text, format!("{}…", "가".repeat(799)));
+    }
+
+    #[test]
+    fn long_text_attachment_is_part_of_the_body() {
+        let long = AttachmentPointer { content_type: Some(LONG_TEXT.into()), digest: Some(vec![7; 32]), ..Default::default() };
+        let photo = AttachmentPointer { content_type: Some("image/png".into()), digest: Some(vec![8; 32]), ..Default::default() };
+        let dm = DataMessage { body: Some("앞부분".into()), attachments: vec![long, photo], ..Default::default() };
+        let c = Content::from_body(dm, presage::libsignal_service::content::Metadata {
+            sender: presage::libsignal_service::protocol::ServiceId::Aci(Uuid::from_u128(2).into()),
+            destination: presage::libsignal_service::protocol::ServiceId::Aci(Uuid::from_u128(1).into()),
+            sender_device: 1u32.try_into().unwrap(),
+            pni_verified: None,
+            client_timestamp: chrono::DateTime::from_timestamp_millis(5).unwrap(),
+            server_timestamp: chrono::DateTime::from_timestamp_millis(5).unwrap(),
+            needs_receipt: false,
+            unidentified_sender: false,
+            was_plaintext: false,
+            server_guid: None,
+        });
+        let window = [(5u64, c)];
+        let name = |_: &Uuid| String::new();
+        let empty = HashMap::new();
+        let run = |long: &LongTexts| build(&window, Uuid::from_u128(1), &[], &empty, &Default::default(), long, &name);
+        let b = run(&LongTexts::default());
+        assert_eq!(b.items[0].text, "앞부분");
+        assert_eq!(b.wanted_texts.len(), 1);
+        // the long text isn't listed as a file
+        assert!(b.items[0].attachment.is_empty());
+        let mut long = LongTexts::default();
+        long.full.insert(b.wanted_texts[0].0.clone(), "앞부분 그리고 나머지".into());
+        let b = run(&long);
+        assert_eq!(b.items[0].text, "앞부분 그리고 나머지");
+        assert!(b.wanted_texts.is_empty());
+        assert_eq!(trim_body("가나", 4), "가");
     }
 
     #[test]
