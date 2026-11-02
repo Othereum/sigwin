@@ -5,6 +5,45 @@ use presage::store::Thread;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 
+/// Version of our `ls_*` tables (presage's own tables migrate themselves). The `CREATE TABLE`
+/// statements in `Index::open` stay at version 1 forever; any later change is a step in
+/// `migrate` with `SCHEMA` bumped, so a fresh DB and an auto-updated old one take the same path.
+/// Kept in our `ls_meta` table rather than `PRAGMA user_version`, which the DB shares with presage.
+const SCHEMA: i64 = 1;
+
+async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
+    sqlx::query("CREATE TABLE IF NOT EXISTS ls_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID")
+        .execute(pool)
+        .await?;
+    let stored: Option<i64> =
+        sqlx::query_scalar("SELECT value FROM ls_meta WHERE key = 'schema'").fetch_optional(pool).await?;
+    // no row: a new DB, or one from before versioning; both have exactly the version 1 tables
+    let mut v = stored.unwrap_or(1);
+    if v > SCHEMA {
+        // a newer build ran on this DB (the installer refuses downgrades, so rare)
+        tracing::warn!("db: schema {v} is newer than this build's {SCHEMA}");
+        return Ok(());
+    }
+    while v < SCHEMA {
+        v = step(pool, v).await?;
+    }
+    if stored != Some(v) {
+        sqlx::query("INSERT INTO ls_meta (key, value) VALUES ('schema', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+            .bind(v)
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
+}
+
+/// One migration step up from `v`; returns the new version. Run in order, each exactly once.
+async fn step(_pool: &SqlitePool, v: i64) -> anyhow::Result<i64> {
+    match v {
+        // 1 => { sqlx::query("ALTER TABLE ls_pins ADD COLUMN ...").execute(pool).await?; Ok(2) }
+        _ => anyhow::bail!("db: no migration from schema {v}"),
+    }
+}
+
 #[derive(Clone)]
 pub struct Index {
     pool: SqlitePool,
@@ -85,6 +124,7 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        migrate(&pool).await?;
         Ok(Self { pool })
     }
 
@@ -346,5 +386,32 @@ impl Index {
             .filter_map(|r| r.try_get::<i64, _>("ts").ok())
             .map(|t| t as u64)
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn schema_version_is_recorded_and_kept() {
+        let opts = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
+        let index = Index::open(opts).await.unwrap();
+        let v: i64 = sqlx::query_scalar("SELECT value FROM ls_meta WHERE key = 'schema'")
+            .fetch_one(&index.pool)
+            .await
+            .unwrap();
+        assert_eq!(v, SCHEMA);
+        // running again (every start) changes nothing
+        migrate(&index.pool).await.unwrap();
+        // a DB from a newer build is left alone
+        sqlx::query("UPDATE ls_meta SET value = 99 WHERE key = 'schema'").execute(&index.pool).await.unwrap();
+        migrate(&index.pool).await.unwrap();
+        let v: i64 = sqlx::query_scalar("SELECT value FROM ls_meta WHERE key = 'schema'")
+            .fetch_one(&index.pool)
+            .await
+            .unwrap();
+        assert_eq!(v, 99);
     }
 }
