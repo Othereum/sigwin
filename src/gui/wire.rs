@@ -52,6 +52,23 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
 
 /// Composer: sending, attachments, paste, @mentions, formatting, reply.
 fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
+    // the composer text before the last edit, to find what an edit inserted
+    let prev = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let weak = app.as_weak();
+    app.on_clamp_draft(move |text| {
+        let mut prev = prev.borrow_mut();
+        let Some((fit, cursor)) = crate::view::fit_edit(&prev, &text, crate::view::MAX_LONG_TEXT_BYTES) else {
+            *prev = text.to_string();
+            return -1;
+        };
+        if let Some(app) = weak.upgrade() {
+            app.set_draft(fit.as_str().into());
+            app.set_status_text("메시지는 64KB까지 입력할 수 있습니다".into());
+        }
+        *prev = fit;
+        cursor as i32
+    });
+
     let s = send.clone();
     let weak = app.as_weak();
     app.on_send(move |text| {

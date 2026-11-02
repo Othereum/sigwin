@@ -56,6 +56,8 @@ export component AppWindow inherits Window {
     callback start-link(string);
     callback open-thread(string);
     callback send(string);
+    // the composer text changed: cut it to the message size limit; the new cursor offset, or -1 if it fit
+    callback clamp-draft(string) -> int;
     callback load-older();
     callback attach();
     callback clear-attachments();
@@ -623,6 +625,11 @@ export component AppWindow inherits Window {
                                     composer := TextInput {
                                         text <=> root.draft;
                                         edited => {
+                                            // over the 64KB a message can carry: the new part is cut to fit
+                                            let cut = root.clamp-draft(self.text);
+                                            if cut >= 0 {
+                                                self.set-selection-offsets(cut, cut);
+                                            }
                                             root.composing(self.text != "");
                                             root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
                                         }

@@ -188,6 +188,35 @@ pub fn trim_body(text: &str, max: usize) -> &str {
     &text[..end]
 }
 
+/// An edit that took `prev` past `max` bytes: keeps what was there and as much of the inserted
+/// part as fits. Returns the text and the cursor (byte offset, after the kept insert), or None
+/// if `new` fits.
+pub fn fit_edit(prev: &str, new: &str, max: usize) -> Option<(String, usize)> {
+    if new.len() <= max {
+        return None;
+    }
+    // the inserted part lies between the common prefix and the common suffix
+    let pre = prev.char_indices().zip(new.chars()).find(|((_, a), b)| a != b).map_or(prev.len().min(new.len()), |((i, _), _)| i);
+    let suf_max = prev.len().min(new.len()) - pre;
+    let suf = prev[pre..]
+        .chars()
+        .rev()
+        .zip(new[pre..].chars().rev())
+        .take_while(|(a, b)| a == b)
+        .map(|(a, _)| a.len_utf8())
+        .scan(0, |n, l| {
+            *n += l;
+            Some(*n)
+        })
+        .take_while(|n| *n <= suf_max)
+        .last()
+        .unwrap_or(0);
+    let (head, tail) = (&new[..pre], &new[new.len() - suf..]);
+    let room = max.saturating_sub(head.len() + tail.len());
+    let inserted = trim_body(&new[pre..new.len() - suf], room);
+    Some((format!("{head}{inserted}{tail}"), pre + inserted.len()))
+}
+
 pub fn is_image(ptr: &AttachmentPointer) -> bool {
     matches!(
         ptr.content_type.as_deref(),
@@ -958,6 +987,22 @@ mod tests {
         assert_eq!(&out[styles[0].0..styles[0].1], "한글");
         // previews mask spoilers, overlapping ones too
         assert_eq!(with_mentions("ab 비밀 c 둘", &[st(3, 2, 3), st(8, 1, 3), st(7, 2, 3)], &name), "ab ■■■■ c■■■■");
+    }
+
+    #[test]
+    fn over_long_edits_keep_what_fits() {
+        assert_eq!(fit_edit("abc", "abcd", 4), None);
+        // typed at the end
+        assert_eq!(fit_edit("abcd", "abcde", 4), Some(("abcd".into(), 4)));
+        // pasted in the middle: the paste is cut, the text around it stays
+        assert_eq!(fit_edit("ab|cd", "ab|XYZW|cd", 7), Some(("ab|XYcd".into(), 5)));
+        // never half a char
+        assert_eq!(fit_edit("ab", "a가나b", 5), Some(("a가b".into(), 4)));
+        // repeated chars around the insert
+        assert_eq!(fit_edit("aa", "aaaa", 3), Some(("aaa".into(), 3)));
+        // a stale `prev` (the draft was set from Rust) still ends within the limit
+        let (t, _) = fit_edit("zzz", "abcdef", 4).unwrap();
+        assert!(t.len() <= 4);
     }
 
     #[test]
