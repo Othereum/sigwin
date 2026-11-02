@@ -1,7 +1,7 @@
 // Settings page.
 
 import { Button, Switch } from "std-widgets.slint";
-import { Theme } from "theme.slint";
+import { Links, Theme } from "theme.slint";
 import { IconButton, Segmented } from "widgets.slint";
 
 export component SettingSection inherits VerticalLayout {
@@ -200,13 +200,37 @@ export component SettingsPage inherits Rectangle {
                             }
                         }
                     }
-                    Rectangle { height: 20px; }
-                    Text {
-                        text: root.version;
-                        color: Theme.subtle;
-                        font-size: 11.5px;
-                        horizontal-alignment: center;
+                    SettingSection {
+                        title: "정보";
+                        SettingRow {
+                            label: root.version;
+                            hint: "Signal과 무관한 비공식 클라이언트입니다. \"Signal\"은 Signal Technology Foundation의 상표입니다.";
+                        }
+                        SettingRow {
+                            label: "소스 코드";
+                            hint: "© Othereum. AGPL-3.0 라이선스로 공개된 자유 소프트웨어이며, 어떠한 보증도 하지 않습니다.";
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Button {
+                                    text: "GitHub";
+                                    clicked => { Links.open("https://github.com/Othereum/sigwin"); }
+                                }
+                                Button {
+                                    text: "라이선스";
+                                    clicked => { Links.open("https://www.gnu.org/licenses/agpl-3.0.html"); }
+                                }
+                            }
+                        }
+                        SettingRow {
+                            label: "오픈소스 라이선스";
+                            hint: "Sigwin에 포함된 라이브러리의 저작권과 라이선스 고지";
+                            Button {
+                                text: "보기";
+                                clicked => { Links.open("sigwin-licenses:"); }
+                            }
+                        }
                     }
+                    Rectangle { height: 16px; }
                 }
             }
         }

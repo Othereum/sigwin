@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Sigwin 오픈소스 라이선스</title>
+<style>
+body { font: 14px/1.5 "Malgun Gothic", sans-serif; max-width: 900px; margin: 2em auto; padding: 0 1em; color: #222; }
+@media (prefers-color-scheme: dark) { body { background: #1b1b1b; color: #ddd; } a { color: #7aa7ff; } pre { background: #252525 !important; } }
+h2 { margin-top: 2em; border-bottom: 1px solid #8884; }
+ul.crates { columns: 2; font-size: 13px; }
+pre { white-space: pre-wrap; background: #f4f4f4; padding: 1em; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>Sigwin 오픈소스 라이선스</h1>
+<p>Sigwin은 <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a> 라이선스로 배포되며 소스 코드는 <a href="https://github.com/Othereum/sigwin">github.com/Othereum/sigwin</a>에 있습니다. 아래는 Sigwin에 포함된 라이브러리와 그 라이선스입니다.</p>
+<h2>SQLCipher</h2>
+<p>libsqlite3-sys에 포함되어 함께 빌드됩니다. SQLite는 퍼블릭 도메인입니다.</p>
+<pre>Copyright (c) 2008-2020 Zetetic LLC
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the ZETETIC LLC nor the
+      names of its contributors may be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY ZETETIC LLC &#x27;&#x27;AS IS&#x27;&#x27; AND ANY
+EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL ZETETIC LLC BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</pre>
+{{#each licenses}}
+<h2>{{name}}</h2>
+<ul class="crates">
+{{#each used_by}}<li>{{crate.name}} {{crate.version}}</li>
+{{/each}}</ul>
+<pre>{{text}}</pre>
+{{/each}}
+</body>
+</html>

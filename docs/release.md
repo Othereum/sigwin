@@ -16,6 +16,17 @@ re-tagging. A release the app rejects (signature mismatch, missing `sigwin.exe` 
 `.minisig`) is skipped until a newer tag appears; it is remembered only until the app
 restarts, so each running app downloads a broken release at most once per launch.
 
+## License notices
+The workflow generates third-party notices with `cargo about` (`build-support/about.toml`:
+accepted licenses in order of preference, Slint taken under GPL-3.0;
+`build-support/about.hbs`: the HTML, with the bundled SQLCipher license added by hand),
+embeds them through `SIGWIN_LICENSES` (`build.rs`; without it a placeholder pointing at the
+release is embedded) and publishes `licenses.html` with the release. Settings > 정보 >
+오픈소스 라이선스 opens the embedded copy. A new dependency under a license not in `accepted`
+fails the release: check it, then add it. Locally:
+`cargo about generate -c build-support/about.toml build-support/about.hbs -o target/licenses.html`
+(`cargo install cargo-about --features cli`).
+
 ## Signing key
 - Public key: `PUBLIC_KEY` in `src/update.rs`. Secret key: the `MINISIGN_KEY` repository
   secret (the full contents of the minisign secret key file, generated **without a password**

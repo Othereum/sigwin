@@ -69,4 +69,4 @@ target\fast\sigwin.exe
 그 밖의 데모·헤드리스 옵션은 [`docs/headless.md`](docs/headless.md)를 보세요.
 
 ## 라이선스
-AGPL-3.0-only (presage, libsignal과 동일). 전문은 [`LICENSE`](LICENSE)에 있습니다.
+AGPL-3.0-only (presage, libsignal과 동일). 전문은 [`LICENSE`](LICENSE)에 있습니다. 포함된 라이브러리의 고지는 앱의 `⚙` → 정보 → 오픈소스 라이선스, 또는 릴리스의 `licenses.html`에 있습니다.

@@ -34,6 +34,15 @@ jobs:
           choco install protoc nasm -y --no-progress
           "C:\Program Files\NASM" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
+      # third-party notices, embedded in the exe (settings > 정보) and published beside it
+      - name: Generate license notices
+        shell: pwsh
+        run: |
+          cargo install cargo-about --version 0.9.3 --locked --features cli
+          cargo about generate -c build-support/about.toml build-support/about.hbs -o licenses.html
+          if ($LASTEXITCODE -ne 0) { throw "cargo about failed" }
+          "SIGWIN_LICENSES=$PWD\licenses.html" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
       - name: Build
         run: cargo build --release --locked
 
@@ -60,4 +69,4 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" sigwin.exe sigwin.exe.minisig --title "Sigwin $env:VERSION" --generate-notes
+        run: gh release create "${{ github.ref_name }}" sigwin.exe sigwin.exe.minisig licenses.html --title "Sigwin $env:VERSION" --generate-notes

@@ -392,6 +392,8 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     app.global::<Links>().on_open(move |url| {
         if let Some(id) = url.strip_prefix(SPOILER_URL) {
             reveal_spoilers(&weak.unwrap(), id);
+        } else if url == crate::notices::URL {
+            crate::notices::open(&crate::data_dir());
         } else if let Some(id) = url.strip_prefix(MORE_URL) {
             s(Command::ReadMore(id.to_string()));
         } else {

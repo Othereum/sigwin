@@ -17,6 +17,7 @@ mod instance;
 mod gui;
 mod link;
 mod logfile;
+mod notices;
 mod mention;
 mod secret;
 mod settings;
