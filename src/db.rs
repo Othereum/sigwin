@@ -5,10 +5,18 @@ use presage::store::Thread;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 
-/// Version of our `ls_*` tables (presage's own tables migrate themselves). The `CREATE TABLE`
-/// statements in `Index::open` stay at version 1 forever; any later change is a step in
-/// `migrate` with `SCHEMA` bumped, so a fresh DB and an auto-updated old one take the same path.
-/// Kept in our `ls_meta` table rather than `PRAGMA user_version`, which the DB shares with presage.
+/// Version of our `ls_*` tables (presage's own tables migrate themselves). Kept in our `ls_meta`
+/// table rather than `PRAGMA user_version`, which the DB shares with presage.
+///
+/// `CREATE TABLE IF NOT EXISTS` does nothing on a DB that has the table, and installed apps
+/// auto-update and keep their DB, so:
+/// - a new table: just add its `CREATE TABLE IF NOT EXISTS` to `Index::open`;
+/// - a change to an existing table: leave its `CREATE` as it is, add a `step` and bump
+///   `SCHEMA`. Most of ours can be rebuilt (receipts and pins are backfilled from presage's
+///   messages, packs/stickers are a cache): prefer drop, recreate and make the backfill run
+///   again over moving columns;
+/// - `ls_deleted_mine` has no source to rebuild from (which deleted rows were ours): its data
+///   must be carried over.
 const SCHEMA: i64 = 1;
 
 async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
@@ -39,7 +47,7 @@ async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
 /// One migration step up from `v`; returns the new version. Run in order, each exactly once.
 async fn step(_pool: &SqlitePool, v: i64) -> anyhow::Result<i64> {
     match v {
-        // 1 => { sqlx::query("ALTER TABLE ls_pins ADD COLUMN ...").execute(pool).await?; Ok(2) }
+        // 1 => { DROP TABLE ls_pins; CREATE the new one; reset `Persist.pins_indexed`; Ok(2) }
         _ => anyhow::bail!("db: no migration from schema {v}"),
     }
 }

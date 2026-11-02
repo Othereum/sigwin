@@ -26,7 +26,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/backend/stickers.rs` | sticker packs: picker thumbs, grids, sending, installing |
 | `src/backend/files.rs` | attachment / thumbnail caches (encrypted), opening attachments, `seal_legacy_files` |
 | `src/view.rs` | `Content` → `MsgDto` rows: folds reactions and edits, receipt status, day separators, snippets |
-| `src/db.rs` | own SQL on presage's DB: thread list by recency, timestamp paging, `ls_receipts` index. Our `ls_*` tables are versioned in `ls_meta` (`SCHEMA`); their `CREATE` statements stay at version 1 and changes go through `migrate` steps, since auto-updates carry old DBs forward |
+| `src/db.rs` | own SQL on presage's DB: thread list by recency, timestamp paging, `ls_receipts` index. Our `ls_*` tables are versioned in `ls_meta` (`SCHEMA`); new tables are just added, changes to existing ones go through `migrate` steps (rebuildable ones dropped and backfilled again), since auto-updates carry old DBs forward |
 | `src/types.rs` | `Command` / `Event` / DTOs crossing threads (all `Send`), thread keys `c:<uuid>` / `g:<hex>` |
 | `src/secret.rs` | random 256-bit DB key, stored DPAPI-protected (`db.key`) |
 | `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |
