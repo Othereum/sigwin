@@ -59,6 +59,8 @@ pub struct MsgDto {
     pub show_avatar: bool,
     pub status: String,
     pub quote: String,
+    /// who wrote the quoted message ("나" for us), empty if unknown
+    pub quote_author: String,
     /// (emoji, count)
     pub reactions: Vec<(String, u32)>,
     /// the message is only 1..=5 emoji: shown large, without a bubble

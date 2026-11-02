@@ -9,6 +9,7 @@ use presage::libsignal_service::prelude::Uuid;
 use presage::proto::sync_message::{Content as SyncContent, Sent};
 use presage::proto::body_range::AssociatedValue;
 use presage::proto::data_message::pin_message::PinDuration;
+use presage::proto::data_message::Quote;
 use presage::proto::{receipt_message, AttachmentPointer, BodyRange, EditMessage, ReceiptMessage, SyncMessage};
 
 use presage::store::ContentExt;
@@ -248,10 +249,30 @@ fn mention_uuid(r: &BodyRange) -> Option<Uuid> {
     }
 }
 
-/// Everyone @mentioned in a data message (body and quote), so callers can resolve names first.
+/// Everyone named in a data message (@mentions in body and quote, the quoted author),
+/// so callers can resolve names first.
 pub fn mentioned(dm: &DataMessage) -> Vec<Uuid> {
     let quote = dm.quote.iter().flat_map(|q| q.body_ranges.iter());
-    dm.body_ranges.iter().chain(quote).filter_map(mention_uuid).collect()
+    let mut v: Vec<Uuid> = dm.body_ranges.iter().chain(quote).filter_map(mention_uuid).collect();
+    v.extend(dm.quote.as_ref().and_then(quote_author));
+    v
+}
+
+/// Author of a quoted message (newer clients send only the binary form).
+pub fn quote_author(q: &Quote) -> Option<Uuid> {
+    q.author_aci_binary
+        .as_deref()
+        .and_then(|b| Uuid::from_slice(b).ok())
+        .or_else(|| q.author_aci.as_deref()?.parse().ok())
+}
+
+/// The name shown above a quote: "나" for our own messages.
+pub fn quote_author_name(q: &Quote, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> String {
+    match quote_author(q) {
+        Some(u) if u == me => "나".into(),
+        Some(u) => name_of(&u),
+        None => String::new(),
+    }
 }
 
 /// Replaces mention ranges (a U+FFFC placeholder in the text, offsets in UTF-16 units) with "@name",
@@ -693,6 +714,7 @@ pub fn build(
                         .filter(|t| !t.is_empty())
                         .map(|t| with_mentions(t, &q.body_ranges, name_of))
                         .unwrap_or_else(|| "(첨부파일)".into());
+                    m.quote_author = quote_author_name(q, me, name_of);
                 }
                 let mut others = 0;
                 for (i, a) in shown_attachments(dm) {

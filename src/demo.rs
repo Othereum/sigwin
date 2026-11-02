@@ -127,6 +127,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
 ※ 읽음 확인을 끈 사람은 '읽음'으로 표시되지 않습니다.".into() } else { String::new() },
             // tall rows at the end check that scrolling to the bottom reaches it
             quote: if i % 11 == 0 || i >= 298 { "이전 메시지 인용".into() } else { String::new() },
+            quote_author: if i % 11 == 0 || i >= 298 { if i % 2 == 0 { "나".into() } else { "이서연".into() } } else { String::new() },
             reactions: if i % 9 == 0 { vec![("❤️".into(), 2), ("👍".into(), 1), ("😂".into(), 3)] } else { Vec::new() },
             attachment: if i % 13 == 0 { "보고서.pdf".into() } else { String::new() },
             day_sep: if i % 50 == 0 { "2026년 11월 1일 일요일".into() } else { String::new() },

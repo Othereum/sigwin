@@ -222,6 +222,7 @@ impl App {
             thread_key,
             text: String::new(),
             quote: String::new(),
+            quote_author: String::new(),
             attachment: String::new(),
             image_key: image_key.clone(),
             error: None,

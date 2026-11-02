@@ -24,11 +24,18 @@ impl App {
             })
         });
         let names = &self.names;
-        let quote_label = quote
+        let name_of = |u: &Uuid| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into());
+        // same labels as view::build gives the stored row
+        let (quote_label, quote_author) = quote
             .as_ref()
-            .and_then(|q| {
-                let t = q.text.as_deref().filter(|t| !t.is_empty())?;
-                Some(view::with_mentions(t, &q.body_ranges, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())))
+            .map(|q| {
+                let label = q
+                    .text
+                    .as_deref()
+                    .filter(|t| !t.is_empty())
+                    .map(|t| view::with_mentions(t, &q.body_ranges, &name_of))
+                    .unwrap_or_else(|| "(첨부파일)".into());
+                (label, view::quote_author_name(q, self.me, &name_of))
             })
             .unwrap_or_default();
         let (body, body_ranges) = crate::mention::encode(&text, &mentions);
@@ -50,6 +57,7 @@ impl App {
             thread_key: open.key.clone(),
             text: text.clone(),
             quote: quote_label,
+            quote_author,
             attachment,
             image_key: String::new(),
             error: None,
@@ -162,6 +170,7 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     let mut m = view::outgoing_stub(p.ts, prev_ts);
     (m.text, m.styles) = crate::format::parse(&p.text);
     m.quote = p.quote.clone();
+    m.quote_author = p.quote_author.clone();
     m.attachment = p.attachment.clone();
     if !p.image_key.is_empty() {
         m.image_key = p.image_key.clone();

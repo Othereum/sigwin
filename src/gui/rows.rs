@@ -235,6 +235,7 @@ pub(crate) fn to_item(
         readers: reader_items(m, senders),
         readers_more: m.readers.len().saturating_sub(types::MAX_READER_PHOTOS) as i32,
         quote: m.quote.as_str().into(),
+        quote_author: m.quote_author.as_str().into(),
         attachment: m.attachment.as_str().into(),
         has_image: !m.image_key.is_empty(),
         image: image.unwrap_or_default(),

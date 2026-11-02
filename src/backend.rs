@@ -185,6 +185,7 @@ struct Pending {
     thread_key: String,
     text: String,
     quote: String,
+    quote_author: String,
     attachment: String,
     /// sticker preview: thumbnail key, already emitted to the UI
     image_key: String,

@@ -304,6 +304,14 @@ export component Bubble inherits VerticalLayout {
                         Rectangle { width: 3px; background: m.outgoing ? white : Theme.accent; }
                         VerticalLayout {
                             padding: 6px;
+                            spacing: 1px;
+                            if m.quote-author != "": Text {
+                                text: m.quote-author;
+                                color: m.outgoing ? white : Theme.text;
+                                font-size: 12px;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
                             Text {
                                 text: m.quote;
                                 color: m.outgoing ? #ffffffd0 : Theme.subtle;
