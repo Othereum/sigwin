@@ -358,7 +358,8 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
 
     let s = send.clone();
     let weak = app.as_weak();
-    let demo = std::env::var_os("SIGWIN_DEMO").is_some();
+    // the paged demo (SIGWIN_DEMO_OLDER) pages in the target like the backend does
+    let demo = std::env::var_os("SIGWIN_DEMO").is_some() && std::env::var_os("SIGWIN_DEMO_OLDER").is_none();
     app.on_show_message(move |id| match weak.upgrade() {
         // no backend: demo pin and quote ids are row ids
         Some(app) if demo => jump_to_row(&app, id.to_string()),

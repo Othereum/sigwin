@@ -93,13 +93,24 @@ impl App {
     }
 
     /// Scrolls to the message with sent timestamp `id`, loading older rows until it is in the window.
+    ///
+    /// The target also gets `JUMP_MARGIN` rows above it when history allows. Landing near the
+    /// window's first row would make the next scroll fetch an older page while that row is on
+    /// screen, and anchoring it (`gui::scroll::hold_older`) fights the wheel: the view shakes.
+    /// With a margin, older pages come in through the usual prefetch, off screen.
     pub(super) async fn jump_to(&mut self, id: &str) -> anyhow::Result<()> {
         let target: u64 = id.parse()?;
         let mut loaded = false;
         loop {
             let Some(open) = self.current.as_ref() else { return Ok(()) };
-            if let Some((row, _)) = open.window.iter().find(|(_, c)| c.timestamp() == target) {
-                let row = row.to_string();
+            if let Some(pos) = open.window.iter().position(|(_, c)| c.timestamp() == target) {
+                if displayable(&open.window[..pos], self.me) < JUMP_MARGIN && self.extend_older().await? {
+                    loaded = true;
+                    continue;
+                }
+                // nothing was prepended (no more history): `pos` still holds
+                let Some(open) = self.current.as_ref() else { return Ok(()) };
+                let row = open.window[pos].0.to_string();
                 if loaded {
                     self.emit_messages(Scroll::Keep).await;
                 }

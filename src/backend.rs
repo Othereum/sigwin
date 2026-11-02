@@ -57,6 +57,9 @@ pub type Emit = Arc<dyn Fn(Event) + Send + Sync>;
 
 const PAGE: u32 = 60;
 const MAX_WINDOW: usize = 600;
+/// shown rows kept above a jump target (`App::jump_to`): well past the older-page prefetch
+/// distance (two screens)
+const JUMP_MARGIN: usize = 30;
 /// presage sends to each group member one by one: skip typing indicators in larger groups
 const TYPING_MAX_GROUP: usize = 12;
 /// Signal clients resend "typing" every few seconds and give up on silent typists after 15s

@@ -128,8 +128,9 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             // tall rows at the end check that scrolling to the bottom reaches it
             quote: if i % 11 == 0 || i >= 298 { "이전 메시지 인용".into() } else { String::new() },
             quote_author: if i % 11 == 0 || i >= 298 { if i % 2 == 0 { "나".into() } else { "이서연".into() } } else { String::new() },
-            // demo ids are row ids: quote a row some way up
-            quote_id: if i % 11 == 0 || i >= 298 { i.saturating_sub(40).to_string() } else { String::new() },
+            // demo ids are row ids: quote a row some way up (the last rows: near the top of the
+            // page that SIGWIN_DEMO_OLDER pages in for it)
+            quote_id: if i >= 298 { (i - 175).to_string() } else if i % 11 == 0 { i.saturating_sub(40).to_string() } else { String::new() },
             reactions: if i % 9 == 0 { vec![("❤️".into(), 2), ("👍".into(), 1), ("😂".into(), 3)] } else { Vec::new() },
             attachment: if i % 13 == 0 { "보고서.pdf".into() } else { String::new() },
             day_sep: if i % 50 == 0 { "2026년 11월 1일 일요일".into() } else { String::new() },
@@ -254,6 +255,19 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                     std::thread::sleep(delay);
                     start = start.saturating_sub(60);
                     emit(Event::Messages { key: "c:demo-1".into(), items: window(start), can_older: start > 0, scroll: Scroll::Older });
+                }
+                // like App::jump_to: page in older rows until the target is in the window,
+                // with a margin above it
+                if let Command::JumpTo(id) = &c {
+                    let Ok(target) = id.parse::<usize>() else { continue };
+                    if target < start + 30 && start > 0 {
+                        while target < start + 30 && start > 0 {
+                            std::thread::sleep(delay);
+                            start = start.saturating_sub(60);
+                        }
+                        emit(Event::Messages { key: "c:demo-1".into(), items: window(start), can_older: start > 0, scroll: Scroll::Keep });
+                    }
+                    emit(Event::JumpTo(id.clone()));
                 }
             }
         });
