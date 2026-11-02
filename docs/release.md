@@ -2,10 +2,13 @@
 
 ## Publishing
 1. Bump `version` in `Cargo.toml` (and `Cargo.lock` via `cargo build`), commit.
-2. Push `main`, then run the `release` workflow on `main` (Actions > release > Run workflow, or
-   `gh workflow run release.yml`). It builds `--release`, signs `sigwin.exe` with minisign
-   (trusted comment `sigwin <version>`) and creates tag `v<version>` plus the GitHub release
-   with `sigwin.exe` + `sigwin.exe.minisig`. It fails if that release already exists.
+2. Push `main`, then run `scriptselease.ps1` on it. It checks the tree is clean and equals
+   `origin/main` and the release is new, builds `--release`, signs `sigwin.exe` with minisign
+   (trusted comment `sigwin <version>`, key password typed at the prompt), verifies the signature
+   against `PUBLIC_KEY`, asks for confirmation and creates tag `v<version>` plus the GitHub
+   release with `sigwin.exe`, `sigwin.exe.minisig` and `licenses.html`. Needs `cargo-about`,
+   `minisign` and `gh` (logged in) in `PATH`; the key defaults to `~\.minisign\sigwin.key`
+   (`-Key` to change).
 3. Installed apps check `releases/latest` 10s after start, then hourly (and when the window
    gains focus after an hour without a check), download and verify the exe, swap it in, and
    show "새 버전 … 준비됨 · 다시 시작" in the sidebar. Network failures retry after 5 min,
