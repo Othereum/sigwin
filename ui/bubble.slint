@@ -379,7 +379,34 @@ export component Bubble inherits VerticalLayout {
                     spacing: 8px;
                     if m.text != "": Rectangle {
                         horizontal-stretch: 1;
-                        VerticalLayout {
+                        // trailing NBSPs stand in for the time: if they push the text onto another line,
+                        // the time doesn't fit beside the last line and gets a row of its own
+                        // (the time itself floats at the bottom right; `mm` measures its real width)
+                        property <bool> with-time: root.inline-time && !m.hide-time;
+                        property <string> pad: !with-time ? "" : mm.preferred-width <= 52px ? "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" : mm.preferred-width <= 82px ? "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" : mm.preferred-width <= 112px ? "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" : "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}";
+                        // fixed (the widest the text can get), so measuring doesn't loop with the layout
+                        property <length> probe-w: (root.flush ? max(m.img-w, 200px) : root.max-w) - 24px;
+                        property <bool> wraps: with-time && probe-pad.preferred-height > probe.preferred-height;
+                        preferred-width: with-time ? probe.preferred-width + mm.preferred-width + 6px : probe.preferred-width;
+                        mm := MsgMeta { visible: false; m: m; }
+                        min-height: tl.min-height;
+                        preferred-height: tl.preferred-height;
+                        max-height: tl.max-height;
+                        probe := Text {
+                            visible: false;
+                            width: probe-w;
+                            text: m.text;
+                            wrap: word-wrap;
+                            font-size: 14px;
+                        }
+                        probe-pad := Text {
+                            visible: false;
+                            width: probe-w;
+                            text: m.text + parent.pad;
+                            wrap: word-wrap;
+                            font-size: 14px;
+                        }
+                        tl := VerticalLayout {
                             TextInput {
                                 text: m.text;
                                 read-only: true;
@@ -393,6 +420,7 @@ export component Bubble inherits VerticalLayout {
                                 selection-background-color: m.outgoing ? #ffffff60 : #2c6bed60;
                                 selection-foreground-color: m.has-rich ? transparent : m.outgoing ? white : Theme.text;
                             }
+                            if wraps: Rectangle { height: 14px; }
                         }
                         if m.has-rich: StyledText {
                             width: parent.width;
@@ -403,10 +431,14 @@ export component Bubble inherits VerticalLayout {
                             link-color: m.outgoing ? white : Theme.dark ? #7aa7ff : #1f5fd6;
                             link-clicked(url) => { Links.open(url); }
                         }
-                    }
-                    if root.inline-time && !m.hide-time: MsgMeta {
-                        m: m;
-                        info(t) => { root.show-info(t); }
+                        if with-time: MsgMeta {
+                            x: parent.width - self.width;
+                            y: parent.height - self.height;
+                            width: self.preferred-width;
+                            height: self.preferred-height;
+                            m: m;
+                            info(t) => { root.show-info(t); }
+                        }
                     }
                 }
                 if m.more: HorizontalLayout {
