@@ -21,7 +21,7 @@ The user works on this PC: never pop up a window, take focus or move the real mo
 ```
 $env:SIGWIN_DATA="<scratch>"; $env:SIGWIN_DEMO="1"
 $env:SIGWIN_HEADLESS="wait 500; wheel 650 350 6; click 960 590; type 안녕; key shift+Enter; wait 300; shot <scratch>\a.png"
-.\target\debug\sigwin.exe
+.\target\fast\sigwin.exe
 ```
 Steps: `size W H` (logical, default 1000x680), `scale S`, `wait MS`, `move/click/rclick/dblclick X Y`, `drag X1 Y1 X2 Y2`, `wheel X Y N` (+ = up), `type TEXT`, `key [ctrl+][shift+]NAME`, `shot PATH`, `record DIR` (save every frame drawn from now on as `DIR\NNNN.png`, for one-frame glitches; `record` alone stops; saving slows frames down, so give `wait`s more time).
 

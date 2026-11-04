@@ -21,8 +21,8 @@
 
 ## Build & run
 ```
-cargo build --profile fast     # day-to-day: optimized, no LTO, incremental -> target\fast\
-cargo build                    # debug: quickest for UI experiments -> target\debug\
+cargo build --profile fast     # day-to-day, compile checks too: optimized, no LTO, incremental -> target\fast\
+cargo build                    # debug (dev profile): only for a debugger; rebuilds slower than fast here -> target\debug\
 cargo build --release          # distribution only (~2.5 min, thin LTO)
 cargo test
 ```
