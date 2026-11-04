@@ -76,6 +76,8 @@ export component AppWindow inherits Window {
     // index into the zoom steps (see settings::ZOOMS)
     in-out property <int> set-zoom: 1;
     in-out property <bool> enter-sends: true;
+    in-out property <bool> set-autostart;
+    in-out property <bool> set-start-hidden: true;
     in property <string> account-name;
     in property <string> account-number;
     in property <string> account-device;
@@ -687,6 +689,8 @@ export component AppWindow inherits Window {
         theme <=> root.set-theme;
         zoom <=> root.set-zoom;
         enter-sends <=> root.enter-sends;
+        autostart <=> root.set-autostart;
+        start-hidden <=> root.set-start-hidden;
         account-name: root.account-name;
         account-number: root.account-number;
         account-device: root.account-device;

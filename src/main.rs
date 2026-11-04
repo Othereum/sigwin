@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod alloc;
+mod autostart;
 mod avatar;
 mod badge;
 mod backend;
@@ -176,6 +177,10 @@ fn main() -> anyhow::Result<()> {
     let prefs = settings::Settings::load(&settings_path);
     prefs.publish();
     badge::set_enabled(prefs.badge);
+    if prefs.autostart {
+        // keeps the command current (exe moved by a reinstall, flag changed)
+        autostart::apply(true, prefs.start_hidden, false);
+    }
     show_settings(&app, &prefs);
     app.set_version(format!("Sigwin {}", env!("CARGO_PKG_VERSION")).into());
     UI.with_borrow_mut(|ui| {
@@ -187,8 +192,28 @@ fn main() -> anyhow::Result<()> {
         ui.drafts = drafts::load(&ui.drafts_path);
     });
     apply_theme(&app, true);
-    wire(&app, cmd_tx);
-    app.run()?;
+    wire(&app, cmd_tx.clone());
+    if !headless::active() {
+        let weak = app.as_weak();
+        tray::install(move || {
+            if let Some(app) = weak.upgrade() {
+                to_front(&app);
+            }
+        });
+    }
+    if std::env::args().any(|a| a == autostart::BACKGROUND_FLAG) && !headless::active() && tray::active() {
+        // autostart: the window stays unshown until the tray icon is used. It isn't in the
+        // foreground, so notifications must not wait for a focus event that never comes.
+        let _ = cmd_tx.send(Command::WindowFocus(false));
+        preset_scale(UI.with_borrow(|ui| ui.settings.zoom));
+        slint::run_event_loop_until_quit()?;
+        let _ = app.hide();
+    } else {
+        if !headless::active() {
+            ensure_shown(&app);
+        }
+        app.run()?;
+    }
     tray::remove();
     // like Signal's `fastClear` on unload: a toast we can no longer act on goes away
     if !headless::active() {

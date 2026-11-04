@@ -1,29 +1,32 @@
 //! Notification-area icon: closing the window hides it and the app keeps running.
 //!
-//! The icon reports to the main window (callback message `WM_TRAY`, handled in `winhook`).
-//! Left click shows the window, right click opens a small menu (열기 / 종료). If the icon
-//! can't be added (no taskbar yet) closing still quits, so the app is never hidden with no
-//! way back. Explorer's restart sends "TaskbarCreated": the icon is added again then.
+//! The icon belongs to its own hidden top-level window (not the main window), so it exists
+//! before the main window does: an autostart launch (`--background`) never shows the main
+//! window until the icon is used. Left click shows the window, right click opens a small menu
+//! (열기 / 종료). If the icon can't be added (no taskbar yet) closing still quits and
+//! `--background` shows the window anyway, so the app is never hidden with no way back.
+//! Explorer's restart sends "TaskbarCreated": the icon is added again then.
 
 #[cfg(windows)]
 pub use win::*;
 
 #[cfg(not(windows))]
 mod stub {
-    pub fn install(_hwnd: isize) {}
+    pub fn install(_on_open: impl Fn() + 'static) {}
     pub fn remove() {}
     pub fn active() -> bool {
         false
     }
+    pub fn hide_window(_hwnd: isize) {}
 }
 #[cfg(not(windows))]
 pub use stub::*;
 
 #[cfg(windows)]
 mod win {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
-    use windows_sys::Win32::Foundation::{HWND, POINT};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Shell::{
         Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
@@ -31,14 +34,15 @@ mod win {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
     /// Callback message of the icon (WM_APP + 1).
-    pub const WM_TRAY: u32 = WM_APP + 1;
+    const WM_TRAY: u32 = WM_APP + 1;
     const ID: u32 = 1;
     const CMD_OPEN: usize = 1;
     const CMD_QUIT: usize = 2;
 
     thread_local! {
         static ADDED: Cell<bool> = const { Cell::new(false) };
-        static HWND_: Cell<isize> = const { Cell::new(0) };
+        static OWNER: Cell<isize> = const { Cell::new(0) };
+        static ON_OPEN: RefCell<Option<Box<dyn Fn()>>> = RefCell::new(None);
     }
 
     fn wide(s: &str) -> Vec<u16> {
@@ -54,12 +58,44 @@ mod win {
         d
     }
 
-    /// Adds the icon (again). Remembers the window for later retries.
-    pub fn install(hwnd: isize) {
-        HWND_.set(hwnd);
-        if hwnd == 0 {
+    /// Creates the owner window and adds the icon. `on_open` runs on the Slint event loop
+    /// when the user asks for the window.
+    pub fn install(on_open: impl Fn() + 'static) {
+        ON_OPEN.with_borrow_mut(|o| *o = Some(Box::new(on_open)));
+        let class = wide("SigwinTray");
+        // SAFETY: registers a class for our own hidden window; the proc only touches thread-locals
+        let hwnd = unsafe {
+            let inst = GetModuleHandleW(std::ptr::null());
+            let mut wc: WNDCLASSW = std::mem::zeroed();
+            wc.lpfnWndProc = Some(proc);
+            wc.hInstance = inst;
+            wc.lpszClassName = class.as_ptr();
+            RegisterClassW(&wc);
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                class.as_ptr(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                inst,
+                std::ptr::null(),
+            )
+        };
+        if hwnd.is_null() {
+            tracing::warn!("tray window not created");
             return;
         }
+        OWNER.set(hwnd as isize);
+        add_icon();
+    }
+
+    fn add_icon() {
+        let hwnd = OWNER.get();
         // SAFETY: loads our own icon resource (id 1, set in build.rs) at the small-icon size;
         // shared icons need no cleanup
         let icon = unsafe {
@@ -82,15 +118,10 @@ mod win {
         }
     }
 
-    /// Re-adds the icon after Explorer restarted.
-    pub fn reinstall() {
-        install(HWND_.get());
-    }
-
     pub fn remove() {
         if ADDED.replace(false) {
             // SAFETY: valid struct for our window
-            unsafe { Shell_NotifyIconW(NIM_DELETE, &data(HWND_.get())) };
+            unsafe { Shell_NotifyIconW(NIM_DELETE, &data(OWNER.get())) };
         }
     }
 
@@ -100,21 +131,44 @@ mod win {
     }
 
     /// Hides the main window (taskbar button goes with it).
-    pub fn hide_window(hwnd: HWND) {
+    pub fn hide_window(hwnd: isize) {
         // SAFETY: our own window
-        unsafe { ShowWindow(hwnd, SW_HIDE) };
+        unsafe { ShowWindow(hwnd as HWND, SW_HIDE) };
     }
 
-    /// Mouse message from the icon.
-    pub fn on_event(hwnd: HWND, lparam: isize, show: impl FnOnce()) {
-        match lparam as u32 {
-            WM_LBUTTONUP => show(),
-            WM_RBUTTONUP | WM_CONTEXTMENU => menu(hwnd, show),
-            _ => {}
+    /// "TaskbarCreated": Explorer (re)started, notification-area icons are gone.
+    fn taskbar_created() -> u32 {
+        thread_local!(static ID: Cell<u32> = const { Cell::new(0) });
+        if ID.get() == 0 {
+            // SAFETY: NUL-terminated name
+            ID.set(unsafe { RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()) });
         }
+        ID.get()
     }
 
-    fn menu(hwnd: HWND, show: impl FnOnce()) {
+    fn open() {
+        // not from inside the window procedure: showing the main window belongs to Slint's loop
+        let _ = slint::invoke_from_event_loop(|| ON_OPEN.with_borrow(|o| o.as_ref().map(|f| f())).unwrap_or(()));
+    }
+
+    unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if msg == WM_TRAY {
+            match lparam as u32 {
+                WM_LBUTTONUP => open(),
+                WM_RBUTTONUP | WM_CONTEXTMENU => menu(hwnd),
+                _ => {}
+            }
+            return 0;
+        }
+        if msg == taskbar_created() {
+            add_icon();
+            return 0;
+        }
+        // SAFETY: default handling of a message for our own window
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
+
+    fn menu(hwnd: HWND) {
         // SAFETY: popup menu owned here, destroyed before returning
         let cmd = unsafe {
             let m = CreatePopupMenu();
@@ -130,7 +184,7 @@ mod win {
             cmd as usize
         };
         match cmd {
-            CMD_OPEN => show(),
+            CMD_OPEN => open(),
             CMD_QUIT => {
                 let _ = slint::quit_event_loop();
             }

@@ -59,6 +59,8 @@ pub(crate) fn show_settings(app: &AppWindow, s: &settings::Settings) {
     app.set_set_theme(s.theme as i32);
     app.set_set_zoom(settings::ZOOMS.iter().position(|&z| z == s.zoom).unwrap_or(1) as i32);
     app.set_enter_sends(s.enter_sends);
+    app.set_set_autostart(s.autostart);
+    app.set_set_start_hidden(s.start_hidden);
 }
 
 pub(crate) fn hwnd(app: &AppWindow) -> isize {
@@ -95,8 +97,56 @@ pub(crate) fn open_from_toast(app: &AppWindow, hit: Option<crate::toast::Click>)
     send_cmd(Command::OpenFromToast { key: hit.key, msg: hit.msg });
 }
 
+thread_local! {
+    static SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// starts the native-window hooks (`hook_window`); set by `wire`
+    static STARTER: std::cell::RefCell<Option<Box<dyn Fn(&AppWindow)>>> = std::cell::RefCell::new(None);
+}
+
+pub(crate) fn set_starter(f: impl Fn(&AppWindow) + 'static) {
+    STARTER.with_borrow_mut(|s| *s = Some(Box::new(f)));
+}
+
+/// Shows the Slint window the first time (an autostart launch keeps it unshown until the tray
+/// icon is used) and starts the window hooks. True if it was shown just now.
+pub(crate) fn ensure_shown(app: &AppWindow) -> bool {
+    if SHOWN.replace(true) {
+        return false;
+    }
+    if let Err(e) = app.show() {
+        tracing::warn!("show window: {e}");
+    }
+    STARTER.with_borrow(|s| {
+        if let Some(s) = s {
+            s(app);
+        }
+    });
+    true
+}
+
+/// Before the window exists: image sizes follow the system DPI and the zoom setting.
+#[cfg(windows)]
+pub(crate) fn preset_scale(zoom: u32) {
+    // SAFETY: plain query
+    let dpi = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForSystem() };
+    types::set_ui_scale(dpi as f32 / 96.0 * zoom as f32 / 100.0);
+}
+
+#[cfg(not(windows))]
+pub(crate) fn preset_scale(_: u32) {}
+
 #[cfg(windows)]
 pub(crate) fn to_front(app: &AppWindow) {
+    if ensure_shown(app) {
+        // the native window appears a moment later: raise it then
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
+            if let Some(app) = weak.upgrade() {
+                to_front(&app);
+            }
+        });
+        return;
+    }
     use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
@@ -132,6 +182,7 @@ pub(crate) fn to_front(app: &AppWindow) {
 
 #[cfg(not(windows))]
 pub(crate) fn to_front(app: &AppWindow) {
+    ensure_shown(app);
     app.show().ok();
 }
 
@@ -167,9 +218,6 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
         });
         tracing::info!(hwnd = h, hooked, "window hook");
         badge::set_hwnd(h);
-        if hooked && !headless::active() {
-            tray::install(h);
-        }
         if !hooked {
             // fallback: poll the foreground window
             let weak = app.as_weak();

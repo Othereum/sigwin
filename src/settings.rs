@@ -20,11 +20,15 @@ pub struct Settings {
     pub zoom: u32,
     /// Enter sends (Shift+Enter: new line); otherwise Ctrl+Enter sends and Enter is a new line
     pub enter_sends: bool,
+    /// Start with Windows (HKCU Run), only for the installed copy
+    pub autostart: bool,
+    /// The autostart launch begins hidden in the tray (`--background`)
+    pub start_hidden: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { notify: true, preview: 0, badge: true, theme: 0, zoom: 100, enter_sends: true }
+        Self { notify: true, preview: 0, badge: true, theme: 0, zoom: 100, enter_sends: true, autostart: true, start_hidden: true }
     }
 }
 

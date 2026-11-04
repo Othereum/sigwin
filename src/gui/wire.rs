@@ -13,7 +13,9 @@ pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     wire_settings(app, &send);
     anim::wire(app);
     if !headless::active() {
-        hook_window(app, &send); // no native window in headless
+        // no native window in headless; started when the window is first shown
+        let send = send.clone();
+        set_starter(move |app| hook_window(app, &send));
     }
 }
 
@@ -488,6 +490,8 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             theme: app.get_set_theme().clamp(0, 2) as u8,
             zoom: settings::ZOOMS.get(app.get_set_zoom().max(0) as usize).copied().unwrap_or(100),
             enter_sends: app.get_enter_sends(),
+            autostart: app.get_set_autostart(),
+            start_hidden: app.get_set_start_hidden(),
         };
         let (old, path) = UI.with_borrow_mut(|ui| (std::mem::replace(&mut ui.settings, new.clone()), ui.settings_path.clone()));
         if old == new {
@@ -495,6 +499,9 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
         new.publish();
         badge::set_enabled(new.badge);
+        if (old.autostart, old.start_hidden) != (new.autostart, new.start_hidden) {
+            autostart::apply(new.autostart, new.start_hidden, !old.autostart && new.autostart);
+        }
         if old.theme != new.theme {
             apply_theme(&app, false);
             refresh_rows(&app);

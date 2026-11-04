@@ -46,6 +46,8 @@ export component SettingsPage inherits Rectangle {
     in-out property <int> theme;
     in-out property <int> zoom;
     in-out property <bool> enter-sends;
+    in-out property <bool> autostart;
+    in-out property <bool> start-hidden;
     in property <string> account-name;
     in property <string> account-number;
     in property <string> account-device;
@@ -116,6 +118,26 @@ export component SettingsPage inherits Rectangle {
                             hint: "작업 표시줄 아이콘에 안 읽은 메시지 수를 표시합니다";
                             Switch {
                                 checked <=> root.badge;
+                                toggled => { root.changed(); }
+                            }
+                        }
+                    }
+                    SettingSection {
+                        title: "시작";
+                        SettingRow {
+                            label: "컴퓨터 로그인 시 열기";
+                            hint: "Windows에 로그인하면 Sigwin을 자동으로 실행합니다";
+                            Switch {
+                                checked <=> root.autostart;
+                                toggled => { root.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: "시스템 트레이로 최소화된 상태로 열기";
+                            hint: "자동 실행할 때 창을 띄우지 않고 트레이에 둡니다";
+                            Switch {
+                                enabled: root.autostart;
+                                checked <=> root.start-hidden;
                                 toggled => { root.changed(); }
                             }
                         }
