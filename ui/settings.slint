@@ -48,6 +48,11 @@ export component SettingsPage inherits Rectangle {
     in-out property <bool> enter-sends;
     in-out property <bool> autostart;
     in-out property <bool> start-hidden;
+    in-out property <bool> auto-update;
+    in property <string> update-status;
+    in property <bool> update-checking;
+    in property <bool> update-ready;
+    callback check-update();
     in property <string> account-name;
     in property <string> account-number;
     in property <string> account-device;
@@ -219,6 +224,27 @@ export component SettingsPage inherits Rectangle {
                             Button {
                                 text: "열기";
                                 clicked => { root.open-logs(); }
+                            }
+                        }
+                    }
+                    SettingSection {
+                        title: "업데이트";
+                        SettingRow {
+                            label: "자동 업데이트";
+                            hint: "새 버전을 백그라운드에서 내려받아 설치합니다. 다음에 시작할 때 적용됩니다.";
+                            Switch {
+                                checked <=> root.auto-update;
+                                toggled => { root.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: "업데이트 확인";
+                            hint: root.version + (root.update-ready ? "  ·  새 버전이 준비되었습니다. 왼쪽 아래에서 다시 시작하세요."
+                                : root.update-status != "" ? "  ·  " + root.update-status : "");
+                            Button {
+                                text: root.update-checking ? "확인 중…" : "지금 확인";
+                                enabled: !root.update-checking && !root.update-ready;
+                                clicked => { root.check-update(); }
                             }
                         }
                     }

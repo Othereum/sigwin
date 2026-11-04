@@ -32,7 +32,7 @@ mod winhook;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use slint::{ComponentHandle, ModelRc};
+use slint::{ComponentHandle, ModelRc, SharedString};
 use tokio::sync::mpsc::unbounded_channel;
 
 use gui::*;
@@ -158,12 +158,31 @@ fn main() -> anyhow::Result<()> {
         let _backend = backend::spawn(data_dir(), cmd_rx, emit);
         if let Some(exe) = install::installed_self() {
             let weak = app.as_weak();
-            update::spawn(exe, move |v| {
-                let _ = weak.upgrade_in_event_loop(move |app| app.set_update_version(v.into()));
+            update::spawn(exe, move |st| {
+                let _ = weak.upgrade_in_event_loop(move |app| {
+                    app.set_update_checking(false);
+                    match st {
+                        update::Status::Ready(v) => app.set_update_version(v.into()),
+                        update::Status::UpToDate => app.set_update_status("최신 버전입니다.".into()),
+                        update::Status::Failed => {
+                            app.set_update_status("확인하지 못했습니다. 네트워크를 확인하고 다시 시도하세요.".into())
+                        }
+                    }
+                });
             });
         }
     }
     app.on_restart_for_update(update::restart);
+    let weak = app.as_weak();
+    app.on_check_update(move || {
+        let Some(app) = weak.upgrade() else { return };
+        if update::check_now() {
+            app.set_update_status(SharedString::new());
+            app.set_update_checking(true);
+        } else {
+            app.set_update_status("설치된 Sigwin에서만 업데이트할 수 있습니다.".into());
+        }
+    });
     app.on_open_logs(|| {
         let dir = logfile::dir(&data_dir());
         if let Err(e) = std::process::Command::new("explorer").arg(&dir).spawn() {

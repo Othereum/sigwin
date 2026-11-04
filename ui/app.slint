@@ -78,6 +78,11 @@ export component AppWindow inherits Window {
     in-out property <bool> enter-sends: true;
     in-out property <bool> set-autostart;
     in-out property <bool> set-start-hidden: true;
+    in-out property <bool> set-auto-update: true;
+    // result of the last manual update check; checking = waiting for it
+    in-out property <string> update-status;
+    in-out property <bool> update-checking;
+    callback check-update();
     in property <string> account-name;
     in property <string> account-number;
     in property <string> account-device;
@@ -691,6 +696,11 @@ export component AppWindow inherits Window {
         enter-sends <=> root.enter-sends;
         autostart <=> root.set-autostart;
         start-hidden <=> root.set-start-hidden;
+        auto-update <=> root.set-auto-update;
+        update-status: root.update-status;
+        update-checking: root.update-checking;
+        update-ready: root.update-version != "";
+        check-update => { root.check-update(); }
         account-name: root.account-name;
         account-number: root.account-number;
         account-device: root.account-device;

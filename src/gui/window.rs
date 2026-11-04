@@ -61,6 +61,7 @@ pub(crate) fn show_settings(app: &AppWindow, s: &settings::Settings) {
     app.set_enter_sends(s.enter_sends);
     app.set_set_autostart(s.autostart);
     app.set_set_start_hidden(s.start_hidden);
+    app.set_set_auto_update(s.auto_update);
 }
 
 pub(crate) fn hwnd(app: &AppWindow) -> isize {

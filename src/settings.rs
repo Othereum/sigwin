@@ -24,11 +24,23 @@ pub struct Settings {
     pub autostart: bool,
     /// The autostart launch begins hidden in the tray (`--background`)
     pub start_hidden: bool,
+    /// Check for and install new versions in the background
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { notify: true, preview: 0, badge: true, theme: 0, zoom: 100, enter_sends: true, autostart: true, start_hidden: true }
+        Self {
+            notify: true,
+            preview: 0,
+            badge: true,
+            theme: 0,
+            zoom: 100,
+            enter_sends: true,
+            autostart: true,
+            start_hidden: true,
+            auto_update: true,
+        }
     }
 }
 
@@ -58,7 +70,9 @@ impl Settings {
 
     /// Makes the notification choice visible to the backend thread.
     pub fn publish(&self) {
-        NOTIFY.store(if self.notify { self.preview } else { OFF }, Ordering::Relaxed);    }
+        NOTIFY.store(if self.notify { self.preview } else { OFF }, Ordering::Relaxed);
+        crate::update::set_auto(self.auto_update);
+    }
 }
 
 pub fn path(data_dir: &Path) -> PathBuf {

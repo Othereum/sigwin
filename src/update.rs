@@ -1,5 +1,6 @@
 //! Self-update from GitHub Releases. Only the installed exe updates itself.
 //!
+//! (The "automatic updates" setting gates all of this; the settings button checks once on demand.)
 //! A background thread checks `releases/latest` 10s after start, then once an hour, and also
 //! when the window gains focus and the last check is over an hour old. "An hour" is wall-clock
 //! time checked every few minutes, so a laptop waking from sleep checks soon. A check that fails
@@ -15,8 +16,9 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{bail, Context};
 use minisign_verify::{PublicKey, Signature};
@@ -36,13 +38,39 @@ const RETRY: Duration = Duration::from_secs(5 * 60);
 /// how often the thread looks at the clock (sleep doesn't count suspended time reliably)
 const TICK: Duration = RETRY;
 
-static POKE: OnceLock<mpsc::Sender<()>> = OnceLock::new();
+enum Msg {
+    /// the window gained focus
+    Poke,
+    /// the settings button
+    Manual,
+}
+
+static POKE: OnceLock<mpsc::Sender<Msg>> = OnceLock::new();
+/// The "automatic updates" setting; manual checks ignore it.
+static AUTO: AtomicBool = AtomicBool::new(true);
+
+pub fn set_auto(on: bool) {
+    AUTO.store(on, Ordering::Relaxed);
+}
 
 /// The window gained focus: check now if the last check is old enough.
 pub fn poke() {
     if let Some(tx) = POKE.get() {
-        let _ = tx.send(());
+        let _ = tx.send(Msg::Poke);
     }
+}
+
+/// The "check now" button. False when nothing can update (not the installed copy).
+pub fn check_now() -> bool {
+    POKE.get().is_some_and(|tx| tx.send(Msg::Manual).is_ok())
+}
+
+/// What a check found, for the UI. Automatic checks only report `Ready`.
+pub enum Status {
+    UpToDate,
+    /// a newer version replaced the exe
+    Ready(String),
+    Failed,
 }
 
 /// Whether `wait` has passed since `last` (wall clock; never = passed).
@@ -81,49 +109,74 @@ impl<E: Into<anyhow::Error>> From<E> for Failure {
     }
 }
 
-/// Starts checking for updates of `exe` (the installed copy we run from). `ready` gets the new
-/// version once it has replaced `exe`; checking stops then.
-pub fn spawn(exe: PathBuf, ready: impl Fn(String) + Send + 'static) {
+/// Starts checking for updates of `exe` (the installed copy we run from). `report` gets the new
+/// version once it has replaced `exe` (checking stops then), and the outcome of manual checks.
+pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
     let (tx, rx) = mpsc::channel();
     if POKE.set(tx).is_err() {
         return;
     }
     let _ = std::thread::Builder::new().name("update".into()).spawn(move || {
-        std::thread::sleep(FIRST_CHECK);
-        // drop pokes from before the first check
-        while rx.try_recv().is_ok() {}
+        // wait for the first check; pokes meanwhile are dropped, a manual check isn't
+        let start = Instant::now();
+        let mut manual = false;
+        while let Some(left) = FIRST_CHECK.checked_sub(start.elapsed()) {
+            match rx.recv_timeout(left) {
+                Ok(Msg::Manual) => {
+                    manual = true;
+                    break;
+                }
+                Ok(Msg::Poke) => {}
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+        }
         let (mut ok, mut tried, mut failures) = (None, None, 0u32);
         let mut bad_tag: Option<String> = None;
         loop {
-            if due(ok, tried, failures, SystemTime::now()) {
-                match check_once(&exe, bad_tag.as_deref()) {
+            if manual || (AUTO.load(Ordering::Relaxed) && due(ok, tried, failures, SystemTime::now())) {
+                // a manual check looks at a skipped release again
+                let skip = if manual { None } else { bad_tag.as_deref() };
+                match check_once(&exe, skip) {
                     Ok(Some(v)) => {
                         tracing::info!("update: {v} installed, restart to use it");
-                        ready(v);
+                        report(Status::Ready(v));
                         return;
                     }
                     Ok(None) => {
                         tracing::debug!("update: up to date ({VERSION})");
                         ok = Some(SystemTime::now());
                         failures = 0;
+                        if manual {
+                            report(Status::UpToDate);
+                        }
                     }
                     Err(Failure::BadRelease { tag, err }) => {
                         tracing::warn!("update: skipping {tag} until a newer release: {err:#}");
                         bad_tag = Some(tag);
                         ok = Some(SystemTime::now());
                         failures = 0;
+                        if manual {
+                            report(Status::Failed);
+                        }
                     }
                     Err(Failure::Transient(e)) => {
-                        failures += 1;
-                        tracing::warn!("update: {e:#} (retrying in {} min)", backoff(failures).as_secs() / 60);
+                        tracing::warn!("update: {e:#}");
+                        if manual {
+                            report(Status::Failed);
+                        } else {
+                            failures += 1;
+                            tracing::debug!("update: retrying in {} min", backoff(failures).as_secs() / 60);
+                        }
                     }
                 }
                 tried = Some(SystemTime::now());
             }
-            match rx.recv_timeout(TICK) {
-                Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+            manual = match rx.recv_timeout(TICK) {
+                Ok(Msg::Manual) => true,
+                Ok(Msg::Poke) | Err(RecvTimeoutError::Timeout) => false,
                 Err(RecvTimeoutError::Disconnected) => return,
-            }
+            };
         }
     });
 }

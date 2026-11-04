@@ -492,6 +492,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             enter_sends: app.get_enter_sends(),
             autostart: app.get_set_autostart(),
             start_hidden: app.get_set_start_hidden(),
+            auto_update: app.get_set_auto_update(),
         };
         let (old, path) = UI.with_borrow_mut(|ui| (std::mem::replace(&mut ui.settings, new.clone()), ui.settings_path.clone()));
         if old == new {
