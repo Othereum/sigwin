@@ -7,7 +7,7 @@
 //! (its DB may already be migrated). `--uninstall` (what "Installed apps" runs) removes all of
 //! it; the account data only if the user says so.
 //!
-//! Skipped for builds run from this repo's `target\` (day-to-day development).
+//! Skipped for dev builds (built without `SIGWIN_RELEASE`, see build.rs).
 
 use std::path::Path;
 
@@ -30,12 +30,10 @@ pub fn installed_self() -> Option<std::path::PathBuf> {
     None
 }
 
-/// Run from this repo's `target\` (any profile): day-to-day development.
-pub fn is_dev_build() -> bool {
-    #[cfg(windows)]
-    return std::env::current_exe().is_ok_and(|exe| win::is_dev_build(&exe));
-    #[cfg(not(windows))]
-    false
+/// Built without `SIGWIN_RELEASE` (`sigwin_dev`, see build.rs): any local build, wherever its
+/// exe is run from. Dev builds never install or update themselves.
+pub const fn is_dev_build() -> bool {
+    cfg!(sigwin_dev)
 }
 
 /// Modal error box with no owner window (before the app window exists).
@@ -113,23 +111,17 @@ mod win {
         }
     }
 
-    pub fn is_dev_build(exe: &Path) -> bool {
-        let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
-        let (exe, target) = (exe.to_string_lossy().to_lowercase(), target.to_string_lossy().to_lowercase());
-        exe.starts_with(&target)
-    }
-
     pub fn installed_self() -> Option<PathBuf> {
         let exe = std::env::current_exe().ok()?;
         let lay = Layout::user()?;
-        (!is_dev_build(&exe) && same_path(&exe, &lay.exe)).then_some(lay.exe)
+        (!super::is_dev_build() && same_path(&exe, &lay.exe)).then_some(lay.exe)
     }
 
     pub fn run(data_dir: &Path) -> bool {
-        let Ok(exe) = std::env::current_exe() else { return true };
-        if is_dev_build(&exe) {
+        if super::is_dev_build() {
             return true;
         }
+        let Ok(exe) = std::env::current_exe() else { return true };
         let Some(lay) = Layout::user() else { return true };
         if same_path(&exe, &lay.exe) {
             // left by an upgrade that replaced us while we ran
@@ -446,13 +438,6 @@ mod win {
             remove(&lay, &data, true, &std::env::current_exe().unwrap()).unwrap();
             assert!(!lay.home.exists());
             let _ = fs::remove_dir_all(lay.home.parent().unwrap());
-        }
-
-        #[test]
-        fn dev_builds_are_skipped() {
-            let target = Path::new(env!("CARGO_MANIFEST_DIR")).join(r"target\fast\sigwin.exe");
-            assert!(is_dev_build(&target));
-            assert!(!is_dev_build(Path::new(r"C:\Users\a\Downloads\sigwin.exe")));
         }
     }
 }

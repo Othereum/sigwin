@@ -224,6 +224,8 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
         });
         tracing::info!(hwnd = h, hooked, "window hook");
         badge::set_hwnd(h);
+        #[cfg(all(windows, sigwin_dev))]
+        set_dev_icon(h);
         if !hooked {
             // fallback: poll the foreground window
             let weak = app.as_weak();
@@ -286,4 +288,31 @@ pub(crate) fn visibility(app: &AppWindow, shown: bool) {
             tracing::debug!("hidden: dropped the open thread's rows and images");
         });
     });
+}
+
+/// Dev builds: the marked icon (resource 2, build.rs) on the window and its taskbar button.
+/// Not through Slint's `icon`: it never applies a pixel-buffer image (no cache key, so it looks
+/// unchanged), and an `@image-url` would ship the icon in releases. Slint only sets the icon
+/// again when its own image changes, so this one stays.
+#[cfg(all(windows, sigwin_dev))]
+fn set_dev_icon(hwnd: isize) {
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, LoadImageW, SendMessageW, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_SHARED, SM_CXICON,
+        SM_CXSMICON, WM_SETICON,
+    };
+    if hwnd == 0 {
+        return;
+    }
+    // SAFETY: our own icon resource on our own window; shared icons need no cleanup
+    unsafe {
+        let inst = GetModuleHandleW(std::ptr::null());
+        for (which, metric) in [(ICON_SMALL, SM_CXSMICON), (ICON_BIG, SM_CXICON)] {
+            let size = GetSystemMetrics(metric);
+            let icon = LoadImageW(inst, 2 as _, IMAGE_ICON, size, size, LR_SHARED);
+            if !icon.is_null() {
+                SendMessageW(hwnd as _, WM_SETICON, which as usize, icon as isize);
+            }
+        }
+    }
 }

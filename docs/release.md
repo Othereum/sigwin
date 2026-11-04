@@ -53,4 +53,16 @@ fails the release: check it, then add it. Locally:
 
 ## What only the installed exe does
 Self-update and the Installed apps entry apply only to `%LOCALAPPDATA%\Sigwin\sigwin.exe`.
-Builds run from this repo's `target\` never install or update themselves (`install.rs`).
+Dev builds never install or update themselves (`install.rs`, see below).
+
+## Dev builds
+Any build without `SIGWIN_RELEASE` is a dev build (`sigwin_dev` cfg, set by `build.rs`), whatever
+the profile and wherever its exe runs, so a local `cargo build --release` is one too. It shows the
+commit hash in the title (`Sigwin [34f43ce]`) and the version line, uses `assets/icon-dev.ico`
+(window, tray), shows an error on a second launch instead of bringing the running app to the
+front, and never installs, updates or registers autostart. Releases carry none of it.
+
+`scripts\release.ps1` sets `SIGWIN_RELEASE`, remaps the home and repo dirs out of panic locations
+(`--remap-path-prefix`: they held the user name), and refuses an exe that is still a dev build
+(`SpecialBuild` in its version info, set by `build.rs`) or contains either path. To try the install or update flow locally, build with `SIGWIN_RELEASE=1` and run
+the exe from outside `%LOCALAPPDATA%\Sigwin\`.

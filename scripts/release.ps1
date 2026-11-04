@@ -38,8 +38,23 @@ $out = New-Item -ItemType Directory -Force target\release-dist
 $licenses = Join-Path $out "licenses.html"
 cargo about generate -c build-support/about.toml build-support/about.hbs -o $licenses; Run "cargo about"
 $env:SIGWIN_LICENSES = (Resolve-Path $licenses).Path
+# leaves out everything that marks dev builds (build.rs `sigwin_dev`)
+$env:SIGWIN_RELEASE = "1"
+# keep this machine's paths (user name, repo dir) out of panic locations; the last match wins,
+# so the repo comes after the home dir
+$repo = (Get-Location).Path
+$env:CARGO_ENCODED_RUSTFLAGS = @("--remap-path-prefix=$env:USERPROFILE=~", "--remap-path-prefix=$repo=sigwin") -join [char]0x1f
+# same for C code (aws-lc's __FILE__; cc and CMake both take CFLAGS): MSVC's /d1trimfile
+$env:CFLAGS = "/d1trimfile:$env:USERPROFILE\ /d1trimfile:$repo\"
 
 cargo build --release --locked; Run "cargo build"
+# a dev build (build.rs puts SpecialBuild in its version info) or a leaked path must not ship
+$built = (Resolve-Path target\release\sigwin.exe).Path
+if ((Get-Item $built).VersionInfo.SpecialBuild) { throw "$built is a dev build: SIGWIN_RELEASE didn't reach build.rs" }
+$text = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($built))
+foreach ($bad in $env:USERPROFILE, $repo) {
+    if ($text.IndexOf($bad, [StringComparison]::OrdinalIgnoreCase) -ge 0) { throw "$built contains '$bad'" }
+}
 $exe = Join-Path $out "sigwin.exe"
 Copy-Item target\release\sigwin.exe $exe -Force
 Remove-Item "$exe.minisig" -ErrorAction SilentlyContinue

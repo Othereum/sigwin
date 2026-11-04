@@ -44,14 +44,17 @@ pub use sigwin_ui::*;
 static GLOBAL: alloc::Counting = alloc::Counting;
 
 /// "Sigwin 0.1.3", or "Sigwin 0.1.3 (개발 빌드, 34f43ce)" for a dev build.
-fn version_label(dev: bool) -> String {
+fn version_label() -> String {
     let v = env!("CARGO_PKG_VERSION");
-    match (dev, env!("SIGWIN_GIT_HASH")) {
-        (false, _) => format!("Sigwin {v}"),
-        (true, "") => format!("Sigwin {v} (개발 빌드)"),
-        (true, hash) => format!("Sigwin {v} (개발 빌드, {hash})"),
-    }
+    #[cfg(sigwin_dev)]
+    return match env!("SIGWIN_GIT_HASH") {
+        "" => format!("Sigwin {v} (개발 빌드)"),
+        hash => format!("Sigwin {v} (개발 빌드, {hash})"),
+    };
+    #[cfg(not(sigwin_dev))]
+    format!("Sigwin {v}")
 }
+
 
 /// `SIGWIN_DATA`, else `%LOCALAPPDATA%\Sigwin\data`.
 fn data_dir() -> PathBuf {
@@ -239,11 +242,13 @@ fn main() -> anyhow::Result<()> {
         autostart::apply(true, prefs.start_hidden, false);
     }
     show_settings(&app, &prefs);
-    app.set_version(version_label(install::is_dev_build()).into());
-    if install::is_dev_build() {
-        let hash = env!("SIGWIN_GIT_HASH");
-        app.set_dev_tag(if hash.is_empty() { "개발" } else { hash }.into());
-    }
+    app.set_version(version_label().into());
+    // dev builds: commit hash in the title (the icon: `gui::window::set_dev_icon`, tray)
+    #[cfg(sigwin_dev)]
+    app.set_dev_tag(match env!("SIGWIN_GIT_HASH") {
+        "" => "개발".into(),
+        hash => hash.into(),
+    });
     UI.with_borrow_mut(|ui| {
         ui.tx = Some(cmd_tx.clone());
         ui.paste_dir = paste_dir;

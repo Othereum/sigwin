@@ -39,8 +39,7 @@ component PrefRow inherits HorizontalLayout {
 
 export component AppWindow inherits Window {
     in property <int> total-unread;
-    // dev builds (run from target\): commit hash, else "개발"; empty for the installed copy.
-    // Also picks the dev icon.
+    // dev builds (no SIGWIN_RELEASE): commit hash, else "개발"; empty for releases
     in property <string> dev-tag;
     title: (dev-tag != "" ? "Sigwin [" + dev-tag + "]" : "Sigwin") + (total-unread > 0 ? " (" + total-unread + ")" : "");
     preferred-width: 1000px;
@@ -52,7 +51,7 @@ export component AppWindow inherits Window {
     in property <bool> repaint-flip;
     background: repaint-flip ? Theme.pane-twin : Theme.pane;
     default-font-family: "Malgun Gothic";
-    icon: dev-tag != "" ? @image-url("../assets/icon-dev.png") : @image-url("../assets/icon.png");
+    icon: @image-url("../assets/icon.png");
 
     // "loading" | "link" | "main"
     in property <string> page: "loading";

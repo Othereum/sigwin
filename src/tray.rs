@@ -96,7 +96,7 @@ mod win {
 
     fn add_icon() {
         let hwnd = OWNER.get();
-        // id 1 is the app icon, 2 the dev build's (build.rs)
+        // id 1 is the app icon, 2 the dev build's (only in dev builds, build.rs)
         let id: usize = if crate::install::is_dev_build() { 2 } else { 1 };
         // SAFETY: loads our own icon resource at the small-icon size; shared icons need no cleanup
         let icon = unsafe {
