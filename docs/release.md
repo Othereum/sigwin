@@ -8,7 +8,7 @@
    `PUBLIC_KEY`, asks for confirmation and creates tag `v<version>` plus the GitHub release with
    `sigwin.exe`, `sigwin.exe.minisig` and `licenses.html`. Needs `cargo-about`, `minisign` and
    `gh` (logged in) in `PATH`; the key defaults to `~\.minisign\sigwin.key` (`-Key` to change).
-3. Installed apps check `releases/latest` 10s after start, then hourly (and when the window
+3. Installed apps check `releases/latest` after the first sync (at once on the login screen), then hourly (and when the window
    gains focus after an hour without a check), download and verify the exe, swap it in, and
    show "새 버전 … 준비됨 · 다시 시작" in the sidebar. Network failures retry after 5 min,
    backing off to an hour.

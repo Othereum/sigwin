@@ -1,7 +1,8 @@
 //! Self-update from GitHub Releases. Only the installed exe updates itself.
 //!
 //! (The "automatic updates" setting gates all of this; the settings button checks once on demand.)
-//! A background thread checks `releases/latest` 10s after start, then once an hour, and also
+//! A background thread checks `releases/latest` once the first sync is done (or at once on the
+//! login screen, where there is nothing to sync), then once an hour, and also
 //! when the window gains focus and the last check is over an hour old. "An hour" is wall-clock
 //! time checked every few minutes, so a laptop waking from sleep checks soon. A check that fails
 //! on the network (none yet right after login) is retried after 5 minutes, backing off to an
@@ -18,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{bail, Context};
 use minisign_verify::{PublicKey, Signature};
@@ -31,7 +32,6 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const EXE_ASSET: &str = "sigwin.exe";
 const SIG_ASSET: &str = "sigwin.exe.minisig";
 const MAX_SIZE: u64 = 200 << 20;
-const FIRST_CHECK: Duration = Duration::from_secs(10);
 const INTERVAL: Duration = Duration::from_secs(3600);
 /// after a failed check
 const RETRY: Duration = Duration::from_secs(5 * 60);
@@ -39,6 +39,8 @@ const RETRY: Duration = Duration::from_secs(5 * 60);
 const TICK: Duration = RETRY;
 
 enum Msg {
+    /// the first check may run (see `start`)
+    Start,
     /// the window gained focus
     Poke,
     /// the settings button
@@ -51,6 +53,14 @@ static AUTO: AtomicBool = AtomicBool::new(true);
 
 pub fn set_auto(on: bool) {
     AUTO.store(on, Ordering::Relaxed);
+}
+
+/// Lets the first check run: called once the first sync is done (the network works and the
+/// startup load is over) or when there is no account to sync (login screen). Later calls do nothing.
+pub fn start() {
+    if let Some(tx) = POKE.get() {
+        let _ = tx.send(Msg::Start);
+    }
 }
 
 /// The window gained focus: check now if the last check is old enough.
@@ -118,17 +128,16 @@ pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
     }
     let _ = std::thread::Builder::new().name("update".into()).spawn(move || {
         // wait for the first check; pokes meanwhile are dropped, a manual check isn't
-        let start = Instant::now();
         let mut manual = false;
-        while let Some(left) = FIRST_CHECK.checked_sub(start.elapsed()) {
-            match rx.recv_timeout(left) {
+        loop {
+            match rx.recv() {
+                Ok(Msg::Start) => break,
                 Ok(Msg::Manual) => {
                     manual = true;
                     break;
                 }
                 Ok(Msg::Poke) => {}
-                Err(RecvTimeoutError::Timeout) => break,
-                Err(RecvTimeoutError::Disconnected) => return,
+                Err(_) => return,
             }
         }
         let (mut ok, mut tried, mut failures) = (None, None, 0u32);
@@ -174,7 +183,7 @@ pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
             }
             manual = match rx.recv_timeout(TICK) {
                 Ok(Msg::Manual) => true,
-                Ok(Msg::Poke) | Err(RecvTimeoutError::Timeout) => false,
+                Ok(Msg::Poke | Msg::Start) | Err(RecvTimeoutError::Timeout) => false,
                 Err(RecvTimeoutError::Disconnected) => return,
             };
         }

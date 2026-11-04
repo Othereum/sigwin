@@ -104,6 +104,7 @@ impl App {
             Received::QueueEmpty => {
                 if !self.synced {
                     self.sweep();
+                    crate::update::start();
                 }
                 self.synced = true;
                 self.status("");

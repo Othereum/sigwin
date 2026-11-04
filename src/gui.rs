@@ -156,6 +156,8 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::NeedLink => {
             app.set_has_qr(false);
             app.set_page("link".into());
+            // no account, so no sync to wait for
+            crate::update::start();
         }
         Event::LinkQr(url) => {
             if let Some(img) = qr_image(&url) {
