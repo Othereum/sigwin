@@ -46,6 +46,8 @@ libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-custom-cry
 unicode-segmentation = "1"
 # streaming PNG encoder for pasted clipboard images (same version the image crate uses)
 png = "0.18"
+# Slint-generated UI: a separate crate so Rust-only edits don't recompile it
+sigwin-ui = { path = "crates/ui" }
 # decode/resample: a separate crate so it stays optimized in the `fast` profile
 sigwin-thumb = { path = "crates/thumb" }
 # encrypted attachment/thumbnail cache files: own crate for the same reason
@@ -54,15 +56,12 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 minisign-verify = "0.3.0"
 
 [workspace]
-members = ["crates/thumb", "crates/vault"]
+members = ["crates/thumb", "crates/vault", "crates/ui"]
 
 [features]
 # optional GPU renderers for comparison; pick at runtime with SLINT_BACKEND=winit-femtovg|winit-skia|winit-software
 renderer-femtovg = ["slint/renderer-femtovg"]
 renderer-skia = ["slint/renderer-skia"]
-
-[build-dependencies]
-slint-build = "1.18.1"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
@@ -123,7 +122,10 @@ lto = false
 codegen-units = 16
 incremental = true
 
-# the Slint-generated UI code (~5MB) dominates this crate: opt-level 0 cuts a .slint edit from ~37s
-# to ~9s. Dependencies (renderer, image, sqlite) stay optimized. Use --release for memory/perf numbers.
+# our own code at opt-level 0: the Slint-generated UI (~6MB, crates/ui) took a .slint edit from ~9s
+# to ~37s when optimized. Dependencies (renderer, image, sqlite) stay optimized. Use --release for
+# memory/perf numbers.
 [profile.fast.package.sigwin]
+opt-level = 0
+[profile.fast.package.sigwin-ui]
 opt-level = 0

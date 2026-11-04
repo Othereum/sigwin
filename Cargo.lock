@@ -6399,9 +6399,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sigwin-thumb",
+ "sigwin-ui",
  "sigwin-vault",
  "slint",
- "slint-build",
  "sqlx",
  "tokio",
  "tracing",
@@ -6419,6 +6419,14 @@ name = "sigwin-thumb"
 version = "0.1.0"
 dependencies = [
  "image",
+]
+
+[[package]]
+name = "sigwin-ui"
+version = "0.1.0"
+dependencies = [
+ "slint",
+ "slint-build",
 ]
 
 [[package]]

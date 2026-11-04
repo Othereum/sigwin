@@ -38,7 +38,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use gui::*;
 use types::{Command, Event};
 
-slint::include_modules!();
+pub use sigwin_ui::*;
 
 #[global_allocator]
 static GLOBAL: alloc::Counting = alloc::Counting;
