@@ -1,5 +1,13 @@
 # Releases and updates
 
+## Versioning
+`MAJOR.MINOR.PATCH`, compared numerically by the updater (the parts mean nothing to it):
+- **PATCH** by default: fixes and features.
+- **MINOR** when going back or staying behind stops working: a Signal protocol/server change that
+  makes older versions unusable, or a local data format change older versions can't read
+  (`db.rs` `SCHEMA` migration, incompatible settings).
+- **MAJOR** stays 0 until the core features feel complete.
+
 ## Publishing
 1. Bump `version` in `Cargo.toml` (and `Cargo.lock` via `cargo build`), commit, push `main`.
 2. Run `scripts\release.ps1` (in a terminal: it asks for the key password). It checks the tree is
