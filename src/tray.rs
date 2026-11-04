@@ -96,12 +96,13 @@ mod win {
 
     fn add_icon() {
         let hwnd = OWNER.get();
-        // SAFETY: loads our own icon resource (id 1, set in build.rs) at the small-icon size;
-        // shared icons need no cleanup
+        // id 1 is the app icon, 2 the dev build's (build.rs)
+        let id: usize = if crate::install::is_dev_build() { 2 } else { 1 };
+        // SAFETY: loads our own icon resource at the small-icon size; shared icons need no cleanup
         let icon = unsafe {
             let inst = GetModuleHandleW(std::ptr::null());
             let size = GetSystemMetrics(SM_CXSMICON);
-            LoadImageW(inst, 1 as _, IMAGE_ICON, size, size, LR_SHARED)
+            LoadImageW(inst, id as _, IMAGE_ICON, size, size, LR_SHARED)
         };
         let mut d = data(hwnd);
         d.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;

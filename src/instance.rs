@@ -14,10 +14,10 @@ pub struct Instance {
     events: [isize; 2],
 }
 
-/// `Some` for the first instance; `None` when another one owns `data_dir` and was asked to
-/// come to the front.
-pub fn claim(data_dir: &Path) -> Option<Instance> {
-    imp::claim(&name(data_dir))
+/// `Some` for the first instance; `None` when another one owns `data_dir` (asked to come to
+/// the front if `activate`).
+pub fn claim(data_dir: &Path, activate: bool) -> Option<Instance> {
+    imp::claim(&name(data_dir), activate)
 }
 
 /// Asks the app running on `data_dir` (if any) to quit and waits for it. False if it is
@@ -64,7 +64,7 @@ mod imp {
         format!("{name}-quit")
     }
 
-    pub fn claim(name: &str) -> Option<Instance> {
+    pub fn claim(name: &str, activate: bool) -> Option<Instance> {
         let (main, quit) = (w(name), w(&quit_name(name)));
         // SAFETY: NUL-terminated names; handles are closed below or kept for the process
         unsafe {
@@ -75,9 +75,11 @@ mod imp {
                 return Some(Instance { events: [0; 2] });
             }
             if GetLastError() == ERROR_ALREADY_EXISTS {
-                // we are the foreground launch: let the first instance take the foreground
-                AllowSetForegroundWindow(ASFW_ANY);
-                SetEvent(event);
+                if activate {
+                    // we are the foreground launch: let the first instance take the foreground
+                    AllowSetForegroundWindow(ASFW_ANY);
+                    SetEvent(event);
+                }
                 CloseHandle(event);
                 return None;
             }
@@ -140,7 +142,7 @@ mod imp {
 mod imp {
     use super::Instance;
 
-    pub fn claim(_name: &str) -> Option<Instance> {
+    pub fn claim(_name: &str, _activate: bool) -> Option<Instance> {
         Some(Instance {})
     }
 
@@ -167,14 +169,17 @@ mod tests {
     #[test]
     fn second_claim_activates_first() {
         let dir = std::env::temp_dir().join(format!("sigwin-instance-test-{}", std::process::id()));
-        let first = claim(&dir).expect("first claim");
+        let first = claim(&dir, true).expect("first claim");
         let (tx, rx) = std::sync::mpsc::channel();
         let quit_tx = tx.clone();
         first.serve(move || tx.send("activate").unwrap(), move || quit_tx.send("quit").unwrap());
-        assert!(claim(&dir).is_none());
+        assert!(claim(&dir, true).is_none());
         assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok("activate"));
-        assert!(claim(&dir).is_none());
+        assert!(claim(&dir, true).is_none());
         assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok("activate"));
+        // a dev build backs off without bringing the other one up
+        assert!(claim(&dir, false).is_none());
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(300)).is_err());
         // the "process" never exits in a test, so quit_running times out; only check the signal
         std::thread::spawn(move || quit_running(&dir));
         assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok("quit"));

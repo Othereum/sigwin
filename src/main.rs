@@ -43,6 +43,16 @@ pub use sigwin_ui::*;
 #[global_allocator]
 static GLOBAL: alloc::Counting = alloc::Counting;
 
+/// "Sigwin 0.1.3", or "Sigwin 0.1.3 (개발 빌드, 34f43ce)" for a dev build.
+fn version_label(dev: bool) -> String {
+    let v = env!("CARGO_PKG_VERSION");
+    match (dev, env!("SIGWIN_GIT_HASH")) {
+        (false, _) => format!("Sigwin {v}"),
+        (true, "") => format!("Sigwin {v} (개발 빌드)"),
+        (true, hash) => format!("Sigwin {v} (개발 빌드, {hash})"),
+    }
+}
+
 /// `SIGWIN_DATA`, else `%LOCALAPPDATA%\Sigwin\data`.
 fn data_dir() -> PathBuf {
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -99,8 +109,21 @@ fn main() -> anyhow::Result<()> {
     let instance = if headless::active() {
         None
     } else {
-        match instance::claim(&data_dir()) {
+        // a dev build never hands off: the installed copy coming up instead hides that the
+        // build didn't start
+        let dev = install::is_dev_build();
+        match instance::claim(&data_dir(), !dev) {
             Some(i) => Some(i),
+            None if dev => {
+                tracing::error!("already running for {}: dev build not started", data_dir().display());
+                // scratch-dir runs are automation: no modal box to block on
+                if std::env::var_os("SIGWIN_DATA").is_none() {
+                    install::error("Sigwin이 이미 실행 중이라 개발 빌드를 시작하지 않았습니다.
+
+실행 중인 Sigwin(설치본 또는 다른 빌드)을 종료한 뒤 다시 실행하세요.");
+                }
+                return Ok(());
+            }
             None => {
                 tracing::info!("already running for {}: brought it to the front", data_dir().display());
                 return Ok(());
@@ -216,7 +239,11 @@ fn main() -> anyhow::Result<()> {
         autostart::apply(true, prefs.start_hidden, false);
     }
     show_settings(&app, &prefs);
-    app.set_version(format!("Sigwin {}", env!("CARGO_PKG_VERSION")).into());
+    app.set_version(version_label(install::is_dev_build()).into());
+    if install::is_dev_build() {
+        let hash = env!("SIGWIN_GIT_HASH");
+        app.set_dev_tag(if hash.is_empty() { "개발" } else { hash }.into());
+    }
     UI.with_borrow_mut(|ui| {
         ui.tx = Some(cmd_tx.clone());
         ui.paste_dir = paste_dir;

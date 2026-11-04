@@ -30,6 +30,22 @@ pub fn installed_self() -> Option<std::path::PathBuf> {
     None
 }
 
+/// Run from this repo's `target\` (any profile): day-to-day development.
+pub fn is_dev_build() -> bool {
+    #[cfg(windows)]
+    return std::env::current_exe().is_ok_and(|exe| win::is_dev_build(&exe));
+    #[cfg(not(windows))]
+    false
+}
+
+/// Modal error box with no owner window (before the app window exists).
+pub fn error(text: &str) {
+    #[cfg(windows)]
+    win::error(text);
+    #[cfg(not(windows))]
+    let _ = text;
+}
+
 /// `sigwin.exe --uninstall`.
 pub fn uninstall(data_dir: &Path) {
     #[cfg(windows)]
@@ -97,7 +113,7 @@ mod win {
         }
     }
 
-    fn is_dev_build(exe: &Path) -> bool {
+    pub fn is_dev_build(exe: &Path) -> bool {
         let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
         let (exe, target) = (exe.to_string_lossy().to_lowercase(), target.to_string_lossy().to_lowercase());
         exe.starts_with(&target)
@@ -353,6 +369,10 @@ mod win {
             }
             Some(links.iter().any(|l| l.0 == picked).then_some(picked))
         }
+    }
+
+    pub fn error(text: &str) {
+        message(text, MB_OK | MB_ICONERROR);
     }
 
     fn message(text: &str, style: u32) -> i32 {
