@@ -53,6 +53,8 @@ pub struct ThreadDto {
 pub struct ThreadPrefs {
     /// what toasts show, like `Settings::preview`
     pub preview: Option<u8>,
+    /// toasts play a sound, like `Settings::sound`
+    pub sound: Option<bool>,
     /// while notifications are off: @mentions of us still notify
     pub mentions: Option<bool>,
     /// ... replies to our messages still notify
@@ -74,6 +76,7 @@ pub enum Pref {
     Mentions(Option<bool>),
     Replies(Option<bool>),
     Badge(Option<bool>),
+    Sound(Option<bool>),
 }
 
 impl ThreadPrefs {
@@ -83,6 +86,7 @@ impl ThreadPrefs {
             Pref::Mentions(v) => self.mentions = v,
             Pref::Replies(v) => self.replies = v,
             Pref::Badge(v) => self.badge = v,
+            Pref::Sound(v) => self.sound = v,
         }
     }
 }

@@ -1,9 +1,9 @@
 //! User settings (`settings.json` in the data folder). Owned by the UI thread; the backend
-//! only reads the notification mode through an atomic. The toast sound is Windows' per-app
-//! notification setting, not ours.
+//! only reads the notification mode through atomics. Windows' per-app sound switch can
+//! still mute a toast our sound setting lets ring.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +13,8 @@ pub struct Settings {
     pub notify: bool,
     /// 0 = sender and text, 1 = sender only, 2 = neither
     pub preview: u8,
+    /// toasts play a sound
+    pub sound: bool,
     pub badge: bool,
     /// 0 = follow the system, 1 = light, 2 = dark
     pub theme: u8,
@@ -39,6 +41,7 @@ impl Default for Settings {
         Self {
             notify: true,
             preview: 0,
+            sound: true,
             badge: true,
             theme: 0,
             zoom: 100,
@@ -81,6 +84,7 @@ impl Settings {
     pub fn publish(&self) {
         NOTIFY.store(if self.notify { self.preview } else { OFF }, Ordering::Relaxed);
         MUTED.store(self.muted_mentions as u8 | (self.muted_replies as u8) << 1, Ordering::Relaxed);
+        SOUND.store(self.sound, Ordering::Relaxed);
         crate::update::set_auto(self.auto_update);
     }
 }
@@ -91,6 +95,13 @@ static MUTED: AtomicU8 = AtomicU8::new(3);
 pub fn muted_exceptions() -> (bool, bool) {
     let m = MUTED.load(Ordering::Relaxed);
     (m & 1 != 0, m & 2 != 0)
+}
+
+static SOUND: AtomicBool = AtomicBool::new(true);
+
+/// Whether toasts play a sound (the app setting; a chat can override it).
+pub fn sound() -> bool {
+    SOUND.load(Ordering::Relaxed)
 }
 
 pub fn path(data_dir: &Path) -> PathBuf {

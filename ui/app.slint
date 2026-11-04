@@ -96,6 +96,7 @@ export component AppWindow inherits Window {
     in-out property <bool> settings-open;
     in-out property <bool> set-notify: true;
     in-out property <int> set-preview;
+    in-out property <bool> set-sound: true;
     in-out property <bool> set-badge: true;
     in-out property <int> set-theme;
     // index into the zoom steps (see settings::ZOOMS)
@@ -199,15 +200,17 @@ export component AppWindow inherits Window {
     in-out property <string> tprefs-key;
     in property <string> tprefs-name;
     in-out property <int> tprefs-preview;
+    in-out property <int> tprefs-sound;
     in-out property <int> tprefs-mentions;
     in-out property <int> tprefs-replies;
     in-out property <int> tprefs-badge;
     in property <string> tprefs-preview-default;
+    in property <string> tprefs-sound-default;
     in property <string> tprefs-mentions-default;
     in property <string> tprefs-replies-default;
     in property <string> tprefs-badge-default;
     callback open-thread-prefs(string);
-    // key, item (0 preview, 1 mentions, 2 replies, 3 badge), option index
+    // key, item (0 preview, 1 mentions, 2 replies, 3 badge, 4 sound), option index
     callback set-pref(string, int, int);
 
     in-out property <bool> sticker-open;
@@ -795,6 +798,7 @@ export component AppWindow inherits Window {
         height: root.height;
         notify <=> root.set-notify;
         preview <=> root.set-preview;
+        sound <=> root.set-sound;
         badge <=> root.set-badge;
         theme <=> root.set-theme;
         zoom <=> root.set-zoom;
@@ -1090,6 +1094,13 @@ export component AppWindow inherits Window {
                     options: ["기본값", "이름과 내용", "이름만", "숨김"];
                     current: root.tprefs-preview;
                     changed(v) => { root.set-pref(root.tprefs-key, 0, v); }
+                }
+                PrefRow {
+                    label: "알림 소리";
+                    hint: root.tprefs-sound-default;
+                    options: ["기본값", "켬", "끔"];
+                    current: root.tprefs-sound;
+                    changed(v) => { root.set-pref(root.tprefs-key, 4, v); }
                 }
                 VerticalLayout {
                     spacing: 10px;

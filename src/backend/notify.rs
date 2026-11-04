@@ -37,6 +37,8 @@ pub(crate) struct Queued {
     pub picture: Option<Picture>,
     /// what the toast shows (the thread's preview setting, else the app's)
     pub preview: u8,
+    /// the toast plays a sound (the thread's setting, else the app's)
+    pub sound: bool,
 }
 
 struct Shown {
@@ -130,7 +132,7 @@ impl Notifier {
         // showing replaces the previous toast
         self.clear_shown = false;
         self.shown = Some(Shown { key: q.key.clone(), msg: q.msg, reaction: q.reaction.clone() });
-        toast::show(Toast { title, body, picture, key: q.key, msg: Some(q.msg) });
+        toast::show(Toast { title, body, picture, key: q.key, msg: Some(q.msg), sound: q.sound });
     }
 }
 
@@ -163,7 +165,7 @@ impl App {
         let message = self.snippet(c).await.unwrap_or_default();
         let sender_title = self.sender_title(thread, c.metadata.sender.raw_uuid()).await;
         let picture = self.toast_picture(thread, key, preview).await;
-        self.notes.add(Queued { key: key.into(), msg: c.timestamp(), sender_title, message, expiring, reaction: None, picture, preview });
+        self.notes.add(Queued { key: key.into(), msg: c.timestamp(), sender_title, message, expiring, reaction: None, picture, preview, sound: n.sound });
     }
 
     /// Someone else reacted (or took a reaction back): a reaction to one of our messages
@@ -193,7 +195,7 @@ impl App {
         let sender_title = self.sender_title(thread, from).await;
         let picture = self.toast_picture(thread, key, preview).await;
         let reaction = Some(ReactionRef { from, from_name, emoji: emoji.into() });
-        self.notes.add(Queued { key: key.into(), msg: target, sender_title, message, expiring, reaction, picture, preview });
+        self.notes.add(Queued { key: key.into(), msg: target, sender_title, message, expiring, reaction, picture, preview, sound: n.sound });
     }
 
     /// 1:1: the sender's name; groups: "{group}의 {sender} 님" (`icu:notificationSenderInGroup`).
@@ -269,6 +271,7 @@ mod tests {
             reaction,
             picture: None,
             preview: 0,
+            sound: true,
         }
     }
 

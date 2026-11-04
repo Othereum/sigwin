@@ -94,6 +94,8 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let preview = ["이름과 내용", "이름만", "숨김"][s.preview.min(2) as usize];
         app.set_tprefs_name(name.into());
         app.set_tprefs_preview(p.preview.map_or(0, |v| v.min(2) as i32 + 1));
+        app.set_tprefs_sound(index(p.sound));
+        app.set_tprefs_sound_default(on_off(s.sound).into());
         app.set_tprefs_mentions(index(p.mentions));
         app.set_tprefs_replies(index(p.replies));
         app.set_tprefs_badge(index(p.badge));
@@ -118,6 +120,7 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             0 => types::Pref::Preview((v > 0).then(|| (v - 1).clamp(0, 2) as u8)),
             1 => types::Pref::Mentions(b),
             2 => types::Pref::Replies(b),
+            4 => types::Pref::Sound(b),
             _ => types::Pref::Badge(b),
         };
         s(Command::SetPref { key: key.to_string(), pref });
@@ -559,6 +562,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let new = settings::Settings {
             notify: app.get_set_notify(),
             preview: app.get_set_preview().clamp(0, 2) as u8,
+            sound: app.get_set_sound(),
             badge: app.get_set_badge(),
             theme: app.get_set_theme().clamp(0, 2) as u8,
             zoom: settings::ZOOMS.get(app.get_set_zoom().max(0) as usize).copied().unwrap_or(100),

@@ -1,6 +1,6 @@
 //! Per-thread notification settings. "Notifications off": the phone's value from the Storage
 //! Service (read only, never written back), overridden by what is picked in Sigwin until that
-//! runs out or is cleared ("휴대폰 설정 따르기"). The rest (preview, what gets through while
+//! runs out or is cleared ("휴대폰 설정 따르기"). The rest (preview, sound, what gets through while
 //! off, badge) resolve the same way: the thread's own choice, else the phone's (group
 //! mentions only), else the app setting.
 
@@ -37,6 +37,7 @@ pub(super) struct Notify {
     pub muted: bool,
     /// what toasts show (`Settings::preview`); None = notifications are off in the app
     pub preview: Option<u8>,
+    pub sound: bool,
     /// while muted
     pub mentions: bool,
     pub replies: bool,
@@ -58,6 +59,7 @@ impl App {
         Notify {
             muted: self.mute(key).active(view::now_ms()),
             preview: crate::settings::preview().map(|global| p.preview.unwrap_or(global)),
+            sound: p.sound.unwrap_or_else(crate::settings::sound),
             mentions: p.mentions.or(self.phone_mentions(key)).unwrap_or(mentions),
             replies: p.replies.unwrap_or(replies),
         }

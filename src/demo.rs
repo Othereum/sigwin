@@ -106,7 +106,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                 _ => Mute::default(),
             },
             // own settings in one chat, the phone's mention setting in a group
-            prefs: if i == 5 { ThreadPrefs { preview: Some(1), badge: Some(false), ..Default::default() } } else { ThreadPrefs::default() },
+            prefs: if i == 5 { ThreadPrefs { preview: Some(1), sound: Some(false), badge: Some(false), ..Default::default() } } else { ThreadPrefs::default() },
             phone_mentions: (i == 3).then_some(false),
         })
         .collect();
@@ -395,8 +395,10 @@ pub(crate) fn selftest() {
                 toast::show(toast::Toast {
                     title: "selftest".into(),
                     body: "toast".into(),
-                    picture: Some(toast::Picture::Initial { text: "S".into(), rgb: 0x3a77c9 }),                    key: String::new(),
+                    picture: Some(toast::Picture::Initial { text: "S".into(), rgb: 0x3a77c9 }),
+                    key: String::new(),
                     msg: None,
+                    sound: true,
                 });
             }
             _ => {}
@@ -467,6 +469,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
                         reaction: None,
                         picture: Some(Picture::Photo(photo.clone())),
                         preview: crate::settings::preview().unwrap_or(0),
+                        sound: crate::settings::sound(),
                     },
                     2 => Queued {
                         key: "c:demo-3".into(),
@@ -477,6 +480,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
                         reaction: None,
                         picture: Some(letter("c:demo-3", "가족 단톡방")),
                         preview: crate::settings::preview().unwrap_or(0),
+                        sound: crate::settings::sound(),
                     },
                     3 => Queued {
                         key: "c:demo-2".into(),
@@ -487,6 +491,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
                         reaction: Some(ReactionRef { from: uuid::Uuid::from_u128(2), from_name: "박지훈".into(), emoji: "👍".into() }),
                         picture: Some(letter("c:demo-2", "박지훈")),
                         preview: crate::settings::preview().unwrap_or(0),
+                        sound: crate::settings::sound(),
                     },
                     _ => Queued {
                         key: "c:demo-4".into(),
@@ -497,6 +502,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
                         reaction: None,
                         picture: Some(letter("c:demo-4", "Alice")),
                         preview: crate::settings::preview().unwrap_or(0),
+                        sound: crate::settings::sound(),
                     },
                 };
                 tracing::info!(n, focused, "demo notify: message");
