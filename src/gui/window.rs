@@ -99,8 +99,8 @@ pub(crate) fn open_from_toast(app: &AppWindow, hit: Option<crate::toast::Click>)
 pub(crate) fn to_front(app: &AppWindow) {
     use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow,
-        SW_RESTORE,
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+        SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW,
     };
     let hwnd = hwnd(app) as *mut std::ffi::c_void;
     if hwnd.is_null() {
@@ -108,6 +108,9 @@ pub(crate) fn to_front(app: &AppWindow) {
     }
     // SAFETY: Win32 calls on our own window; the input attach is undone right after
     unsafe {
+        if IsWindowVisible(hwnd) == 0 {
+            ShowWindow(hwnd, SW_SHOW); // hidden to the tray (a minimized window is still "visible")
+        }
         if IsIconic(hwnd) != 0 {
             ShowWindow(hwnd, SW_RESTORE);
         }
@@ -164,6 +167,9 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
         });
         tracing::info!(hwnd = h, hooked, "window hook");
         badge::set_hwnd(h);
+        if hooked && !headless::active() {
+            tray::install(h);
+        }
         if !hooked {
             // fallback: poll the foreground window
             let weak = app.as_weak();
@@ -184,4 +190,46 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
     });
     // the timer holds an Rc to itself (to stop itself); it lives for the app's lifetime
     std::mem::forget(timer);
+}
+
+/// How long the window stays hidden before its rows and images are dropped: a quick
+/// hide / show shouldn't reload anything.
+const RELEASE_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
+thread_local! {
+    static RELEASE: slint::Timer = slint::Timer::default();
+}
+
+/// The window was hidden (tray) or shown. Hidden for a while: the open thread's rows,
+/// thumbnails, photos and sticker frames go, so only the thread list stays in memory.
+/// Shown again: the thread is loaded afresh (at its newest messages).
+pub(crate) fn visibility(app: &AppWindow, shown: bool) {
+    if shown {
+        RELEASE.with(|t| t.stop());
+        let reload = UI.with_borrow_mut(|ui| std::mem::take(&mut ui.released).then(|| ui.open_key.clone()));
+        if let Some(key) = reload.filter(|k| !k.is_empty()) {
+            send_cmd(Command::OpenThread(key));
+        }
+        return;
+    }
+    let weak = app.as_weak();
+    RELEASE.with(|t| {
+        t.start(slint::TimerMode::SingleShot, RELEASE_AFTER, move || {
+            if let Some(app) = weak.upgrade() {
+                close_stickers(&app);
+            }
+            UI.with_borrow_mut(|ui| {
+                ui.anims.clear_list();
+                ui.thumbs.clear();
+                ui.sender_avatars.clear();
+                ui.messages.set_vec(Vec::new());
+                ui.last.clear();
+                ui.typing_row = false;
+                ui.older = None;
+                ui.released = true;
+            });
+            sigwin_clear_plain_styles();
+            tracing::debug!("hidden: dropped the open thread's rows and images");
+        });
+    });
 }

@@ -22,6 +22,7 @@ mod mention;
 mod secret;
 mod settings;
 mod toast;
+mod tray;
 mod types;
 mod update;
 mod view;
@@ -188,6 +189,7 @@ fn main() -> anyhow::Result<()> {
     apply_theme(&app, true);
     wire(&app, cmd_tx);
     app.run()?;
+    tray::remove();
     // like Signal's `fastClear` on unload: a toast we can no longer act on goes away
     if !headless::active() {
         toast::clear_now();

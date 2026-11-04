@@ -67,9 +67,43 @@ unsafe extern "system" fn subclass_proc(
 ) -> windows_sys::Win32::Foundation::LRESULT {
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, WA_INACTIVE, WM_ACTIVATE, WM_DPICHANGED, WM_SIZE,
+        SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_DPICHANGED,
+        WM_SHOWWINDOW, WM_SIZE,
     };
     match msg {
+        // close = hide to the tray (only while the icon exists), the app keeps running
+        WM_CLOSE if crate::tray::active() => {
+            crate::tray::hide_window(hwnd);
+            return 0;
+        }
+        WM_SHOWWINDOW => {
+            // hidden windows are not drawn to: same pause as minimized
+            let shown = wparam != 0;
+            crate::gui::anim::pause(!shown);
+            let _ = slint::invoke_from_event_loop(move || {
+                APP.with_borrow(|a| {
+                    if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
+                        crate::visibility(&app, shown);
+                    }
+                });
+            });
+            if shown {
+                schedule_repaint();
+            }
+        }
+        crate::tray::WM_TRAY => {
+            crate::tray::on_event(hwnd, lparam, || {
+                let _ = slint::invoke_from_event_loop(|| {
+                    APP.with_borrow(|a| {
+                        if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
+                            crate::to_front(&app);
+                        }
+                    });
+                });
+            });
+            return 0;
+        }
+        m if m == tray_created() => crate::tray::reinstall(),
         WM_SIZE => match wparam as u32 {
             SIZE_MINIMIZED => {
                 MINIMIZED.set(true);
@@ -119,6 +153,18 @@ fn taskbar_created() -> u32 {
     thread_local!(static ID: Cell<u32> = const { Cell::new(0) });
     if ID.get() == 0 {
         let name: Vec<u16> = "TaskbarButtonCreated".encode_utf16().chain(Some(0)).collect();
+        // SAFETY: NUL-terminated name
+        ID.set(unsafe { windows_sys::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW(name.as_ptr()) });
+    }
+    ID.get()
+}
+
+/// "TaskbarCreated": Explorer (re)started, notification-area icons are gone.
+#[cfg(windows)]
+fn tray_created() -> u32 {
+    thread_local!(static ID: Cell<u32> = const { Cell::new(0) });
+    if ID.get() == 0 {
+        let name: Vec<u16> = "TaskbarCreated".encode_utf16().chain(Some(0)).collect();
         // SAFETY: NUL-terminated name
         ID.set(unsafe { windows_sys::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW(name.as_ptr()) });
     }

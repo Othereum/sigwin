@@ -76,6 +76,9 @@ pub(crate) struct Ui {
     pub(crate) settings_path: PathBuf,
     /// messages whose spoilers were clicked open, open thread only
     revealed: std::collections::HashSet<String>,
+    /// the window sat hidden in the tray and the open thread's rows and images were dropped;
+    /// showing it again reloads the thread (`window::visibility`)
+    released: bool,
 }
 
 pub(crate) fn send_cmd(c: Command) {
@@ -314,6 +317,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 }
             });
         }
+        Event::Thumb(_) if UI.with_borrow(|ui| ui.released) => {}
         Event::Thumb(t) => {
             let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
             let img = Image::from_rgba8(buf);
