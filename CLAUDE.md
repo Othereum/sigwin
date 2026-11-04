@@ -26,12 +26,12 @@ cargo build                    # debug: quickest for UI experiments -> target\de
 cargo build --release          # distribution only (~2.5 min, thin LTO)
 cargo test
 ```
-- **A running `sigwin.exe` locks its exe and the build fails with "액세스가 거부되었습니다".** Use the **debug** build for experiments so an app running from `target\fast\` keeps running.
+- **A running `sigwin.exe` locks its exe and the build fails with "액세스가 거부되었습니다".** Stop it first, or build a different profile.
 - `protoc` comes from `PATH`. `.cargo/config.toml` defaults `LIBCLANG_PATH` (overridable by env) and pins dummy `OPENSSL_*` dirs. libsqlite3-sys uses `bundled-sqlcipher-custom-crypto` (pure-Rust crypto); its Windows build script still demands OpenSSL paths, hence `build-support/no-openssl`.
 - presage and presage-store-sqlite are git deps pinned to one `rev`. Bump both together, and keep the `[patch.crates-io] libsqlite3-sys` entry in sync with presage's workspace.
 
 ## Verifying UI without an account
-Layout and glyph bugs only show up visually; a successful compile proves nothing about them. Use the demo modes (`SIGWIN_DEMO=1`, synthetic data, no backend) **headless**, without popping up a window, taking focus or moving the real mouse. `SIGWIN_HEADLESS="<steps>"` renders offscreen and writes PNG shots (`shot PATH`). Step syntax, demo variants and what headless can't cover: `docs/headless.md`.
+Layout and glyph bugs only show up visually; a successful compile proves nothing about them. The demo modes (`SIGWIN_DEMO=1`, synthetic data, no backend) can run **headless**, without popping up a window, taking focus or moving the real mouse: `SIGWIN_HEADLESS="<steps>"` renders offscreen and writes PNG shots (`shot PATH`). Step syntax, demo variants and what headless can't cover: `docs/headless.md`.
 
 ## Architecture in brief
 UI thread (Slint) sends `Command`s to a backend thread (tokio current_thread + `LocalSet`) that owns the `!Send` presage `Manager`; results come back as `Event`s via `upgrade_in_event_loop`. `gui/` = UI wiring and rows, `backend/` = Signal logic, `view.rs` = message rows, `db.rs` = own SQL, `types.rs` = cross-thread types, `ui/` = Slint UI (`app.slint` is the window). Full file table: `docs/architecture.md`.
@@ -49,6 +49,6 @@ Every hunk under `vendor/` has to be re-applied by hand on each Slint / presage 
 - **Commit subjects are short**: one line, imperative, about 50 characters or less (hard cap 72), no trailing period. Put details in the body (blank line, then wrapped lines) only when the why isn't obvious. Don't cram the whole change list into the subject.
 - **Keep `README.md` current**: when a user-visible feature lands or changes, update its 기능 / 사용법 / 미지원 sections in the same commit.
 - **Keep `README.md` concise**: always short. Don't describe detailed behavior there (that belongs in `docs/`).
-- **Every experiment run sets `SIGWIN_DATA` to a scratch dir**, including demo, probe and child modes. If the flag is misparsed the app falls through to the real account, and that would make two instances share one Signal device/DB.
+- **Demo, probe and child runs set `SIGWIN_DATA` to a scratch dir.** The instance lock is per data dir: without it a demo either brings the real window to the front and exits, or runs on the real data dir (writes its settings and drafts, rewrites the autostart entry to this exe, mixes logs). Headless enforces it in code.
 - Sending messages or installing packs (`install_sticker_pack` syncs to the phone) on a real account is outward-facing: never do it from tests or automation. Useful log filter: `RUST_LOG=info,spqr=warn,presage_store_sqlite=error,sigwin=debug`.
 - Prefer the Edit tool over perl/sed for multi-line or backslash-heavy edits: shell escaping has already corrupted files here (Windows paths, `\f`, `\r`).
