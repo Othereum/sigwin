@@ -72,6 +72,30 @@ export component MenuRow inherits Rectangle {
     }
 }
 
+// red button for destructive actions (std Button can't be recolored)
+export component DangerButton inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+    height: 32px;
+    min-width: lbl.preferred-width + 32px;
+    border-radius: 6px;
+    // soft tint with red text
+    background: Theme.dark
+        ? (ta.pressed ? #4a2226 : (ta.has-hover ? #40201f : #331c1e))
+        : (ta.pressed ? #ffd3d6 : (ta.has-hover ? #ffdfe1 : #ffe9ea));
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    lbl := Text {
+        text: root.text;
+        color: Theme.dark ? #ff6369 : #e5484d;
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
 export component TextButton inherits Rectangle {
     in property <string> text;
     in property <bool> active;

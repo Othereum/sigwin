@@ -459,7 +459,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let s = send.clone();
     app.on_unlink(move || {
         let ok = rfd::MessageDialog::new()
-            .set_title("연결 해제")
+            .set_title("데이터 삭제")
             .set_description("이 PC의 연결을 해제하고 로컬 데이터를 모두 삭제할까요?")
             .set_buttons(rfd::MessageButtons::YesNo)
             .set_level(rfd::MessageLevel::Warning)

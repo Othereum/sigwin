@@ -122,3 +122,8 @@ inherits = "release"
 lto = false
 codegen-units = 16
 incremental = true
+
+# the Slint-generated UI code (~5MB) dominates this crate: opt-level 0 cuts a .slint edit from ~37s
+# to ~9s. Dependencies (renderer, image, sqlite) stay optimized. Use --release for memory/perf numbers.
+[profile.fast.package.sigwin]
+opt-level = 0
