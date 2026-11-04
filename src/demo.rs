@@ -58,6 +58,10 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         // the "new version ready" bar; clicking it restarts the demo for real
         app.set_update_version(v.into());
     }
+    if let Ok(v) = std::env::var("SIGWIN_DEMO_UPDATE_AVAILABLE") {
+        // the "new version available" bar (automatic download off)
+        app.set_update_available(v.into());
+    }
     if std::env::var_os("SIGWIN_DEMO_SETTINGS").is_some() {
         let weak = app.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {

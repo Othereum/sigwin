@@ -1,6 +1,8 @@
 //! Self-update from GitHub Releases. Only the installed exe updates itself.
 //!
-//! (The "automatic updates" setting gates all of this; the settings button checks once on demand.)
+//! (The "automatic download" setting only decides whether a newer release is installed on its own;
+//! when off, checks still run and `Status::Available` offers an install button. The settings button
+//! checks once on demand.)
 //! A background thread checks `releases/latest` once the first sync is done (or at once on the
 //! login screen, where there is nothing to sync), then once an hour, and also
 //! when the window gains focus and the last check is over an hour old. "An hour" is wall-clock
@@ -45,10 +47,12 @@ enum Msg {
     Poke,
     /// the settings button
     Manual,
+    /// the sidebar button: install the release found earlier
+    Install,
 }
 
 static POKE: OnceLock<mpsc::Sender<Msg>> = OnceLock::new();
-/// The "automatic updates" setting; manual checks ignore it.
+/// The "automatic download" setting: install a newer release without asking. Off = offer only.
 static AUTO: AtomicBool = AtomicBool::new(true);
 
 pub fn set_auto(on: bool) {
@@ -75,9 +79,16 @@ pub fn check_now() -> bool {
     POKE.get().is_some_and(|tx| tx.send(Msg::Manual).is_ok())
 }
 
-/// What a check found, for the UI. Automatic checks only report `Ready`.
+/// The sidebar's update button. False when nothing can update (not the installed copy).
+pub fn install() -> bool {
+    POKE.get().is_some_and(|tx| tx.send(Msg::Install).is_ok())
+}
+
+/// What a check found, for the UI. Automatic checks only report `Ready` and a new `Available`.
 pub enum Status {
     UpToDate,
+    /// a newer version exists but "automatic download" is off: not downloaded
+    Available(String),
     /// a newer version replaced the exe
     Ready(String),
     Failed,
@@ -129,11 +140,13 @@ pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
     let _ = std::thread::Builder::new().name("update".into()).spawn(move || {
         // wait for the first check; pokes meanwhile are dropped, a manual check isn't
         let mut manual = false;
+        let mut want_install = false;
         loop {
             match rx.recv() {
                 Ok(Msg::Start) => break,
-                Ok(Msg::Manual) => {
+                Ok(m @ (Msg::Manual | Msg::Install)) => {
                     manual = true;
+                    want_install = matches!(m, Msg::Install);
                     break;
                 }
                 Ok(Msg::Poke) => {}
@@ -142,18 +155,31 @@ pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
         }
         let (mut ok, mut tried, mut failures) = (None, None, 0u32);
         let mut bad_tag: Option<String> = None;
+        // the version last offered while not installing
+        let mut offered: Option<String> = None;
         loop {
-            if manual || (AUTO.load(Ordering::Relaxed) && due(ok, tried, failures, SystemTime::now())) {
+            if manual || due(ok, tried, failures, SystemTime::now()) {
+                let install = want_install || AUTO.load(Ordering::Relaxed);
                 // a manual check looks at a skipped release again
                 let skip = if manual { None } else { bad_tag.as_deref() };
-                match check_once(&exe, skip) {
-                    Ok(Some(v)) => {
+                match check_once(&exe, skip, install) {
+                    Ok(Some(Found::Installed(v))) => {
                         tracing::info!("update: {v} installed, restart to use it");
                         report(Status::Ready(v));
                         return;
                     }
+                    Ok(Some(Found::Available(v))) => {
+                        tracing::info!("update: {v} is available");
+                        ok = Some(SystemTime::now());
+                        failures = 0;
+                        if manual || offered.as_deref() != Some(&v) {
+                            report(Status::Available(v.clone()));
+                        }
+                        offered = Some(v);
+                    }
                     Ok(None) => {
                         tracing::debug!("update: up to date ({VERSION})");
+                        offered = None;
                         ok = Some(SystemTime::now());
                         failures = 0;
                         if manual {
@@ -181,19 +207,28 @@ pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
                 }
                 tried = Some(SystemTime::now());
             }
-            manual = match rx.recv_timeout(TICK) {
-                Ok(Msg::Manual) => true,
-                Ok(Msg::Poke | Msg::Start) | Err(RecvTimeoutError::Timeout) => false,
+            (manual, want_install) = match rx.recv_timeout(TICK) {
+                Ok(Msg::Manual) => (true, false),
+                Ok(Msg::Install) => (true, true),
+                Ok(Msg::Poke | Msg::Start) | Err(RecvTimeoutError::Timeout) => (false, false),
                 Err(RecvTimeoutError::Disconnected) => return,
             };
         }
     });
 }
 
-/// `Some(version)` once a newer version has replaced `exe`. `bad_tag` counts as up to date.
-fn check_once(exe: &Path, bad_tag: Option<&str>) -> Result<Option<String>, Failure> {
+enum Found {
+    /// a newer version exists; nothing was downloaded
+    Available(String),
+    /// a newer version has replaced the exe
+    Installed(String),
+}
+
+/// Looks for a newer version and, with `install`, replaces `exe` with it. `bad_tag` counts as
+/// up to date.
+fn check_once(exe: &Path, bad_tag: Option<&str>, install: bool) -> Result<Option<Found>, Failure> {
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    rt.block_on(check(exe, bad_tag))
+    rt.block_on(check(exe, bad_tag, install))
 }
 
 #[derive(serde::Deserialize)]
@@ -208,7 +243,7 @@ struct Asset {
     browser_download_url: String,
 }
 
-async fn check(exe: &Path, bad_tag: Option<&str>) -> Result<Option<String>, Failure> {
+async fn check(exe: &Path, bad_tag: Option<&str>, install: bool) -> Result<Option<Found>, Failure> {
     let client = reqwest::Client::builder()
         .user_agent(concat!("sigwin/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(20))
@@ -225,6 +260,9 @@ async fn check(exe: &Path, bad_tag: Option<&str>) -> Result<Option<String>, Fail
     let latest = rel.tag_name.trim_start_matches('v').to_string();
     if !newer(&latest, VERSION) || bad_tag == Some(rel.tag_name.as_str()) {
         return Ok(None);
+    }
+    if !install {
+        return Ok(Some(Found::Available(latest)));
     }
     let bad = |err: anyhow::Error| Failure::BadRelease { tag: rel.tag_name.clone(), err };
     let url = |name: &str| {
@@ -250,7 +288,7 @@ async fn check(exe: &Path, bad_tag: Option<&str>) -> Result<Option<String>, Fail
     }
     self_replace::self_replace(&new).context("replacing the exe")?;
     let _ = std::fs::remove_file(&new);
-    Ok(Some(latest))
+    Ok(Some(Found::Installed(latest)))
 }
 
 /// `download`'s failures: the connection (retry) or the file itself (don't fetch it again).

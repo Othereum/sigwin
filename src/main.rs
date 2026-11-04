@@ -161,9 +161,17 @@ fn main() -> anyhow::Result<()> {
             update::spawn(exe, move |st| {
                 let _ = weak.upgrade_in_event_loop(move |app| {
                     app.set_update_checking(false);
+                    app.set_update_installing(false);
                     match st {
-                        update::Status::Ready(v) => app.set_update_version(v.into()),
-                        update::Status::UpToDate => app.set_update_status("최신 버전입니다.".into()),
+                        update::Status::Ready(v) => {
+                            app.set_update_available(SharedString::new());
+                            app.set_update_version(v.into());
+                        }
+                        update::Status::Available(v) => app.set_update_available(v.into()),
+                        update::Status::UpToDate => {
+                            app.set_update_available(SharedString::new());
+                            app.set_update_status("최신 버전입니다.".into());
+                        }
                         update::Status::Failed => {
                             app.set_update_status("확인하지 못했습니다. 네트워크를 확인하고 다시 시도하세요.".into())
                         }
@@ -173,6 +181,13 @@ fn main() -> anyhow::Result<()> {
         }
     }
     app.on_restart_for_update(update::restart);
+    let weak = app.as_weak();
+    app.on_install_update(move || {
+        let Some(app) = weak.upgrade() else { return };
+        if !update::install() {
+            app.set_update_installing(false);
+        }
+    });
     let weak = app.as_weak();
     app.on_check_update(move || {
         let Some(app) = weak.upgrade() else { return };
