@@ -26,6 +26,12 @@ pub struct Settings {
     pub start_hidden: bool,
     /// Check for and install new versions in the background
     pub auto_update: bool,
+    /// chats with notifications off still notify when we're @mentioned
+    pub muted_mentions: bool,
+    /// ... and for replies to our messages
+    pub muted_replies: bool,
+    /// their unread messages count in the badge (taskbar, window title)
+    pub badge_muted: bool,
 }
 
 impl Default for Settings {
@@ -40,6 +46,9 @@ impl Default for Settings {
             autostart: true,
             start_hidden: true,
             auto_update: true,
+            muted_mentions: true,
+            muted_replies: true,
+            badge_muted: true,
         }
     }
 }
@@ -71,8 +80,17 @@ impl Settings {
     /// Makes the notification choice visible to the backend thread.
     pub fn publish(&self) {
         NOTIFY.store(if self.notify { self.preview } else { OFF }, Ordering::Relaxed);
+        MUTED.store(self.muted_mentions as u8 | (self.muted_replies as u8) << 1, Ordering::Relaxed);
         crate::update::set_auto(self.auto_update);
     }
+}
+
+static MUTED: AtomicU8 = AtomicU8::new(3);
+
+/// Whether a chat with notifications off still notifies for (@mentions of us, replies to us).
+pub fn muted_exceptions() -> (bool, bool) {
+    let m = MUTED.load(Ordering::Relaxed);
+    (m & 1 != 0, m & 2 != 0)
 }
 
 pub fn path(data_dir: &Path) -> PathBuf {

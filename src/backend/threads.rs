@@ -82,6 +82,7 @@ impl App {
                 ThreadDto {
                     unread: self.persist.unread.get(&key).copied().unwrap_or(0),
                     is_group: matches!(row.thread, Thread::Group(_)),
+                    mute: self.mute(&key),
                     time: view::time_short(display_ts),
                     ts: display_ts,
                     key,
@@ -100,6 +101,7 @@ impl App {
                 list.push((
                     0,
                     ThreadDto {
+                        mute: self.mute(&key),
                         key,
                         name: if g.title.is_empty() { "그룹".into() } else { g.title },
                         snippet: String::new(),
@@ -113,6 +115,7 @@ impl App {
         }
         list.sort_by(|a, b| b.0.cmp(&a.0));
         self.threads = list.into_iter().map(|(_, t)| t).collect();
+        self.mute_due = self.next_mute_change();
         self.emit_threads().await;
         self.load_avatars();
         Ok(())
@@ -236,6 +239,7 @@ impl App {
                 let phone = c.phone_number.as_ref().map(|p| p.to_string()).unwrap_or_default();
                 if c.name.to_lowercase().contains(&q) || (!phone.is_empty() && phone.contains(&q)) {
                     out.push(ThreadDto {
+                        mute: self.mute(&key),
                         key,
                         name: if c.name.is_empty() { phone } else { c.name },
                         snippet: "새 대화 시작".into(),

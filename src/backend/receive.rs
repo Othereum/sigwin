@@ -105,6 +105,7 @@ impl App {
                 if !self.synced {
                     self.sweep();
                     crate::update::start();
+                    self.sync_phone_mutes();
                 }
                 self.synced = true;
                 self.status("");
@@ -138,6 +139,13 @@ impl App {
                         self.threads_dirty = true;
                     }
                 }
+            }
+        }
+
+        // the phone changed something in the Storage Service (e.g. a chat's notifications)
+        if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::FetchLatest(f)), .. }) = &c.body {
+            if f.r#type() == presage::proto::sync_message::fetch_latest::Type::StorageManifest {
+                self.sync_phone_mutes();
             }
         }
 
@@ -239,6 +247,10 @@ impl App {
         if self.pin_expiry.is_some_and(|t| t <= view::now_ms()) {
             self.pin_expiry = None;
             self.current_dirty = true;
+        }
+        if self.mute_due.is_some_and(|t| t <= view::now_ms()) {
+            self.mute_due = None;
+            self.expire_mutes();
         }
         if self.composing.as_ref().is_some_and(|c| c.last_edit.elapsed() >= TYPING_IDLE) {
             if let Some(c) = self.composing.take() {

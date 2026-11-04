@@ -50,6 +50,32 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
 
     let s = send.clone();
     app.on_search_changed(move |q| s(Command::Search(q.to_string())));
+
+    let weak = app.as_weak();
+    app.on_open_thread_menu(move |key, x, y| {
+        let Some(app) = weak.upgrade() else { return };
+        let Some(mute) = UI.with_borrow(|ui| ui.thread_dtos.iter().find(|t| t.key == key.as_str()).map(|t| t.mute)) else {
+            return;
+        };
+        let now = view::now_ms();
+        app.set_tmenu_status(if mute.active(now) { types::mute_text(mute.until, now).into() } else { SharedString::new() });
+        app.set_tmenu_overridden(mute.overridden);
+        app.set_tmenu_phone(format!("휴대폰: {}", types::mute_text(mute.phone, now)).into());
+        app.set_tmenu_x(x);
+        app.set_tmenu_y(y);
+        app.set_tmenu_key(key);
+    });
+
+    let s = send.clone();
+    app.on_set_mute(move |key, secs| {
+        let set = match secs {
+            -2 => types::MuteSet::Phone,
+            -1 => types::MuteSet::Always,
+            0 => types::MuteSet::On,
+            n => types::MuteSet::For(n.max(1) as u64),
+        };
+        s(Command::SetMute { key: key.to_string(), set });
+    });
 }
 
 /// Composer: sending, attachments, paste, @mentions, formatting, reply.
@@ -486,13 +512,17 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let Some(app) = weak.upgrade() else { return };
         let new = settings::Settings {
             notify: app.get_set_notify(),
-            preview: app.get_set_preview().clamp(0, 2) as u8,            badge: app.get_set_badge(),
+            preview: app.get_set_preview().clamp(0, 2) as u8,
+            badge: app.get_set_badge(),
             theme: app.get_set_theme().clamp(0, 2) as u8,
             zoom: settings::ZOOMS.get(app.get_set_zoom().max(0) as usize).copied().unwrap_or(100),
             enter_sends: app.get_enter_sends(),
             autostart: app.get_set_autostart(),
             start_hidden: app.get_set_start_hidden(),
             auto_update: app.get_set_auto_update(),
+            muted_mentions: app.get_set_muted_mentions(),
+            muted_replies: app.get_set_muted_replies(),
+            badge_muted: app.get_set_badge_muted(),
         };
         let (old, path) = UI.with_borrow_mut(|ui| (std::mem::replace(&mut ui.settings, new.clone()), ui.settings_path.clone()));
         if old == new {
@@ -500,6 +530,9 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
         new.publish();
         badge::set_enabled(new.badge);
+        if old.badge_muted != new.badge_muted {
+            UI.with_borrow(|ui| show_total_unread(&app, ui));
+        }
         if (old.autostart, old.start_hidden) != (new.autostart, new.start_hidden) {
             autostart::apply(new.autostart, new.start_hidden, !old.autostart && new.autostart);
         }

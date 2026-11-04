@@ -49,6 +49,9 @@ export component SettingsPage inherits Rectangle {
     in-out property <bool> autostart;
     in-out property <bool> start-hidden;
     in-out property <bool> auto-update;
+    in-out property <bool> muted-mentions;
+    in-out property <bool> muted-replies;
+    in-out property <bool> badge-muted;
     in property <string> update-status;
     in property <bool> update-checking;
     in property <bool> update-ready;
@@ -124,6 +127,30 @@ export component SettingsPage inherits Rectangle {
                             hint: "작업 표시줄 아이콘에 안 읽은 메시지 수를 표시합니다";
                             Switch {
                                 checked <=> root.badge;
+                                toggled => { root.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: "알림을 끈 대화도 배지에 포함";
+                            Switch {
+                                checked <=> root.badge-muted;
+                                toggled => { root.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: "알림을 끈 대화에서 나를 멘션하면 알림";
+                            Switch {
+                                enabled: root.notify;
+                                checked <=> root.muted-mentions;
+                                toggled => { root.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: "알림을 끈 대화에서 내 메시지에 답장하면 알림";
+                            hint: "대화 알림은 목록에서 대화를 오른쪽 클릭하거나 대화 위쪽의 종 버튼으로 끕니다";
+                            Switch {
+                                enabled: root.notify;
+                                checked <=> root.muted-replies;
                                 toggled => { root.changed(); }
                             }
                         }

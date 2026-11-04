@@ -39,6 +39,49 @@ pub struct ThreadDto {
     pub ts: u64,
     pub unread: u32,
     pub is_group: bool,
+    pub mute: Mute,
+}
+
+/// Notifications off for a thread until (ms since the epoch); 0 = on.
+pub const MUTE_ALWAYS: u64 = u64::MAX;
+
+/// A thread's "notifications off" state: Sigwin's own choice, else the phone's.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Mute {
+    /// in effect: off until this (`MUTE_ALWAYS`: until turned back on), 0 = on
+    pub until: u64,
+    /// set in Sigwin; otherwise `until` is the phone's
+    pub overridden: bool,
+    /// the phone's value (Storage Service)
+    pub phone: u64,
+}
+
+impl Mute {
+    pub fn active(&self, now: u64) -> bool {
+        self.until > now
+    }
+}
+
+/// What "notifications off" a thread gets from Sigwin.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MuteSet {
+    /// drop Sigwin's choice, use the phone's
+    Phone,
+    On,
+    /// off for this many seconds
+    For(u64),
+    Always,
+}
+
+/// "오후 3:00까지 알림 꺼짐", for the thread menu. Android sends `i64::MAX` for "always".
+pub fn mute_text(until: u64, now: u64) -> String {
+    if until <= now {
+        "알림 켜짐".into()
+    } else if until >= i64::MAX as u64 || until - now > 100 * 365 * 86_400_000 {
+        "알림 꺼짐".into()
+    } else {
+        format!("{}까지 알림 꺼짐", crate::view::time_until(until))
+    }
 }
 
 /// reader photos drawn next to a message; the rest is a "+N"
@@ -291,4 +334,24 @@ pub enum Command {
     SettingsOpened,
     /// empty the thumbnail cache (rebuilt from attachments and stored photos on demand)
     ClearThumbs,
+    /// turn a thread's notifications off / on, or follow the phone again
+    SetMute { key: String, set: MuteSet },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mute_text_reads_on_off_and_always() {
+        let now = 1_000_000;
+        assert_eq!(mute_text(0, now), "알림 켜짐");
+        assert_eq!(mute_text(now - 1, now), "알림 켜짐");
+        assert_eq!(mute_text(MUTE_ALWAYS, now), "알림 꺼짐");
+        // Android's "always"
+        assert_eq!(mute_text(i64::MAX as u64, now), "알림 꺼짐");
+        assert!(mute_text(now + 3_600_000, now).ends_with("까지 알림 꺼짐"));
+        assert!(Mute { until: now + 1, overridden: false, phone: 0 }.active(now));
+        assert!(!Mute::default().active(now));
+    }
 }

@@ -1,7 +1,7 @@
 //! Demo modes: a fake backend with synthetic data (`SIGWIN_DEMO`), and the memory self-test.
 
 use super::*;
-use crate::types::{MsgDto, Scroll, ThreadDto};
+use crate::types::{MsgDto, Mute, MuteSet, Scroll, ThreadDto, MUTE_ALWAYS};
 
 /// Demo mode: the fake backend plus the `SIGWIN_DEMO_*` / `SIGWIN_SELFTEST` extras.
 pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Command>) {
@@ -98,6 +98,13 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             ts: 0,
             unread: if i % 5 == 0 { (i % 7) as u32 + 1 } else { 0 },
             is_group: i % 6 == 3 || i % 6 == 5,
+            // off on the phone (forever / for a while), and off in Sigwin only
+            mute: match i {
+                3 => Mute { until: i64::MAX as u64, overridden: false, phone: i64::MAX as u64 },
+                5 => Mute { until: view::now_ms() + 2 * 3_600_000, overridden: false, phone: view::now_ms() + 2 * 3_600_000 },
+                10 => Mute { until: MUTE_ALWAYS, overridden: true, phone: 0 },
+                _ => Mute::default(),
+            },
         })
         .collect();
     let mut items = Vec::new();
@@ -197,7 +204,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         st("mono(iiWW)", view::STYLE_MONO);
     }
     emit(Event::Ready);
-    emit(Event::Threads(threads));
+    emit(Event::Threads(threads.clone()));
     // photos on some threads, through the same crop/resample/circle path as real ones
     let photo = |key: String, i: u32, size: u32| {
         let src = image::RgbaImage::from_fn(320, 240, |x, y| {
@@ -283,9 +290,14 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         let notes = std::env::var("SIGWIN_DEMO_NOTIFY").ok().map(|v| demo_notify(emit.clone(), v.parse().unwrap_or(10)));
         // clicking another thread shows the same rows under its key (drafts follow the key)
         let (emit, items, all_pins) = (emit.clone(), items.clone(), pins.clone());
+        let mut threads = threads;
         std::thread::spawn(move || {
             while let Some(c) = cmd_rx.blocking_recv() {
                 demo_frames(&emit, &c);
+                if let Command::SetMute { key, set } = &c {
+                    demo_mute(&mut threads, key, *set);
+                    emit(Event::Threads(threads.clone()));
+                }
                 let open = match &c {
                     Command::OpenThread(key) => Some((key.clone(), None)),
                     Command::OpenFromToast { key, msg } => Some((key.clone(), *msg)),
@@ -338,6 +350,24 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     if std::env::var_os("SIGWIN_DEMO_STICKERS").is_some() {
         demo_stickers(emit);
     }
+}
+
+/// `App::set_mute` on the demo list.
+fn demo_mute(threads: &mut [ThreadDto], key: &str, set: MuteSet) {
+    let Some(t) = threads.iter_mut().find(|t| t.key == key) else { return };
+    let now = view::now_ms();
+    let phone = t.mute.phone;
+    let own = match set {
+        MuteSet::Phone => None,
+        MuteSet::On if phone <= now => None,
+        MuteSet::On => Some(0),
+        MuteSet::For(s) => Some(now + s * 1000),
+        MuteSet::Always => Some(MUTE_ALWAYS),
+    };
+    t.mute = match own {
+        Some(until) => Mute { until, overridden: true, phone },
+        None => Mute { until: phone, overridden: false, phone },
+    };
 }
 
 /// SIGWIN_SELFTEST=1 (with demo): measure what the file dialog and toasts cost.
@@ -531,6 +561,7 @@ fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiv
         ts: 0,
         unread,
         is_group,
+        mute: Mute::default(),
     };
     let threads = vec![
         th(1, "이서연", "그럼 토요일 11시에 합정역에서 봐요!", "오후 6:42", 0, false),

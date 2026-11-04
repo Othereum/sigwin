@@ -272,6 +272,7 @@ pub(crate) fn thread_item(t: &ThreadDto, avatars: &HashMap<String, Image>) -> Th
         color: tint(&t.key),
         is_group: t.is_group,
         draft: false,
+        muted: t.mute.active(view::now_ms()),
     }
 }
 

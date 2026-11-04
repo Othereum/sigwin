@@ -151,6 +151,9 @@ impl App {
             return;
         }
         let Some(dm) = view::data_message(c) else { return };
+        if self.mute(key).active(view::now_ms()) && !mute::breaks_mute(dm, self.me) {
+            return;
+        }
         let expiring = dm.expire_timer.unwrap_or(0) > 0;
         let message = self.snippet(c).await.unwrap_or_default();
         let sender_title = self.sender_title(thread, c.metadata.sender.raw_uuid()).await;
@@ -166,7 +169,7 @@ impl App {
             return;
         }
         self.notes.remove(By::Reaction { msg: target, from });
-        if remove || !self.synced || !crate::settings::notify_enabled() {
+        if remove || !self.synced || !crate::settings::notify_enabled() || self.mute(key).active(view::now_ms()) {
             return;
         }
         let ours = view::data_message(c)

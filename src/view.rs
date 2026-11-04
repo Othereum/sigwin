@@ -247,7 +247,7 @@ fn attachment_label(ptr: &AttachmentPointer) -> String {
     }
 }
 
-fn mention_uuid(r: &BodyRange) -> Option<Uuid> {
+pub fn mention_uuid(r: &BodyRange) -> Option<Uuid> {
     match r.associated_value.as_ref()? {
         AssociatedValue::MentionAci(s) => s.parse().ok(),
         AssociatedValue::MentionAciBinary(b) => Uuid::from_slice(b).ok(),
@@ -526,6 +526,20 @@ pub fn time_short(ts: u64) -> String {
         format!("{}월 {}일", dt.month(), dt.day())
     } else {
         format!("{}. {}. {}.", dt.year(), dt.month(), dt.day())
+    }
+}
+
+/// A future moment: "오후 3:00" today, "내일 오후 3:00", "11월 6일 오후 3:00", with the year
+/// when it differs.
+pub fn time_until(ts: u64) -> String {
+    let dt = local(ts);
+    let now = Local::now();
+    let days = (dt.date_naive() - now.date_naive()).num_days();
+    match days {
+        0 => ampm(&dt),
+        1 => format!("내일 {}", ampm(&dt)),
+        _ if dt.year() == now.year() => format!("{}월 {}일 {}", dt.month(), dt.day(), ampm(&dt)),
+        _ => format!("{}년 {}월 {}일 {}", dt.year(), dt.month(), dt.day(), ampm(&dt)),
     }
 }
 

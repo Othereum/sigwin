@@ -110,6 +110,8 @@ thread_local! {
 
 /// The open thread's photo (or initial) in the conversation header, from its thread list row.
 pub(crate) fn header_avatar(app: &AppWindow, ui: &Ui) {
+    let muted = ui.thread_dtos.iter().find(|t| t.key == ui.open_key).is_some_and(|t| t.mute.active(view::now_ms()));
+    app.set_current_muted(muted);
     let row = (0..slint::Model::row_count(&*ui.threads))
         .filter_map(|i| slint::Model::row_data(&*ui.threads, i))
         .find(|t| t.key.as_str() == ui.open_key);
@@ -125,6 +127,16 @@ pub(crate) fn header_avatar(app: &AppWindow, ui: &Ui) {
     app.set_current_tint(row.color);
     app.set_current_has_photo(row.has_photo);
     app.set_current_photo(row.photo);
+}
+
+/// Unread count for the taskbar badge and the window title; chats with notifications off
+/// count only when the setting says so.
+pub(crate) fn show_total_unread(app: &AppWindow, ui: &Ui) {
+    let now = view::now_ms();
+    let all = ui.settings.badge_muted;
+    let total: u32 = ui.thread_dtos.iter().filter(|t| all || !t.mute.active(now)).map(|t| t.unread).sum();
+    app.set_total_unread(total as i32);
+    badge::set_count(total);
 }
 
 pub(crate) fn qr_image(url: &str) -> Option<Image> {
@@ -168,10 +180,8 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::LinkStatus(s) => app.set_link_status(s.into()),
         Event::Ready => app.set_page("main".into()),
         Event::Threads(list) => UI.with_borrow_mut(|ui| {
-            let total: u32 = list.iter().map(|t| t.unread).sum();
-            app.set_total_unread(total as i32);
-            badge::set_count(total);
             ui.thread_dtos = list;
+            show_total_unread(app, ui);
             drafts::show_threads(ui);
             header_avatar(app, ui);
         }),

@@ -38,6 +38,7 @@ use crate::types::{
 use crate::view::{self, Kind, THUMB_MAX};
 
 pub(crate) mod files;
+mod mute;
 pub(crate) mod notify;
 mod ops;
 mod receive;
@@ -126,6 +127,15 @@ struct Persist {
     /// `snippets` no longer holds misses from the old 20-row scan
     #[serde(default)]
     snippets_deep: bool,
+    /// thread key -> notifications off until (ms; 0 = on, `MUTE_ALWAYS`), picked in Sigwin
+    #[serde(default)]
+    mute_override: HashMap<String, u64>,
+    /// thread key -> the phone's "notifications off until" (Storage Service), nonzero only
+    #[serde(default)]
+    mute_phone: HashMap<String, u64>,
+    /// Storage Service manifest version `mute_phone` was read from
+    #[serde(default)]
+    storage_version: u64,
 }
 
 #[derive(Default, Clone, Copy, Serialize, Deserialize)]
@@ -152,6 +162,7 @@ enum Internal {
     PinsIndexed,
     Swept { sweep: HashMap<String, SweepState>, changed: Vec<String> },
     Avatars(crate::avatar::Done),
+    PhoneMutes(Result<Option<mute::PhoneMutes>, String>),
 }
 
 /// A reaction, edit or delete we sent that presage has not stored yet. Shown optimistically.
@@ -254,6 +265,9 @@ struct App {
     grid_gen: Arc<std::sync::atomic::AtomicU64>,
     /// the toast slot (`notify.rs`)
     notes: notify::Notifier,
+    /// a thread's "notifications off" runs out then (the list shows it)
+    mute_due: Option<u64>,
+    mutes_syncing: bool,
 }
 
 pub fn spawn(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit) -> std::thread::JoinHandle<()> {
@@ -369,6 +383,8 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         avatar_queue: Default::default(),
         grid_gen: Default::default(),
         notes: Default::default(),
+        mute_due: None,
+        mutes_syncing: false,
     };
     if sealed_now {
         app.save_persist();
@@ -533,6 +549,7 @@ impl App {
                 self.thumbs_requested.clear();
                 self.emit_storage();
             }
+            Command::SetMute { key, set } => self.set_mute(&key, set),
         }
     }
 
@@ -694,6 +711,7 @@ impl App {
                 }
                 self.run_avatars();
             }
+            Internal::PhoneMutes(res) => self.phone_mutes(res),
             Internal::Swept { sweep, changed } => {
                 self.sweeping = false;
                 self.persist.sweep = sweep;

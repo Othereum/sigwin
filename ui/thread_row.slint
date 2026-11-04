@@ -8,11 +8,18 @@ export component ThreadRow inherits Rectangle {
     in property <ThreadItem> item;
     in property <bool> selected;
     callback clicked;
+    // right click, at window coordinates
+    callback menu(length, length);
     height: 64px;
     background: selected ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
     }
     HorizontalLayout {
         padding-left: 12px;
@@ -38,6 +45,14 @@ export component ThreadRow inherits Rectangle {
                     font-size: 14px;
                     overflow: elide;
                     horizontal-stretch: 1;
+                }
+                if item.muted: Text {
+                    text: "🔕";
+                    font-family: "Segoe UI Symbol";
+                    color: Theme.subtle;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 0;
                 }
                 Text {
                     text: item.time;
@@ -71,7 +86,7 @@ export component ThreadRow inherits Rectangle {
                     min-width: 20px;
                     height: 18px;
                     border-radius: 9px;
-                    background: Theme.accent;
+                    background: item.muted ? Theme.subtle : Theme.accent;
                     HorizontalLayout {
                         padding-left: 6px;
                         padding-right: 6px;
