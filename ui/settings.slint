@@ -39,6 +39,23 @@ export component SettingRow inherits HorizontalLayout {
     }
 }
 
+// a few related rows under a small heading, indented
+export component SettingGroup inherits VerticalLayout {
+    in property <string> title;
+    in property <string> hint;
+    padding-top: 12px;
+    spacing: 2px;
+    Text { text: root.title; color: Theme.text; font-size: 13.5px; font-weight: 600; }
+    if root.hint != "": Text { text: root.hint; color: Theme.subtle; font-size: 11.5px; wrap: word-wrap; }
+    HorizontalLayout {
+        padding-top: 2px;
+        padding-left: 16px;
+        VerticalLayout {
+            @children
+        }
+    }
+}
+
 export component SettingsPage inherits Rectangle {
     in-out property <bool> notify;
     in-out property <int> preview;
@@ -130,28 +147,31 @@ export component SettingsPage inherits Rectangle {
                                 toggled => { root.changed(); }
                             }
                         }
-                        SettingRow {
-                            label: "알림을 끈 대화도 배지에 포함";
-                            Switch {
-                                checked <=> root.badge-muted;
-                                toggled => { root.changed(); }
+                        SettingGroup {
+                            title: "알림을 끈 대화";
+                            hint: "대화를 오른쪽 클릭해서 끌 수 있고, \"알림 설정…\"에서 대화별로 설정할 수 있습니다";
+                            SettingRow {
+                                label: "나를 멘션하면 알림";
+                                Switch {
+                                    enabled: root.notify;
+                                    checked <=> root.muted-mentions;
+                                    toggled => { root.changed(); }
+                                }
                             }
-                        }
-                        SettingRow {
-                            label: "알림을 끈 대화에서 나를 멘션하면 알림";
-                            Switch {
-                                enabled: root.notify;
-                                checked <=> root.muted-mentions;
-                                toggled => { root.changed(); }
+                            SettingRow {
+                                label: "내 메시지에 답장하면 알림";
+                                Switch {
+                                    enabled: root.notify;
+                                    checked <=> root.muted-replies;
+                                    toggled => { root.changed(); }
+                                }
                             }
-                        }
-                        SettingRow {
-                            label: "알림을 끈 대화에서 내 메시지에 답장하면 알림";
-                            hint: "대화 알림은 목록에서 대화를 오른쪽 클릭하거나 대화 위쪽의 종 버튼으로 끕니다";
-                            Switch {
-                                enabled: root.notify;
-                                checked <=> root.muted-replies;
-                                toggled => { root.changed(); }
+                            SettingRow {
+                                label: "배지에 포함";
+                                Switch {
+                                    checked <=> root.badge-muted;
+                                    toggled => { root.changed(); }
+                                }
                             }
                         }
                     }

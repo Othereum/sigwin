@@ -134,7 +134,8 @@ pub(crate) fn header_avatar(app: &AppWindow, ui: &Ui) {
 pub(crate) fn show_total_unread(app: &AppWindow, ui: &Ui) {
     let now = view::now_ms();
     let all = ui.settings.badge_muted;
-    let total: u32 = ui.thread_dtos.iter().filter(|t| all || !t.mute.active(now)).map(|t| t.unread).sum();
+    let counts = |t: &&ThreadDto| !t.mute.active(now) || t.prefs.badge.unwrap_or(all);
+    let total: u32 = ui.thread_dtos.iter().filter(counts).map(|t| t.unread).sum();
     app.set_total_unread(total as i32);
     badge::set_count(total);
 }

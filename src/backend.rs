@@ -136,6 +136,16 @@ struct Persist {
     /// Storage Service manifest version `mute_phone` was read from
     #[serde(default)]
     storage_version: u64,
+    /// groups whose mentions don't notify while muted, on the phone (`dontNotifyForMentionsIfMuted`)
+    #[serde(default)]
+    phone_no_mentions: HashSet<String>,
+    /// what the last Storage Service read collected (`mute::STORAGE_FORMAT`); older reads
+    /// are redone even when the manifest is unchanged
+    #[serde(default)]
+    storage_format: u32,
+    /// thread key -> its own notification settings (only threads with any)
+    #[serde(default)]
+    thread_prefs: HashMap<String, crate::types::ThreadPrefs>,
 }
 
 #[derive(Default, Clone, Copy, Serialize, Deserialize)]
@@ -550,6 +560,7 @@ impl App {
                 self.emit_storage();
             }
             Command::SetMute { key, set } => self.set_mute(&key, set),
+            Command::SetPref { key, pref } => self.set_pref(&key, pref),
         }
     }
 

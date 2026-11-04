@@ -1,6 +1,8 @@
-//! Per-thread "notifications off": the phone's value from the Storage Service (read only,
-//! never written back), overridden by what is picked in Sigwin until that runs out or is
-//! cleared ("휴대폰 설정 따르기").
+//! Per-thread notification settings. "Notifications off": the phone's value from the Storage
+//! Service (read only, never written back), overridden by what is picked in Sigwin until that
+//! runs out or is cleared ("휴대폰 설정 따르기"). The rest (preview, what gets through while
+//! off, badge) resolve the same way: the thread's own choice, else the phone's (group
+//! mentions only), else the app setting.
 
 use presage::libsignal_service::configuration::ServiceCredentials;
 use presage::libsignal_service::master_key::StorageServiceKey;
@@ -10,17 +12,70 @@ use presage::libsignal_service::push_service::PushService;
 use presage::libsignal_service::StorageService;
 use presage::manager::RegistrationData;
 
-use crate::types::{Mute, MuteSet, MUTE_ALWAYS};
+use crate::types::{Mute, MuteSet, Pref, ThreadPrefs, MUTE_ALWAYS};
 
 use super::*;
 
 /// items per Storage Service read (presage reads groups 100 at a time too)
 const READ_CHUNK: usize = 100;
 
-/// The phone's muted threads: (manifest version, thread key -> muted until).
-pub(super) type PhoneMutes = (u64, HashMap<String, u64>);
+/// bumped when a read collects more (2: group mention settings)
+pub(super) const STORAGE_FORMAT: u32 = 2;
+
+/// What the phone says about notifications, from one Storage Service manifest.
+pub(super) struct PhoneMutes {
+    version: u64,
+    /// thread key -> muted until
+    mutes: HashMap<String, u64>,
+    /// groups whose mentions don't notify while muted
+    no_mentions: HashSet<String>,
+}
+
+/// How a thread's notifications behave now, all layers resolved.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Notify {
+    pub muted: bool,
+    /// what toasts show (`Settings::preview`); None = notifications are off in the app
+    pub preview: Option<u8>,
+    /// while muted
+    pub mentions: bool,
+    pub replies: bool,
+}
 
 impl App {
+    pub(super) fn prefs(&self, key: &str) -> ThreadPrefs {
+        self.persist.thread_prefs.get(key).copied().unwrap_or_default()
+    }
+
+    /// The phone's "mentions notify while muted" (groups that turned it off), else unset.
+    pub(super) fn phone_mentions(&self, key: &str) -> Option<bool> {
+        self.persist.phone_no_mentions.contains(key).then_some(false)
+    }
+
+    pub(super) fn notify_for(&self, key: &str) -> Notify {
+        let p = self.prefs(key);
+        let (mentions, replies) = crate::settings::muted_exceptions();
+        Notify {
+            muted: self.mute(key).active(view::now_ms()),
+            preview: crate::settings::preview().map(|global| p.preview.unwrap_or(global)),
+            mentions: p.mentions.or(self.phone_mentions(key)).unwrap_or(mentions),
+            replies: p.replies.unwrap_or(replies),
+        }
+    }
+
+    pub(super) fn set_pref(&mut self, key: &str, pref: Pref) {
+        let mut p = self.prefs(key);
+        p.set(pref);
+        if p.is_empty() {
+            self.persist.thread_prefs.remove(key);
+        } else {
+            self.persist.thread_prefs.insert(key.to_string(), p);
+        }
+        info!(?pref, "thread notification setting");
+        self.persist_dirty = true;
+        self.threads_dirty = true;
+    }
+
     /// A thread's state now: Sigwin's choice if any, else the phone's.
     pub(super) fn mute(&self, key: &str) -> Mute {
         let phone = self.persist.mute_phone.get(key).copied().unwrap_or(0);
@@ -78,7 +133,7 @@ impl App {
         let Some(m) = self.manager.as_ref() else { return };
         let reg = m.registration_data().clone();
         let (store, tx) = (self.store.clone(), self.tx.clone());
-        let known = self.persist.storage_version;
+        let known = if self.persist.storage_format < STORAGE_FORMAT { 0 } else { self.persist.storage_version };
         self.mutes_syncing = true;
         tokio::task::spawn_local(async move {
             let res = Box::pin(read_phone_mutes(&store, &reg, known)).await.map_err(|e| format!("{e:#}"));
@@ -89,10 +144,12 @@ impl App {
     pub(super) fn phone_mutes(&mut self, res: Result<Option<PhoneMutes>, String>) {
         self.mutes_syncing = false;
         match res {
-            Ok(Some((version, mutes))) => {
-                info!(version, muted = mutes.len(), "notification settings from the phone");
+            Ok(Some(PhoneMutes { version, mutes, no_mentions })) => {
+                info!(version, muted = mutes.len(), no_mentions = no_mentions.len(), "notification settings from the phone");
                 self.persist.storage_version = version;
+                self.persist.storage_format = STORAGE_FORMAT;
                 self.persist.mute_phone = mutes;
+                self.persist.phone_no_mentions = no_mentions;
                 self.persist_dirty = true;
                 self.threads_dirty = true;
             }
@@ -137,7 +194,7 @@ async fn read_phone_mutes(store: &SqliteStore, reg: &RegistrationData, known: u6
         .filter(|id| matches!(id.r#type(), IdType::Contact | IdType::Groupv2))
         .map(|id| id.raw.clone())
         .collect();
-    let mut mutes = HashMap::new();
+    let (mut mutes, mut no_mentions) = (HashMap::new(), HashSet::new());
     for chunk in ids.chunks(READ_CHUNK) {
         for rec in storage.read_items(chunk.to_vec(), Some(&manifest.record_ikm)).await? {
             let (key, until) = match rec.record {
@@ -145,7 +202,13 @@ async fn read_phone_mutes(store: &SqliteStore, reg: &RegistrationData, known: u6
                     let uuid = Uuid::from_slice(&c.aci_binary).ok().or_else(|| c.aci.parse().ok());
                     (uuid.map(|u| format!("c:{u}")), c.muted_until_timestamp)
                 }
-                Some(Record::GroupV2(g)) if g.master_key.len() == 32 => (Some(format!("g:{}", hex::encode(&g.master_key))), g.muted_until_timestamp),
+                Some(Record::GroupV2(g)) if g.master_key.len() == 32 => {
+                    let key = format!("g:{}", hex::encode(&g.master_key));
+                    if g.dont_notify_for_mentions_if_muted {
+                        no_mentions.insert(key.clone());
+                    }
+                    (Some(key), g.muted_until_timestamp)
+                }
                 _ => continue,
             };
             if let (Some(key), true) = (key, until > 0) {
@@ -153,13 +216,12 @@ async fn read_phone_mutes(store: &SqliteStore, reg: &RegistrationData, known: u6
             }
         }
     }
-    Ok(Some((manifest.version, mutes)))
+    Ok(Some(PhoneMutes { version: manifest.version, mutes, no_mentions }))
 }
 
 /// Whether a message gets through to a thread with notifications off: @mentions of us and
-/// replies to our messages do, unless turned off in the settings (Signal's defaults).
-pub(super) fn breaks_mute(dm: &DataMessage, me: Uuid) -> bool {
-    let (mentions, replies) = crate::settings::muted_exceptions();
+/// replies to our messages do, if the thread's settings say so (Signal's defaults: both).
+pub(super) fn breaks_mute(dm: &DataMessage, me: Uuid, mentions: bool, replies: bool) -> bool {
     let mentioned = || dm.body_ranges.iter().filter_map(view::mention_uuid).any(|u| u == me);
     let replied = || dm.quote.as_ref().and_then(view::quote_author) == Some(me);
     (mentions && mentioned()) || (replies && replied())
@@ -177,10 +239,14 @@ mod tests {
         let mention = |u: Uuid| BodyRange { start: Some(0), length: Some(1), associated_value: Some(AssociatedValue::MentionAci(u.to_string())), ..Default::default() };
         let quote = |u: Uuid| Quote { author_aci: Some(u.to_string()), ..Default::default() };
         let plain = DataMessage::default();
-        assert!(!breaks_mute(&plain, me));
-        assert!(breaks_mute(&DataMessage { body_ranges: vec![mention(me)], ..Default::default() }, me));
-        assert!(!breaks_mute(&DataMessage { body_ranges: vec![mention(other)], ..Default::default() }, me));
-        assert!(breaks_mute(&DataMessage { quote: Some(quote(me)), ..Default::default() }, me));
-        assert!(!breaks_mute(&DataMessage { quote: Some(quote(other)), ..Default::default() }, me));
+        let at_me = DataMessage { body_ranges: vec![mention(me)], ..Default::default() };
+        let reply = DataMessage { quote: Some(quote(me)), ..Default::default() };
+        assert!(!breaks_mute(&plain, me, true, true));
+        assert!(breaks_mute(&at_me, me, true, false));
+        assert!(!breaks_mute(&at_me, me, false, true));
+        assert!(!breaks_mute(&DataMessage { body_ranges: vec![mention(other)], ..Default::default() }, me, true, true));
+        assert!(breaks_mute(&reply, me, false, true));
+        assert!(!breaks_mute(&reply, me, true, false));
+        assert!(!breaks_mute(&DataMessage { quote: Some(quote(other)), ..Default::default() }, me, true, true));
     }
 }

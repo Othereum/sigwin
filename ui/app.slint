@@ -1,7 +1,7 @@
 import { LineEdit, Button, ListView, Palette, Spinner } from "std-widgets.slint";
 import { ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, IconButton, MenuRow, TextButton } from "widgets.slint";
+import { Avatar, IconButton, MenuRow, Segmented, TextButton } from "widgets.slint";
 import { Bubble } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
@@ -11,6 +11,31 @@ import { LinkPage } from "link.slint";
 // Structs and globals the Rust side uses.
 export { ThreadItem, ReactionItem, ReaderItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 export { Anim, Links, Theme } from "theme.slint";
+
+// a row of the chat notification settings dialog: label + the default, choices on the right
+component PrefRow inherits HorizontalLayout {
+    in property <string> label;
+    // what "기본값" means right now
+    in property <string> hint;
+    in property <[string]> options;
+    in property <int> current;
+    callback changed(int);
+    spacing: 12px;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        spacing: 2px;
+        Text { text: root.label; color: Theme.text; font-size: 13px; wrap: word-wrap; }
+        Text { text: "기본값: " + root.hint; color: Theme.subtle; font-size: 11.5px; wrap: word-wrap; }
+    }
+    Segmented {
+        y: (parent.height - self.height) / 2;
+        horizontal-stretch: 0;
+        options: root.options;
+        current: root.current;
+        changed(v) => { root.changed(v); }
+    }
+}
 
 export component AppWindow inherits Window {
     in property <int> total-unread;
@@ -169,6 +194,21 @@ export component AppWindow inherits Window {
     callback open-thread-menu(string, length, length);
     // seconds off; 0 = on, -1 = always, -2 = follow the phone
     callback set-mute(string, int);
+    // a chat's own notification settings (dialog); tprefs-key is "" when closed.
+    // Each value is an index into its options, 0 = the default (described by its *-default text).
+    in-out property <string> tprefs-key;
+    in property <string> tprefs-name;
+    in-out property <int> tprefs-preview;
+    in-out property <int> tprefs-mentions;
+    in-out property <int> tprefs-replies;
+    in-out property <int> tprefs-badge;
+    in property <string> tprefs-preview-default;
+    in property <string> tprefs-mentions-default;
+    in property <string> tprefs-replies-default;
+    in property <string> tprefs-badge-default;
+    callback open-thread-prefs(string);
+    // key, item (0 preview, 1 mentions, 2 replies, 3 badge), option index
+    callback set-pref(string, int, int);
 
     in-out property <bool> sticker-open;
     in property <[PackItem]> packs;
@@ -1008,6 +1048,75 @@ export component AppWindow inherits Window {
                         spacing: 1px;
                         Text { text: "휴대폰 설정 따르기"; color: Theme.text; font-size: 13px; }
                         Text { text: root.tmenu-phone; color: Theme.subtle; font-size: 11.5px; overflow: elide; }
+                    }
+                }
+                Rectangle { height: 1px; background: Theme.border; }
+                MenuRow {
+                    text: "알림 설정…";
+                    clicked => {
+                        root.open-thread-prefs(root.tmenu-key);
+                        root.tmenu-key = "";
+                    }
+                }
+            }
+        }
+    }
+
+    // a chat's own notification settings
+    if root.tprefs-key != "": Rectangle {
+        background: #00000080;
+        TouchArea {
+            clicked => { root.tprefs-key = ""; }
+        }
+        Rectangle {
+            width: min(460px, parent.width - 40px);
+            height: tprefs-col.preferred-height;
+            border-radius: 12px;
+            background: Theme.pane;
+            border-width: 1px;
+            border-color: Theme.border;
+            TouchArea { }
+            tprefs-col := VerticalLayout {
+                padding: 18px;
+                spacing: 14px;
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "알림 설정"; font-weight: 700; font-size: 15px; color: Theme.text; }
+                    Text { text: root.tprefs-name; color: Theme.subtle; font-size: 12px; overflow: elide; }
+                }
+                PrefRow {
+                    label: "알림에 표시할 내용";
+                    hint: root.tprefs-preview-default;
+                    options: ["기본값", "이름과 내용", "이름만", "숨김"];
+                    current: root.tprefs-preview;
+                    changed(v) => { root.set-pref(root.tprefs-key, 0, v); }
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    Text { text: "알림을 끈 동안"; color: Theme.text; font-size: 13px; font-weight: 600; }
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        VerticalLayout {
+                            spacing: 14px;
+                            for row[i] in [
+                                { label: "나를 멘션하면 알림", hint: root.tprefs-mentions-default, current: root.tprefs-mentions },
+                                { label: "내 메시지에 답장하면 알림", hint: root.tprefs-replies-default, current: root.tprefs-replies },
+                                { label: "배지에 포함", hint: root.tprefs-badge-default, current: root.tprefs-badge },
+                            ]: PrefRow {
+                                label: row.label;
+                                hint: row.hint;
+                                options: ["기본값", "켬", "끔"];
+                                current: row.current;
+                                changed(v) => { root.set-pref(root.tprefs-key, i + 1, v); }
+                            }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    Button {
+                        text: "닫기";
+                        clicked => { root.tprefs-key = ""; }
                     }
                 }
             }

@@ -76,6 +76,52 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         };
         s(Command::SetMute { key: key.to_string(), set });
     });
+
+    let weak = app.as_weak();
+    app.on_open_thread_prefs(move |key| {
+        let Some(app) = weak.upgrade() else { return };
+        let found = UI.with_borrow(|ui| {
+            let t = ui.thread_dtos.iter().find(|t| t.key == key.as_str())?;
+            Some((t.name.clone(), t.prefs, t.phone_mentions, ui.settings.clone()))
+        });
+        let Some((name, p, phone_mentions, s)) = found else { return };
+        let on_off = |b: bool| if b { "켬" } else { "끔" };
+        let index = |b: Option<bool>| match b {
+            None => 0,
+            Some(true) => 1,
+            Some(false) => 2,
+        };
+        let preview = ["이름과 내용", "이름만", "숨김"][s.preview.min(2) as usize];
+        app.set_tprefs_name(name.into());
+        app.set_tprefs_preview(p.preview.map_or(0, |v| v.min(2) as i32 + 1));
+        app.set_tprefs_mentions(index(p.mentions));
+        app.set_tprefs_replies(index(p.replies));
+        app.set_tprefs_badge(index(p.badge));
+        app.set_tprefs_preview_default(if s.notify { preview.into() } else { "알림 꺼짐 (앱 설정)".into() });
+        app.set_tprefs_mentions_default(match phone_mentions {
+            Some(b) => format!("{} (휴대폰 설정)", on_off(b)).into(),
+            None => on_off(s.muted_mentions).into(),
+        });
+        app.set_tprefs_replies_default(on_off(s.muted_replies).into());
+        app.set_tprefs_badge_default(on_off(s.badge_muted).into());
+        app.set_tprefs_key(key);
+    });
+
+    let s = send.clone();
+    app.on_set_pref(move |key, item, v| {
+        let b = match v {
+            1 => Some(true),
+            2 => Some(false),
+            _ => None,
+        };
+        let pref = match item {
+            0 => types::Pref::Preview((v > 0).then(|| (v - 1).clamp(0, 2) as u8)),
+            1 => types::Pref::Mentions(b),
+            2 => types::Pref::Replies(b),
+            _ => types::Pref::Badge(b),
+        };
+        s(Command::SetPref { key: key.to_string(), pref });
+    });
 }
 
 /// Composer: sending, attachments, paste, @mentions, formatting, reply.

@@ -83,6 +83,8 @@ impl App {
                     unread: self.persist.unread.get(&key).copied().unwrap_or(0),
                     is_group: matches!(row.thread, Thread::Group(_)),
                     mute: self.mute(&key),
+                    prefs: self.prefs(&key),
+                    phone_mentions: self.phone_mentions(&key),
                     time: view::time_short(display_ts),
                     ts: display_ts,
                     key,
@@ -102,6 +104,8 @@ impl App {
                     0,
                     ThreadDto {
                         mute: self.mute(&key),
+                        prefs: self.prefs(&key),
+                        phone_mentions: self.phone_mentions(&key),
                         key,
                         name: if g.title.is_empty() { "그룹".into() } else { g.title },
                         snippet: String::new(),
@@ -240,6 +244,8 @@ impl App {
                 if c.name.to_lowercase().contains(&q) || (!phone.is_empty() && phone.contains(&q)) {
                     out.push(ThreadDto {
                         mute: self.mute(&key),
+                        prefs: self.prefs(&key),
+                        phone_mentions: None,
                         key,
                         name: if c.name.is_empty() { phone } else { c.name },
                         snippet: "새 대화 시작".into(),

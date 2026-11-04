@@ -35,6 +35,8 @@ pub(crate) struct Queued {
     pub expiring: bool,
     pub reaction: Option<ReactionRef>,
     pub picture: Option<Picture>,
+    /// what the toast shows (the thread's preview setting, else the app's)
+    pub preview: u8,
 }
 
 struct Shown {
@@ -117,7 +119,11 @@ impl Notifier {
             return;
         }
         let Some(q) = self.queued.take() else { return };
-        let Some(level) = crate::settings::preview() else { return };
+        // turned off meanwhile
+        if !crate::settings::notify_enabled() {
+            return;
+        }
+        let level = q.preview;
         let (title, body) = content(&q, level);
         let picture = if level < 2 { q.picture } else { None };
         info!("notification: showing one");
@@ -147,18 +153,17 @@ fn content(q: &Queued, level: u8) -> (String, String) {
 impl App {
     /// An incoming message (`maybeNotify` for a normal message).
     pub(super) async fn notify_message(&mut self, thread: &Thread, key: &str, c: &Content) {
-        if !self.synced || !crate::settings::notify_enabled() {
-            return;
-        }
+        let n = self.notify_for(key);
+        let Some(preview) = n.preview.filter(|_| self.synced) else { return };
         let Some(dm) = view::data_message(c) else { return };
-        if self.mute(key).active(view::now_ms()) && !mute::breaks_mute(dm, self.me) {
+        if n.muted && !mute::breaks_mute(dm, self.me, n.mentions, n.replies) {
             return;
         }
         let expiring = dm.expire_timer.unwrap_or(0) > 0;
         let message = self.snippet(c).await.unwrap_or_default();
         let sender_title = self.sender_title(thread, c.metadata.sender.raw_uuid()).await;
-        let picture = self.toast_picture(thread, key).await;
-        self.notes.add(Queued { key: key.into(), msg: c.timestamp(), sender_title, message, expiring, reaction: None, picture });
+        let picture = self.toast_picture(thread, key, preview).await;
+        self.notes.add(Queued { key: key.into(), msg: c.timestamp(), sender_title, message, expiring, reaction: None, picture, preview });
     }
 
     /// Someone else reacted (or took a reaction back): a reaction to one of our messages
@@ -169,9 +174,8 @@ impl App {
             return;
         }
         self.notes.remove(By::Reaction { msg: target, from });
-        if remove || !self.synced || !crate::settings::notify_enabled() || self.mute(key).active(view::now_ms()) {
-            return;
-        }
+        let n = self.notify_for(key);
+        let Some(preview) = n.preview.filter(|_| !remove && self.synced && !n.muted) else { return };
         let ours = view::data_message(c)
             .and_then(|dm| dm.reaction.as_ref())
             .and_then(|r| r.parse_target_author_aci())
@@ -187,9 +191,9 @@ impl App {
         let message = self.snippet(&msg).await.unwrap_or_default();
         let from_name = self.name(from).await;
         let sender_title = self.sender_title(thread, from).await;
-        let picture = self.toast_picture(thread, key).await;
+        let picture = self.toast_picture(thread, key, preview).await;
         let reaction = Some(ReactionRef { from, from_name, emoji: emoji.into() });
-        self.notes.add(Queued { key: key.into(), msg: target, sender_title, message, expiring, reaction, picture });
+        self.notes.add(Queued { key: key.into(), msg: target, sender_title, message, expiring, reaction, picture, preview });
     }
 
     /// 1:1: the sender's name; groups: "{group}의 {sender} 님" (`icu:notificationSenderInGroup`).
@@ -202,8 +206,8 @@ impl App {
     }
 
     /// The chat's photo as stored (no network), else its initial (`getAvatarOrIdenticon`).
-    async fn toast_picture(&mut self, thread: &Thread, key: &str) -> Option<Picture> {
-        if crate::settings::preview().is_none_or(|p| p >= 2) {
+    async fn toast_picture(&mut self, thread: &Thread, key: &str, preview: u8) -> Option<Picture> {
+        if preview >= 2 {
             return None;
         }
         let photo = match thread {
@@ -264,6 +268,7 @@ mod tests {
             expiring,
             reaction,
             picture: None,
+            preview: 0,
         }
     }
 

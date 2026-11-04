@@ -40,6 +40,51 @@ pub struct ThreadDto {
     pub unread: u32,
     pub is_group: bool,
     pub mute: Mute,
+    /// Sigwin's per-thread notification choices (None = the default)
+    pub prefs: ThreadPrefs,
+    /// the phone's "notify for mentions while muted" (groups only; None = not set there)
+    pub phone_mentions: Option<bool>,
+}
+
+/// A thread's own notification settings; each None follows the next layer (the phone's
+/// value where it has one, else the app setting).
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ThreadPrefs {
+    /// what toasts show, like `Settings::preview`
+    pub preview: Option<u8>,
+    /// while notifications are off: @mentions of us still notify
+    pub mentions: Option<bool>,
+    /// ... replies to our messages still notify
+    pub replies: Option<bool>,
+    /// ... the unread messages count in the badge
+    pub badge: Option<bool>,
+}
+
+impl ThreadPrefs {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// One of `ThreadPrefs` changed in the thread's settings dialog.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Pref {
+    Preview(Option<u8>),
+    Mentions(Option<bool>),
+    Replies(Option<bool>),
+    Badge(Option<bool>),
+}
+
+impl ThreadPrefs {
+    pub fn set(&mut self, p: Pref) {
+        match p {
+            Pref::Preview(v) => self.preview = v.map(|v| v.min(2)),
+            Pref::Mentions(v) => self.mentions = v,
+            Pref::Replies(v) => self.replies = v,
+            Pref::Badge(v) => self.badge = v,
+        }
+    }
 }
 
 /// Notifications off for a thread until (ms since the epoch); 0 = on.
@@ -336,6 +381,8 @@ pub enum Command {
     ClearThumbs,
     /// turn a thread's notifications off / on, or follow the phone again
     SetMute { key: String, set: MuteSet },
+    /// change one of a thread's own notification settings
+    SetPref { key: String, pref: Pref },
 }
 
 #[cfg(test)]

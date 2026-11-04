@@ -1,7 +1,7 @@
 //! Demo modes: a fake backend with synthetic data (`SIGWIN_DEMO`), and the memory self-test.
 
 use super::*;
-use crate::types::{MsgDto, Mute, MuteSet, Scroll, ThreadDto, MUTE_ALWAYS};
+use crate::types::{MsgDto, Mute, MuteSet, Scroll, ThreadDto, ThreadPrefs, MUTE_ALWAYS};
 
 /// Demo mode: the fake backend plus the `SIGWIN_DEMO_*` / `SIGWIN_SELFTEST` extras.
 pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Command>) {
@@ -105,6 +105,9 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                 10 => Mute { until: MUTE_ALWAYS, overridden: true, phone: 0 },
                 _ => Mute::default(),
             },
+            // own settings in one chat, the phone's mention setting in a group
+            prefs: if i == 5 { ThreadPrefs { preview: Some(1), badge: Some(false), ..Default::default() } } else { ThreadPrefs::default() },
+            phone_mentions: (i == 3).then_some(false),
         })
         .collect();
     let mut items = Vec::new();
@@ -298,6 +301,12 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                     demo_mute(&mut threads, key, *set);
                     emit(Event::Threads(threads.clone()));
                 }
+                if let Command::SetPref { key, pref } = &c {
+                    if let Some(t) = threads.iter_mut().find(|t| &t.key == key) {
+                        t.prefs.set(*pref);
+                    }
+                    emit(Event::Threads(threads.clone()));
+                }
                 let open = match &c {
                     Command::OpenThread(key) => Some((key.clone(), None)),
                     Command::OpenFromToast { key, msg } => Some((key.clone(), *msg)),
@@ -457,6 +466,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
                         expiring: false,
                         reaction: None,
                         picture: Some(Picture::Photo(photo.clone())),
+                        preview: crate::settings::preview().unwrap_or(0),
                     },
                     2 => Queued {
                         key: "c:demo-3".into(),
@@ -466,6 +476,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
                         expiring: false,
                         reaction: None,
                         picture: Some(letter("c:demo-3", "가족 단톡방")),
+                        preview: crate::settings::preview().unwrap_or(0),
                     },
                     3 => Queued {
                         key: "c:demo-2".into(),
@@ -475,6 +486,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
                         expiring: false,
                         reaction: Some(ReactionRef { from: uuid::Uuid::from_u128(2), from_name: "박지훈".into(), emoji: "👍".into() }),
                         picture: Some(letter("c:demo-2", "박지훈")),
+                        preview: crate::settings::preview().unwrap_or(0),
                     },
                     _ => Queued {
                         key: "c:demo-4".into(),
@@ -484,6 +496,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
                         expiring: true,
                         reaction: None,
                         picture: Some(letter("c:demo-4", "Alice")),
+                        preview: crate::settings::preview().unwrap_or(0),
                     },
                 };
                 tracing::info!(n, focused, "demo notify: message");
@@ -562,6 +575,8 @@ fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiv
         unread,
         is_group,
         mute: Mute::default(),
+        prefs: ThreadPrefs::default(),
+        phone_mentions: None,
     };
     let threads = vec![
         th(1, "이서연", "그럼 토요일 11시에 합정역에서 봐요!", "오후 6:42", 0, false),
