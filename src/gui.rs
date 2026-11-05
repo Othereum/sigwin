@@ -32,7 +32,7 @@ pub(crate) struct Ui {
     pub(crate) threads: Rc<VecModel<ThreadItem>>,
     /// the backend's last thread list; `threads` is this with drafts merged in
     thread_dtos: Vec<ThreadDto>,
-    /// unsent composer contents by thread key (`drafts.json`)
+    /// unsent composer contents by thread key (`drafts.enc`)
     pub(crate) drafts: HashMap<String, drafts::Draft>,
     pub(crate) drafts_path: PathBuf,
     pub(crate) messages: Rc<VecModel<MsgItem>>,

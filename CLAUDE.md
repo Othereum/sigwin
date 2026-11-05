@@ -21,6 +21,15 @@ Every change must respect this:
 - Anything that loads heavy system DLLs runs in a child process.
 - Measure, don't guess: the log prints `mem: rust heap …, private …` every 10s at debug level (`sigwin=debug`; info only every 10 min, for users' log files) (`alloc.rs` counts Rust heap; the rest is native). `SIGWIN_DEMO=1 SIGWIN_SELFTEST=1` measures the dialog and notification cost.
 
+## Hard constraint: privacy and security
+This client holds private conversations; treat a leak as worse than a crash. Every change must respect this:
+- **Account data never reaches the disk in plain form.** That covers message text and anything derived from it (previews, drafts, caches), names, phone numbers, attachments and thumbnails, and thread keys: a group's key is its master key, a secret. It belongs in the encrypted DB or in vault files (`sigwin_vault`, `sealed`). `settings.json` holds preferences only. Changing an existing plain format means moving old files over and removing them.
+- **A plain copy exists only when another app must read it**, in a folder emptied on exit and on start.
+- **Logs never carry account data, at any level**: no message text, URLs from messages, names, numbers, UUIDs or keys. Log counts, sizes, durations and sent timestamps. `logfile::scrub` is a safety net for what libraries log, not permission. Panic messages stay out of the log file: they can quote the string being handled.
+- **New outgoing traffic needs the user's approval first**, like a vendor patch: anything beyond the Signal service and the update check reveals who uses this app, and when. No telemetry, no previews fetched from links.
+- **Real account data stays out of the work too.** Debug with the demo modes first. When a real log, DB or state file must be read, print shapes and counts with values masked, and never paste or commit its contents.
+- Encryption at rest protects copied files (backups, sync, a stolen disk), not against malware running as the same Windows user. Don't claim more than that in the UI or docs.
+
 ## Build & run
 ```
 cargo build --profile fast     # day-to-day, compile checks too: optimized, no LTO, incremental -> target\fast\

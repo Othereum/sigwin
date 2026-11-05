@@ -20,6 +20,7 @@ mod link;
 mod logfile;
 mod notices;
 mod mention;
+mod sealed;
 mod secret;
 mod settings;
 mod toast;
@@ -81,6 +82,10 @@ fn main() -> anyhow::Result<()> {
         .add_directive("sqlx=error".parse()?);
     // the uninstaller may delete the data folder, so it must not hold a file open in it
     let uninstall = std::env::args().any(|a| a == "--uninstall");
+    // the first run that seals the state files: logs from before `logfile::scrub` go with them
+    if !uninstall && data_dir().join("state.json").exists() {
+        let _ = std::fs::remove_dir_all(logfile::dir(&data_dir()));
+    }
     let file = if uninstall {
         None
     } else {
@@ -178,6 +183,10 @@ fn main() -> anyhow::Result<()> {
     toast::init(backend::Paths::new(&data_dir()).open, move |hit| {
         let _ = weak.upgrade_in_event_loop(move |app| open_from_toast(&app, hit));
     });
+    // before anything reads the encrypted files; a failure is the backend's to show
+    if let Err(e) = backend::unlock(&data_dir()) {
+        tracing::warn!("unlock: {e:#}");
+    }
     if demo {
         demo::start(&app, emit, cmd_rx);
     } else {
@@ -254,7 +263,7 @@ fn main() -> anyhow::Result<()> {
         ui.paste_dir = paste_dir;
         ui.settings = prefs;
         ui.settings_path = settings_path;
-        ui.drafts_path = data_dir().join("drafts.json");
+        ui.drafts_path = data_dir().join("drafts.enc");
         ui.drafts = drafts::load(&ui.drafts_path);
     });
     apply_theme(&app, true);
@@ -289,5 +298,7 @@ fn main() -> anyhow::Result<()> {
     // plain copies of opened attachments; the backend also empties this on start (crashes,
     // files another app still held)
     backend::files::clear_open(&data_dir());
+    // pasted images, plain as well: a draft's paste doesn't outlive the run anyway (`clip::clean`)
+    clip::clean(&data_dir().join("paste"));
     Ok(())
 }

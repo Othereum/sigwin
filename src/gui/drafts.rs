@@ -1,5 +1,5 @@
 //! Message drafts: what was left in the composer when another thread was opened, shown in the
-//! thread list as "작성 중: …" like Signal Desktop. Owned by the UI thread, saved to `drafts.json`.
+//! thread list as "작성 중: …" like Signal Desktop. Owned by the UI thread, saved to `drafts.enc`.
 
 use std::path::Path;
 
@@ -46,7 +46,7 @@ impl Draft {
 }
 
 pub(crate) fn load(path: &Path) -> HashMap<String, Draft> {
-    std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    crate::sealed::read(path, &path.with_extension("json")).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
 fn save(ui: &Ui) {
@@ -54,11 +54,7 @@ fn save(ui: &Ui) {
     if path.as_os_str().is_empty() {
         return;
     }
-    let tmp = path.with_extension("json.tmp");
-    let res = serde_json::to_vec(&ui.drafts)
-        .map_err(anyhow::Error::from)
-        .and_then(|b| Ok(std::fs::write(&tmp, b)?))
-        .and_then(|_| Ok(std::fs::rename(&tmp, path)?));
+    let res = serde_json::to_vec(&ui.drafts).map_err(anyhow::Error::from).and_then(|b| Ok(crate::sealed::write(path, &b)?));
     if let Err(e) = res {
         tracing::warn!("saving drafts: {e:#}");
     }

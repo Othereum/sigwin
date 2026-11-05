@@ -87,7 +87,7 @@ impl Paths {
         Self {
             db: dir.join("signal.db3"),
             key: dir.join("db.key"),
-            state: dir.join("state.json"),
+            state: dir.join("state.enc"),
             attachments: dir.join("attachments"),
             thumbs: dir.join("thumbs"),
             open: dir.join("open"),
@@ -317,6 +317,16 @@ pub fn spawn(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit) -> st
         .expect("spawn backend thread")
 }
 
+/// Loads the DB key (made on first use) and opens the vault: encrypted files use keys derived from
+/// it. Also called before the UI reads its drafts, and before this thread starts: no race to make it.
+pub fn unlock(dir: &Path) -> anyhow::Result<String> {
+    std::fs::create_dir_all(dir)?;
+    let pass = crate::secret::load_or_create(&Paths::new(dir).key)?;
+    let root: [u8; 32] = hex::decode(&pass).ok().and_then(|k| k.try_into().ok()).context("db key is not 32 bytes")?;
+    sigwin_vault::init(root);
+    Ok(pass)
+}
+
 async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -> anyhow::Result<()> {
     std::fs::create_dir_all(&dir)?;
     let paths = Paths::new(&dir);
@@ -327,10 +337,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
     remove_legacy_sticker_thumbs(&paths.thumbs);
     emit(Event::Loading("저장소 여는 중…".into()));
 
-    let pass = crate::secret::load_or_create(&paths.key)?;
-    // the cache files are encrypted with keys derived from the DB key
-    let root: [u8; 32] = hex::decode(&pass).ok().and_then(|k| k.try_into().ok()).context("db key is not 32 bytes")?;
-    sigwin_vault::init(root);
+    let pass = unlock(&dir)?;
     clear_dir(&paths.open);
     let options = SqliteConnectOptions::new()
         .filename(&paths.db)
@@ -345,8 +352,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         .context("opening database")?;
     let index = Index::open(options).await.context("opening index")?;
 
-    let mut persist: Persist = std::fs::read(&paths.state)
-        .ok()
+    let mut persist: Persist = crate::sealed::read(&paths.state, &dir.join("state.json"))
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
     let sealed_now = persist.cache_format < CACHE_FORMAT && {
@@ -783,9 +789,8 @@ impl App {
 
     fn save_persist(&self) {
         if let Ok(b) = serde_json::to_vec(&self.persist) {
-            let tmp = self.paths.state.with_extension("json.tmp");
-            if std::fs::write(&tmp, b).is_ok() {
-                let _ = std::fs::rename(&tmp, &self.paths.state);
+            if let Err(e) = crate::sealed::write(&self.paths.state, &b) {
+                warn!("saving state: {e}");
             }
         }
     }

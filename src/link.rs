@@ -67,7 +67,6 @@ pub fn open(url: &str) {
         tracing::info!(url, "link clicked (headless: not opened)");
         return;
     }
-    tracing::debug!(url, "open link");
     #[cfg(windows)]
     {
         use windows_sys::Win32::UI::Shell::ShellExecuteW;
