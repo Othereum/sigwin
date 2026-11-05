@@ -548,9 +548,9 @@ fn demo_viewer(emit: &backend::Emit, id: &str, index: usize, fit: (u32, u32)) {
     });
     let Ok(png) = sigwin_thumb::png_rgba(&src) else { return };
     drop(src);
-    let Ok(Some((img, full, opaque))) = sigwin_thumb::decode_view(&png, fit.0, fit.1, u64::MAX) else { return };
-    let pixels = slint::SharedPixelBuffer::clone_from_slice(img.as_raw(), img.width(), img.height());
-    emit(Event::ViewerImage(types::ViewerImage { id: id.to_string(), index: index.min(2), count: 3, full, opaque, pixels }));
+    let Ok(Some(view)) = sigwin_thumb::decode_view(&png, fit.0, fit.1, u64::MAX) else { return };
+    let pixels = types::ViewerPixels::from(view);
+    emit(Event::ViewerImage(types::ViewerImage { id: id.to_string(), index: index.min(2), count: 3, pixels }));
 }
 
 /// `StickerFrames` / `PickerFrames`: `demo-st-1` and every 4th picker sticker are animated GIFs

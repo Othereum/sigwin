@@ -46,10 +46,19 @@ pub fn fit_size((w, h): (u32, u32), (box_w, box_h): (u32, u32)) -> (u32, u32) {
     (((w as f64 * s).round() as u32).max(1), ((h as f64 * s).round() as u32).max(1))
 }
 
-/// A still image for the viewer: upright (EXIF), shrunk to fit in `box_w` x `box_h`, with its
-/// upright full size and whether it can't have transparent pixels. `None` when it is animated or
-/// has more than `max_pixels`: those go to an outside app.
-pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> ImageResult<Option<(RgbaImage, (u32, u32), bool)>> {
+/// A still image for the viewer.
+pub struct ViewImage {
+    /// upright (EXIF), at full size
+    pub original: RgbaImage,
+    /// shrunk to fit the box asked for; `None` when the original already does
+    pub fitted: Option<RgbaImage>,
+    /// can't have transparent pixels
+    pub opaque: bool,
+}
+
+/// Decodes a still image for the viewer. `None` when it is animated or has more than
+/// `max_pixels`: those go to an outside app.
+pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> ImageResult<Option<ViewImage>> {
     use image::ImageDecoder;
     let reader = || image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format();
     let (w, h) = reader()?.into_dimensions()?;
@@ -63,13 +72,10 @@ pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> Ima
     let full = (img.width(), img.height());
     let opaque = !img.color().has_alpha();
     let out = fit_size(full, (box_w, box_h));
-    let rgba = img.into_rgba8();
-    if out == full {
-        return Ok(Some((rgba, full, opaque)));
-    }
+    let original = img.into_rgba8();
     let crop = (0.0, 0.0, full.0 as f64, full.1 as f64);
-    let fitted = resize_view(rgba.as_raw(), full, crop, out, opaque).unwrap_or(rgba);
-    Ok(Some((fitted, full, opaque)))
+    let fitted = if out == full { None } else { resize_view(original.as_raw(), full, crop, out, opaque) };
+    Ok(Some(ViewImage { original, fitted, opaque }))
 }
 
 /// Resamples the `crop` (left, top, width, height) of an RGBA image of `size` to exactly `out`:
@@ -315,10 +321,10 @@ mod tests {
     #[test]
     fn decode_view_fits_never_upscales_and_refuses() {
         let png = png_rgba(&RgbaImage::new(400, 200)).unwrap();
-        let (img, full, opaque) = decode_view(&png, 100, 100, u64::MAX).unwrap().unwrap();
-        assert_eq!((img.dimensions(), full, opaque), ((100, 50), (400, 200), false));
-        let (img, ..) = decode_view(&png, 1000, 1000, u64::MAX).unwrap().unwrap();
-        assert_eq!(img.dimensions(), (400, 200));
+        let v = decode_view(&png, 100, 100, u64::MAX).unwrap().unwrap();
+        assert_eq!((v.original.dimensions(), v.fitted.unwrap().dimensions(), v.opaque), ((400, 200), (100, 50), false));
+        let v = decode_view(&png, 1000, 1000, u64::MAX).unwrap().unwrap();
+        assert_eq!((v.original.dimensions(), v.fitted.is_none()), ((400, 200), true));
         assert!(decode_view(&png, 100, 100, 79_999).unwrap().is_none());
         assert!(decode_view(&gif(3, 50), 100, 100, u64::MAX).unwrap().is_none());
         assert!(decode_view(b"junk", 100, 100, u64::MAX).is_err());

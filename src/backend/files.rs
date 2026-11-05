@@ -124,18 +124,17 @@ impl App {
             let p = path.clone();
             let decoded = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
                 let bytes = sigwin_vault::read(&p)?;
-                let Some((img, full, opaque)) = sigwin_thumb::decode_view(&bytes, fit.0, fit.1, VIEW_MAX_PIXELS)? else {
+                let Some(view) = sigwin_thumb::decode_view(&bytes, fit.0, fit.1, VIEW_MAX_PIXELS)? else {
                     return Ok(None);
                 };
                 drop(bytes);
-                let pixels = slint::SharedPixelBuffer::clone_from_slice(img.as_raw(), img.width(), img.height());
-                Ok(Some((pixels, full, opaque)))
+                Ok(Some(crate::types::ViewerPixels::from(view)))
             })
             .await;
             match decoded {
-                Ok(Ok(Some((pixels, full, opaque)))) => {
+                Ok(Ok(Some(pixels))) => {
                     let _ = tx.send(Internal::Status(String::new()));
-                    emit(Event::ViewerImage(crate::types::ViewerImage { id, index, count, full, opaque, pixels }));
+                    emit(Event::ViewerImage(crate::types::ViewerImage { id, index, count, pixels }));
                 }
                 other => {
                     if let Ok(Err(e)) = other {
@@ -172,7 +171,7 @@ impl App {
 }
 
 /// Safety limit, not a budget: more pixels than this are abnormal input and go to an outside app.
-/// The peak is 8 bytes per pixel: the original is held at 4 once the viewer zooms, until it closes.
+/// The peak is 8 bytes per pixel; the viewer holds the original at 4 until it closes.
 const VIEW_MAX_PIXELS: u64 = 100_000_000;
 
 /// Downloads an attachment unless it is cached; false (status set) if that failed.

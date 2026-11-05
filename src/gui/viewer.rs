@@ -7,7 +7,7 @@ use std::time::Duration;
 use slint::winit_030::WinitWindowAccessor;
 
 use super::*;
-use crate::types::ViewerImage;
+use crate::types::{ViewerImage, ViewerPixels};
 
 /// Share of the monitor's work area a newly shown image may take.
 const SCREEN_SHARE: f32 = 0.9;
@@ -22,8 +22,6 @@ const ZOOM_STEP: f64 = 1.1;
 const ZOOM_MAX: f64 = 8.0;
 /// From this scale the original's pixels show as they are.
 const SMOOTH_BELOW: f64 = 3.0;
-/// `fit` that makes the backend send the original.
-const ORIGINAL: (u32, u32) = (u32::MAX, u32::MAX);
 
 /// Window position and size, physical px.
 type Placement = (i32, i32, u32, u32);
@@ -36,18 +34,14 @@ struct Viewer {
     /// the image last asked for; other answers are late and dropped
     wanted_index: Cell<usize>,
     count: usize,
-    full: (u32, u32),
     /// size the user chose for the image, physical px (the window may be smaller after a snap)
     wanted: Cell<(u32, u32)>,
     /// window size we last set: another one means the system resized it (a snap)
     placed: Cell<(u32, u32)>,
     refit: slint::Timer,
-    /// Decoded on the first change of size and kept until the image or the window goes: pans and
-    /// zooms only resample the visible part of it. Shared with `source`, not a copy.
-    original: Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>>,
-    /// the original was asked for
-    loading: Cell<bool>,
-    opaque: bool,
+    /// Pans and zooms only resample the visible part of `pixels.original`. Kept until the image or
+    /// the window goes, and shared with `source` once that shows it, not a copy.
+    pixels: ViewerPixels,
     /// the latest patch asked for; older ones are dropped when they finish
     patch_id: Cell<u64>,
     /// a patch is being resampled: only one at a time, the next one starts when it ends
@@ -93,37 +87,25 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
         if wanted.is_none() || !row_has_image(&img.id) {
             return;
         }
-        if let Err(e) = create(app, &img) {
+        if let Err(e) = create(app, img) {
             tracing::warn!("image viewer: {e}");
-            return;
         }
+        return;
     }
     let moved = VIEWER.with_borrow_mut(|v| {
         let v = v.as_mut()?;
-        if img.index != v.wanted_index.get() {
+        // late, or back at the image already on screen
+        if img.index != v.wanted_index.get() || img.index == v.index {
             return None;
         }
-        let another = img.index != v.index;
-        let size = (img.pixels.width(), img.pixels.height());
         v.index = img.index;
         v.count = img.count;
-        v.full = img.full;
-        v.win.set_original_w(img.full.0 as i32);
-        let caption = if img.count > 1 { format!("{} / {}", img.index + 1, img.count) } else { String::new() };
-        v.win.set_caption(caption.into());
-        v.opaque = img.opaque;
-        if another {
-            v.original = None;
-            v.loading.set(false);
-            clear_patch(v);
-        }
-        if size == img.full {
-            v.original = Some(img.pixels.clone());
-        }
-        v.win.set_source(Image::from_rgba8(img.pixels));
-        if !another {
-            return None;
-        }
+        show_details(&v.win, &img);
+        v.pixels = img.pixels;
+        clear_patch(v);
+        let first = v.pixels.take_first();
+        let size = (first.width(), first.height());
+        v.win.set_source(Image::from_rgba8(first));
         // another image starts over at its own size, around the window's center
         v.wanted.set(size);
         set_shown(v, size);
@@ -143,11 +125,16 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
     if let Some(p) = moved {
         place(p);
     }
-    // a late answer may have left other pixels than the size on screen
-    schedule_refit();
 }
 
-fn create(app: &AppWindow, img: &ViewerImage) -> Result<(), slint::PlatformError> {
+/// What the window shows about an image besides its pixels.
+fn show_details(win: &ImageViewer, img: &ViewerImage) {
+    win.set_original_w(img.pixels.full().0 as i32);
+    let caption = if img.count > 1 { format!("{} / {}", img.index + 1, img.count) } else { String::new() };
+    win.set_caption(caption.into());
+}
+
+fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformError> {
     let win = ImageViewer::new()?;
     win.on_prev(|| step(-1));
     win.on_next(|| step(1));
@@ -178,8 +165,11 @@ fn create(app: &AppWindow, img: &ViewerImage) -> Result<(), slint::PlatformError
         slint::CloseRequestResponse::HideWindow
     });
     let scale = window::monitor_scale(window::hwnd(app));
-    let pixels = (img.pixels.width(), img.pixels.height());
+    let first = img.pixels.take_first();
+    let pixels = (first.width(), first.height());
     let size = (pixels.0.max((MIN_SIZE.0 * scale) as u32), pixels.1.max((MIN_SIZE.1 * scale) as u32));
+    win.set_source(Image::from_rgba8(first));
+    show_details(&win, &img);
     win.set_shown_w(pixels.0 as i32);
     win.set_shown_h(pixels.1 as i32);
     win.window().set_size(slint::PhysicalSize::new(size.0, size.1));
@@ -191,17 +181,14 @@ fn create(app: &AppWindow, img: &ViewerImage) -> Result<(), slint::PlatformError
     VIEWER.with_borrow_mut(|v| {
         *v = Some(Viewer {
             win,
-            id: img.id.clone(),
+            id: img.id,
             index: img.index,
             wanted_index: Cell::new(img.index),
             count: img.count,
-            full: img.full,
             wanted: Cell::new(pixels),
             placed: Cell::new(size),
             refit: slint::Timer::default(),
-            original: None,
-            loading: Cell::new(false),
-            opaque: img.opaque,
+            pixels: img.pixels,
             patch_id: Cell::new(0),
             patch_busy: Cell::new(false),
         });
@@ -264,7 +251,8 @@ fn step(by: i64) {
 fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
     let moved = VIEWER.with_borrow(|v| {
         let v = v.as_ref()?;
-        let (full_w, full_h) = (v.full.0 as f64, v.full.1 as f64);
+        let full = v.pixels.full();
+        let (full_w, full_h) = (full.0 as f64, full.1 as f64);
         let old = shown(v);
         let (area_w, area_h) = area_size(v);
         let min = min_size(v);
@@ -301,6 +289,7 @@ fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
         v.win.set_pan_x((ex - placement.0 as f64) as f32);
         v.win.set_pan_y((ey - placement.1 as f64) as f32);
         v.wanted.set(new);
+        show_original(v);
         set_shown(v, new);
         clear_patch(v);
         Some(placement)
@@ -341,6 +330,14 @@ fn place((x, y, w, h): Placement) {
     });
 }
 
+/// The fitted image only looks right at its own size, and patches line up with the original.
+fn show_original(v: &Viewer) {
+    let has = v.win.get_source().size();
+    if (has.width, has.height) != v.pixels.full() {
+        v.win.set_source(Image::from_rgba8(v.pixels.original.clone()));
+    }
+}
+
 fn schedule_refit() {
     // `resized` also fires while the window is being created, before it is stored
     with_current(|v| v.refit.start(slint::TimerMode::SingleShot, REFIT_AFTER, refit));
@@ -365,13 +362,9 @@ fn refit() {
         if target == (has.width, has.height) {
             return clear_patch(v);
         }
-        let Some(original) = &v.original else {
-            if !v.loading.replace(true) {
-                send_cmd(Command::ViewImage { id: v.id.clone(), index: v.index, fit: ORIGINAL, from_file: false });
-            }
-            return;
-        };
-        if target.0 as f64 / v.full.0 as f64 >= SMOOTH_BELOW {
+        show_original(v);
+        let full = v.pixels.full();
+        if target.0 as f64 / full.0 as f64 >= SMOOTH_BELOW {
             return clear_patch(v);
         }
         let Some(area) = visible_part(target, client, (v.win.get_cur_x(), v.win.get_cur_y())) else { return };
@@ -380,7 +373,7 @@ fn refit() {
         if v.patch_busy.replace(true) {
             return;
         }
-        let (src, full, opaque) = (original.clone(), v.full, v.opaque);
+        let (src, opaque) = (v.pixels.original.clone(), v.pixels.opaque);
         let crop = patch_crop(area, full, target);
         std::thread::spawn(move || {
             let img = sigwin_thumb::resize_view(src.as_bytes(), full, crop, (area.2, area.3), opaque);

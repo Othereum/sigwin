@@ -252,17 +252,42 @@ pub struct Thumb {
     pub rgba: Vec<u8>,
 }
 
-/// An image for the viewer window, already shrunk to the size asked for.
+/// An image for the viewer window.
 pub struct ViewerImage {
     pub id: String,
     pub index: usize,
     /// images in the message
     pub count: usize,
-    /// upright size of the original
-    pub full: (u32, u32),
+    pub pixels: ViewerPixels,
+}
+
+/// A decoded image for the viewer window.
+pub struct ViewerPixels {
+    /// upright, at full size: opening one almost always leads to zooming it
+    pub original: slint::SharedPixelBuffer<slint::Rgba8Pixel>,
+    /// shrunk to the size asked for; `None` when the original already fits
+    pub fitted: Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>>,
     /// it can't have transparent pixels
     pub opaque: bool,
-    pub pixels: slint::SharedPixelBuffer<slint::Rgba8Pixel>,
+}
+
+impl From<sigwin_thumb::ViewImage> for ViewerPixels {
+    fn from(view: sigwin_thumb::ViewImage) -> Self {
+        let copy = |img: &image::RgbaImage| slint::SharedPixelBuffer::clone_from_slice(img.as_raw(), img.width(), img.height());
+        Self { fitted: view.fitted.as_ref().map(copy), original: copy(&view.original), opaque: view.opaque }
+    }
+}
+
+impl ViewerPixels {
+    pub fn full(&self) -> (u32, u32) {
+        (self.original.width(), self.original.height())
+    }
+
+    /// What a newly shown image starts as. Takes the fitted one: only `source` holds it, so it
+    /// goes when that shows the original.
+    pub fn take_first(&mut self) -> slint::SharedPixelBuffer<slint::Rgba8Pixel> {
+        self.fitted.take().unwrap_or_else(|| self.original.clone())
+    }
 }
 
 /// Frames of all playing stickers in the message list together; the least recently shown
