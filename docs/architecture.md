@@ -17,7 +17,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/gui/viewer.rs` | image viewer: its own frameless window (`ui/viewer.slint`) owned by the main one, created per opening and dropped on close so its image and frame buffer go too. Dragging the image moves the window (`drag_window`), or the image once it is bigger than the window; a click closes it, as do Esc and the ✕ shown near the top right corner. Opens at the image's size within 90% of the monitor's work area, drawn 1:1 in physical px. The wheel scales image and window together around the cursor; the window stops at the work area, the image goes on to 800%. Opening keeps only the fitted image; the first change of size decodes the original and keeps it until the image or the window goes. Its pixels are stretched while the view changes, then the visible part is resampled on a thread (`sigwin_thumb::resize_view`) and drawn over them; from 300% the pixels stay. Also closes when the row goes away (deleted, expired, thread switch). Animated, undecodable or over 100MP images go to the default app. |
 | `src/gui/window.rs` | theme, zoom, native window handle, focus hook (`hook_window`) |
 | `src/demo.rs` | demo modes: fake backend with synthetic data, `SIGWIN_DEMO_*` extras, self-test |
-| `src/backend.rs` | `App` state, `run` (startup, linking, receive reconnect with backoff), command dispatch, internal events, sweep of expired messages, unlink. Messages are paged through `db::Index::page`, the open window capped at `MAX_WINDOW` |
+| `src/backend.rs` | `App` state, `run` (startup, linking, receive reconnect with backoff), command dispatch, internal events, sweep of expired messages, unlink. Messages are read in pages and the open window has a cap, so memory doesn't grow with a thread |
 | `src/backend/receive.rs` | incoming content, receipts (batched delivery/read), notifications, pin/receipt index backfills |
 | `src/backend/threads.rs` | thread list: names, snippets, unread, read receipts queue, avatars |
 | `src/backend/window.rs` | the open thread's window: paging, jumps, `emit_messages`, header |
@@ -25,7 +25,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/backend/ops.rs` | reactions, edits, deletes, pins (`App.ops`, `load_pins`) |
 | `src/backend/typing.rs` | typing indicators in and out |
 | `src/backend/stickers.rs` | sticker packs: picker thumbs, grids, sending, installing |
-| `src/backend/files.rs` | attachment / thumbnail caches (encrypted, thumbnails under `thumbs/` at up to `THUMB_MAX`; the UI keeps them for the open thread only and clears them on a thread switch), opening attachments, `seal_legacy_files` |
+| `src/backend/files.rs` | attachment / thumbnail caches (encrypted, on disk; the UI holds thumbnails for the open thread only), opening attachments, `seal_legacy_files` |
 | `src/view.rs` | `Content` → `MsgDto` rows: folds reactions and edits, receipt status, day separators, snippets |
 | `src/db.rs` | own SQL on presage's DB: thread list by recency, paging in display order (`ls_order`: stored order, kept by triggers on presage's table), `ls_receipts` index. Our `ls_*` tables are versioned in `ls_meta` (`SCHEMA`); new tables are just added, changes to existing ones go through `migrate` steps (rebuildable ones dropped and backfilled again), since auto-updates carry old DBs forward |
 | `src/types.rs` | `Command` / `Event` / DTOs crossing threads (all `Send`), thread keys `c:<uuid>` / `g:<hex>` |
