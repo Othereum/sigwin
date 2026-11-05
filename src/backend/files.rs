@@ -172,7 +172,7 @@ impl App {
 }
 
 /// Safety limit, not a budget: more pixels than this are abnormal input and go to an outside app.
-/// Decoding takes up to 4 bytes per pixel, returned when it ends.
+/// The peak is 8 bytes per pixel: the original is held at 4 once the viewer zooms, until it closes.
 const VIEW_MAX_PIXELS: u64 = 100_000_000;
 
 /// Downloads an attachment unless it is cached; false (status set) if that failed.

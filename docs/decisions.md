@@ -30,3 +30,7 @@ Smoothing only what's visible keeps memory and time bounded by the window, whate
 - Rebuilding the patch during the drag: visibly choppy. At a 2560x1392 window a patch with margin (8MP) took 86ms to make and the frame showing it 43ms instead of 10.
 
 Bare pixels while dragging, smooth when it stops, look fine: motion hides the difference. Wheel notches in one burst were at most 65ms apart and slow single notches 400ms or more, hence the 100ms wait.
+
+Large images (synthetic JPEG, headless, opaque): 100MP peaks at 765MB and holds 383MB once zoomed, 200MP at 1528MB and 764MB; all of it returns on close. Frame times don't grow with the image. `VIEW_MAX_PIXELS` stays at 100MP anyway: such photos are rare here, and the limit still stops decompression bombs (a small PNG can claim 17GB). Transparent images are worse while zoomed: `fast_image_resize` premultiplies the whole source for every patch (200MP: 225-370ms and about 860MB more).
+
+`fast_image_resize` (5.5.0 and 6.1.0) has a crash reachable from safe code: when enlarging with a kernel that is zero at whole numbers (Catmull-Rom), a first output pixel centered exactly on a source pixel trims its bound past the next pixel's, `b.start -= x_first` underflows and it reads out of bounds. `viewer::patch_crop` can't produce such a crop, and a test holds it to that.
