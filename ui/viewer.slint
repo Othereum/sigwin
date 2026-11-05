@@ -29,8 +29,10 @@ component ViewerButton inherits Rectangle {
 
 export component ImageViewer inherits Window {
     in property <image> source;
-    // "2 / 3"; empty for a single image
-    in property <string> caption;
+    // of the images in the message, empty for a single image; blank until each one arrives
+    in property <[image]> thumbs;
+    // the one on screen, or on its way
+    in property <int> current;
     // size to draw the image at, physical px
     in property <int> shown-w;
     in property <int> shown-h;
@@ -38,6 +40,8 @@ export component ImageViewer inherits Window {
     in property <int> original-w;
     // the scale readout is showing: for a moment after each wheel notch
     in property <bool> scale-on;
+    // the thumbnail strip is showing wherever the cursor is: for a moment after going to an image
+    in property <bool> strip-on;
     // wanted offset of the image from the center when it is bigger than the window, physical px
     in-out property <float> pan-x;
     in-out property <float> pan-y;
@@ -48,6 +52,7 @@ export component ImageViewer inherits Window {
     in property <int> patch-x;
     in property <int> patch-y;
     callback panned();
+    callback go(int);
     callback prev();
     callback next();
     callback save();
@@ -81,7 +86,13 @@ export component ImageViewer inherits Window {
     out property <float> cur-x: clamp(pan-x, -over-x, over-x);
     out property <float> cur-y: clamp(pan-y, -over-y, over-y);
     // this press moved the window or the image: its release is not a click
-    property <bool> near-bar: hover.has-hover && hover.mouse-y > root.height - 100px && abs(hover.mouse-x - root.width / 2) < 200px;
+    property <bool> has-strip: root.thumbs.length > 1;
+    property <length> strip-w: min(root.thumbs.length * 48px - 4px, root.width - 32px);
+    property <bool> strip-shown: root.has-strip && (root.near-bar || root.strip-on);
+    // height of the cursor where the previous and next buttons may show
+    property <bool> near-side: hover.has-hover && root.has-strip && abs(hover.mouse-y - root.height / 2) < 130px;
+    // the bar shows when the cursor is about where it appears
+    property <bool> near-bar: hover.has-hover && hover.mouse-y > root.height - (has-strip ? 150px : 100px) && abs(hover.mouse-x - root.width / 2) < max(200px, has-strip ? strip-w / 2 + 40px : 0px);
     property <bool> dragged;
     property <bool> panning;
     property <float> pan-start-x;
@@ -167,7 +178,7 @@ export component ImageViewer inherits Window {
             background: self.hovered ? #c42b1c : #00000090;
             clicked => { root.dismiss(); }
         }
-        if hover.has-hover && root.caption != "": ViewerButton {
+        if root.near-side && hover.mouse-x < 100px: ViewerButton {
             x: 12px;
             y: (root.height - self.height) / 2;
             width: 44px;
@@ -177,7 +188,7 @@ export component ImageViewer inherits Window {
             background: self.hovered ? #000000d0 : #00000090;
             clicked => { root.prev(); }
         }
-        if hover.has-hover && root.caption != "": ViewerButton {
+        if root.near-side && hover.mouse-x > root.width - 100px: ViewerButton {
             x: root.width - self.width - 12px;
             y: (root.height - self.height) / 2;
             width: 44px;
@@ -187,7 +198,7 @@ export component ImageViewer inherits Window {
             background: self.hovered ? #000000d0 : #00000090;
             clicked => { root.next(); }
         }
-        if root.near-bar || (hover.has-hover && root.caption != ""): Rectangle {
+        if root.near-bar: Rectangle {
             x: (root.width - self.width) / 2;
             y: root.height - self.height - 12px;
             width: bar.preferred-width;
@@ -199,22 +210,64 @@ export component ImageViewer inherits Window {
             bar := HorizontalLayout {
                 padding: 4px;
                 spacing: 2px;
-                if root.caption != "": Text {
-                    text: root.caption;
-                    color: white;
-                    font-size: 13px;
-                    vertical-alignment: center;
-                    horizontal-alignment: center;
-                    width: self.preferred-width + 20px;
-                    min-height: 30px;
-                }
-                if root.near-bar: ViewerButton {
+                ViewerButton {
                     text: "저장";
                     clicked => { root.save(); }
                 }
-                if root.near-bar: ViewerButton {
+                ViewerButton {
                     text: "기본 앱으로 열기";
                     clicked => { root.open-outside(); }
+                }
+            }
+        }
+        if root.strip-shown: Rectangle {
+            x: (root.width - self.width) / 2;
+            y: root.height - self.height - 56px;
+            width: root.strip-w + 8px;
+            height: 52px;
+            border-radius: 8px;
+            background: #000000c0;
+            // nor clicks between the thumbnails, or just below them on the way to the buttons
+            TouchArea {
+                height: parent.height + 6px;
+                y: 0;
+            }
+            Flickable {
+                property <int> at: root.current;
+                function reveal() {
+                    // the current one in the middle, as far as the row goes
+                    self.content-x = -clamp(at * 48px - (self.width - 44px) / 2, 0px, max(0px, self.content-width - self.width));
+                }
+                init => { self.reveal(); }
+                changed at => { self.reveal(); }
+                x: 4px;
+                y: 4px;
+                width: root.strip-w;
+                height: 44px;
+                content-width: root.thumbs.length * 48px - 4px;
+                for thumb[i] in root.thumbs: Rectangle {
+                    x: i * 48px;
+                    width: 44px;
+                    height: 44px;
+                    border-radius: 4px;
+                    clip: true;
+                    background: #ffffff20;
+                    Image {
+                        source: thumb;
+                        width: 100%;
+                        height: 100%;
+                        image-fit: fill;
+                    }
+                    Rectangle {
+                        background: i == root.current || cell.has-hover ? transparent : #00000070;
+                        border-radius: 4px;
+                        border-width: i == root.current ? 2px : 0px;
+                        border-color: white;
+                    }
+                    cell := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.go(i); }
+                    }
                 }
             }
         }
@@ -223,7 +276,7 @@ export component ImageViewer inherits Window {
     // above the bar, which may not be showing; clicks go through it
     if root.scale-on: Rectangle {
         x: (root.width - self.width) / 2;
-        y: root.height - self.height - 58px;
+        y: root.height - self.height - (root.strip-shown ? 114px : 58px);
         width: scale-text.preferred-width + 24px;
         height: 30px;
         border-radius: 8px;

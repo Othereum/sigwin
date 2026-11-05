@@ -355,6 +355,8 @@ pub enum Event {
     Thumb(Arc<Thumb>),
     /// answer to `ViewImage`
     ViewerImage(ViewerImage),
+    /// one of the answers to `ViewerThumbs`: message id, image index, thumbnail
+    ViewerThumb(String, usize, Thumb),
     /// answer to `StickerFrames` / `PickerFrames`
     Frames(Frames),
     /// sticker picker images (grid cells, pack covers), batched
@@ -386,6 +388,9 @@ pub enum Command {
     /// show image `index` of row `id` in the viewer, shrunk to fit in `fit` (physical px).
     /// `from_file`: the file line was clicked; a row with other files then opens them outside.
     ViewImage { id: String, index: usize, fit: (u32, u32), from_file: bool },
+    /// Square thumbnails of `px` physical px of all images of a message for the viewer, downloading
+    /// the ones still missing: whoever opens an album usually goes through it.
+    ViewerThumbs { id: String, px: u32 },
     /// the viewer's "기본 앱으로 열기"
     OpenViewed { id: String, index: usize },
     /// the viewer's "저장"; `owner`: HWND for the file dialog

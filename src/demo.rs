@@ -550,7 +550,13 @@ fn demo_viewer(emit: &backend::Emit, id: &str, index: usize, fit: (u32, u32)) {
     drop(src);
     let Ok(Some(view)) = sigwin_thumb::decode_view(&png, fit.0, fit.1, u64::MAX) else { return };
     let pixels = types::ViewerPixels::from(view);
-    emit(Event::ViewerImage(types::ViewerImage { id: id.to_string(), index: index.min(2), count: 3, pixels }));
+    let count = demo_viewer_count();
+    emit(Event::ViewerImage(types::ViewerImage { id: id.to_string(), index: index.min(count - 1), count, pixels }));
+}
+
+/// SIGWIN_DEMO_VIEWER_COUNT: images in the album, 3 by default; past the third they repeat it.
+fn demo_viewer_count() -> usize {
+    std::env::var("SIGWIN_DEMO_VIEWER_COUNT").ok().and_then(|v| v.parse().ok()).unwrap_or(3)
 }
 
 /// `StickerFrames` / `PickerFrames`: `demo-st-1` and every 4th picker sticker are animated GIFs
@@ -558,6 +564,14 @@ fn demo_viewer(emit: &backend::Emit, id: &str, index: usize, fit: (u32, u32)) {
 fn demo_frames(emit: &backend::Emit, c: &Command) {
     if let Command::ViewImage { id, index, fit, .. } = c {
         return demo_viewer(emit, id, *index, *fit);
+    }
+    if let Command::ViewerThumbs { id, px } = c {
+        for index in 0..demo_viewer_count() {
+            let t = image::RgbaImage::from_fn(*px, *px, |x, y| image::Rgba([(x * 255 / *px) as u8, (y * 255 / *px) as u8, (index * 60 % 256) as u8, 255]));
+            let (width, height) = t.dimensions();
+            emit(Event::ViewerThumb(id.clone(), index, types::Thumb { key: id.clone(), width, height, rgba: t.into_raw() }));
+        }
+        return;
     }
     let (key, fit) = match c {
         Command::StickerFrames(k) => (k.clone(), view::STICKER_SIZE),

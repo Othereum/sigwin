@@ -349,6 +349,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             });
         }
         Event::ViewerImage(v) => viewer::arrived(app, v),
+        Event::ViewerThumb(id, index, t) => viewer::thumb_arrived(&id, index, t),
         Event::Frames(f) => anim::frames_arrived(f),
         Event::Status(s) => app.set_status_text(s.into()),
         Event::Typing { group, who } => {

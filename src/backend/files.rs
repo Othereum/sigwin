@@ -147,6 +147,44 @@ impl App {
         });
     }
 
+    /// One at a time, in order. Failures leave a blank cell: the status line belongs to the image
+    /// being viewed.
+    pub(super) fn viewer_thumbs(&self, id: &str, px: u32) {
+        let Some((ts, dm)) = self.row_message(id) else { return };
+        let images = view::shown_attachments(dm).filter(|(_, a)| view::is_image(a));
+        let jobs: Vec<(String, AttachmentPointer)> = images.map(|(i, a)| (view::attachment_key(a, ts, i), a.clone())).collect();
+        let id = id.to_string();
+        let manager = self.manager.clone();
+        let emit = self.emit.clone();
+        let (attachments, thumbs) = (self.paths.attachments.clone(), self.paths.thumbs.clone());
+        tokio::task::spawn_local(async move {
+            for (index, (key, ptr)) in jobs.into_iter().enumerate() {
+                let orig = attachment_path(&attachments, &key);
+                let thumb = thumbs.join(format!("{key}.enc"));
+                if !thumb.exists() && !orig.exists() {
+                    let Some(m) = manager.as_ref() else { return };
+                    let saved = m.get_attachment(&ptr).await.map_err(anyhow::Error::from);
+                    if let Err(e) = saved.and_then(|data| Ok(sigwin_vault::write(&orig, &data)?)) {
+                        warn!("viewer thumbnail: {e:#}");
+                        continue;
+                    }
+                }
+                let made = tokio::task::spawn_blocking(move || -> anyhow::Result<Thumb> {
+                    let t = make_thumb(&key, &orig, &thumb, 0)?;
+                    let img = image::RgbaImage::from_raw(t.width, t.height, t.rgba).context("thumbnail size")?;
+                    let square = sigwin_thumb::square(&image::DynamicImage::ImageRgba8(img), px);
+                    Ok(Thumb { key, width: square.width(), height: square.height(), rgba: square.into_raw() })
+                })
+                .await;
+                match made {
+                    Ok(Ok(t)) => emit(Event::ViewerThumb(id.clone(), index, t)),
+                    Ok(Err(e)) => warn!("viewer thumbnail: {e:#}"),
+                    Err(e) => warn!("viewer thumbnail: {e}"),
+                }
+            }
+        });
+    }
+
     pub(super) fn open_viewed(&self, id: &str, index: usize) {
         let Some((path, ptr)) = self.viewed(id, index) else { return };
         let tx = self.tx.clone();

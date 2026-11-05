@@ -11,7 +11,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 - `SIGWIN_DEMO_OLDER=<ms>` (60 rows, older pages of 60 loaded at the top after <ms>)
 - `SIGWIN_DEMO_MENU=1|edit|pin`
 - `SIGWIN_DEMO_SETTINGS=1`
-- `SIGWIN_DEMO_VIEWER=1|<width>x<height>` (a photo on the newest row; clicking it opens the image viewer with three fake images, the first of the given size)
+- `SIGWIN_DEMO_VIEWER=1|<width>x<height>` (a photo on the newest row; clicking it opens the image viewer with three fake images, the first of the given size; `SIGWIN_DEMO_VIEWER_COUNT=<n>` for a longer album)
 - `SIGWIN_DEMO_UPDATE=<version>` (the sidebar "new version ready" bar), `SIGWIN_DEMO_UPDATE_AVAILABLE=<version>` ("new version available" bar, automatic download off)
 - `SIGWIN_DEMO_TICK=1` (periodic updates, for the minimize/restore repro)
 - `SIGWIN_DEMO_NOTIFY=<secs>` (a fake incoming message every <secs>, through the real `Notifier` and real toasts: 1:1 with photo, group, reaction, disappearing; needs a real window and an unfocused app, so it's for the user; run it with a scratch `SIGWIN_DATA`)

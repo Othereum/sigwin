@@ -15,6 +15,7 @@
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
+use slint::Model;
 use slint::winit_030::WinitWindowAccessor;
 
 use super::*;
@@ -22,6 +23,8 @@ use crate::types::{ViewerImage, ViewerPixels};
 
 /// Share of the monitor's work area a newly shown image may take.
 const SCREEN_SHARE: f32 = 0.8;
+/// Size of a cell of the thumbnail strip in `ImageViewer`.
+const THUMB_CELL: f32 = 44.0;
 /// `min-width` / `min-height` of `ImageViewer`.
 const MIN_SIZE: (f32, f32) = (360.0, 240.0);
 /// Smooth what's visible this long after the last change of view: longer than the gaps within a
@@ -38,6 +41,8 @@ const NEAR_ORIGINAL: f64 = 0.05;
 const HOLD_AT_ORIGINAL: Duration = Duration::from_millis(120);
 /// The scale readout stays this long after the last wheel notch.
 const SCALE_SHOWN: Duration = Duration::from_secs(1);
+/// The thumbnail strip stays this long after going to an image.
+const STRIP_SHOWN: Duration = Duration::from_secs(1);
 /// From this scale the original's pixels show as they are.
 const SMOOTH_BELOW: f64 = 3.0;
 
@@ -55,6 +60,7 @@ struct Viewer {
     /// the wheel does nothing until then
     wheel_held: Cell<Option<Instant>>,
     hide_scale: slint::Timer,
+    hide_strip: slint::Timer,
     refit: slint::Timer,
     /// Pans and zooms only resample the visible part of `pixels.original`. Kept until the image or
     /// the window goes, and shared with `source` once that shows it, not a copy.
@@ -143,15 +149,25 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
     }
 }
 
+/// A thumbnail of the strip, unless the viewer went on to another message.
+pub(crate) fn thumb_arrived(id: &str, index: usize, t: crate::types::Thumb) {
+    with_current(|v| {
+        if v.id == id && index < v.win.get_thumbs().row_count() {
+            let pixels = slint::SharedPixelBuffer::clone_from_slice(&t.rgba, t.width, t.height);
+            v.win.get_thumbs().set_row_data(index, Image::from_rgba8(pixels));
+        }
+    });
+}
+
 /// What the window shows about an image besides its pixels.
 fn show_details(win: &ImageViewer, img: &ViewerImage) {
     win.set_original_w(img.pixels.full().0 as i32);
-    let caption = if img.count > 1 { format!("{} / {}", img.index + 1, img.count) } else { String::new() };
-    win.set_caption(caption.into());
+    win.set_current(img.index as i32);
 }
 
 fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformError> {
     let win = ImageViewer::new()?;
+    win.on_go(|index| go_to(index as usize));
     win.on_prev(|| step(-1));
     win.on_next(|| step(1));
     win.on_dismiss(close);
@@ -186,6 +202,10 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
     let size = (pixels.0.max((MIN_SIZE.0 * scale) as u32), pixels.1.max((MIN_SIZE.1 * scale) as u32));
     win.set_source(Image::from_rgba8(first));
     show_details(&win, &img);
+    if img.count > 1 {
+        win.set_thumbs(slint::ModelRc::new(slint::VecModel::from(vec![Image::default(); img.count])));
+        send_cmd(Command::ViewerThumbs { id: img.id.clone(), px: (THUMB_CELL * scale).round() as u32 });
+    }
     win.set_shown_w(pixels.0 as i32);
     win.set_shown_h(pixels.1 as i32);
     win.window().set_size(slint::PhysicalSize::new(size.0, size.1));
@@ -199,7 +219,8 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
         let Some(win) = weak.upgrade() else { return };
         match win.window().winit_window().await {
             Ok(_) => attach(&win, owner),
-            Err(e) => tracing::warn!("image viewer: {e}"),
+            // headless runs
+            Err(e) => tracing::debug!("image viewer: {e}"),
         }
     });
     if let Err(e) = attaching {
@@ -214,6 +235,7 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
             count: img.count,
             wheel_held: Cell::new(None),
             hide_scale: slint::Timer::default(),
+            hide_strip: slint::Timer::default(),
             refit: slint::Timer::default(),
             pixels: img.pixels,
             patch_id: Cell::new(0),
@@ -264,8 +286,18 @@ fn set_shown(v: &Viewer, size: (u32, u32)) {
 fn step(by: i64) {
     with_current(|v| {
         if v.count > 1 {
-            let index = (v.wanted_index.get() as i64 + by).rem_euclid(v.count as i64) as usize;
+            go_to((v.wanted_index.get() as i64 + by).rem_euclid(v.count as i64) as usize);
+        }
+    });
+}
+
+fn go_to(index: usize) {
+    with_current(|v| {
+        if index != v.wanted_index.get() {
             v.wanted_index.set(index);
+            v.win.set_current(index as i32);
+            v.win.set_strip_on(true);
+            v.hide_strip.start(slint::TimerMode::SingleShot, STRIP_SHOWN, || with_current(|v| v.win.set_strip_on(false)));
             let fit = screen_box(viewer_hwnd(&v.win));
             send_cmd(Command::ViewImage { id: v.id.clone(), index, fit, from_file: false });
         }
