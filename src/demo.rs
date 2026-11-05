@@ -532,7 +532,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
 
 /// `ViewImage`: a large landscape photo, a tiny one and a portrait one with a 1px checker in a
 /// corner (blurry or uneven when not drawn 1:1), decoded like real images.
-fn demo_viewer(emit: &backend::Emit, id: &str, index: usize, fit: (u32, u32), exact: bool) {
+fn demo_viewer(emit: &backend::Emit, id: &str, index: usize, fit: (u32, u32)) {
     // SIGWIN_DEMO_VIEWER=<width>x<height>: size of the first image
     let first = std::env::var("SIGWIN_DEMO_VIEWER").ok().and_then(|v| {
         let (w, h) = v.split_once('x')?;
@@ -548,16 +548,16 @@ fn demo_viewer(emit: &backend::Emit, id: &str, index: usize, fit: (u32, u32), ex
     });
     let Ok(png) = sigwin_thumb::png_rgba(&src) else { return };
     drop(src);
-    let Ok(Some((img, full))) = sigwin_thumb::decode_view(&png, fit.0, fit.1, exact, u64::MAX) else { return };
+    let Ok(Some((img, full, opaque))) = sigwin_thumb::decode_view(&png, fit.0, fit.1, u64::MAX) else { return };
     let pixels = slint::SharedPixelBuffer::clone_from_slice(img.as_raw(), img.width(), img.height());
-    emit(Event::ViewerImage(types::ViewerImage { id: id.to_string(), index: index.min(2), count: 3, full, pixels }));
+    emit(Event::ViewerImage(types::ViewerImage { id: id.to_string(), index: index.min(2), count: 3, full, opaque, pixels }));
 }
 
 /// `StickerFrames` / `PickerFrames`: `demo-st-1` and every 4th picker sticker are animated GIFs
 /// (a pulsing blob), decoded like real stickers.
 fn demo_frames(emit: &backend::Emit, c: &Command) {
-    if let Command::ViewImage { id, index, fit, exact, .. } = c {
-        return demo_viewer(emit, id, *index, *fit, *exact);
+    if let Command::ViewImage { id, index, fit, .. } = c {
+        return demo_viewer(emit, id, *index, *fit);
     }
     let (key, fit) = match c {
         Command::StickerFrames(k) => (k.clone(), view::STICKER_SIZE),

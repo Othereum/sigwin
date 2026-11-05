@@ -6,4 +6,5 @@ license = "AGPL-3.0-only"
 description = "Pixel work for sigwin (decode, resample), kept out of the main crate so it is optimized in every profile"
 
 [dependencies]
+fast_image_resize = { version = "5", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }

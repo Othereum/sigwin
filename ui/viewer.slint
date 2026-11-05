@@ -39,6 +39,13 @@ export component ImageViewer inherits Window {
     // wanted offset of the image from the center when it is bigger than the window, physical px
     in-out property <float> pan-x;
     in-out property <float> pan-y;
+    // the visible part of the image, resampled: drawn 1:1 over the stretched `source`, at this
+    // offset within the image, physical px
+    in property <image> patch;
+    in property <bool> patch-on;
+    in property <int> patch-x;
+    in property <int> patch-y;
+    callback panned();
     callback prev();
     callback next();
     callback save();
@@ -59,8 +66,7 @@ export component ImageViewer inherits Window {
     changed width => { root.resized(); }
     changed height => { root.resized(); }
 
-    // Normally 1:1 with the fitted image; until it arrives, and at high zoom, its pixels are
-    // stretched to this size
+    // Pixels of `source` are stretched to this size (nearest neighbor)
     property <length> full-w: shown-w * 1phx;
     property <length> full-h: shown-h * 1phx;
     // how far the image sticks out of the window on each side, physical px
@@ -75,13 +81,23 @@ export component ImageViewer inherits Window {
     property <bool> panning;
     property <float> pan-start-x;
     property <float> pan-start-y;
+    property <length> image-x: round((root.width - full-w) / 2 / 1phx + cur-x) * 1phx;
+    property <length> image-y: round((root.height - full-h) / 2 / 1phx + cur-y) * 1phx;
     Image {
         source: root.source;
         image-fit: fill;
         width: full-w;
         height: full-h;
-        x: round((root.width - self.width) / 2 / 1phx + cur-x) * 1phx;
-        y: round((root.height - self.height) / 2 / 1phx + cur-y) * 1phx;
+        x: image-x;
+        y: image-y;
+    }
+    if root.patch-on: Image {
+        source: root.patch;
+        image-fit: fill;
+        width: root.patch.width * 1phx;
+        height: root.patch.height * 1phx;
+        x: image-x + root.patch-x * 1phx;
+        y: image-y + root.patch-y * 1phx;
     }
 
     keys := FocusScope {
@@ -124,6 +140,7 @@ export component ImageViewer inherits Window {
             if (root.panning) {
                 root.pan-x = root.pan-start-x + (self.mouse-x - self.pressed-x) / 1phx;
                 root.pan-y = root.pan-start-y + (self.mouse-y - self.pressed-y) / 1phx;
+                root.panned();
             }
         }
         clicked => {

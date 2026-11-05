@@ -510,7 +510,7 @@ impl App {
                 }
             }
             Command::Send { text, files, quote, mentions } => self.send(text, files, quote, mentions).await,
-            Command::ViewImage { id, index, fit, exact, from_file } => self.view_image(&id, index, fit, exact, from_file),
+            Command::ViewImage { id, index, fit, from_file } => self.view_image(&id, index, fit, from_file),
             Command::OpenViewed { id, index } => self.open_viewed(&id, index),
             Command::SaveViewed { id, index, owner } => self.save_viewed(&id, index, owner),
             Command::ReadMore(id) => {

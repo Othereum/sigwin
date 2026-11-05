@@ -13,17 +13,17 @@ use crate::types::ViewerImage;
 const SCREEN_SHARE: f32 = 0.9;
 /// `min-width` / `min-height` of `ImageViewer`.
 const MIN_SIZE: (f32, f32) = (360.0, 240.0);
-/// Refit this long after the last size change: each refit decodes the original again.
-const REFIT_AFTER: Duration = Duration::from_millis(200);
+/// Smooth what's visible this long after the last change of view: longer than the gaps within a
+/// wheel burst (measured up to 65ms; slow single notches are 400ms and more apart).
+const REFIT_AFTER: Duration = Duration::from_millis(100);
 /// Image scale per wheel notch.
 const ZOOM_STEP: f64 = 1.1;
 /// Largest scale, unless the screen takes a smaller image further.
 const ZOOM_MAX: f64 = 8.0;
 /// From this scale the original's pixels show as they are.
 const SMOOTH_BELOW: f64 = 3.0;
-/// Above the original's size, a smoothed image of more pixels than this isn't kept (4 bytes each):
-/// the original's pixels show instead.
-const SMOOTH_MAX_PIXELS: u64 = 32_000_000;
+/// `fit` that makes the backend send the original.
+const ORIGINAL: (u32, u32) = (u32::MAX, u32::MAX);
 
 /// Window position and size, physical px.
 type Placement = (i32, i32, u32, u32);
@@ -42,6 +42,16 @@ struct Viewer {
     /// window size we last set: another one means the system resized it (a snap)
     placed: Cell<(u32, u32)>,
     refit: slint::Timer,
+    /// Decoded on the first change of size and kept until the image or the window goes: pans and
+    /// zooms only resample the visible part of it. Shared with `source`, not a copy.
+    original: Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>>,
+    /// the original was asked for
+    loading: Cell<bool>,
+    opaque: bool,
+    /// the latest patch asked for; older ones are dropped when they finish
+    patch_id: Cell<u64>,
+    /// a patch is being resampled: only one at a time, the next one starts when it ends
+    patch_busy: Cell<bool>,
 }
 
 thread_local! {
@@ -53,7 +63,7 @@ thread_local! {
 pub(crate) fn open(app: &AppWindow, id: String, from_file: bool) {
     close();
     PENDING.with_borrow_mut(|p| *p = Some(id.clone()));
-    send_cmd(Command::ViewImage { id, index: 0, fit: screen_box(window::hwnd(app)), exact: false, from_file });
+    send_cmd(Command::ViewImage { id, index: 0, fit: screen_box(window::hwnd(app)), from_file });
 }
 
 /// Callable from the window's own callbacks: the window is dropped after they return.
@@ -101,6 +111,15 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
         v.win.set_original_w(img.full.0 as i32);
         let caption = if img.count > 1 { format!("{} / {}", img.index + 1, img.count) } else { String::new() };
         v.win.set_caption(caption.into());
+        v.opaque = img.opaque;
+        if another {
+            v.original = None;
+            v.loading.set(false);
+            clear_patch(v);
+        }
+        if size == img.full {
+            v.original = Some(img.pixels.clone());
+        }
         v.win.set_source(Image::from_rgba8(img.pixels));
         if !another {
             return None;
@@ -142,6 +161,12 @@ fn create(app: &AppWindow, img: &ViewerImage) -> Result<(), slint::PlatformError
         with_current(|v| send_cmd(Command::OpenViewed { id: v.id.clone(), index: v.index }));
     });
     win.on_resized(schedule_refit);
+    win.on_panned(|| {
+        // bare pixels while dragging: swapping patches stalls frames (a 8MP one took 86ms to make
+        // and its frame 43ms instead of 10), and a kept one leaves a visible edge past its end
+        with_current(clear_patch);
+        schedule_refit();
+    });
     win.on_zoom(zoom);
     win.on_drag_window(|| {
         with_current(|v| {
@@ -174,6 +199,11 @@ fn create(app: &AppWindow, img: &ViewerImage) -> Result<(), slint::PlatformError
             wanted: Cell::new(pixels),
             placed: Cell::new(size),
             refit: slint::Timer::default(),
+            original: None,
+            loading: Cell::new(false),
+            opaque: img.opaque,
+            patch_id: Cell::new(0),
+            patch_busy: Cell::new(false),
         });
     });
     Ok(())
@@ -223,7 +253,7 @@ fn step(by: i64) {
             let index = (v.wanted_index.get() as i64 + by).rem_euclid(v.count as i64) as usize;
             v.wanted_index.set(index);
             let fit = screen_box(viewer_hwnd(&v.win));
-            send_cmd(Command::ViewImage { id: v.id.clone(), index, fit, exact: false, from_file: false });
+            send_cmd(Command::ViewImage { id: v.id.clone(), index, fit, from_file: false });
         }
     });
 }
@@ -243,7 +273,11 @@ fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
         let low = (min.0 as f64 / full_w).min(min.1 as f64 / full_h).min(1.0).min(scale);
         let high = (area_w as f64 / full_w).min(area_h as f64 / full_h).max(ZOOM_MAX).max(scale);
         let scale = (scale * ZOOM_STEP.powf(notches as f64)).clamp(low, high);
-        let new = (((full_w * scale).round() as u32).max(1), ((full_h * scale).round() as u32).max(1));
+        // The renderer steps through source pixels in 1/256ths, truncated: at other scales the
+        // error adds up across the image, up to 8px at 1080p, and the patch lands elsewhere. So
+        // only scales where the step is a whole number of 1/256ths.
+        let step = (256.0 / scale).round().clamp((256.0 / high).ceil().max(1.0), (256.0 / low).floor().max(1.0));
+        let new = (((full_w * 256.0 / step) as u32).max(1), ((full_h * 256.0 / step) as u32).max(1));
         if new == old {
             return None;
         }
@@ -268,6 +302,7 @@ fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
         v.win.set_pan_y((ey - placement.1 as f64) as f32);
         v.wanted.set(new);
         set_shown(v, new);
+        clear_patch(v);
         Some(placement)
     });
     if let Some(p) = moved {
@@ -311,7 +346,7 @@ fn schedule_refit() {
     with_current(|v| v.refit.start(slint::TimerMode::SingleShot, REFIT_AFTER, refit));
 }
 
-/// The size on screen changed: fetch the image at the new one, if that gives other pixels.
+/// The view changed: smooth what's visible now, unless the image is drawn 1:1 or as bare pixels.
 fn refit() {
     with_current(|v| {
         // the system resized the window (a snap): the image follows, it isn't cut off
@@ -319,18 +354,85 @@ fn refit() {
         if client != v.placed.get() {
             v.placed.set(client);
             let fitted = clipped(v.wanted.get(), client);
-            v.wanted.set(fitted);
-            set_shown(v, fitted);
+            if fitted != v.wanted.get() {
+                v.wanted.set(fitted);
+                set_shown(v, fitted);
+                clear_patch(v);
+            }
         }
         let target = v.wanted.get();
-        let pixels = target.0 as u64 * target.1 as u64;
-        let scale = target.0 as f64 / v.full.0 as f64;
-        let want = if scale > 1.0 && (scale >= SMOOTH_BELOW || pixels > SMOOTH_MAX_PIXELS) { v.full } else { target };
         let has = v.win.get_source().size();
-        if want != (has.width, has.height) {
-            send_cmd(Command::ViewImage { id: v.id.clone(), index: v.index, fit: want, exact: true, from_file: false });
+        if target == (has.width, has.height) {
+            return clear_patch(v);
+        }
+        let Some(original) = &v.original else {
+            if !v.loading.replace(true) {
+                send_cmd(Command::ViewImage { id: v.id.clone(), index: v.index, fit: ORIGINAL, from_file: false });
+            }
+            return;
+        };
+        if target.0 as f64 / v.full.0 as f64 >= SMOOTH_BELOW {
+            return clear_patch(v);
+        }
+        let Some(area) = visible_part(target, client, (v.win.get_cur_x(), v.win.get_cur_y())) else { return };
+        let id = v.patch_id.get() + 1;
+        v.patch_id.set(id);
+        if v.patch_busy.replace(true) {
+            return;
+        }
+        let (src, full, opaque) = (original.clone(), v.full, v.opaque);
+        // the renderer's step through the source (see `zoom`), so the patch lands on its pixels
+        let step = |full: u32, target: u32| (full as f64 * 256.0 / target as f64).floor() / 256.0;
+        let (sx, sy) = (step(full.0, target.0), step(full.1, target.1));
+        let (left, top) = (area.0 as f64 * sx, area.1 as f64 * sy);
+        let crop = (left, top, (area.2 as f64 * sx).min(full.0 as f64 - left), (area.3 as f64 * sy).min(full.1 as f64 - top));
+        std::thread::spawn(move || {
+            let img = sigwin_thumb::resize_view(src.as_bytes(), full, crop, (area.2, area.3), opaque);
+            drop(src);
+            let pixels = img.map(|i| slint::SharedPixelBuffer::clone_from_slice(i.as_raw(), i.width(), i.height()));
+            let _ = slint::invoke_from_event_loop(move || patch_done(id, pixels, (area.0, area.1)));
+        });
+    });
+}
+
+/// The part of an image of `size`, centered in the window and offset by `offset`, that the window
+/// shows: left, top, width and height within the image, physical px.
+fn visible_part(size: (u32, u32), client: (u32, u32), offset: (f32, f32)) -> Option<(u32, u32, u32, u32)> {
+    let axis = |size: u32, client: u32, offset: f32| {
+        // as `image-x` / `image-y` in the window
+        let start = ((client as f64 - size as f64) / 2.0 + offset as f64).round() as i64;
+        let from = (-start).max(0);
+        let to = (client as i64 - start).min(size as i64);
+        (to > from).then_some((from as u32, (to - from) as u32))
+    };
+    let (x, w) = axis(size.0, client.0, offset.0)?;
+    let (y, h) = axis(size.1, client.1, offset.1)?;
+    Some((x, y, w, h))
+}
+
+fn patch_done(id: u64, pixels: Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>>, at: (u32, u32)) {
+    let mut stale = false;
+    with_current(|v| {
+        v.patch_busy.set(false);
+        if id != v.patch_id.get() {
+            stale = true;
+        } else if let Some(pixels) = pixels {
+            v.win.set_patch(Image::from_rgba8(pixels));
+            v.win.set_patch_x(at.0 as i32);
+            v.win.set_patch_y(at.1 as i32);
+            v.win.set_patch_on(true);
         }
     });
+    if stale {
+        schedule_refit();
+    }
+}
+
+/// Drops the patch, and the one being made if any.
+fn clear_patch(v: &Viewer) {
+    v.patch_id.set(v.patch_id.get() + 1);
+    v.win.set_patch_on(false);
+    v.win.set_patch(Image::default());
 }
 
 /// `size`, shrunk to fit in `bounds` if needed.

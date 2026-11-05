@@ -14,3 +14,19 @@ GPU renderers load the graphics driver into the process (nvoglv64, d3d12): they 
 
 ## Color emoji: DirectWrite path removed
 A DirectWrite path (3D COLRv1 style) was tried and removed. In-process it kept ~20MB of font caches (+18MB for 16 emoji, only 6MB returned on drop), it needed a child process plus a PNG cache, and it mixed two emoji styles on screen. Now emoji are plain text drawn by the patched software renderer in one flat style.
+
+## Image viewer resampling (measured 2026-11-06, synthetic JPEG, 16 threads)
+`fast_image_resize` (integer SIMD, single thread) over `image`:
+| job | `thumbnail` | `image` Lanczos3 | fir CatmullRom |
+|---|---|---|---|
+| 12MP to 1440x1080 | 25ms / 5MB | 122ms / 71MB | 12ms / 22MB |
+| 48MP to 1440x1080 | 62ms / 5MB | 310ms / 137MB | 32ms / 39MB |
+| 640x360 to 1080p | 24ms / 7MB | 43ms / 18MB | 3ms / 10MB |
+
+Enlarging against an analytic chart: `thumbnail` 12dB (visible stairs), fir Bilinear 22dB, CatmullRom 26dB, Lanczos3 28dB with visible halos. So Lanczos3 down, CatmullRom up. It adds 0.6MB to the release exe. Sixteen threads gain little (48MP: 32ms to 22ms); decoding is the slow step and has no thread option. Transparent images need premultiplying: 68MB instead of 22MB for the first job.
+
+Smoothing only what's visible keeps memory and time bounded by the window, whatever the zoom: resampling the whole image takes 411MB for a 12MP photo at 300%. Rejected while dragging:
+- A patch with a margin, rebuilt when the drag ends: its edge shows once the drag passes the margin.
+- Rebuilding the patch during the drag: visibly choppy. At a 2560x1392 window a patch with margin (8MP) took 86ms to make and the frame showing it 43ms instead of 10.
+
+Bare pixels while dragging, smooth when it stops, look fine: motion hides the difference. Wheel notches in one burst were at most 65ms apart and slow single notches 400ms or more, hence the 100ms wait.

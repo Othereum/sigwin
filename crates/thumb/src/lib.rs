@@ -46,12 +46,10 @@ pub fn fit_size((w, h): (u32, u32), (box_w, box_h): (u32, u32)) -> (u32, u32) {
     (((w as f64 * s).round() as u32).max(1), ((h as f64 * s).round() as u32).max(1))
 }
 
-/// A still image for the viewer: upright (EXIF), shrunk to fit in `box_w` x `box_h` or, when
-/// `exact`, scaled to that very size (also up), with its upright full size. `None` when it is
-/// animated or has more than `max_pixels`: those go to an outside app. `thumbnail_exact` rather
-/// than `resample`: the latter's float buffers take 16 bytes per source pixel, 192MB for a 12MP
-/// photo.
-pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, exact: bool, max_pixels: u64) -> ImageResult<Option<(RgbaImage, (u32, u32))>> {
+/// A still image for the viewer: upright (EXIF), shrunk to fit in `box_w` x `box_h`, with its
+/// upright full size and whether it can't have transparent pixels. `None` when it is animated or
+/// has more than `max_pixels`: those go to an outside app.
+pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> ImageResult<Option<(RgbaImage, (u32, u32), bool)>> {
     use image::ImageDecoder;
     let reader = || image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format();
     let (w, h) = reader()?.into_dimensions()?;
@@ -63,9 +61,33 @@ pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, exact: bool, max_pixels
     let mut img = DynamicImage::from_decoder(decoder)?;
     img.apply_orientation(orientation);
     let full = (img.width(), img.height());
-    let (nw, nh) = if exact { (box_w, box_h) } else { fit_size(full, (box_w, box_h)) };
-    let out = if (nw, nh) == full { img } else { img.thumbnail_exact(nw, nh) };
-    Ok(Some((out.into_rgba8(), full)))
+    let opaque = !img.color().has_alpha();
+    let out = fit_size(full, (box_w, box_h));
+    let rgba = img.into_rgba8();
+    if out == full {
+        return Ok(Some((rgba, full, opaque)));
+    }
+    let crop = (0.0, 0.0, full.0 as f64, full.1 as f64);
+    let fitted = resize_view(rgba.as_raw(), full, crop, out, opaque).unwrap_or(rgba);
+    Ok(Some((fitted, full, opaque)))
+}
+
+/// Resamples the `crop` (left, top, width, height) of an RGBA image of `size` to exactly `out`:
+/// Lanczos3 down, Catmull-Rom up (Lanczos rings visibly when enlarging). Integer SIMD, so much
+/// faster than `image`'s resize and without its float buffers. `opaque` skips premultiplying,
+/// which needs a copy of the source.
+pub fn resize_view(src: &[u8], size: (u32, u32), crop: (f64, f64, f64, f64), out: (u32, u32), opaque: bool) -> Option<RgbaImage> {
+    use fast_image_resize::images::{Image, ImageRef};
+    use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
+    let filter = if (out.0 as f64) < crop.2 { FilterType::Lanczos3 } else { FilterType::CatmullRom };
+    let options = ResizeOptions::new()
+        .resize_alg(ResizeAlg::Convolution(filter))
+        .crop(crop.0, crop.1, crop.2, crop.3)
+        .use_alpha(!opaque);
+    let src = ImageRef::new(size.0, size.1, src, PixelType::U8x4).ok()?;
+    let mut dst = Image::new(out.0, out.1, PixelType::U8x4);
+    Resizer::new().resize(&src, &mut dst, &options).ok()?;
+    RgbaImage::from_raw(out.0, out.1, dst.into_vec())
 }
 
 /// High-quality downscale so the longer side is `px` (never upscales). Filters in premultiplied
@@ -293,15 +315,24 @@ mod tests {
     #[test]
     fn decode_view_fits_never_upscales_and_refuses() {
         let png = png_rgba(&RgbaImage::new(400, 200)).unwrap();
-        let (img, full) = decode_view(&png, 100, 100, false, u64::MAX).unwrap().unwrap();
-        assert_eq!((img.dimensions(), full), ((100, 50), (400, 200)));
-        let (img, _) = decode_view(&png, 1000, 1000, false, u64::MAX).unwrap().unwrap();
+        let (img, full, opaque) = decode_view(&png, 100, 100, u64::MAX).unwrap().unwrap();
+        assert_eq!((img.dimensions(), full, opaque), ((100, 50), (400, 200), false));
+        let (img, ..) = decode_view(&png, 1000, 1000, u64::MAX).unwrap().unwrap();
         assert_eq!(img.dimensions(), (400, 200));
-        let (img, full) = decode_view(&png, 800, 400, true, u64::MAX).unwrap().unwrap();
-        assert_eq!((img.dimensions(), full), ((800, 400), (400, 200)));
-        assert!(decode_view(&png, 100, 100, false, 79_999).unwrap().is_none());
-        assert!(decode_view(&gif(3, 50), 100, 100, false, u64::MAX).unwrap().is_none());
-        assert!(decode_view(b"junk", 100, 100, false, u64::MAX).is_err());
+        assert!(decode_view(&png, 100, 100, 79_999).unwrap().is_none());
+        assert!(decode_view(&gif(3, 50), 100, 100, u64::MAX).unwrap().is_none());
+        assert!(decode_view(b"junk", 100, 100, u64::MAX).is_err());
+    }
+
+    #[test]
+    fn resize_view_takes_the_crop_at_the_exact_size() {
+        // left half red, right half blue
+        let src = RgbaImage::from_fn(40, 20, |x, _| image::Rgba(if x < 20 { [255, 0, 0, 255] } else { [0, 0, 255, 255] }));
+        for out in [(10, 10), (80, 80)] {
+            let img = resize_view(src.as_raw(), (40, 20), (20.0, 0.0, 20.0, 20.0), out, true).unwrap();
+            assert_eq!(img.dimensions(), out);
+            assert_eq!(img.get_pixel(out.0 / 2, out.1 / 2).0, [0, 0, 255, 255]);
+        }
     }
 
     #[test]
