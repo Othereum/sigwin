@@ -136,6 +136,19 @@ pub fn mute_text(until: u64, now: u64) -> String {
 /// reader photos drawn next to a message; the rest is a "+N"
 pub const MAX_READER_PHOTOS: usize = 3;
 
+/// One image of a message's grid; position and size in logical px within the grid.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CellDto {
+    /// key into the UI thumbnail cache
+    pub key: String,
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    /// images not shown, covered by this cell's "+N"
+    pub more: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MsgDto {
     pub id: String,
@@ -164,6 +177,8 @@ pub struct MsgDto {
     pub image_key: String,
     pub img_w: u32,
     pub img_h: u32,
+    /// several images: the grid drawn instead of `image_key`, which is its first cell's
+    pub cells: Vec<CellDto>,
     pub deleted: bool,
     pub day_sep: String,
     pub system: bool,

@@ -17,6 +17,17 @@ export struct ThreadItem {
     muted: bool,
 }
 
+// one image of a message's grid
+export struct ImageCell {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    image: image,
+    // images not shown, covered by this cell's "+N"
+    more: int,
+}
+
 export struct ReactionItem {
     emoji: string,
     count: int,
@@ -65,6 +76,8 @@ export struct MsgItem {
     frame: [int],
     img-w: length,
     img-h: length,
+    // several images: the grid drawn instead of `image`
+    cells: [ImageCell],
     deleted: bool,
     day-sep: string,
     system: bool,

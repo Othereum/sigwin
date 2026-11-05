@@ -9,7 +9,7 @@ import { SettingsPage } from "settings.slint";
 import { LinkPage } from "link.slint";
 
 // Structs and globals the Rust side uses.
-export { ThreadItem, ReactionItem, ReaderItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
+export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 export { Anim, Links, Theme } from "theme.slint";
 export { ImageViewer } from "viewer.slint";
 
@@ -92,7 +92,8 @@ export component AppWindow inherits Window {
     callback load-older();
     callback attach();
     callback clear-attachments();
-    callback attachment-clicked(string);
+    // the message and which of its images
+    callback attachment-clicked(string, int);
     callback file-clicked(string);
     callback reply(string);
     callback cancel-reply();
@@ -566,7 +567,7 @@ export component AppWindow inherits Window {
                                 root.jump-found = true;
                             }
                         }
-                        attachment-clicked(id) => { root.attachment-clicked(id); }
+                        attachment-clicked(id, index) => { root.attachment-clicked(id, index); }
                         file-clicked(id) => { root.file-clicked(id); }
                         quote-clicked(id) => { root.show-message(id); }
                         reply(id) => { root.reply(id); }

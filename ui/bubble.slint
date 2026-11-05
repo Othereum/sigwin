@@ -47,7 +47,7 @@ export component MsgImage inherits Rectangle {
     in property <length> r-tr: 18px;
     in property <length> r-bl: 18px;
     in property <length> r-br: 18px;
-    callback attachment-clicked(string);
+    callback attachment-clicked(string, int);
     callback menu(string, length, length);
     min-width: flush ? m.img-w : 0px;
     preferred-width: m.img-w;
@@ -73,18 +73,52 @@ export component MsgImage inherits Rectangle {
     changed still => {
         if m.sticker { Anim.shown(m.id); }
     }
-    Image {
+    if m.cells.length == 0: Image {
         width: 100%;
         height: 100%;
         source: m.frames.length > 0 ? m.frames[m.frame[0]] : m.image;
         image-fit: m.sticker ? contain : cover;
     }
-    TouchArea {
+    if m.cells.length == 0: TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.attachment-clicked(m.id); }
+        clicked => { root.attachment-clicked(m.id, 0); }
         pointer-event(e) => {
             if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
                 root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
+    for cell[i] in m.cells: Rectangle {
+        x: cell.x;
+        y: cell.y;
+        width: cell.w;
+        height: cell.h;
+        // until the image arrives
+        background: #80808030;
+        Image {
+            width: 100%;
+            height: 100%;
+            source: cell.image;
+            // already resampled to this size
+            image-fit: fill;
+        }
+        if cell.more > 0: Rectangle {
+            background: #00000080;
+            Text {
+                text: "+" + cell.more;
+                color: white;
+                font-size: 22px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.attachment-clicked(m.id, i); }
+            pointer-event(e) => {
+                if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                    root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                }
             }
         }
     }
@@ -137,7 +171,7 @@ export component Bubble inherits VerticalLayout {
     in property <length> max-w;
     // briefly outlined after jumping to it (pinned message bar)
     in property <bool> flash;
-    callback attachment-clicked(string);
+    callback attachment-clicked(string, int);
     // the file line (a photo is `attachment-clicked`)
     callback file-clicked(string);
     // the quote in a reply: the quoted message's sent timestamp
@@ -287,7 +321,7 @@ export component Bubble inherits VerticalLayout {
                     flush: true;
                     r-tl: root.r-tl;
                     r-tr: root.r-tr;
-                    attachment-clicked(id) => { root.attachment-clicked(id); }
+                    attachment-clicked(id, index) => { root.attachment-clicked(id, index); }
                     menu(id, x, y) => { root.menu(id, x, y); }
                 }
             VerticalLayout {
@@ -346,7 +380,7 @@ export component Bubble inherits VerticalLayout {
                     r-tr: root.r-tr;
                     r-bl: root.r-bl;
                     r-br: root.r-br;
-                    attachment-clicked(id) => { root.attachment-clicked(id); }
+                    attachment-clicked(id, index) => { root.attachment-clicked(id, index); }
                     menu(id, x, y) => { root.menu(id, x, y); }
                 }
                 if m.attachment != "": Rectangle {

@@ -257,6 +257,19 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             (m.img_w, m.img_h) = (400, 300);
         }
     }
+    if std::env::var_os("SIGWIN_DEMO_GRID").is_some() {
+        // the newest rows, bare, with a caption and with a file
+        let last = items.len() - DEMO_GRIDS.len();
+        for (&count, m) in DEMO_GRIDS.iter().zip(&mut items[last..]) {
+            m.big_emoji = false;
+            m.sticker = false;
+            m.quote.clear();
+            m.quote_author.clear();
+            m.attachment = if count == 5 { "보고서.pdf".into() } else { String::new() };
+            m.text = if count == 3 { "사진 설명이 함께 있는 메시지".into() } else { String::new() };
+            view::set_photo_grid(m, count, |n, _, _| format!("demo-grid-{count}-{n}"));
+        }
+    }
     if reload {
         // like a real account: photos make rows very uneven in height
         for (i, m) in items.iter_mut().enumerate().filter(|(i, _)| i % 9 == 4 && *i < 290) {
@@ -380,6 +393,14 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         typing: None,
     });
     emit(Event::Storage { db: 23 * 1024 * 1024, attachments: 148 * 1024 * 1024, thumbs: 3_400_000 });
+    if std::env::var_os("SIGWIN_DEMO_GRID").is_some() {
+        // after the rows, as downloads do
+        let emit = emit.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            demo_grids(&emit);
+        });
+    }
     if std::env::var_os("SIGWIN_DEMO_STICKERS").is_some() {
         demo_stickers(emit);
     }
@@ -653,6 +674,27 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
             emit(Event::Frames(types::Frames::decode(key, &gif, fit, types::ANIM_BUDGET / 2)));
         }
     });
+}
+
+/// SIGWIN_DEMO_GRID: images of the newest rows.
+const DEMO_GRIDS: [usize; 5] = [2, 3, 4, 5, 8];
+
+fn demo_grids(emit: &backend::Emit) {
+    for count in DEMO_GRIDS {
+        let mut row = types::MsgDto::default();
+        let mut cells = Vec::new();
+        view::set_photo_grid(&mut row, count, |n, w, h| {
+            cells.push((n, w, h));
+            format!("demo-grid-{count}-{n}")
+        });
+        // the last one of 4 never arrives: how a cell looks until then
+        for (n, w, h) in cells.into_iter().filter(|c| count != 4 || c.0 != 3) {
+            let (pw, ph) = (types::physical_px(w), types::physical_px(h));
+            let img = image::RgbaImage::from_fn(pw, ph, |x, y| image::Rgba([(x * 255 / pw) as u8, (y * 255 / ph) as u8, (n * 50) as u8, 255]));
+            let key = format!("demo-grid-{count}-{n}");
+            emit(Event::Thumb(Arc::new(types::Thumb { key, width: pw, height: ph, rgba: img.into_raw() })));
+        }
+    }
 }
 
 pub(crate) fn demo_stickers(emit: backend::Emit) {

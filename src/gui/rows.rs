@@ -200,6 +200,18 @@ pub(crate) fn to_item(
 ) -> MsgItem {
     let image = thumbs.get(&m.image_key).cloned();
     let (frames, frame) = anims.models(&m.image_key);
+    let cells: Vec<ImageCell> = m
+        .cells
+        .iter()
+        .map(|c| ImageCell {
+            x: c.x as f32,
+            y: c.y as f32,
+            w: c.w as f32,
+            h: c.h as f32,
+            image: thumbs.get(&c.key).cloned().unwrap_or_default(),
+            more: c.more as i32,
+        })
+        .collect();
     let avatar = if m.show_avatar { senders.get(&m.sender_key).cloned() } else { None };
     let reactions: Vec<ReactionItem> = m
         .reactions
@@ -247,6 +259,7 @@ pub(crate) fn to_item(
         frame,
         img_w: m.img_w as f32,
         img_h: m.img_h as f32,
+        cells: if cells.is_empty() { Default::default() } else { ModelRc::new(VecModel::from(cells)) },
         deleted: m.deleted,
         day_sep: m.day_sep.as_str().into(),
         system: m.system,

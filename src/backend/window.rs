@@ -279,7 +279,12 @@ impl App {
         view::mark_runs(&mut items, open.is_group);
         for (k, ptr, fit) in built.wanted_thumbs {
             if self.thumbs_requested.insert(k.clone()) {
-                self.request_thumb(k, ptr, fit);
+                self.request_thumb(k.clone(), k, ptr, ThumbShape::Fit(fit));
+            }
+        }
+        for c in built.wanted_cells {
+            if self.thumbs_requested.insert(c.key.clone()) {
+                self.request_thumb(c.key, c.file_key, c.ptr, ThumbShape::Cover(c.size.0, c.size.1));
             }
         }
         for (k, ptr) in built.wanted_texts {

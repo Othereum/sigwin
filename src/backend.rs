@@ -256,6 +256,8 @@ struct App {
     threads_dirty: bool,
     /// thumbnails and long texts asked for in the open thread
     thumbs_requested: HashSet<String>,
+    /// held while making a message's thumbnail
+    thumb_gate: Arc<tokio::sync::Semaphore>,
     long: view::LongTexts,
     pending: Vec<Pending>,
     /// per thread: resolves when the last message queued for sending is done
@@ -384,6 +386,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         current_dirty: false,
         threads_dirty: false,
         thumbs_requested: HashSet::new(),
+        thumb_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         long: Default::default(),
         pending: Vec::new(),
         send_tail: HashMap::new(),

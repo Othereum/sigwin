@@ -567,6 +567,55 @@ fn day_label(dt: &DateTime<Local>) -> String {
     )
 }
 
+/// An image wanted for a cell of a message's grid.
+pub struct WantedCell {
+    /// what the UI knows it by
+    pub key: String,
+    /// its files on disk
+    pub file_key: String,
+    pub ptr: AttachmentPointer,
+    /// logical px
+    pub size: (u32, u32),
+}
+
+/// Images a grid shows; the rest are a "+N" on its last cell and wait for the viewer.
+const GRID_SHOWN: usize = 5;
+
+/// Where a grid of `count` images (2 or more) puts them: x, y, width and height in logical px,
+/// with a 1px gap. As in Signal's apps, the first ones are the largest.
+fn grid_cells(count: usize) -> &'static [(u32, u32, u32, u32)] {
+    match count {
+        0 | 1 => &[],
+        2 => &[(0, 0, 150, 150), (151, 0, 150, 150)],
+        3 => &[(0, 0, 200, 201), (201, 0, 100, 100), (201, 101, 100, 100)],
+        4 => &[(0, 0, 150, 150), (151, 0, 150, 150), (0, 151, 150, 150), (151, 151, 150, 150)],
+        _ => &[(0, 0, 150, 150), (151, 0, 150, 150), (0, 151, 100, 100), (101, 151, 99, 100), (201, 151, 100, 100)],
+    }
+}
+
+/// Makes `m` show `count` images as a grid, if that is 2 or more. `key` gets the index of each
+/// image shown and the size of its cell, and returns its key in the UI thumbnail cache.
+pub fn set_photo_grid(m: &mut MsgDto, count: usize, mut key: impl FnMut(usize, u32, u32) -> String) {
+    let cells = grid_cells(count);
+    let more = count.saturating_sub(GRID_SHOWN) as u32;
+    m.cells = cells
+        .iter()
+        .enumerate()
+        .map(|(n, &(x, y, w, h))| crate::types::CellDto {
+            key: key(n, w, h),
+            x,
+            y,
+            w,
+            h,
+            more: if n + 1 == GRID_SHOWN { more } else { 0 },
+        })
+        .collect();
+    let Some(first) = m.cells.first() else { return };
+    m.image_key = first.key.clone();
+    m.img_w = cells.iter().map(|c| c.0 + c.2).max().unwrap_or(0);
+    m.img_h = cells.iter().map(|c| c.1 + c.3).max().unwrap_or(0);
+}
+
 fn fit(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
     match (w, h) {
         (Some(w), Some(h)) if w > 0 && h > 0 => {
@@ -583,6 +632,7 @@ pub struct Built {
     pub items: Vec<MsgDto>,
     /// image attachments that need a thumbnail: (key, pointer, square box in logical px to fit into, 0 = as is)
     pub wanted_thumbs: Vec<(String, AttachmentPointer, u32)>,
+    pub wanted_cells: Vec<WantedCell>,
     /// long-text attachments not in `LongTexts::full` yet: (key, pointer)
     pub wanted_texts: Vec<(String, AttachmentPointer)>,
     /// earliest time a still-shown disappearing message expires
@@ -668,6 +718,7 @@ pub fn build(
 
     let mut items = Vec::new();
     let mut wanted = Vec::new();
+    let mut wanted_cells = Vec::new();
     let mut wanted_texts = Vec::new();
     let mut prev_day = None;
 
@@ -743,20 +794,33 @@ pub fn build(
                     m.quote_id = q.id.map(|i| i.to_string()).unwrap_or_default();
                 }
                 let mut others = 0;
+                let mut photos = Vec::new();
                 for (i, a) in shown_attachments(dm) {
-                    if m.image_key.is_empty() && is_image(a) {
-                        let key = attachment_key(a, *ts, i);
-                        let (w, h) = fit(a.width, a.height);
-                        m.img_w = w;
-                        m.img_h = h;
-                        // pre-resample to the on-screen size (nearest-neighbor scaling is jagged)
-                        wanted.push((key.clone(), a.clone(), w.max(h)));
-                        m.image_key = key;
+                    if !m.sticker && is_image(a) {
+                        photos.push((i, a));
                     } else if m.attachment.is_empty() {
                         m.attachment = attachment_label(a);
                     } else {
                         others += 1;
                     }
+                }
+                if let [(i, a)] = photos[..] {
+                    let key = attachment_key(a, *ts, i);
+                    let (w, h) = fit(a.width, a.height);
+                    m.img_w = w;
+                    m.img_h = h;
+                    // pre-resample to the on-screen size (nearest-neighbor scaling is jagged)
+                    wanted.push((key.clone(), a.clone(), w.max(h)));
+                    m.image_key = key;
+                } else {
+                    set_photo_grid(&mut m, photos.len(), |n, w, h| {
+                        let (i, a) = photos[n];
+                        let file_key = attachment_key(a, *ts, i);
+                        // the same image may also be shown alone, or in a cell of another size
+                        let key = format!("{file_key}@{w}x{h}");
+                        wanted_cells.push(WantedCell { key: key.clone(), file_key, ptr: a.clone(), size: (w, h) });
+                        key
+                    });
                 }
                 if others > 0 {
                     m.attachment = format!("{} 외 {}개", m.attachment, others);
@@ -826,7 +890,7 @@ pub fn build(
         m.readers.retain(|(u, _)| seen.insert(u.clone()));
     }
     // runs (`mark_runs`) are marked by the caller once pins, pending ops and stub rows are in
-    Built { items, wanted_thumbs: wanted, wanted_texts, next_expiry }
+    Built { items, wanted_thumbs: wanted, wanted_cells, wanted_texts, next_expiry }
 }
 
 /// Texts of long messages in the open window, and how much of each is shown.
@@ -1088,12 +1152,8 @@ mod tests {
         assert_eq!(m.text, format!("{}…", "가".repeat(799)));
     }
 
-    #[test]
-    fn long_text_attachment_is_part_of_the_body() {
-        let long = AttachmentPointer { content_type: Some(LONG_TEXT.into()), digest: Some(vec![7; 32]), ..Default::default() };
-        let photo = AttachmentPointer { content_type: Some("image/png".into()), digest: Some(vec![8; 32]), ..Default::default() };
-        let dm = DataMessage { body: Some("앞부분".into()), attachments: vec![long, photo], ..Default::default() };
-        let c = Content::from_body(dm, presage::libsignal_service::content::Metadata {
+    fn incoming(dm: DataMessage) -> Content {
+        Content::from_body(dm, presage::libsignal_service::content::Metadata {
             sender: presage::libsignal_service::protocol::ServiceId::Aci(Uuid::from_u128(2).into()),
             destination: presage::libsignal_service::protocol::ServiceId::Aci(Uuid::from_u128(1).into()),
             sender_device: 1u32.try_into().unwrap(),
@@ -1104,8 +1164,75 @@ mod tests {
             unidentified_sender: false,
             was_plaintext: false,
             server_guid: None,
-        });
-        let window = [(5u64, c)];
+        })
+    }
+
+    #[test]
+    fn grid_cells_fill_their_box_without_touching() {
+        for count in 2..8 {
+            let cells = grid_cells(count);
+            assert_eq!(cells.len(), count.min(GRID_SHOWN));
+            let width = cells.iter().map(|c| c.0 + c.2).max().unwrap();
+            let height = cells.iter().map(|c| c.1 + c.3).max().unwrap();
+            assert_eq!(width, 301);
+            let area: u32 = cells.iter().map(|c| c.2 * c.3).sum();
+            // what's left of the box is the 1px gaps
+            assert!(area < width * height && width * height - area <= 2 * width + height, "{count}");
+            for (i, a) in cells.iter().enumerate() {
+                for b in &cells[i + 1..] {
+                    let apart = a.0 + a.2 < b.0 + 1 || b.0 + b.2 < a.0 + 1 || a.1 + a.3 < b.1 + 1 || b.1 + b.3 < a.1 + 1;
+                    assert!(apart, "{count}: {a:?} {b:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn several_photos_make_a_grid_and_files_stay_files() {
+        let photo = |d: u8| AttachmentPointer { content_type: Some("image/png".into()), digest: Some(vec![d; 32]), ..Default::default() };
+        let pdf = |d: u8| AttachmentPointer {
+            content_type: Some("application/pdf".into()),
+            file_name: Some(format!("{d}.pdf")),
+            digest: Some(vec![d; 32]),
+            ..Default::default()
+        };
+        let name = |_: &Uuid| String::new();
+        let empty = HashMap::new();
+        let long = LongTexts::default();
+        let run = |attachments: Vec<AttachmentPointer>| {
+            let window = [(5u64, incoming(DataMessage { attachments, ..Default::default() }))];
+            build(&window, Uuid::from_u128(1), &[], &empty, &Default::default(), &long, &name)
+        };
+
+        let b = run(vec![photo(1), pdf(2), photo(3), photo(4), pdf(5)]);
+        let m = &b.items[0];
+        assert_eq!(m.attachment, "2.pdf 외 1개");
+        assert_eq!((m.cells.len(), m.img_w, m.img_h), (3, 301, 201));
+        assert_eq!(m.image_key, m.cells[0].key);
+        assert_eq!(b.wanted_cells.len(), 3);
+        assert!(b.wanted_thumbs.is_empty());
+        assert_eq!(b.wanted_cells[1].file_key, attachment_key(&photo(3), 5, 2));
+        // the key tells a cell from the same image shown alone
+        assert_ne!(b.wanted_cells[1].key, b.wanted_cells[1].file_key);
+
+        // past the last cell: counted on it, and not downloaded
+        let b = run((1..=8).map(photo).collect());
+        assert_eq!(b.wanted_cells.len(), GRID_SHOWN);
+        let more: Vec<u32> = b.items[0].cells.iter().map(|c| c.more).collect();
+        assert_eq!(more, [0, 0, 0, 0, 3]);
+
+        // one photo stays as it was
+        let b = run(vec![photo(1)]);
+        assert!(b.items[0].cells.is_empty());
+        assert_eq!(b.wanted_thumbs.len(), 1);
+    }
+
+    #[test]
+    fn long_text_attachment_is_part_of_the_body() {
+        let long = AttachmentPointer { content_type: Some(LONG_TEXT.into()), digest: Some(vec![7; 32]), ..Default::default() };
+        let photo = AttachmentPointer { content_type: Some("image/png".into()), digest: Some(vec![8; 32]), ..Default::default() };
+        let dm = DataMessage { body: Some("앞부분".into()), attachments: vec![long, photo], ..Default::default() };
+        let window = [(5u64, incoming(dm))];
         let name = |_: &Uuid| String::new();
         let empty = HashMap::new();
         let run = |long: &LongTexts| build(&window, Uuid::from_u128(1), &[], &empty, &Default::default(), long, &name);

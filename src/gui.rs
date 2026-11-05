@@ -340,12 +340,21 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             UI.with_borrow_mut(|ui| {
                 ui.thumbs.insert(t.key.clone(), img.clone());
                 for (i, m) in ui.last.iter().enumerate() {
-                    if m.image_key == t.key {
-                        if let Some(mut row) = slint::Model::row_data(&*ui.messages, i) {
-                            row.image = img.clone();
-                            slint::Model::set_row_data(&*ui.messages, i, row);
-                        }
+                    let cell = m.cells.iter().position(|c| c.key == t.key);
+                    if cell.is_none() && m.image_key != t.key {
+                        continue;
                     }
+                    let Some(mut row) = slint::Model::row_data(&*ui.messages, i) else { continue };
+                    if let Some(n) = cell {
+                        // a new model, not a change inside the old one: a ListView row didn't
+                        // show that until it was scrolled away and back
+                        let mut cells: Vec<ImageCell> = slint::Model::iter(&row.cells).collect();
+                        cells[n].image = img.clone();
+                        row.cells = ModelRc::new(VecModel::from(cells));
+                    } else {
+                        row.image = img.clone();
+                    }
+                    slint::Model::set_row_data(&*ui.messages, i, row);
                 }
             });
         }

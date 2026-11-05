@@ -453,19 +453,19 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
 
     let s = send.clone();
     let weak = app.as_weak();
-    app.on_attachment_clicked(move |id| {
+    app.on_attachment_clicked(move |id, index| {
         let is_sticker = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id.as_str() && m.sticker));
         if is_sticker {
             s(Command::StickerClicked(id.to_string()));
         } else if let Some(app) = weak.upgrade() {
-            viewer::open(&app, id.to_string(), false);
+            viewer::open(&app, id.to_string(), index as usize, false);
         }
     });
 
     let weak = app.as_weak();
     app.on_file_clicked(move |id| {
         if let Some(app) = weak.upgrade() {
-            viewer::open(&app, id.to_string(), true);
+            viewer::open(&app, id.to_string(), 0, true);
         }
     });
 

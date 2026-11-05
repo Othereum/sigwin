@@ -2,13 +2,23 @@
 
 use super::*;
 
+/// How a message's thumbnail is drawn, in logical px.
+pub(super) enum ThumbShape {
+    /// the longer side is this long
+    Fit(u32),
+    /// fills this size, cut off around its center
+    Cover(u32, u32),
+}
+
 impl App {
-    pub(super) fn request_thumb(&self, key: String, ptr: AttachmentPointer, fit: u32) {
-        let thumb_path = self.paths.thumbs.join(format!("{key}.enc"));
-        let orig_path = attachment_path(&self.paths.attachments, &key);
+    /// `key` is what the UI knows the result by, `file_key` the attachment's files on disk.
+    pub(super) fn request_thumb(&self, key: String, file_key: String, ptr: AttachmentPointer, shape: ThumbShape) {
+        let thumb_path = self.paths.thumbs.join(format!("{file_key}.enc"));
+        let orig_path = attachment_path(&self.paths.attachments, &file_key);
         let manager = self.manager.clone();
         let emit = self.emit.clone();
         let tx = self.tx.clone();
+        let gate = self.thumb_gate.clone();
         tokio::task::spawn_local(async move {
             if !thumb_path.exists() {
                 if !orig_path.exists() {
@@ -28,7 +38,13 @@ impl App {
                 }
             }
             let k = key.clone();
-            let res = tokio::task::spawn_blocking(move || make_thumb(&k, &orig_path, &thumb_path, fit)).await;
+            // one at a time: an album would otherwise decode all its full-size originals at once
+            let permit = gate.acquire_owned().await;
+            let res = tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                make_shaped_thumb(&k, &orig_path, &thumb_path, shape)
+            })
+            .await;
             match res {
                 Ok(Ok(t)) => emit(Event::Thumb(Arc::new(t))),
                 _ => {
@@ -68,9 +84,11 @@ impl App {
         });
     }
 
+    /// The message's file line: its images have their own place, in the row and the viewer.
     pub(super) fn open_attachment(&self, id: &str) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let jobs: Vec<(PathBuf, AttachmentPointer)> = view::shown_attachments(dm)
+            .filter(|(_, a)| !view::is_image(a))
             .map(|(i, a)| (attachment_path(&self.paths.attachments, &view::attachment_key(a, ts, i)), a.clone()))
             .collect();
         let manager = self.manager.clone();
@@ -261,6 +279,17 @@ pub(super) fn remove_files(c: &Content, ts: u64, attachments: &Path, thumbs: &Pa
         let _ = std::fs::remove_file(attachment_path(attachments, &k));
         let _ = std::fs::remove_file(thumbs.join(format!("{k}.enc")));
     }
+}
+
+fn make_shaped_thumb(key: &str, orig: &Path, thumb: &Path, shape: ThumbShape) -> anyhow::Result<Thumb> {
+    let (w, h) = match shape {
+        ThumbShape::Fit(fit) => return make_thumb(key, orig, thumb, fit),
+        ThumbShape::Cover(w, h) => (crate::types::physical_px(w), crate::types::physical_px(h)),
+    };
+    let t = make_thumb(key, orig, thumb, 0)?;
+    let img = image::RgbaImage::from_raw(t.width, t.height, t.rgba).context("thumbnail size")?;
+    let cell = sigwin_thumb::cover(&img, w, h);
+    Ok(Thumb { key: t.key, width: cell.width(), height: cell.height(), rgba: cell.into_raw() })
 }
 
 pub(super) fn make_thumb(key: &str, orig: &Path, thumb: &Path, fit: u32) -> anyhow::Result<Thumb> {

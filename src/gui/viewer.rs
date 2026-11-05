@@ -84,10 +84,10 @@ thread_local! {
     static PENDING: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-pub(crate) fn open(app: &AppWindow, id: String, from_file: bool) {
+pub(crate) fn open(app: &AppWindow, id: String, index: usize, from_file: bool) {
     close();
     PENDING.with_borrow_mut(|p| *p = Some(id.clone()));
-    send_cmd(Command::ViewImage { id, index: 0, fit: screen_box(window::hwnd(app)), from_file });
+    send_cmd(Command::ViewImage { id, index, fit: screen_box(window::hwnd(app)), from_file });
 }
 
 /// A main window notice also shows here: the viewer usually covers it.

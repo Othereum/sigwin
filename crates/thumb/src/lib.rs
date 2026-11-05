@@ -153,6 +153,41 @@ fn resample(img: RgbaImage, px: u32) -> RgbaImage {
     }
 }
 
+/// Center-crops to the shape of `w` x `h` and resamples to exactly that. Cropped first: enlarging
+/// from a crop can make `fast_image_resize` read out of bounds (see `viewer::patch_crop`).
+pub fn cover(img: &RgbaImage, w: u32, h: u32) -> RgbaImage {
+    let (sw, sh) = img.dimensions();
+    if sw == 0 || sh == 0 || w == 0 || h == 0 {
+        return img.clone();
+    }
+    let (cw, ch) = if sw as u64 * h as u64 > sh as u64 * w as u64 {
+        (((sh as u64 * w as u64 / h as u64) as u32).max(1), sh)
+    } else {
+        (sw, ((sw as u64 * h as u64 / w as u64) as u32).max(1))
+    };
+    let cropped = image::imageops::crop_imm(img, (sw - cw) / 2, (sh - ch) / 2, cw, ch).to_image();
+    let mut out = RgbaImage::new(w, h);
+    match resize_into(cropped.as_raw(), (cw, ch), (0.0, 0.0, cw as f64, ch as f64), (w, h), &mut out, false) {
+        Some(()) => out,
+        None => cropped,
+    }
+}
+
+#[test]
+fn cover_fills_the_size_from_the_center() {
+    // red | green | red: only the middle survives a square cut of a wide image
+    let wide = RgbaImage::from_fn(300, 100, |x, _| image::Rgba(if (100..200).contains(&x) { [0, 255, 0, 255] } else { [255, 0, 0, 255] }));
+    let cell = cover(&wide, 50, 50);
+    assert_eq!(cell.dimensions(), (50, 50));
+    assert_eq!(cell.get_pixel(25, 25).0, [0, 255, 0, 255]);
+    assert_eq!(cell.get_pixel(1, 25).0, [0, 255, 0, 255]);
+    // enlarges, and takes extreme shapes
+    for (w, h, sw, sh) in [(400, 402, 37, 41), (200, 100, 1, 500), (100, 200, 500, 1), (301, 150, 300, 150)] {
+        let src = RgbaImage::from_pixel(sw, sh, image::Rgba([9, 9, 9, 255]));
+        assert_eq!(cover(&src, w, h).dimensions(), (w, h));
+    }
+}
+
 /// Center-crops to a square and resamples it to exactly `px` (smaller sources are upscaled
 /// smoothly instead of letting the renderer pixelate them).
 pub fn square(img: &DynamicImage, px: u32) -> RgbaImage {
