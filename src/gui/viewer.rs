@@ -194,7 +194,18 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
         win.window().set_position(slint::PhysicalPosition::new(x + (w - size.0 as i32) / 2, y + (h - size.1 as i32) / 2));
     }
     win.show()?;
-    attach(&win, window::hwnd(app));
+    // the native window doesn't exist yet: show only asks for it
+    let (weak, owner) = (win.as_weak(), window::hwnd(app));
+    let attaching = slint::spawn_local(async move {
+        let Some(win) = weak.upgrade() else { return };
+        match win.window().winit_window().await {
+            Ok(_) => attach(&win, owner),
+            Err(e) => tracing::warn!("image viewer: {e}"),
+        }
+    });
+    if let Err(e) = attaching {
+        tracing::warn!("image viewer: {e}");
+    }
     VIEWER.with_borrow_mut(|v| {
         *v = Some(Viewer {
             win,
@@ -515,13 +526,24 @@ fn work_area(_: isize) -> Option<(i32, i32, i32, i32)> {
 #[cfg(windows)]
 fn attach(win: &ImageViewer, owner: isize) {
     use slint::winit_030::winit::platform::windows::WindowExtWindows;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_HWNDPARENT};
+    use windows_sys::Win32::UI::Shell::SetWindowSubclass;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWLP_HWNDPARENT, GWL_EXSTYLE, WS_EX_APPWINDOW,
+    };
 
     let hwnd = viewer_hwnd(win);
     // no native window in headless runs
     if hwnd == 0 || owner == 0 {
         return;
     }
+    // SAFETY: both are our own live windows, on their UI thread; the subclass goes with the window
+    unsafe {
+        SetWindowSubclass(hwnd as _, Some(no_app_window), 1, 0);
+        let style = GetWindowLongPtrW(hwnd as _, GWL_EXSTYLE);
+        SetWindowLongPtrW(hwnd as _, GWL_EXSTYLE, style & !(WS_EX_APPWINDOW as isize));
+        SetWindowLongPtrW(hwnd as _, GWLP_HWNDPARENT, owner);
+    }
+    // removes the button the window got when shown; without the style it stays away
     let done = win.window().with_winit_window(|w| {
         w.set_skip_taskbar(true);
         w.set_undecorated_shadow(true);
@@ -529,8 +551,28 @@ fn attach(win: &ImageViewer, owner: isize) {
     if done.is_none() {
         tracing::warn!("image viewer: no winit window");
     }
-    // SAFETY: both are our own live windows, on their UI thread
-    unsafe { SetWindowLongPtrW(hwnd as _, GWLP_HWNDPARENT, owner) };
+}
+
+/// winit gives every window `WS_EX_APPWINDOW`, which keeps even an owned one on the taskbar, and
+/// sets it again whenever its flags change (a snap, for one).
+#[cfg(windows)]
+unsafe extern "system" fn no_app_window(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+    _: usize,
+    _: usize,
+) -> isize {
+    use windows_sys::Win32::UI::Shell::DefSubclassProc;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, STYLESTRUCT, WM_STYLECHANGING, WS_EX_APPWINDOW};
+    if msg == WM_STYLECHANGING && wparam as i32 == GWL_EXSTYLE {
+        // SAFETY: for this message lparam points to the STYLESTRUCT being applied
+        let style = unsafe { &mut *(lparam as *mut STYLESTRUCT) };
+        style.styleNew &= !WS_EX_APPWINDOW;
+    }
+    // SAFETY: forwards this very call
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
 #[cfg(not(windows))]
