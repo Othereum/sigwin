@@ -12,15 +12,13 @@
 
 ## Hard constraint: memory
 **Target: idle private memory under 30MB**, measured with a real account after sync, one thread open, nothing else going on. The rest of the budget depends on who started the work (reasons in `docs/decisions.md`):
-- Something the user opened (image viewer, sticker panel) may use what it needs, with a safety limit against abnormal input, and must return to idle levels when closed.
-- Automatic work (receiving, thumbnails, sync) has to stay small: no outside app would have done it instead, so all of it is added cost.
+- Something the user opened (image viewer, sticker panel) may use what it needs, with a safety limit against abnormal input, and must return to idle levels when closed. Inside it, responsiveness comes first: don't drop and reload what the user will likely need next just to lower memory while it's open.
+- Automatic work (receiving, thumbnails, sync) has to stay small: no outside app would have done it instead, so all of it is added cost. Hold only what's on screen, at the size it's shown; anything worth keeping goes to disk.
 
 Every change must respect this:
 - No GPU renderer, WebView, JVM, or extra runtimes. Slint uses `renderer-software` only (GPU renderers cost 200MB+; numbers in `docs/decisions.md`). Never enable the `renderer-femtovg` / `renderer-skia` features by default.
-- Never load whole threads: page messages through `db::Index::page` (60 rows); the open window is capped at `MAX_WINDOW` (600). `store.messages(thread, range)` does `fetch_all`: always bound the range.
-- Images: decode to thumbnails (`THUMB_MAX` 260px, stickers in the picker 96px), cache them on disk under `thumbs/`. Keep `slint::Image`s only for what's on screen; clear them on thread switch or when the panel closes.
-- Animated sticker frames are decoded RGBA, so they're the costliest images: only for stickers shown on screen, all together under `ANIM_BUDGET` (24MB), and only the hovered sticker in the picker (`gui/anim.rs`).
-- Anything that loads heavy system DLLs (the file dialog) runs in a child process (`picker.rs`).
+- Never load whole threads: always bound what you read from the store.
+- Anything that loads heavy system DLLs runs in a child process.
 - Measure, don't guess: the log prints `mem: rust heap …, private …` every 10s at debug level (`sigwin=debug`; info only every 10 min, for users' log files) (`alloc.rs` counts Rust heap; the rest is native). `SIGWIN_DEMO=1 SIGWIN_SELFTEST=1` measures the dialog and notification cost.
 
 ## Build & run
@@ -49,6 +47,7 @@ Every hunk under `vendor/` has to be re-applied by hand on each Slint / presage 
 - When a hunk becomes unnecessary (upstream fixed it, the feature went away), remove it from the source and from `vendor/PATCHES.md`.
 
 ## Conventions
+- **This file holds rules, not a description of the code.** A rule stays true when the implementation changes. Don't put current values (sizes, budgets, caps) or how a feature works today here: they go stale unnoticed. They belong in code comments and `docs/architecture.md`, and even there name the constant rather than repeat its value.
 - UI strings are Korean; code comments are short and English.
 - **Commit subjects are short**: one line, imperative, about 50 characters or less (hard cap 72), no trailing period. Put details in the body (blank line, then wrapped lines) only when the why isn't obvious. Don't cram the whole change list into the subject.
 - **Keep `README.md` current**: when a user-visible feature lands or changes, update its 기능 / 사용법 / 미지원 sections in the same commit.
