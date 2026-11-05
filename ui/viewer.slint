@@ -36,6 +36,9 @@ export component ImageViewer inherits Window {
     in property <int> shown-h;
     // width of the original, for the scale readout
     in property <int> original-w;
+    // wanted offset of the image from the center when it is bigger than the window, physical px
+    in-out property <float> pan-x;
+    in-out property <float> pan-y;
     callback prev();
     callback next();
     callback save();
@@ -56,20 +59,29 @@ export component ImageViewer inherits Window {
     changed width => { root.resized(); }
     changed height => { root.resized(); }
 
-    // Normally 1:1 with the fitted image; until it arrives the old pixels are stretched to the
-    // new size, and a window smaller than that scales it down
+    // Normally 1:1 with the fitted image; until it arrives, and at high zoom, its pixels are
+    // stretched to this size
     property <length> full-w: shown-w * 1phx;
     property <length> full-h: shown-h * 1phx;
-    property <float> shrink: shown-w > 0 && shown-h > 0 ? min(1, root.width / full-w, root.height / full-h) : 1;
-    // this press moved the window: its release is not a click
+    // how far the image sticks out of the window on each side, physical px
+    property <float> over-x: max(0, (shown-w - root.width / 1phx) / 2);
+    property <float> over-y: max(0, (shown-h - root.height / 1phx) / 2);
+    property <bool> overflows: over-x > 0 || over-y > 0;
+    // the image's offset from the center, physical px
+    out property <float> cur-x: clamp(pan-x, -over-x, over-x);
+    out property <float> cur-y: clamp(pan-y, -over-y, over-y);
+    // this press moved the window or the image: its release is not a click
     property <bool> dragged;
+    property <bool> panning;
+    property <float> pan-start-x;
+    property <float> pan-start-y;
     Image {
         source: root.source;
         image-fit: fill;
-        width: full-w * shrink;
-        height: full-h * shrink;
-        x: round((root.width - self.width) / 2 / 1phx) * 1phx;
-        y: round((root.height - self.height) / 2 / 1phx) * 1phx;
+        width: full-w;
+        height: full-h;
+        x: round((root.width - self.width) / 2 / 1phx + cur-x) * 1phx;
+        y: round((root.height - self.height) / 2 / 1phx + cur-y) * 1phx;
     }
 
     keys := FocusScope {
@@ -92,15 +104,26 @@ export component ImageViewer inherits Window {
 
     // the parent of the controls, so hovering them still counts
     hover := TouchArea {
+        mouse-cursor: !root.overflows ? MouseCursor.default : root.panning && self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down) {
                 root.dragged = false;
+                root.panning = false;
+                root.pan-start-x = root.cur-x;
+                root.pan-start-y = root.cur-y;
             }
         }
         moved => {
             if (!root.dragged && (abs(self.mouse-x - self.pressed-x) > 4px || abs(self.mouse-y - self.pressed-y) > 4px)) {
                 root.dragged = true;
-                root.drag-window();
+                root.panning = root.overflows;
+                if (!root.panning) {
+                    root.drag-window();
+                }
+            }
+            if (root.panning) {
+                root.pan-x = root.pan-start-x + (self.mouse-x - self.pressed-x) / 1phx;
+                root.pan-y = root.pan-start-y + (self.mouse-y - self.pressed-y) / 1phx;
             }
         }
         clicked => {
@@ -163,7 +186,7 @@ export component ImageViewer inherits Window {
                     width: self.preferred-width + 20px;
                 }
                 Text {
-                    text: round(root.shown-w * root.shrink * 100 / max(root.original-w, 1)) + "%";
+                    text: round(root.shown-w * 100 / max(root.original-w, 1)) + "%";
                     color: white;
                     font-size: 13px;
                     vertical-alignment: center;

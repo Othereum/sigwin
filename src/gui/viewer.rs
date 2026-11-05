@@ -17,6 +17,13 @@ const MIN_SIZE: (f32, f32) = (360.0, 240.0);
 const REFIT_AFTER: Duration = Duration::from_millis(200);
 /// Image scale per wheel notch.
 const ZOOM_STEP: f64 = 1.1;
+/// Largest scale, unless the screen takes a smaller image further.
+const ZOOM_MAX: f64 = 8.0;
+/// From this scale the original's pixels show as they are.
+const SMOOTH_BELOW: f64 = 3.0;
+/// Above the original's size, a smoothed image of more pixels than this isn't kept (4 bytes each):
+/// the original's pixels show instead.
+const SMOOTH_MAX_PIXELS: u64 = 32_000_000;
 
 /// Window position and size, physical px.
 type Placement = (i32, i32, u32, u32);
@@ -32,6 +39,8 @@ struct Viewer {
     full: (u32, u32),
     /// size the user chose for the image, physical px (the window may be smaller after a snap)
     wanted: Cell<(u32, u32)>,
+    /// window size we last set: another one means the system resized it (a snap)
+    placed: Cell<(u32, u32)>,
     refit: slint::Timer,
 }
 
@@ -99,6 +108,8 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
         // another image starts over at its own size, around the window's center
         v.wanted.set(size);
         set_shown(v, size);
+        v.win.set_pan_x(0.0);
+        v.win.set_pan_y(0.0);
         let (old_w, old_h) = client_size(v);
         let (w, h) = window_size(v, size);
         let pos = v.win.window().position();
@@ -161,6 +172,7 @@ fn create(app: &AppWindow, img: &ViewerImage) -> Result<(), slint::PlatformError
             count: img.count,
             full: img.full,
             wanted: Cell::new(pixels),
+            placed: Cell::new(size),
             refit: slint::Timer::default(),
         });
     });
@@ -185,9 +197,15 @@ fn min_size(v: &Viewer) -> (u32, u32) {
     ((MIN_SIZE.0 * scale) as u32, (MIN_SIZE.1 * scale) as u32)
 }
 
+/// The window for an image of this size: as big as the image, within the screen.
 fn window_size(v: &Viewer, image: (u32, u32)) -> (u32, u32) {
     let min = min_size(v);
-    (image.0.max(min.0), image.1.max(min.1))
+    let (area_w, area_h) = area_size(v);
+    (image.0.min(area_w).max(min.0), image.1.min(area_h).max(min.1))
+}
+
+fn area_size(v: &Viewer) -> (u32, u32) {
+    work_area(viewer_hwnd(&v.win)).map_or((1920, 1080), |(_, _, w, h)| (w as u32, h as u32))
 }
 
 fn shown(v: &Viewer) -> (u32, u32) {
@@ -210,21 +228,20 @@ fn step(by: i64) {
     });
 }
 
-/// The wheel scales the image and the window with it, keeping the image point under the cursor
-/// (around the center, shrinking could leave the cursor outside the window). `cursor` is in
-/// physical px within the window.
+/// The wheel scales the image, and the window with it up to the screen, keeping the image point
+/// under the cursor (around the center, shrinking could leave the cursor outside the window).
+/// `cursor` is in physical px within the window.
 fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
     let moved = VIEWER.with_borrow(|v| {
         let v = v.as_ref()?;
         let (full_w, full_h) = (v.full.0 as f64, v.full.1 as f64);
         let old = shown(v);
-        let area = work_area(viewer_hwnd(&v.win));
-        let (area_w, area_h) = area.map_or((1920, 1080), |(_, _, w, h)| (w, h));
+        let (area_w, area_h) = area_size(v);
         let min = min_size(v);
         let scale = old.0 as f64 / full_w;
-        // down to the minimum window or the original size, whichever is larger; up to the screen
+        // down to the minimum window or the original size, whichever is larger
         let low = (min.0 as f64 / full_w).min(min.1 as f64 / full_h).min(1.0).min(scale);
-        let high = (area_w as f64 / full_w).min(area_h as f64 / full_h).max(scale);
+        let high = (area_w as f64 / full_w).min(area_h as f64 / full_h).max(ZOOM_MAX).max(scale);
         let scale = (scale * ZOOM_STEP.powf(notches as f64)).clamp(low, high);
         let new = (((full_w * scale).round() as u32).max(1), ((full_h * scale).round() as u32).max(1));
         if new == old {
@@ -233,22 +250,25 @@ fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
         if v.win.window().is_maximized() {
             v.win.window().set_maximized(false);
         }
-        v.wanted.set(new);
-        set_shown(v, new);
         let client = client_size(v);
         let (w, h) = window_size(v, new);
-        let anchor = |cursor: f32, client: u32, old: u32, new: u32, window: u32| {
-            let at = ((cursor as f64 - (client as f64 - old as f64) / 2.0) / old as f64).clamp(0.0, 1.0);
-            (cursor as f64 - (at * new as f64 + (window as f64 - new as f64) / 2.0)).round() as i32
+        // where the image point under the cursor is, 0..1, and where the new image starts
+        // relative to the window's left or top if that is to stay under the cursor
+        let at = |cursor: f32, client: u32, old: u32, cur: f32| {
+            ((cursor as f64 - (client as f64 - old as f64) / 2.0 - cur as f64) / old as f64).clamp(0.0, 1.0)
         };
+        let at = (at(cursor_x, client.0, old.0, v.win.get_cur_x()), at(cursor_y, client.1, old.1, v.win.get_cur_y()));
         let pos = v.win.window().position();
-        Some(on_screen(
-            area,
-            pos.x + anchor(cursor_x, client.0, old.0, new.0, w),
-            pos.y + anchor(cursor_y, client.1, old.1, new.1, h),
-            w,
-            h,
-        ))
+        let cursor = (pos.x as f64 + cursor_x as f64, pos.y as f64 + cursor_y as f64);
+        let edge = |cursor: f64, at: f64, new: u32, window: u32| cursor - (at * new as f64 + (window as f64 - new as f64) / 2.0);
+        let (ex, ey) = (edge(cursor.0, at.0, new.0, w), edge(cursor.1, at.1, new.1, h));
+        let placement = on_screen(work_area(viewer_hwnd(&v.win)), ex.round() as i32, ey.round() as i32, w, h);
+        // the window stopped at the screen: the image moves the rest of the way
+        v.win.set_pan_x((ex - placement.0 as f64) as f32);
+        v.win.set_pan_y((ey - placement.1 as f64) as f32);
+        v.wanted.set(new);
+        set_shown(v, new);
+        Some(placement)
     });
     if let Some(p) = moved {
         place(p);
@@ -263,7 +283,14 @@ fn on_screen(area: Option<(i32, i32, i32, i32)>, x: i32, y: i32, w: u32, h: u32)
 
 /// Moves and resizes in one step: two separate calls would shake the window.
 fn place((x, y, w, h): Placement) {
-    let Some(hwnd) = VIEWER.with_borrow(|v| v.as_ref().map(|v| viewer_hwnd(&v.win))) else { return };
+    let Some(hwnd) = VIEWER.with_borrow(|v| {
+        v.as_ref().map(|v| {
+            v.placed.set((w, h));
+            viewer_hwnd(&v.win)
+        })
+    }) else {
+        return;
+    };
     #[cfg(windows)]
     if hwnd != 0 {
         use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
@@ -287,11 +314,21 @@ fn schedule_refit() {
 /// The size on screen changed: fetch the image at the new one, if that gives other pixels.
 fn refit() {
     with_current(|v| {
-        let target = clipped(v.wanted.get(), client_size(v));
-        set_shown(v, target);
+        // the system resized the window (a snap): the image follows, it isn't cut off
+        let client = client_size(v);
+        if client != v.placed.get() {
+            v.placed.set(client);
+            let fitted = clipped(v.wanted.get(), client);
+            v.wanted.set(fitted);
+            set_shown(v, fitted);
+        }
+        let target = v.wanted.get();
+        let pixels = target.0 as u64 * target.1 as u64;
+        let scale = target.0 as f64 / v.full.0 as f64;
+        let want = if scale > 1.0 && (scale >= SMOOTH_BELOW || pixels > SMOOTH_MAX_PIXELS) { v.full } else { target };
         let has = v.win.get_source().size();
-        if target != (has.width, has.height) {
-            send_cmd(Command::ViewImage { id: v.id.clone(), index: v.index, fit: target, exact: true, from_file: false });
+        if want != (has.width, has.height) {
+            send_cmd(Command::ViewImage { id: v.id.clone(), index: v.index, fit: want, exact: true, from_file: false });
         }
     });
 }
