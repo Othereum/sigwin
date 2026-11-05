@@ -71,6 +71,8 @@ export struct MsgItem {
     sticker: bool,
     receipt-info: string,
     pending: bool,
+    // the send failed: "다시 보내기" / "삭제" below the bubble
+    failed: bool,
     // collapsed with the next row: no time / status footer
     hide-time: bool,
     // same run as the row above / below: flatter corners on that side, tighter spacing

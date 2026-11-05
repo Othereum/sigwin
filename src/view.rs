@@ -596,6 +596,9 @@ const COLLAPSE_WITHIN_MS: u64 = 3 * 60 * 1000;
 fn same_run(older: &MsgDto, newer: &MsgDto) -> bool {
     !older.system
         && !newer.system
+        // the retry / discard links hang below the bubble
+        && !older.failed
+        && !newer.failed
         // reactions hang below the bubble
         && older.reactions.is_empty()
         && older.outgoing == newer.outgoing

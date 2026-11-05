@@ -4,13 +4,14 @@ use super::*;
 
 impl App {
     pub(super) async fn send(&mut self, text: String, files: Vec<PathBuf>, quote_id: Option<String>, mentions: Vec<crate::mention::Member>) {
-        let Some(manager) = self.manager.clone() else { return };
+        if self.manager.is_none() {
+            return;
+        }
         let Some(open) = self.current.as_ref() else { return };
         let text = text.trim_end().to_string();
         if text.trim().is_empty() && files.is_empty() {
             return;
         }
-        let thread = open.thread.clone();
         let key = open.key.clone();
         let quote = quote_id.and_then(|id| id.parse::<u64>().ok()).and_then(|qts| {
             let (_, c) = open.window.iter().find(|(t, _)| *t == qts)?;
@@ -44,7 +45,6 @@ impl App {
             self.status("메시지가 너무 깁니다 (최대 64KB)");
             return;
         }
-        let group_revision = self.group_revision(&thread).await;
         // the message itself ends our typing indicator on the other side
         self.composing = None;
         let ts = self.next_send_ts();
@@ -55,7 +55,7 @@ impl App {
         };
         self.pending.push(Pending {
             ts,
-            thread_key: key.clone(),
+            thread_key: key,
             text: text.clone(),
             quote: quote_label,
             quote_author,
@@ -63,8 +63,20 @@ impl App {
             attachment,
             image_key: String::new(),
             error: None,
+            after_seq: None,
+            job: SendJob::Text { body, body_ranges, files, quote },
         });
         self.emit_messages(Scroll::Bottom).await;
+        self.start_send(ts).await;
+    }
+
+    /// Queues the send of the pending row `ts`.
+    pub(super) async fn start_send(&mut self, ts: u64) {
+        let Some(manager) = self.manager.clone() else { return };
+        let Some(p) = self.pending.iter().find(|p| p.ts == ts) else { return };
+        let Some(thread) = parse_thread_key(&p.thread_key) else { return };
+        let (key, job) = (p.thread_key.clone(), p.job.clone());
+        let group_revision = self.group_revision(&thread).await;
         let tx = self.tx.clone();
         let dir = self.paths.attachments.clone();
         let (turn, done) = self.send_turn(&key);
@@ -74,10 +86,29 @@ impl App {
                 let _ = turn.await;
             }
             let started = std::time::Instant::now();
-            let res = Box::pin(send_task(manager, thread, body, body_ranges, files, quote, group_revision, ts, dir)).await;
+            let res = send_job(manager, thread, job, group_revision, ts, dir).await;
             info!(ms = started.elapsed().as_millis() as u64, ok = res.is_ok(), "message sent");
             let _ = tx.send(Internal::Sent(ts, res.map_err(|e| format!("{e:#}"))));
         });
+    }
+
+    /// Sends a failed row again with its timestamp, the message's id: recipients who got it
+    /// the first time drop the copy. It goes to the bottom again while it's on its way.
+    pub(super) async fn retry_send(&mut self, id: &str) {
+        let Ok(ts) = id.parse::<u64>() else { return };
+        let Some(i) = self.pending.iter().position(|p| p.ts == ts && p.error.is_some()) else { return };
+        let mut p = self.pending.remove(i);
+        p.error = None;
+        p.after_seq = None;
+        self.pending.push(p);
+        self.emit_messages(Scroll::Bottom).await;
+        self.start_send(ts).await;
+    }
+
+    pub(super) async fn discard_failed(&mut self, id: &str) {
+        let Ok(ts) = id.parse::<u64>() else { return };
+        self.pending.retain(|p| p.ts != ts || p.error.is_none());
+        self.emit_messages(Scroll::KeepIfNotAtBottom).await;
     }
 
     /// A thread's messages go out one at a time: they're displayed in the order presage stores
@@ -93,6 +124,61 @@ impl App {
         let last = self.pending.iter().map(|p| p.ts).chain(self.ops.iter().map(|o| o.ts)).max().unwrap_or(0);
         now_ms().max(last + 1)
     }
+}
+
+/// What a pending row sends.
+#[derive(Clone)]
+pub(super) enum SendJob {
+    Text { body: String, body_ranges: Vec<BodyRange>, files: Vec<PathBuf>, quote: Option<Quote> },
+    Sticker(StickerSend),
+}
+
+/// Tries when the server limits our rate. A burst gets through at the rate the server allows:
+/// it's a matter of seconds, a longer wait is reported as a failure.
+const RATE_LIMIT_RETRIES: u32 = 5;
+const RATE_LIMIT_MAX_WAIT: Duration = Duration::from_secs(30);
+
+/// How long the server asks us to wait, if that's why the send failed.
+fn rate_limit_wait(e: &anyhow::Error) -> Option<Duration> {
+    use presage::libsignal_service::prelude::{MessageSenderError, ServiceError};
+    let service = match e.downcast_ref::<presage::Error<presage_store_sqlite::SqliteStoreError>>()? {
+        presage::Error::ServiceError(s) => s,
+        presage::Error::MessageSenderError(m) => match m.as_ref() {
+            MessageSenderError::ServiceError(s) => s,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let ServiceError::RateLimitExceeded { retry_after } = service else { return None };
+    let wait = retry_after.and_then(|d| d.to_std().ok()).unwrap_or(Duration::from_secs(1));
+    (wait <= RATE_LIMIT_MAX_WAIT).then_some(wait)
+}
+
+async fn send_job(m: Mgr, thread: Thread, job: SendJob, group_revision: u32, ts: u64, dir: PathBuf) -> anyhow::Result<()> {
+    let mut tries = 0;
+    loop {
+        let res = match job.clone() {
+            SendJob::Text { body, body_ranges, files, quote } => {
+                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, group_revision, ts, dir.clone())).await
+            }
+            SendJob::Sticker(s) => Box::pin(send_sticker_task(m.clone(), thread.clone(), s, group_revision, dir.clone(), ts)).await,
+        };
+        let Err(e) = &res else { return res };
+        match rate_limit_wait(e) {
+            Some(wait) if tries < RATE_LIMIT_RETRIES => {
+                tries += 1;
+                warn!(ts, tries, ms = wait.as_millis() as u64, "send rate limited, waiting");
+                tokio::time::sleep(wait).await;
+            }
+            _ => return res,
+        }
+    }
+}
+
+/// Where a failed row stored right after `after_seq` goes among `items`: above the first row
+/// stored later. `seqs` maps the window's timestamps to their display positions.
+pub(super) fn failed_row_index(items: &[MsgDto], seqs: &HashMap<u64, i64>, after_seq: i64) -> usize {
+    items.iter().position(|m| seqs.get(&m.ts).is_some_and(|s| *s > after_seq)).unwrap_or(items.len())
 }
 
 pub(super) async fn send_task(
@@ -205,7 +291,8 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
         }
         Some(e) => {
             m.status = "실패".into();
-            m.receipt_info = format!("보내지 못했습니다.\n{e}");
+            m.failed = true;
+            m.receipt_info = format!("보내지 못했습니다. 일부 사람에게는 전달되었을 수 있습니다.\n{e}");
         }
     }
     m
@@ -239,4 +326,41 @@ pub(super) async fn deliver(m: &mut Mgr, thread: Thread, mut body: ContentBody, 
 /// Identifier of a group as typing messages carry it.
 pub(super) fn group_identifier(master_key: &[u8; 32]) -> [u8; 32] {
     GroupSecretParams::derive_from_master_key(GroupMasterKey::new(*master_key)).get_group_identifier()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use presage::libsignal_service::prelude::{MessageSenderError, ServiceError};
+    use presage_store_sqlite::SqliteStoreError;
+
+    fn sender_error(s: ServiceError) -> anyhow::Error {
+        presage::Error::<SqliteStoreError>::MessageSenderError(Box::new(MessageSenderError::ServiceError(s))).into()
+    }
+
+    #[test]
+    fn rate_limits_are_waited_out_unless_long() {
+        let limited = |secs| sender_error(ServiceError::RateLimitExceeded { retry_after: Some(chrono::Duration::seconds(secs)) });
+        assert_eq!(rate_limit_wait(&limited(1)), Some(Duration::from_secs(1)));
+        assert_eq!(rate_limit_wait(&limited(3600)), None);
+        let unspecified = sender_error(ServiceError::RateLimitExceeded { retry_after: None });
+        assert_eq!(rate_limit_wait(&unspecified), Some(Duration::from_secs(1)));
+        assert_eq!(rate_limit_wait(&sender_error(ServiceError::Unauthorized)), None);
+        // wrapped on its way up, as the send path may do
+        assert_eq!(rate_limit_wait(&limited(1).context("sending")), Some(Duration::from_secs(1)));
+        assert_eq!(rate_limit_wait(&anyhow::anyhow!("other")), None);
+    }
+
+    #[test]
+    fn failed_rows_stay_below_what_was_stored_before_them() {
+        let row = |ts| MsgDto { ts, ..Default::default() };
+        // display order isn't timestamp order; 25 is an earlier failed row, not stored
+        let items = [row(30), row(10), row(25), row(20)];
+        let seqs = HashMap::from([(30, 1), (10, 2), (20, 3)]);
+        assert_eq!(failed_row_index(&items, &seqs, 0), 0);
+        assert_eq!(failed_row_index(&items, &seqs, 1), 1);
+        // after the earlier failed row anchored at the same place
+        assert_eq!(failed_row_index(&items, &seqs, 2), 3);
+        assert_eq!(failed_row_index(&items, &seqs, 3), 4);
+    }
 }

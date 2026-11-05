@@ -107,6 +107,9 @@ pub(crate) fn pack_item(p: &types::PackDto, thumbs: &HashMap<String, Image>) -> 
 pub(crate) const SPOILER_URL: &str = "sigwin-spoiler:";
 /// "더 읽기" under a cut-short message
 pub(crate) const MORE_URL: &str = "sigwin-more:";
+/// "다시 보내기" / "삭제" under a message that failed to send
+pub(crate) const RETRY_URL: &str = "sigwin-retry:";
+pub(crate) const DISCARD_URL: &str = "sigwin-discard:";
 
 /// Font styles of a message (bold, italic, strikethrough, monospace) as styled text spans.
 pub(crate) fn font_spans(m: &MsgDto) -> Vec<(std::ops::Range<usize>, SigwinStyle)> {
@@ -250,6 +253,7 @@ pub(crate) fn to_item(
         sticker: m.sticker,
         receipt_info: m.receipt_info.as_str().into(),
         pending: m.pending,
+        failed: m.failed,
         hide_time: m.hide_time,
         collapse_above: m.collapse_above,
         collapse_below: m.collapse_below,

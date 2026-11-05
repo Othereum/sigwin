@@ -243,11 +243,36 @@ impl App {
                 }
             }
         }
-        let mut prev = open.window.last().map(|(t, _)| *t);
-        for p in self.pending.iter().filter(|p| p.thread_key == key) {
-            if open.window.iter().any(|(t, _)| *t == p.ts) {
-                continue; // already stored, the real row is shown
+        // not stored yet (once stored, the real row is shown)
+        let stubs: Vec<&Pending> = self
+            .pending
+            .iter()
+            .filter(|p| p.thread_key == key && !open.window.iter().any(|(t, _)| *t == p.ts))
+            .collect();
+        // failed rows stay where they failed, new messages go below them
+        if stubs.iter().any(|p| p.after_seq.is_some()) {
+            let seqs: HashMap<u64, i64> = self
+                .index
+                .rows_from(&open.thread, open.oldest_seq)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(seq, ts)| (ts, seq))
+                .collect();
+            for p in &stubs {
+                let Some(after) = p.after_seq else { continue };
+                // above what's loaded: it comes back with its older neighbours
+                if after < open.oldest_seq && open.has_more {
+                    continue;
+                }
+                let i = failed_row_index(&items, &seqs, after);
+                let prev = i.checked_sub(1).map(|i| items[i].ts);
+                items.insert(i, pending_row(p, prev));
             }
+        }
+        // on their way: at the bottom
+        let mut prev = items.last().map(|m| m.ts);
+        for p in stubs.iter().filter(|p| p.after_seq.is_none()) {
             items.push(pending_row(p, prev));
             prev = Some(p.ts);
         }

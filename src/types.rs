@@ -172,6 +172,8 @@ pub struct MsgDto {
     pub receipt_info: String,
     /// sent by us, not yet confirmed by the server (or failed)
     pub pending: bool,
+    /// pending and the send failed: can be sent again or discarded
+    pub failed: bool,
     /// our own reaction on this message, empty if none
     pub my_reaction: String,
     /// ours, text only, young enough to edit / delete for everyone
@@ -369,6 +371,10 @@ pub enum Command {
     Edit { id: String, text: String, mentions: Vec<crate::mention::Member> },
     /// delete our message `id` for everyone
     Delete(String),
+    /// a failed row: send it again, with the same timestamp
+    RetrySend(String),
+    /// a failed row: forget it
+    DiscardFailed(String),
     /// pin message `id` (row) for `secs` seconds, None = until unpinned
     Pin { id: String, secs: Option<u32> },
     /// unpin; `id` is the pinned message's sent timestamp (`PinDto::id`)

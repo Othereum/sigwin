@@ -215,6 +215,10 @@ struct Pending {
     /// sticker preview: thumbnail key, already emitted to the UI
     image_key: String,
     error: Option<String>,
+    /// failed: last message stored at that moment, the row stays right below it
+    after_seq: Option<i64>,
+    /// what to send, again if it fails
+    job: SendJob,
 }
 
 struct Open {
@@ -545,6 +549,8 @@ impl App {
             Command::React { id, emoji, remove } => self.react(&id, emoji, remove).await,
             Command::Edit { id, text, mentions } => self.edit(&id, text, &mentions).await,
             Command::Delete(id) => self.delete(&id).await,
+            Command::RetrySend(id) => self.retry_send(&id).await,
+            Command::DiscardFailed(id) => self.discard_failed(&id).await,
             Command::Pin { id, secs } => self.pin(&id, secs).await,
             Command::Unpin(id) => self.unpin(&id).await,
             Command::OpenFromToast { key, msg } => self.open_from_toast(&key, msg).await,
@@ -683,8 +689,14 @@ impl App {
                     return;
                 }
                 self.status(format!("전송 실패: {e}"));
+                let thread = self.pending.iter().find(|p| p.ts == ts).and_then(|p| parse_thread_key(&p.thread_key));
+                let after_seq = match thread {
+                    Some(t) => self.index.page(&t, i64::MAX, 1).await.ok().and_then(|r| r.first().map(|r| r.0)),
+                    None => None,
+                };
                 if let Some(p) = self.pending.iter_mut().find(|p| p.ts == ts) {
                     p.error = Some(e);
+                    p.after_seq = Some(after_seq.unwrap_or(0));
                 }
                 self.emit_messages(Scroll::KeepIfNotAtBottom).await;
             }

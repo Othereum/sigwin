@@ -474,6 +474,10 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             crate::notices::open(&crate::data_dir());
         } else if let Some(id) = url.strip_prefix(MORE_URL) {
             s(Command::ReadMore(id.to_string()));
+        } else if let Some(id) = url.strip_prefix(RETRY_URL) {
+            s(Command::RetrySend(id.to_string()));
+        } else if let Some(id) = url.strip_prefix(DISCARD_URL) {
+            s(Command::DiscardFailed(id.to_string()));
         } else {
             link::open(&url);
         }

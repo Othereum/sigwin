@@ -167,6 +167,15 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             m.receipt_info = "서버로 보내는 중입니다.".into();
         }
     }
+    // failed to send
+    {
+        let m = &mut items[296];
+        m.outgoing = true;
+        m.pending = true;
+        m.failed = true;
+        m.status = "실패".into();
+        m.receipt_info = "보내지 못했습니다.".into();
+    }
     // deleted for everyone: by us (right) and by someone else (left)
     view::set_deleted(&mut items[293]);
     items[292] = MsgDto { id: "292".into(), ts: items[292].ts, time: "오후 3:12".into(), deleted: true, text: "삭제된 메시지입니다".into(), ..Default::default() };

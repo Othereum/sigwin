@@ -200,8 +200,9 @@ impl App {
     }
 
     pub(super) async fn send_sticker(&mut self, hex_id: &str, sticker_id: u32) {
-        let Some(manager) = self.manager.clone() else { return };
-        let Some(thread) = self.current.as_ref().map(|o| o.thread.clone()) else { return };
+        if self.manager.is_none() {
+            return;
+        }
         let Ok(id) = hex::decode(hex_id) else { return };
         let Ok(Some(pack)) = self.store.sticker_pack(&id).await else { return };
         let Some(sticker) = pack.manifest.stickers.into_iter().find(|s| s.id == sticker_id) else { return };
@@ -211,13 +212,11 @@ impl App {
         };
         let content_type = sticker.content_type.filter(|c| !c.is_empty()).unwrap_or_else(|| "image/webp".into());
         let s = StickerSend { pack_id: pack.id, pack_key: pack.key, id: sticker_id, emoji: sticker.emoji, content_type, bytes };
-        let group_revision = self.group_revision(&thread).await;
-        let dir = self.paths.attachments.clone();
-        let tx = self.tx.clone();
         let ts = self.next_send_ts();
         let image_key = format!("pending-{ts}");
         let Some(thread_key) = self.current.as_ref().map(|o| o.key.clone()) else { return };
-        let (turn, done) = self.send_turn(&thread_key);
+        // preview straight from the sticker bytes, no disk cache
+        let bytes = s.bytes.clone();
         self.pending.push(Pending {
             ts,
             thread_key,
@@ -228,9 +227,9 @@ impl App {
             attachment: String::new(),
             image_key: image_key.clone(),
             error: None,
+            after_seq: None,
+            job: SendJob::Sticker(s),
         });
-        // preview straight from the sticker bytes, no disk cache
-        let bytes = s.bytes.clone();
         let emit = self.emit.clone();
         tokio::task::spawn_blocking(move || {
             let img = sigwin_thumb::decode(&bytes).map(|i| {
@@ -242,16 +241,7 @@ impl App {
             }
         });
         self.emit_messages(Scroll::Bottom).await;
-        tokio::task::spawn_local(async move {
-            let _done = done;
-            if let Some(turn) = turn {
-                let _ = turn.await;
-            }
-            let started = std::time::Instant::now();
-            let res = Box::pin(send_sticker_task(manager, thread, s, group_revision, dir, ts)).await;
-            info!(ms = started.elapsed().as_millis() as u64, ok = res.is_ok(), "sticker sent");
-            let _ = tx.send(Internal::Sent(ts, res.map_err(|e| format!("{e:#}"))));
-        });
+        self.start_send(ts).await;
     }
 
     pub(super) fn install_pack(&self, id: Vec<u8>, key: Vec<u8>) {
@@ -291,6 +281,7 @@ impl App {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct StickerSend {
     pack_id: Vec<u8>,
     pack_key: Vec<u8>,
