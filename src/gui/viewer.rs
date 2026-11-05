@@ -521,6 +521,13 @@ fn attach(win: &ImageViewer, owner: isize) {
     }
 }
 
+/// A hidden window shows up transparent except for what changed last: the software renderer lost
+/// track of the damage, as in the main window (`winhook`).
+#[cfg(windows)]
+fn repaint() {
+    with_current(|v| v.win.set_repaint_flip(!v.win.get_repaint_flip()));
+}
+
 /// The styles the system snaps and maximizes a window by.
 #[cfg(windows)]
 const NO_SNAP: windows_sys::Win32::UI::WindowsAndMessaging::WINDOW_STYLE =
@@ -538,7 +545,15 @@ unsafe extern "system" fn filter_styles(
     _: usize,
 ) -> isize {
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GWL_STYLE, STYLESTRUCT, WM_STYLECHANGING, WS_EX_APPWINDOW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GWL_STYLE, STYLESTRUCT, WM_SHOWWINDOW, WM_STYLECHANGING, WS_EX_APPWINDOW,
+    };
+    // back with the owner after it was minimized
+    if msg == WM_SHOWWINDOW && wparam != 0 {
+        // after winit has handled the message, and again in case a frame was presented in between
+        let _ = slint::invoke_from_event_loop(repaint);
+        slint::Timer::single_shot(Duration::from_millis(120), repaint);
+    }
     if msg == WM_STYLECHANGING {
         // SAFETY: for this message lparam points to the STYLESTRUCT being applied
         let style = unsafe { &mut *(lparam as *mut STYLESTRUCT) };
