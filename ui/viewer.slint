@@ -54,7 +54,12 @@ export component ImageViewer inherits Window {
     in property <bool> patch-on;
     in property <int> patch-x;
     in property <int> patch-y;
+    // the image moved within the window
     callback panned();
+    // a press started: where a drag of the window would start from
+    callback press-started();
+    // the image is being dragged and fits the window on one axis: the window moves on that axis
+    callback window-followed();
     callback go(int);
     callback prev();
     callback next();
@@ -146,6 +151,7 @@ export component ImageViewer inherits Window {
                 root.panning = false;
                 root.pan-start-x = root.cur-x;
                 root.pan-start-y = root.cur-y;
+                root.press-started();
             }
         }
         moved => {
@@ -157,9 +163,17 @@ export component ImageViewer inherits Window {
                 }
             }
             if (root.panning) {
+                let old-x = root.cur-x;
+                let old-y = root.cur-y;
+                // on an axis where the image fits, `cur-x` / `cur-y` ignore this
                 root.pan-x = root.pan-start-x + (self.mouse-x - self.pressed-x) / 1phx;
                 root.pan-y = root.pan-start-y + (self.mouse-y - self.pressed-y) / 1phx;
-                root.panned();
+                if (old-x != root.cur-x || old-y != root.cur-y) {
+                    root.panned();
+                }
+                if (root.over-x == 0 || root.over-y == 0) {
+                    root.window-followed();
+                }
             }
         }
         clicked => {

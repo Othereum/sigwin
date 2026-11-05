@@ -3,8 +3,8 @@
 //! expired, another thread opened).
 //!
 //! An image opens at its own size within the screen, drawn 1:1. Dragging moves the window, or the
-//! image once that is bigger than the window; a click, Esc or the ✕ near the top right corner
-//! closes it. The wheel scales image and window together around the cursor; the window stops at
+//! image on the axes where that is bigger than the window; a click, Esc or the ✕ near the top
+//! right corner closes it. The wheel scales image and window together around the cursor; the window stops at
 //! the screen, the image goes on. A notch that would pass the original's size stops at it for a
 //! moment, even in the middle of a fast spin. The window's size follows the image, so the system
 //! can't snap, maximize or minimize it.
@@ -69,6 +69,8 @@ struct Viewer {
     patch_id: Cell<u64>,
     /// a patch is being resampled: only one at a time, the next one starts when it ends
     patch_busy: Cell<bool>,
+    /// at the last press: the cursor on the screen and the window's position, physical px
+    press: Cell<Option<((i32, i32), (i32, i32))>>,
 }
 
 thread_local! {
@@ -195,6 +197,13 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
         with_current(clear_patch);
         schedule_refit();
     });
+    win.on_press_started(|| {
+        with_current(|v| {
+            let pos = v.win.window().position();
+            v.press.set(cursor_pos().map(|cursor| (cursor, (pos.x, pos.y))));
+        });
+    });
+    win.on_window_followed(follow_drag);
     win.on_zoom(zoom);
     win.on_drag_window(|| {
         with_current(|v| {
@@ -249,6 +258,7 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
             pixels: img.pixels,
             patch_id: Cell::new(0),
             patch_busy: Cell::new(false),
+            press: Cell::new(None),
         });
     });
     Ok(())
@@ -381,6 +391,41 @@ fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
         place(p);
         schedule_refit();
     }
+}
+
+/// While the image is dragged, the window moves on the axes where the image fits it. By the cursor
+/// on the screen: within the window, the cursor's position changes as the window moves.
+fn follow_drag() {
+    let moved = VIEWER.with_borrow(|v| {
+        let v = v.as_ref()?;
+        let (from, window) = v.press.get()?;
+        let cursor = cursor_pos()?;
+        let (w, h) = client_size(v);
+        let image = shown(v);
+        let pos = v.win.window().position();
+        let x = if image.0 > w { pos.x } else { window.0 + cursor.0 - from.0 };
+        let y = if image.1 > h { pos.y } else { window.1 + cursor.1 - from.1 };
+        let placement = on_screen(work_area(viewer_hwnd(&v.win)), x, y, w, h);
+        ((placement.0, placement.1) != (pos.x, pos.y)).then_some(placement)
+    });
+    if let Some(p) = moved {
+        place(p);
+    }
+}
+
+/// The cursor on the screen, physical px.
+#[cfg(windows)]
+fn cursor_pos() -> Option<(i32, i32)> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut p = POINT { x: 0, y: 0 };
+    // SAFETY: `p` is a local the call only writes to
+    (unsafe { GetCursorPos(&mut p) } != 0).then_some((p.x, p.y))
+}
+
+#[cfg(not(windows))]
+fn cursor_pos() -> Option<(i32, i32)> {
+    None
 }
 
 fn on_screen(area: Option<(i32, i32, i32, i32)>, x: i32, y: i32, w: u32, h: u32) -> Placement {
