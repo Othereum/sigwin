@@ -4,6 +4,9 @@
 
 pub use image::{DynamicImage, ImageResult, RgbaImage};
 
+/// Pixels ready for the UI. Filled here because their code is generic too.
+pub type Pixels = slint::SharedPixelBuffer<slint::Rgba8Pixel>;
+
 /// Decodes, sniffing the format (file names and content types may lie).
 pub fn decode(bytes: &[u8]) -> ImageResult<DynamicImage> {
     image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.decode()
@@ -49,9 +52,9 @@ pub fn fit_size((w, h): (u32, u32), (box_w, box_h): (u32, u32)) -> (u32, u32) {
 /// A still image for the viewer.
 pub struct ViewImage {
     /// upright (EXIF), at full size
-    pub original: RgbaImage,
+    pub original: Pixels,
     /// shrunk to fit the box asked for; `None` when the original already does
-    pub fitted: Option<RgbaImage>,
+    pub fitted: Option<Pixels>,
     /// can't have transparent pixels
     pub opaque: bool,
 }
@@ -72,17 +75,39 @@ pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> Ima
     let full = (img.width(), img.height());
     let opaque = !img.color().has_alpha();
     let out = fit_size(full, (box_w, box_h));
-    let original = img.into_rgba8();
+    let original = to_pixels(img);
     let crop = (0.0, 0.0, full.0 as f64, full.1 as f64);
-    let fitted = if out == full { None } else { resize_view(original.as_raw(), full, crop, out, opaque) };
+    let fitted = if out == full { None } else { resize_view(original.as_bytes(), full, crop, out, opaque) };
     Ok(Some(ViewImage { original, fitted, opaque }))
+}
+
+/// The one conversion from a decoded image to what the UI draws: photos decode to RGB, and going
+/// through RGBA first would write every pixel twice.
+fn to_pixels(img: DynamicImage) -> Pixels {
+    let mut out = Pixels::new(img.width(), img.height());
+    let bytes = out.make_mut_bytes();
+    match img {
+        DynamicImage::ImageRgb8(rgb) => {
+            for (d, s) in bytes.chunks_exact_mut(4).zip(rgb.as_raw().chunks_exact(3)) {
+                d.copy_from_slice(&[s[0], s[1], s[2], 255]);
+            }
+        }
+        other => bytes.copy_from_slice(other.into_rgba8().as_raw()),
+    }
+    out
 }
 
 /// Resamples the `crop` (left, top, width, height) of an RGBA image of `size` to exactly `out`:
 /// Lanczos3 down, Catmull-Rom up (Lanczos rings visibly when enlarging). Integer SIMD, so much
 /// faster than `image`'s resize and without its float buffers. `opaque` skips premultiplying,
 /// which needs a copy of the source.
-pub fn resize_view(src: &[u8], size: (u32, u32), crop: (f64, f64, f64, f64), out: (u32, u32), opaque: bool) -> Option<RgbaImage> {
+pub fn resize_view(src: &[u8], size: (u32, u32), crop: (f64, f64, f64, f64), out: (u32, u32), opaque: bool) -> Option<Pixels> {
+    let mut dst = Pixels::new(out.0, out.1);
+    resize_into(src, size, crop, out, dst.make_mut_bytes(), opaque)?;
+    Some(dst)
+}
+
+fn resize_into(src: &[u8], size: (u32, u32), crop: (f64, f64, f64, f64), out: (u32, u32), dst: &mut [u8], opaque: bool) -> Option<()> {
     use fast_image_resize::images::{Image, ImageRef};
     use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
     let shrinks = (out.0 as f64) * (out.1 as f64) < crop.2 * crop.3;
@@ -92,9 +117,8 @@ pub fn resize_view(src: &[u8], size: (u32, u32), crop: (f64, f64, f64, f64), out
         .crop(crop.0, crop.1, crop.2, crop.3)
         .use_alpha(!opaque);
     let src = ImageRef::new(size.0, size.1, src, PixelType::U8x4).ok()?;
-    let mut dst = Image::new(out.0, out.1, PixelType::U8x4);
-    Resizer::new().resize(&src, &mut dst, &options).ok()?;
-    RgbaImage::from_raw(out.0, out.1, dst.into_vec())
+    let mut dst = Image::from_slice_u8(out.0, out.1, dst, PixelType::U8x4).ok()?;
+    Resizer::new().resize(&src, &mut dst, &options).ok()
 }
 
 /// High-quality downscale so the longer side is `px` (never upscales). Filters in premultiplied
@@ -121,8 +145,12 @@ pub fn fit(img: RgbaImage, px: u32) -> RgbaImage {
 fn resample(img: RgbaImage, px: u32) -> RgbaImage {
     let (w, h) = img.dimensions();
     let s = px as f32 / w.max(h) as f32;
-    let out = (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1));
-    resize_view(img.as_raw(), (w, h), (0.0, 0.0, w as f64, h as f64), out, false).unwrap_or(img)
+    let (nw, nh) = (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1));
+    let mut out = RgbaImage::new(nw, nh);
+    match resize_into(img.as_raw(), (w, h), (0.0, 0.0, w as f64, h as f64), (nw, nh), &mut out, false) {
+        Some(()) => out,
+        None => img,
+    }
 }
 
 /// Center-crops to a square and resamples it to exactly `px` (smaller sources are upscaled
@@ -317,9 +345,10 @@ mod tests {
     fn decode_view_fits_never_upscales_and_refuses() {
         let png = png_rgba(&RgbaImage::new(400, 200)).unwrap();
         let v = decode_view(&png, 100, 100, u64::MAX).unwrap().unwrap();
-        assert_eq!((v.original.dimensions(), v.fitted.unwrap().dimensions(), v.opaque), ((400, 200), (100, 50), false));
+        let size = |p: &Pixels| (p.width(), p.height());
+        assert_eq!((size(&v.original), size(&v.fitted.unwrap()), v.opaque), ((400, 200), (100, 50), false));
         let v = decode_view(&png, 1000, 1000, u64::MAX).unwrap().unwrap();
-        assert_eq!((v.original.dimensions(), v.fitted.is_none()), ((400, 200), true));
+        assert_eq!((size(&v.original), v.fitted.is_none()), ((400, 200), true));
         assert!(decode_view(&png, 100, 100, 79_999).unwrap().is_none());
         assert!(decode_view(&gif(3, 50), 100, 100, u64::MAX).unwrap().is_none());
         assert!(decode_view(b"junk", 100, 100, u64::MAX).is_err());
@@ -331,9 +360,21 @@ mod tests {
         let src = RgbaImage::from_fn(40, 20, |x, _| image::Rgba(if x < 20 { [255, 0, 0, 255] } else { [0, 0, 255, 255] }));
         for out in [(10, 10), (80, 80)] {
             let img = resize_view(src.as_raw(), (40, 20), (20.0, 0.0, 20.0, 20.0), out, true).unwrap();
-            assert_eq!(img.dimensions(), out);
-            assert_eq!(img.get_pixel(out.0 / 2, out.1 / 2).0, [0, 0, 255, 255]);
+            assert_eq!((img.width(), img.height()), out);
+            let middle = (out.1 / 2 * out.0 + out.0 / 2) as usize * 4;
+            assert_eq!(img.as_bytes()[middle..middle + 4], [0, 0, 255, 255]);
         }
+    }
+
+    #[test]
+    fn decode_view_converts_to_the_same_pixels() {
+        let rgb = image::RgbImage::from_fn(3, 2, |x, y| image::Rgb([x as u8 * 10, y as u8 * 20, 30]));
+        let rgba = DynamicImage::ImageRgb8(rgb.clone()).into_rgba8();
+        assert_eq!(to_pixels(DynamicImage::ImageRgb8(rgb)).as_bytes(), rgba.as_raw().as_slice());
+        let gray = image::GrayImage::from_pixel(2, 2, image::Luma([7]));
+        assert_eq!(to_pixels(DynamicImage::ImageLuma8(gray)).as_bytes(), [7, 7, 7, 255].repeat(4).as_slice());
+        let clear = RgbaImage::from_pixel(1, 1, image::Rgba([1, 2, 3, 4]));
+        assert_eq!(to_pixels(DynamicImage::ImageRgba8(clear)).as_bytes(), [1, 2, 3, 4]);
     }
 
     #[test]

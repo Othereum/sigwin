@@ -8,3 +8,4 @@ description = "Pixel work for sigwin (decode, resample), kept out of the main cr
 [dependencies]
 fast_image_resize = "6"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2"] }

@@ -435,9 +435,8 @@ fn refit() {
         let (src, opaque) = (v.pixels.original.clone(), v.pixels.opaque);
         let crop = patch_crop(area, full, target);
         std::thread::spawn(move || {
-            let img = sigwin_thumb::resize_view(src.as_bytes(), full, crop, (area.2, area.3), opaque);
+            let pixels = sigwin_thumb::resize_view(src.as_bytes(), full, crop, (area.2, area.3), opaque);
             drop(src);
-            let pixels = img.map(|i| slint::SharedPixelBuffer::clone_from_slice(i.as_raw(), i.width(), i.height()));
             let _ = slint::invoke_from_event_loop(move || patch_done(id, pixels, (area.0, area.1)));
         });
     });

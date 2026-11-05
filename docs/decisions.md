@@ -37,6 +37,8 @@ The viewer keeps the original from the moment it opens instead of decoding it ag
 
 `fast_image_resize` (5.5.0 and 6.1.0) has a crash reachable from safe code: when enlarging with a kernel that is zero at whole numbers (Catmull-Rom), a first output pixel centered exactly on a source pixel trims its bound past the next pixel's, `b.start -= x_first` underflows and it reads out of bounds. `viewer::patch_crop` can't produce such a crop, and a test holds it to that.
 
+Going to another image of an album decodes it on the spot. 12MP in the `fast` build took 220ms: 50ms decoding and fitting, 118ms copying into the UI's buffer and 50ms freeing the previous image, those two slow because the main crate is unoptimized there. `decode_view` now fills the UI's buffer itself, in the optimized crate. Measured on a synthetic JPEG with everything optimized, that barely changes the time (73ms to 70ms) but lowers the peak (103MB to 84MB). Decoding the neighbouring images ahead would remove the rest of the wait, at about 96MB more while the viewer is open; not done, it's fast enough.
+
 ## Sticker and avatar resampling (measured 2026-11-06, synthetic images, heap peak without the source)
 `fit` moved from `image`'s resize in f32 to `fast_image_resize`:
 | job | `image`, f32 | fir |

@@ -209,7 +209,8 @@ impl App {
 }
 
 /// Safety limit, not a budget: more pixels than this are abnormal input and go to an outside app.
-/// The peak is 8 bytes per pixel; the viewer holds the original at 4 until it closes.
+/// The peak is 7 bytes per pixel for photos, 8 with transparency; the viewer holds the original at 4
+/// until it closes.
 const VIEW_MAX_PIXELS: u64 = 100_000_000;
 
 /// Downloads an attachment unless it is cached; false (status set) if that failed.

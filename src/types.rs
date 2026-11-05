@@ -273,8 +273,7 @@ pub struct ViewerPixels {
 
 impl From<sigwin_thumb::ViewImage> for ViewerPixels {
     fn from(view: sigwin_thumb::ViewImage) -> Self {
-        let copy = |img: &image::RgbaImage| slint::SharedPixelBuffer::clone_from_slice(img.as_raw(), img.width(), img.height());
-        Self { fitted: view.fitted.as_ref().map(copy), original: copy(&view.original), opaque: view.opaque }
+        Self { fitted: view.fitted, original: view.original, opaque: view.opaque }
     }
 }
 
