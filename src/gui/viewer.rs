@@ -6,7 +6,8 @@
 //! image once that is bigger than the window; a click, Esc or the ✕ near the top right corner
 //! closes it. The wheel scales image and window together around the cursor; the window stops at
 //! the screen, the image goes on. A notch that would pass the original's size stops at it for a
-//! moment, even in the middle of a fast spin.
+//! moment, even in the middle of a fast spin. The window's size follows the image, so the system
+//! can't snap or maximize it.
 //!
 //! While the view changes the original's pixels are stretched as they are, then the visible part
 //! is resampled on a thread and drawn over them.
@@ -49,12 +50,8 @@ struct Viewer {
     /// the image last asked for; other answers are late and dropped
     wanted_index: Cell<usize>,
     count: usize,
-    /// size the user chose for the image, physical px (the window may be smaller after a snap)
-    wanted: Cell<(u32, u32)>,
     /// the wheel does nothing until then
     wheel_held: Cell<Option<Instant>>,
-    /// window size we last set: another one means the system resized it (a snap)
-    placed: Cell<(u32, u32)>,
     refit: slint::Timer,
     /// Pans and zooms only resample the visible part of `pixels.original`. Kept until the image or
     /// the window goes, and shared with `source` once that shows it, not a copy.
@@ -124,7 +121,6 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
         let size = (first.width(), first.height());
         v.win.set_source(Image::from_rgba8(first));
         // another image starts over at its own size, around the window's center
-        v.wanted.set(size);
         set_shown(v, size);
         v.win.set_pan_x(0.0);
         v.win.set_pan_y(0.0);
@@ -213,9 +209,7 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
             index: img.index,
             wanted_index: Cell::new(img.index),
             count: img.count,
-            wanted: Cell::new(pixels),
             wheel_held: Cell::new(None),
-            placed: Cell::new(size),
             refit: slint::Timer::default(),
             pixels: img.pixels,
             patch_id: Cell::new(0),
@@ -314,9 +308,6 @@ fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
         if new == full {
             v.wheel_held.set(Some(Instant::now() + HOLD_AT_ORIGINAL));
         }
-        if v.win.window().is_maximized() {
-            v.win.window().set_maximized(false);
-        }
         let client = client_size(v);
         let (w, h) = window_size(v, new);
         // where the image point under the cursor is, 0..1, and where the new image starts
@@ -333,7 +324,6 @@ fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
         // the window stopped at the screen: the image moves the rest of the way
         v.win.set_pan_x((ex - placement.0 as f64) as f32);
         v.win.set_pan_y((ey - placement.1 as f64) as f32);
-        v.wanted.set(new);
         show_original(v);
         set_shown(v, new);
         clear_patch(v);
@@ -352,12 +342,7 @@ fn on_screen(area: Option<(i32, i32, i32, i32)>, x: i32, y: i32, w: u32, h: u32)
 
 /// Moves and resizes in one step: two separate calls would shake the window.
 fn place((x, y, w, h): Placement) {
-    let Some(hwnd) = VIEWER.with_borrow(|v| {
-        v.as_ref().map(|v| {
-            v.placed.set((w, h));
-            viewer_hwnd(&v.win)
-        })
-    }) else {
+    let Some(hwnd) = VIEWER.with_borrow(|v| v.as_ref().map(|v| viewer_hwnd(&v.win))) else {
         return;
     };
     #[cfg(windows)]
@@ -391,18 +376,8 @@ fn schedule_refit() {
 /// The view changed: smooth what's visible now, unless the image is drawn 1:1 or as bare pixels.
 fn refit() {
     with_current(|v| {
-        // the system resized the window (a snap): the image follows, it isn't cut off
         let client = client_size(v);
-        if client != v.placed.get() {
-            v.placed.set(client);
-            let fitted = clipped(v.wanted.get(), client);
-            if fitted != v.wanted.get() {
-                v.wanted.set(fitted);
-                set_shown(v, fitted);
-                clear_patch(v);
-            }
-        }
-        let target = v.wanted.get();
+        let target = shown(v);
         let has = v.win.get_source().size();
         if target == (has.width, has.height) {
             return clear_patch(v);
@@ -481,15 +456,6 @@ fn clear_patch(v: &Viewer) {
     v.win.set_patch(Image::default());
 }
 
-/// `size`, shrunk to fit in `bounds` if needed.
-fn clipped(size: (u32, u32), bounds: (u32, u32)) -> (u32, u32) {
-    if size.0 <= bounds.0 && size.1 <= bounds.1 {
-        return size;
-    }
-    let s = (bounds.0 as f64 / size.0 as f64).min(bounds.1 as f64 / size.1 as f64);
-    (((size.0 as f64 * s).round() as u32).max(1), ((size.1 as f64 * s).round() as u32).max(1))
-}
-
 /// Largest image size for a new image, physical px.
 fn screen_box(hwnd: isize) -> (u32, u32) {
     let (w, h) = work_area(hwnd).map_or((1920, 1080), |(_, _, w, h)| (w, h));
@@ -528,7 +494,7 @@ fn attach(win: &ImageViewer, owner: isize) {
     use slint::winit_030::winit::platform::windows::WindowExtWindows;
     use windows_sys::Win32::UI::Shell::SetWindowSubclass;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, GWLP_HWNDPARENT, GWL_EXSTYLE, WS_EX_APPWINDOW,
+        GetWindowLongPtrW, SetWindowLongPtrW, GWLP_HWNDPARENT, GWL_EXSTYLE, GWL_STYLE, WS_EX_APPWINDOW,
     };
 
     let hwnd = viewer_hwnd(win);
@@ -538,7 +504,9 @@ fn attach(win: &ImageViewer, owner: isize) {
     }
     // SAFETY: both are our own live windows, on their UI thread; the subclass goes with the window
     unsafe {
-        SetWindowSubclass(hwnd as _, Some(no_app_window), 1, 0);
+        SetWindowSubclass(hwnd as _, Some(filter_styles), 1, 0);
+        let style = GetWindowLongPtrW(hwnd as _, GWL_STYLE);
+        SetWindowLongPtrW(hwnd as _, GWL_STYLE, style & !(NO_SNAP as isize));
         let style = GetWindowLongPtrW(hwnd as _, GWL_EXSTYLE);
         SetWindowLongPtrW(hwnd as _, GWL_EXSTYLE, style & !(WS_EX_APPWINDOW as isize));
         SetWindowLongPtrW(hwnd as _, GWLP_HWNDPARENT, owner);
@@ -553,10 +521,15 @@ fn attach(win: &ImageViewer, owner: isize) {
     }
 }
 
-/// winit gives every window `WS_EX_APPWINDOW`, which keeps even an owned one on the taskbar, and
-/// sets it again whenever its flags change (a snap, for one).
+/// The styles the system snaps and maximizes a window by.
 #[cfg(windows)]
-unsafe extern "system" fn no_app_window(
+const NO_SNAP: windows_sys::Win32::UI::WindowsAndMessaging::WINDOW_STYLE =
+    windows_sys::Win32::UI::WindowsAndMessaging::WS_THICKFRAME | windows_sys::Win32::UI::WindowsAndMessaging::WS_MAXIMIZEBOX;
+
+/// winit gives every window `WS_EX_APPWINDOW`, which keeps even an owned one on the taskbar, and
+/// a resizable one `NO_SNAP`, and sets them again whenever its flags change.
+#[cfg(windows)]
+unsafe extern "system" fn filter_styles(
     hwnd: windows_sys::Win32::Foundation::HWND,
     msg: u32,
     wparam: usize,
@@ -565,11 +538,15 @@ unsafe extern "system" fn no_app_window(
     _: usize,
 ) -> isize {
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, STYLESTRUCT, WM_STYLECHANGING, WS_EX_APPWINDOW};
-    if msg == WM_STYLECHANGING && wparam as i32 == GWL_EXSTYLE {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GWL_STYLE, STYLESTRUCT, WM_STYLECHANGING, WS_EX_APPWINDOW};
+    if msg == WM_STYLECHANGING {
         // SAFETY: for this message lparam points to the STYLESTRUCT being applied
         let style = unsafe { &mut *(lparam as *mut STYLESTRUCT) };
-        style.styleNew &= !WS_EX_APPWINDOW;
+        match wparam as i32 {
+            GWL_STYLE => style.styleNew &= !NO_SNAP,
+            GWL_EXSTYLE => style.styleNew &= !WS_EX_APPWINDOW,
+            _ => {}
+        }
     }
     // SAFETY: forwards this very call
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
