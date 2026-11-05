@@ -27,6 +27,11 @@ const SCREEN_SHARE: f32 = 0.8;
 const THUMB_CELL: f32 = 44.0;
 /// `min-width` / `min-height` of `ImageViewer`.
 const MIN_SIZE: (f32, f32) = (360.0, 240.0);
+/// Space a small image of an album gets around it, to stay clear of the thumbnail strip: its height
+/// and margin in `ImageViewer`, on both sides as the image is centered.
+const STRIP_CLEARANCE: f32 = 128.0;
+/// The window of an album grows for `STRIP_CLEARANCE` up to this height.
+const ALBUM_HEIGHT: f32 = 360.0;
 /// Smooth what's visible this long after the last change of view: longer than the gaps within a
 /// wheel burst (measured up to 65ms; slow single notches are 400ms and more apart).
 const REFIT_AFTER: Duration = Duration::from_millis(100);
@@ -217,7 +222,8 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
     let scale = window::monitor_scale(window::hwnd(app));
     let first = img.pixels.take_first();
     let pixels = (first.width(), first.height());
-    let size = (pixels.0.max((MIN_SIZE.0 * scale) as u32), pixels.1.max((MIN_SIZE.1 * scale) as u32));
+    let height = if img.count > 1 { album_height(pixels.1, scale) } else { pixels.1 };
+    let size = (pixels.0.max((MIN_SIZE.0 * scale) as u32), height.max((MIN_SIZE.1 * scale) as u32));
     win.set_source(Image::from_rgba8(first));
     show_details(&win, &img);
     if img.count > 1 {
@@ -286,7 +292,15 @@ fn min_size(v: &Viewer) -> (u32, u32) {
 fn window_size(v: &Viewer, image: (u32, u32)) -> (u32, u32) {
     let min = min_size(v);
     let (area_w, area_h) = area_size(v);
-    (image.0.min(area_w).max(min.0), image.1.min(area_h).max(min.1))
+    let height = if v.count > 1 { album_height(image.1, v.win.window().scale_factor()) } else { image.1 };
+    (image.0.min(area_w).max(min.0), height.min(area_h).max(min.1))
+}
+
+/// The height a window of an album wants for an image of this height: the smaller the image, the
+/// more of it stays clear of the thumbnail strip, without a jump in size along the way.
+fn album_height(image: u32, scale: f32) -> u32 {
+    let clearance = (STRIP_CLEARANCE * scale) as u32;
+    image.max((image + clearance).min((ALBUM_HEIGHT * scale) as u32))
 }
 
 fn area_size(v: &Viewer) -> (u32, u32) {
@@ -676,6 +690,16 @@ fn viewer_hwnd(win: &ImageViewer) -> isize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn album_windows_grow_without_a_jump() {
+        assert_eq!(album_height(100, 1.0), 228);
+        assert_eq!(album_height(232, 1.0), 360);
+        assert_eq!(album_height(300, 1.0), 360);
+        assert_eq!(album_height(361, 1.0), 361);
+        assert_eq!(album_height(100, 2.0), 356);
+        assert!((1..1000).all(|h| album_height(h + 1, 1.0) - album_height(h, 1.0) <= 1));
+    }
 
     #[test]
     fn wheel_stops_at_the_original_size() {

@@ -96,11 +96,13 @@ export component ImageViewer inherits Window {
     // this press moved the window or the image: its release is not a click
     property <bool> has-strip: root.thumbs.length > 1;
     property <length> strip-w: min(root.thumbs.length * 48px - 4px, root.width - 32px);
-    property <bool> strip-shown: root.has-strip && (root.near-bar || root.strip-on);
+    // the strip shows when the cursor is about where it appears
+    property <bool> near-strip: hover.has-hover && hover.mouse-y > root.height - 100px && abs(hover.mouse-x - root.width / 2) < strip-w / 2 + 40px;
+    property <bool> strip-shown: root.has-strip && (root.near-strip || root.strip-on);
     // height of the cursor where the previous and next buttons may show
     property <bool> near-side: hover.has-hover && root.has-strip && abs(hover.mouse-y - root.height / 2) < 130px;
-    // the bar shows when the cursor is about where it appears
-    property <bool> near-bar: hover.has-hover && hover.mouse-y > root.height - (has-strip ? 150px : 100px) && abs(hover.mouse-x - root.width / 2) < max(200px, has-strip ? strip-w / 2 + 40px : 0px);
+    // the buttons at the top right show when the cursor is about where they appear
+    property <bool> near-top: hover.has-hover && hover.mouse-y < 100px && hover.mouse-x > root.width - 300px;
     property <bool> dragged;
     property <bool> panning;
     property <float> pan-start-x;
@@ -185,7 +187,30 @@ export component ImageViewer inherits Window {
             root.zoom(e.delta-y / 60px, self.mouse-x / 1phx, self.mouse-y / 1phx);
             accept
         }
-        if hover.has-hover && hover.mouse-x > root.width - 100px && hover.mouse-y < 100px: ViewerButton {
+        if root.near-top: Rectangle {
+            // apart from ✕, which closes the window
+            x: root.width - self.width - 56px;
+            y: 12px;
+            width: bar.preferred-width;
+            height: bar.preferred-height;
+            border-radius: 8px;
+            background: #000000c0;
+            // clicks between the buttons don't close the window
+            TouchArea {}
+            bar := HorizontalLayout {
+                padding: 3px;
+                spacing: 2px;
+                ViewerButton {
+                    text: "저장";
+                    clicked => { root.save(); }
+                }
+                ViewerButton {
+                    text: "기본 앱으로 열기";
+                    clicked => { root.open-outside(); }
+                }
+            }
+        }
+        if root.near-top: ViewerButton {
             x: root.width - self.width - 12px;
             y: 12px;
             width: 36px;
@@ -215,40 +240,15 @@ export component ImageViewer inherits Window {
             background: self.hovered ? #000000d0 : #00000090;
             clicked => { root.next(); }
         }
-        if root.near-bar: Rectangle {
-            x: (root.width - self.width) / 2;
-            y: root.height - self.height - 12px;
-            width: bar.preferred-width;
-            height: bar.preferred-height;
-            border-radius: 8px;
-            background: #000000c0;
-            // clicks between the buttons don't close the window
-            TouchArea {}
-            bar := HorizontalLayout {
-                padding: 4px;
-                spacing: 2px;
-                ViewerButton {
-                    text: "저장";
-                    clicked => { root.save(); }
-                }
-                ViewerButton {
-                    text: "기본 앱으로 열기";
-                    clicked => { root.open-outside(); }
-                }
-            }
-        }
         if root.strip-shown: Rectangle {
             x: (root.width - self.width) / 2;
-            y: root.height - self.height - 56px;
+            y: root.height - self.height - 12px;
             width: root.strip-w + 8px;
             height: 52px;
             border-radius: 8px;
             background: #000000c0;
-            // nor clicks between the thumbnails, or just below them on the way to the buttons
-            TouchArea {
-                height: parent.height + 6px;
-                y: 0;
-            }
+            // clicks between the thumbnails don't close the window
+            TouchArea {}
             Flickable {
                 property <int> at: root.current;
                 function reveal() {
@@ -290,10 +290,10 @@ export component ImageViewer inherits Window {
         }
     }
 
-    // above the bar, which may not be showing; clicks go through it
+    // above the strip if it's showing; clicks go through it
     if root.scale-on: Rectangle {
         x: (root.width - self.width) / 2;
-        y: root.height - self.height - (root.strip-shown ? 114px : 58px);
+        y: root.height - self.height - (root.strip-shown ? 70px : 12px);
         width: scale-text.preferred-width + 24px;
         height: 30px;
         border-radius: 8px;
@@ -312,6 +312,6 @@ export component ImageViewer inherits Window {
         text: root.notice-text;
         max-text-width: root.width - 64px;
         x: (root.width - self.width) / 2;
-        y: root.height - self.height - (root.strip-shown ? 152px : 96px);
+        y: root.height - self.height - (root.strip-shown ? 108px : 50px);
     }
 }
