@@ -5,13 +5,14 @@
 //! An image opens at its own size within the screen, drawn 1:1. Dragging moves the window, or the
 //! image once that is bigger than the window; a click, Esc or the ✕ near the top right corner
 //! closes it. The wheel scales image and window together around the cursor; the window stops at
-//! the screen, the image goes on.
+//! the screen, the image goes on. A notch that would pass the original's size stops at it for a
+//! moment, even in the middle of a fast spin.
 //!
 //! While the view changes the original's pixels are stretched as they are, then the visible part
 //! is resampled on a thread and drawn over them.
 
 use std::cell::Cell;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use slint::winit_030::WinitWindowAccessor;
 
@@ -29,6 +30,11 @@ const REFIT_AFTER: Duration = Duration::from_millis(100);
 const ZOOM_STEP: f64 = 1.1;
 /// Largest scale, unless the screen takes a smaller image further.
 const ZOOM_MAX: f64 = 8.0;
+/// How close to 100% the wheel may end up before it goes all the way there.
+const NEAR_ORIGINAL: f64 = 0.05;
+/// The wheel does nothing for this long after landing on 100%: notches within a burst are at most
+/// 65ms apart, so a fast spin still catches there.
+const HOLD_AT_ORIGINAL: Duration = Duration::from_millis(120);
 /// From this scale the original's pixels show as they are.
 const SMOOTH_BELOW: f64 = 3.0;
 
@@ -45,6 +51,8 @@ struct Viewer {
     count: usize,
     /// size the user chose for the image, physical px (the window may be smaller after a snap)
     wanted: Cell<(u32, u32)>,
+    /// the wheel does nothing until then
+    wheel_held: Cell<Option<Instant>>,
     /// window size we last set: another one means the system resized it (a snap)
     placed: Cell<(u32, u32)>,
     refit: slint::Timer,
@@ -195,6 +203,7 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
             wanted_index: Cell::new(img.index),
             count: img.count,
             wanted: Cell::new(pixels),
+            wheel_held: Cell::new(None),
             placed: Cell::new(size),
             refit: slint::Timer::default(),
             pixels: img.pixels,
@@ -254,12 +263,25 @@ fn step(by: i64) {
     });
 }
 
+/// The scale after some wheel notches. Steps rarely land on 100%, the sharpest view, so one that
+/// would pass it or end up near it stops there. Only on the way to it: on the way out, the small
+/// steps of a touchpad could never leave.
+fn wheel_scale(scale: f64, notches: f32) -> f64 {
+    let next = scale * ZOOM_STEP.powf(notches as f64);
+    let passes = (scale < 1.0 && next > 1.0) || (scale > 1.0 && next < 1.0);
+    let (from, to) = ((scale - 1.0).abs(), (next - 1.0).abs());
+    if passes || (to < from && to <= NEAR_ORIGINAL) { 1.0 } else { next }
+}
+
 /// The wheel scales the image, and the window with it up to the screen, keeping the image point
 /// under the cursor (around the center, shrinking could leave the cursor outside the window).
 /// `cursor` is in physical px within the window.
 fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
     let moved = VIEWER.with_borrow(|v| {
         let v = v.as_ref()?;
+        if v.wheel_held.get().is_some_and(|until| Instant::now() < until) {
+            return None;
+        }
         let full = v.pixels.full();
         let (full_w, full_h) = (full.0 as f64, full.1 as f64);
         let old = shown(v);
@@ -269,7 +291,7 @@ fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
         // down to the minimum window or the original size, whichever is larger
         let low = (min.0 as f64 / full_w).min(min.1 as f64 / full_h).min(1.0).min(scale);
         let high = (area_w as f64 / full_w).min(area_h as f64 / full_h).max(ZOOM_MAX).max(scale);
-        let scale = (scale * ZOOM_STEP.powf(notches as f64)).clamp(low, high);
+        let scale = wheel_scale(scale, notches).clamp(low, high);
         // The renderer steps through source pixels in 1/256ths, truncated: at other scales the
         // error adds up across the image, up to 8px at 1080p, and the patch lands elsewhere. So
         // only scales where the step is a whole number of 1/256ths.
@@ -277,6 +299,9 @@ fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
         let new = (((full_w * 256.0 / step) as u32).max(1), ((full_h * 256.0 / step) as u32).max(1));
         if new == old {
             return None;
+        }
+        if new == full {
+            v.wheel_held.set(Some(Instant::now() + HOLD_AT_ORIGINAL));
         }
         if v.win.window().is_maximized() {
             v.win.window().set_maximized(false);
@@ -523,6 +548,30 @@ fn viewer_hwnd(win: &ImageViewer) -> isize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wheel_stops_at_the_original_size() {
+        assert_eq!(wheel_scale(0.95, 1.0), 1.0);
+        assert_eq!(wheel_scale(1.05, -1.0), 1.0);
+        // a burst of notches in one event stops too
+        assert_eq!(wheel_scale(0.5, 10.0), 1.0);
+        assert_eq!(wheel_scale(1.0, 1.0), ZOOM_STEP);
+        assert_eq!(wheel_scale(1.0, -1.0), 1.0 / ZOOM_STEP);
+        assert_eq!(wheel_scale(0.5, 1.0), 0.5 * ZOOM_STEP);
+    }
+
+    #[test]
+    fn wheel_goes_to_the_original_size_from_near_it() {
+        // would end up at 99% and 104%
+        assert_eq!(wheel_scale(0.9, 1.0), 1.0);
+        assert_eq!(wheel_scale(1.144, -1.0), 1.0);
+        // not near enough
+        assert_eq!(wheel_scale(0.8, 1.0), 0.8 * ZOOM_STEP);
+        // small steps can leave 100%, and don't fall back while leaving
+        let out = wheel_scale(1.0, 0.1);
+        assert!(out > 1.0 && out < 1.05);
+        assert!(wheel_scale(out, 0.1) > out);
+    }
 
     #[test]
     fn patch_crops_avoid_the_resizer_crash() {
