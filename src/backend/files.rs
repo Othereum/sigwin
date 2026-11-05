@@ -103,7 +103,7 @@ impl App {
         Some((attachment_path(&self.paths.attachments, &view::attachment_key(a, ts, i)), a.clone()))
     }
 
-    pub(super) fn view_image(&self, id: &str, index: usize, fit: (u32, u32), from_file: bool) {
+    pub(super) fn view_image(&self, id: &str, index: usize, fit: (u32, u32), exact: bool, from_file: bool) {
         let Some((_, dm)) = self.row_message(id) else { return };
         let shown = view::shown_attachments(dm).count();
         let count = view::shown_attachments(dm).filter(|(_, a)| view::is_image(a)).count();
@@ -124,7 +124,7 @@ impl App {
             let p = path.clone();
             let decoded = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
                 let bytes = sigwin_vault::read(&p)?;
-                let Some((img, full)) = sigwin_thumb::decode_view(&bytes, fit.0, fit.1, VIEW_MAX_PIXELS)? else {
+                let Some((img, full)) = sigwin_thumb::decode_view(&bytes, fit.0, fit.1, exact, VIEW_MAX_PIXELS)? else {
                     return Ok(None);
                 };
                 drop(bytes);

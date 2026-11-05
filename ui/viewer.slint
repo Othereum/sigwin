@@ -3,6 +3,7 @@
 component ViewerButton inherits Rectangle {
     in property <string> text;
     in property <length> font-size: 13px;
+    in property <string> font-family;
     out property <bool> hovered: ta.has-hover;
     callback clicked();
     min-height: 30px;
@@ -15,6 +16,7 @@ component ViewerButton inherits Rectangle {
             text: root.text;
             color: white;
             font-size: root.font-size;
+            font-family: root.font-family;
             vertical-alignment: center;
             horizontal-alignment: center;
         }
@@ -29,26 +31,38 @@ export component ImageViewer inherits Window {
     in property <image> source;
     // "2 / 3"; empty for a single image
     in property <string> caption;
+    // size to draw the image at, physical px
+    in property <int> shown-w;
+    in property <int> shown-h;
+    // width of the original, for the scale readout
+    in property <int> original-w;
     callback prev();
     callback next();
     callback save();
     callback open-outside();
     callback dismiss();
     callback resized();
+    callback drag-window();
+    // wheel notches (+ = up) and the cursor in physical px
+    callback zoom(float, float, float);
     title: "이미지 보기";
     icon: @image-url("../assets/icon.png");
     default-font-family: "Malgun Gothic";
     background: #111111;
+    no-frame: true;
     min-width: 360px;
     min-height: 240px;
     forward-focus: keys;
     changed width => { root.resized(); }
     changed height => { root.resized(); }
 
-    // 1:1 in physical pixels; until the fitted image arrives, a window smaller than it scales it
-    property <length> full-w: source.width * 1phx;
-    property <length> full-h: source.height * 1phx;
-    property <float> shrink: source.width > 0 && source.height > 0 ? min(1, root.width / full-w, root.height / full-h) : 1;
+    // Normally 1:1 with the fitted image; until it arrives the old pixels are stretched to the
+    // new size, and a window smaller than that scales it down
+    property <length> full-w: shown-w * 1phx;
+    property <length> full-h: shown-h * 1phx;
+    property <float> shrink: shown-w > 0 && shown-h > 0 ? min(1, root.width / full-w, root.height / full-h) : 1;
+    // this press moved the window: its release is not a click
+    property <bool> dragged;
     Image {
         source: root.source;
         image-fit: fill;
@@ -78,7 +92,36 @@ export component ImageViewer inherits Window {
 
     // the parent of the controls, so hovering them still counts
     hover := TouchArea {
-        clicked => { root.dismiss(); }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.dragged = false;
+            }
+        }
+        moved => {
+            if (!root.dragged && (abs(self.mouse-x - self.pressed-x) > 4px || abs(self.mouse-y - self.pressed-y) > 4px)) {
+                root.dragged = true;
+                root.drag-window();
+            }
+        }
+        clicked => {
+            if (!root.dragged) {
+                root.dismiss();
+            }
+        }
+        scroll-event(e) => {
+            root.zoom(e.delta-y / 60px, self.mouse-x / 1phx, self.mouse-y / 1phx);
+            accept
+        }
+        if hover.has-hover && hover.mouse-x > root.width - 100px && hover.mouse-y < 100px: ViewerButton {
+            x: root.width - self.width - 12px;
+            y: 12px;
+            width: 36px;
+            height: 36px;
+            text: "✕";
+            font-family: "Segoe UI Symbol";
+            background: self.hovered ? #c42b1c : #00000090;
+            clicked => { root.dismiss(); }
+        }
         if hover.has-hover && root.caption != "": ViewerButton {
             x: 12px;
             y: (root.height - self.height) / 2;
@@ -113,6 +156,14 @@ export component ImageViewer inherits Window {
                 spacing: 2px;
                 if root.caption != "": Text {
                     text: root.caption;
+                    color: white;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                    width: self.preferred-width + 20px;
+                }
+                Text {
+                    text: round(root.shown-w * root.shrink * 100 / max(root.original-w, 1)) + "%";
                     color: white;
                     font-size: 13px;
                     vertical-alignment: center;

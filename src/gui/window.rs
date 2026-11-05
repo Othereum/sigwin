@@ -268,6 +268,8 @@ pub(crate) fn visibility(app: &AppWindow, shown: bool) {
         }
         return;
     }
+    // an owned window would stay up while the main one sits in the tray
+    viewer::close();
     let weak = app.as_weak();
     RELEASE.with(|t| {
         t.start(slint::TimerMode::SingleShot, RELEASE_AFTER, move || {
