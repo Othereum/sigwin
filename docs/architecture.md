@@ -14,6 +14,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/gui/anim.rs` | animated stickers: rows report themselves on screen (`Anim.shown`), frames are asked once (`Command::StickerFrames`), kept under `ANIM_BUDGET` (least recently shown goes back to its still); picker plays only the hovered sticker (`PickerFrames`, from the `sp_*-anim.enc` bytes `open_pack` keeps). Exact frame times (µs, by the wall clock): one single-shot timer wakes at the earliest frame change and sets that sticker's shared one-element `frame` model (rows untouched); it stops while minimized |
 | `src/gui/drafts.rs` | per-thread composer drafts (text, mentions, reply, files) in `drafts.json`, saved on thread switch and exit; merged into the backend's thread list ("작성 중:", sorted by draft time when newer than the last message, like Signal Desktop's `shouldShowDraft`) |
 | `src/gui/wire.rs` | Slint callbacks → `Command`s, one `wire_*` per area (threads, composer, messages, stickers, settings) |
+| `src/gui/viewer.rs` | image viewer: its own window (`ui/viewer.slint`), created per opening and dropped on close so its image and frame buffer go too. Opens at the image's size within 90% of the monitor's work area, drawn 1:1 in physical px. Keeps only the fitted image: a bigger window decodes the original again (`sigwin_thumb::decode_view`). Closes when the row goes away (deleted, expired, thread switch). Animated, undecodable or over 100MP images go to the default app. |
 | `src/gui/window.rs` | theme, zoom, native window handle, focus hook (`hook_window`) |
 | `src/demo.rs` | demo modes: fake backend with synthetic data, `SIGWIN_DEMO_*` extras, self-test |
 | `src/backend.rs` | `App` state, `run` (startup, linking, receive reconnect with backoff), command dispatch, internal events, sweep of expired messages, unlink |
@@ -29,7 +30,7 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/db.rs` | own SQL on presage's DB: thread list by recency, paging in display order (`ls_order`: stored order, kept by triggers on presage's table), `ls_receipts` index. Our `ls_*` tables are versioned in `ls_meta` (`SCHEMA`); new tables are just added, changes to existing ones go through `migrate` steps (rebuildable ones dropped and backfilled again), since auto-updates carry old DBs forward |
 | `src/types.rs` | `Command` / `Event` / DTOs crossing threads (all `Send`), thread keys `c:<uuid>` / `g:<hex>` |
 | `src/secret.rs` | random 256-bit DB key, stored DPAPI-protected (`db.key`) |
-| `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |
+| `src/picker.rs` | file dialogs in a child process (`--pick-files <hwnd>`, `--save-file <hwnd> <name>`) |
 | `src/instance.rs` | one process per data dir: a named event (`Local\Sigwin-<FNV hash of the dir>`); a second launch signals it (first comes to the front) and exits; a dev build doesn't signal, it shows an error and exits. A second `-quit` event lets the installer/uninstaller close a running app (normal exit path). Headless runs skip it |
 | `src/install.rs` | self-install: an exe run from outside `%LOCALAPPDATA%\Sigwin\` first asks (install / cancel; no question when that version or newer is already installed), then copies itself there (running copy renamed to `.old`), writes the HKCU Uninstall entry and a Start menu shortcut, starts the installed copy and exits; never overwrites a newer installed version (`DisplayVersion`). `--uninstall` asks (data kept by default), quits the app, removes registry/shortcut/files and self-deletes. Skipped for dev builds (no `SIGWIN_RELEASE`, `docs/release.md`), demo and headless |
 | `src/logfile.rs` | log file `<data>\logs\sigwin.log` (rotated to `.1` past 1MB) next to stderr, plus a panic hook; skipped for `--uninstall` (it may delete the data folder). Settings > 문제 해결 opens the folder |
@@ -57,5 +58,6 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `ui/app.slint` | `AppWindow`: properties and callbacks the Rust side uses, main layout, overlays (menu, mention popup, info). Re-exports the structs and globals for the generated code |
 | `ui/types.slint`, `ui/theme.slint` | rows filled by Rust (`MsgItem`, `ThreadItem`, ...); `Theme` colors and the `Links` hook |
 | `ui/bubble.slint` | message bubble (`Bubble`, `MsgMeta`, `MsgImage`, `MsgTools`) |
+| `ui/viewer.slint` | `ImageViewer`, the viewer window: fixed dark look (globals like `Theme` aren't shared between windows) |
 | `ui/widgets.slint` | small shared widgets (`Avatar`, `IconButton`, `MenuRow`, `TextButton`, `Segmented`) |
 | `ui/thread_row.slint`, `ui/stickers.slint`, `ui/settings.slint`, `ui/link.slint` | thread list row, sticker panel, settings page, linking page |

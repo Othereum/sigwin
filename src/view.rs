@@ -182,7 +182,7 @@ pub fn long_text(dm: &DataMessage, ts: u64) -> Option<(String, &AttachmentPointe
 }
 
 /// Attachments shown as such (the long-text one is part of the body).
-fn shown_attachments(dm: &DataMessage) -> impl Iterator<Item = (usize, &AttachmentPointer)> {
+pub fn shown_attachments(dm: &DataMessage) -> impl Iterator<Item = (usize, &AttachmentPointer)> {
     dm.attachments.iter().enumerate().filter(|(_, a)| !is_long_text(a))
 }
 

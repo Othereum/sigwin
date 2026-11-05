@@ -9,26 +9,54 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 const ARG: &str = "--pick-files";
+const ARG_SAVE: &str = "--save-file";
 
 /// Call first thing in `main`: returns true if this process was the picker child.
 pub fn run_if_child() -> bool {
     let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) != Some(ARG) {
-        return false;
-    }
+    let save = match args.get(1).map(String::as_str) {
+        Some(ARG) => false,
+        Some(ARG_SAVE) => true,
+        _ => return false,
+    };
     let owner = args.get(2).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
-    let mut dialog = rfd::FileDialog::new().set_title("첨부할 파일 선택");
+    let mut dialog = rfd::FileDialog::new();
     if owner != 0 {
         dialog = dialog.set_parent(&Owner(owner));
     }
-    if let Some(files) = dialog.pick_files() {
-        let mut out = std::io::stdout().lock();
-        for f in files {
-            let _ = writeln!(out, "{}", f.to_string_lossy());
-        }
-        let _ = out.flush();
+    let files: Vec<PathBuf> = if save {
+        let name = args.get(3).map(String::as_str).unwrap_or_default();
+        dialog.set_title("이미지 저장").set_file_name(name).save_file().into_iter().collect()
+    } else {
+        dialog.set_title("첨부할 파일 선택").pick_files().unwrap_or_default()
+    };
+    let mut out = std::io::stdout().lock();
+    for f in files {
+        let _ = writeln!(out, "{}", f.to_string_lossy());
     }
+    let _ = out.flush();
     true
+}
+
+/// Opens a save dialog owned by `owner` (HWND), suggesting `name`, and calls `done` with the
+/// choice from a background thread.
+pub fn spawn_save(owner: isize, name: String, done: impl FnOnce(Option<PathBuf>) + Send + 'static) {
+    std::thread::spawn(move || {
+        let file = (|| {
+            let exe = std::env::current_exe().ok()?;
+            let out = Command::new(exe)
+                .arg(ARG_SAVE)
+                .arg(owner.to_string())
+                .arg(name)
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
+                .ok()?;
+            out.stdout.lines().map_while(Result::ok).find(|l| !l.is_empty()).map(PathBuf::from)
+        })();
+        reenable(owner);
+        done(file);
+    });
 }
 
 /// Opens the picker owned by `owner` (HWND) and calls `done` with the selection from a

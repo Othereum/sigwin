@@ -16,6 +16,7 @@ pub(crate) mod anim;
 pub(crate) mod drafts;
 mod rows;
 mod scroll;
+pub(crate) mod viewer;
 mod window;
 mod wire;
 
@@ -233,6 +234,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 }
                 _ => show_rows(app, items, can_older, scroll, switched),
             }
+            viewer::close_if_gone();
         }
         Event::Pins(list) => {
             let items: Vec<PinItem> = list
@@ -346,6 +348,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 }
             });
         }
+        Event::ViewerImage(v) => viewer::arrived(app, v),
         Event::Frames(f) => anim::frames_arrived(f),
         Event::Status(s) => app.set_status_text(s.into()),
         Event::Typing { group, who } => {

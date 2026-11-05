@@ -69,18 +69,8 @@ impl App {
     }
 
     pub(super) fn open_attachment(&self, id: &str) {
-        let Some(open) = self.current.as_ref() else { return };
-        let Ok(ts) = id.parse::<u64>() else { return };
-        let Some((_, c)) = open.window.iter().find(|(t, _)| *t == ts) else { return };
-        let dm = match view::classify(c, self.me) {
-            Kind::Msg { dm, .. } => dm.clone(),
-            _ => return,
-        };
-        let jobs: Vec<(PathBuf, AttachmentPointer)> = dm
-            .attachments
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| !view::is_long_text(a))
+        let Some((ts, dm)) = self.row_message(id) else { return };
+        let jobs: Vec<(PathBuf, AttachmentPointer)> = view::shown_attachments(dm)
             .map(|(i, a)| (attachment_path(&self.paths.attachments, &view::attachment_key(a, ts, i)), a.clone()))
             .collect();
         let manager = self.manager.clone();
@@ -88,35 +78,137 @@ impl App {
         let open_dir = self.paths.open.clone();
         tokio::task::spawn_local(async move {
             for (path, ptr) in jobs {
-                if !path.exists() {
-                    let _ = tx.send(Internal::Status("첨부파일 다운로드 중…".into()));
-                    let Some(m) = manager.as_ref() else { return };
-                    match m.get_attachment(&ptr).await {
-                        Ok(data) => {
-                            if let Err(e) = sigwin_vault::write(&path, &data) {
-                                let _ = tx.send(Internal::Status(format!("저장 실패: {e}")));
-                                continue;
-                            }
-                        }
-                        Err(e) => {
-                            let _ = tx.send(Internal::Status(format!("다운로드 실패: {e}")));
-                            continue;
-                        }
-                    }
-                }
-                let (name, dir) = (attachment_name(&ptr), open_dir.clone());
-                match tokio::task::spawn_blocking(move || decrypt_for_open(&path, &dir, &name)).await {
-                    Ok(Ok(plain)) => {
-                        let _ = tx.send(Internal::Status(String::new()));
-                        open_with_default_app(&plain);
-                    }
-                    Ok(Err(e)) => {
-                        let _ = tx.send(Internal::Status(format!("첨부파일을 열 수 없습니다: {e}")));
-                    }
-                    Err(_) => {}
+                if fetch_attachment(&manager, &tx, &path, &ptr).await {
+                    open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
                 }
             }
         });
+    }
+
+    /// The message of row `id` in the open window.
+    fn row_message(&self, id: &str) -> Option<(u64, &DataMessage)> {
+        let open = self.current.as_ref()?;
+        let ts = id.parse::<u64>().ok()?;
+        let (_, c) = open.window.iter().find(|(t, _)| *t == ts)?;
+        match view::classify(c, self.me) {
+            Kind::Msg { dm, .. } => Some((ts, dm)),
+            _ => None,
+        }
+    }
+
+    /// Image `index` of row `id`: cache path and pointer.
+    fn viewed(&self, id: &str, index: usize) -> Option<(PathBuf, AttachmentPointer)> {
+        let (ts, dm) = self.row_message(id)?;
+        let (i, a) = view::shown_attachments(dm).filter(|(_, a)| view::is_image(a)).nth(index)?;
+        Some((attachment_path(&self.paths.attachments, &view::attachment_key(a, ts, i)), a.clone()))
+    }
+
+    pub(super) fn view_image(&self, id: &str, index: usize, fit: (u32, u32), from_file: bool) {
+        let Some((_, dm)) = self.row_message(id) else { return };
+        let shown = view::shown_attachments(dm).count();
+        let count = view::shown_attachments(dm).filter(|(_, a)| view::is_image(a)).count();
+        if count == 0 || (from_file && count != shown) {
+            return self.open_attachment(id);
+        }
+        let index = index.min(count - 1);
+        let Some((path, ptr)) = self.viewed(id, index) else { return };
+        let id = id.to_string();
+        let manager = self.manager.clone();
+        let emit = self.emit.clone();
+        let tx = self.tx.clone();
+        let open_dir = self.paths.open.clone();
+        tokio::task::spawn_local(async move {
+            if !fetch_attachment(&manager, &tx, &path, &ptr).await {
+                return;
+            }
+            let p = path.clone();
+            let decoded = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+                let bytes = sigwin_vault::read(&p)?;
+                let Some((img, full)) = sigwin_thumb::decode_view(&bytes, fit.0, fit.1, VIEW_MAX_PIXELS)? else {
+                    return Ok(None);
+                };
+                drop(bytes);
+                let pixels = slint::SharedPixelBuffer::clone_from_slice(img.as_raw(), img.width(), img.height());
+                Ok(Some((pixels, full)))
+            })
+            .await;
+            match decoded {
+                Ok(Ok(Some((pixels, full)))) => {
+                    let _ = tx.send(Internal::Status(String::new()));
+                    emit(Event::ViewerImage(crate::types::ViewerImage { id, index, count, full, pixels }));
+                }
+                other => {
+                    if let Ok(Err(e)) = other {
+                        warn!("view image: {e:#}");
+                    }
+                    // animated, huge or undecodable: an outside app may do better
+                    open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
+                }
+            }
+        });
+    }
+
+    pub(super) fn open_viewed(&self, id: &str, index: usize) {
+        let Some((path, ptr)) = self.viewed(id, index) else { return };
+        let tx = self.tx.clone();
+        let open_dir = self.paths.open.clone();
+        tokio::task::spawn_local(async move {
+            open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
+        });
+    }
+
+    pub(super) fn save_viewed(&self, id: &str, index: usize, owner: isize) {
+        let Some((path, ptr)) = self.viewed(id, index) else { return };
+        let tx = self.tx.clone();
+        crate::picker::spawn_save(owner, attachment_name(&ptr), move |dst| {
+            let Some(dst) = dst else { return };
+            let status = match sigwin_vault::decrypt_file(&path, &dst) {
+                Ok(()) => "저장했습니다.".to_string(),
+                Err(e) => format!("저장 실패: {e}"),
+            };
+            let _ = tx.send(Internal::Status(status));
+        });
+    }
+}
+
+/// Safety limit, not a budget: more pixels than this are abnormal input and go to an outside app.
+/// Decoding takes up to 4 bytes per pixel, returned when it ends.
+const VIEW_MAX_PIXELS: u64 = 100_000_000;
+
+/// Downloads an attachment unless it is cached; false (status set) if that failed.
+async fn fetch_attachment(manager: &Option<Mgr>, tx: &UnboundedSender<Internal>, path: &Path, ptr: &AttachmentPointer) -> bool {
+    if path.exists() {
+        return true;
+    }
+    let _ = tx.send(Internal::Status("첨부파일 다운로드 중…".into()));
+    let Some(m) = manager.as_ref() else { return false };
+    match m.get_attachment(ptr).await {
+        Ok(data) => match sigwin_vault::write(path, &data) {
+            Ok(()) => true,
+            Err(e) => {
+                let _ = tx.send(Internal::Status(format!("저장 실패: {e}")));
+                false
+            }
+        },
+        Err(e) => {
+            let _ = tx.send(Internal::Status(format!("다운로드 실패: {e}")));
+            false
+        }
+    }
+}
+
+/// Decrypts a cached attachment to `open/` and opens it with the default app.
+async fn open_outside(tx: &UnboundedSender<Internal>, path: PathBuf, open_dir: &Path, name: String) {
+    let dir = open_dir.to_path_buf();
+    match tokio::task::spawn_blocking(move || decrypt_for_open(&path, &dir, &name)).await {
+        Ok(Ok(plain)) => {
+            let _ = tx.send(Internal::Status(String::new()));
+            open_with_default_app(&plain);
+        }
+        Ok(Err(e)) => {
+            let _ = tx.send(Internal::Status(format!("첨부파일을 열 수 없습니다: {e}")));
+        }
+        Err(_) => {}
     }
 }
 

@@ -1,0 +1,130 @@
+// The image viewer window. Fixed dark look: globals (`Theme`) aren't shared between windows.
+
+component ViewerButton inherits Rectangle {
+    in property <string> text;
+    in property <length> font-size: 13px;
+    out property <bool> hovered: ta.has-hover;
+    callback clicked();
+    min-height: 30px;
+    border-radius: 6px;
+    background: ta.has-hover ? #ffffff30 : transparent;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.text;
+            color: white;
+            font-size: root.font-size;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component ImageViewer inherits Window {
+    in property <image> source;
+    // "2 / 3"; empty for a single image
+    in property <string> caption;
+    callback prev();
+    callback next();
+    callback save();
+    callback open-outside();
+    callback dismiss();
+    callback resized();
+    title: "이미지 보기";
+    icon: @image-url("../assets/icon.png");
+    default-font-family: "Malgun Gothic";
+    background: #111111;
+    min-width: 360px;
+    min-height: 240px;
+    forward-focus: keys;
+    changed width => { root.resized(); }
+    changed height => { root.resized(); }
+
+    // 1:1 in physical pixels; until the fitted image arrives, a window smaller than it scales it
+    property <length> full-w: source.width * 1phx;
+    property <length> full-h: source.height * 1phx;
+    property <float> shrink: source.width > 0 && source.height > 0 ? min(1, root.width / full-w, root.height / full-h) : 1;
+    Image {
+        source: root.source;
+        image-fit: fill;
+        width: full-w * shrink;
+        height: full-h * shrink;
+        x: round((root.width - self.width) / 2 / 1phx) * 1phx;
+        y: round((root.height - self.height) / 2 / 1phx) * 1phx;
+    }
+
+    keys := FocusScope {
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.dismiss();
+                return accept;
+            }
+            if (e.text == Key.LeftArrow) {
+                root.prev();
+                return accept;
+            }
+            if (e.text == Key.RightArrow) {
+                root.next();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    // the parent of the controls, so hovering them still counts
+    hover := TouchArea {
+        if hover.has-hover && root.caption != "": ViewerButton {
+            x: 12px;
+            y: (root.height - self.height) / 2;
+            width: 44px;
+            height: 64px;
+            text: "‹";
+            font-size: 28px;
+            background: self.hovered ? #000000d0 : #00000090;
+            clicked => { root.prev(); }
+        }
+        if hover.has-hover && root.caption != "": ViewerButton {
+            x: root.width - self.width - 12px;
+            y: (root.height - self.height) / 2;
+            width: 44px;
+            height: 64px;
+            text: "›";
+            font-size: 28px;
+            background: self.hovered ? #000000d0 : #00000090;
+            clicked => { root.next(); }
+        }
+        if hover.has-hover: Rectangle {
+            x: (root.width - self.width) / 2;
+            y: root.height - self.height - 12px;
+            width: bar.preferred-width;
+            height: bar.preferred-height;
+            border-radius: 8px;
+            background: #000000c0;
+            bar := HorizontalLayout {
+                padding: 4px;
+                spacing: 2px;
+                if root.caption != "": Text {
+                    text: root.caption;
+                    color: white;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                    width: self.preferred-width + 20px;
+                }
+                ViewerButton {
+                    text: "저장";
+                    clicked => { root.save(); }
+                }
+                ViewerButton {
+                    text: "기본 앱으로 열기";
+                    clicked => { root.open-outside(); }
+                }
+            }
+        }
+    }
+}

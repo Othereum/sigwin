@@ -138,6 +138,8 @@ export component Bubble inherits VerticalLayout {
     // briefly outlined after jumping to it (pinned message bar)
     in property <bool> flash;
     callback attachment-clicked(string);
+    // the file line (a photo is `attachment-clicked`)
+    callback file-clicked(string);
     // the quote in a reply: the quoted message's sent timestamp
     callback quote-clicked(string);
     callback reply(string);
@@ -352,7 +354,7 @@ export component Bubble inherits VerticalLayout {
                     background: ata.has-hover ? (m.outgoing ? #ffffff30 : Theme.hover) : transparent;
                     ata := TouchArea {
                         mouse-cursor: pointer;
-                        clicked => { root.attachment-clicked(m.id); }
+                        clicked => { root.file-clicked(m.id); }
                         pointer-event(e) => {
                             if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
                                 root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);

@@ -11,6 +11,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 - `SIGWIN_DEMO_OLDER=<ms>` (60 rows, older pages of 60 loaded at the top after <ms>)
 - `SIGWIN_DEMO_MENU=1|edit|pin`
 - `SIGWIN_DEMO_SETTINGS=1`
+- `SIGWIN_DEMO_VIEWER=1|<width>x<height>` (a photo on the newest row; clicking it opens the image viewer with three fake images, the first of the given size)
 - `SIGWIN_DEMO_UPDATE=<version>` (the sidebar "new version ready" bar), `SIGWIN_DEMO_UPDATE_AVAILABLE=<version>` ("new version available" bar, automatic download off)
 - `SIGWIN_DEMO_TICK=1` (periodic updates, for the minimize/restore repro)
 - `SIGWIN_DEMO_NOTIFY=<secs>` (a fake incoming message every <secs>, through the real `Notifier` and real toasts: 1:1 with photo, group, reaction, disappearing; needs a real window and an unfocused app, so it's for the user; run it with a scratch `SIGWIN_DATA`)
@@ -23,7 +24,7 @@ $env:SIGWIN_DATA="<scratch>"; $env:SIGWIN_DEMO="1"
 $env:SIGWIN_HEADLESS="wait 500; wheel 650 350 6; click 960 590; type 안녕; key shift+Enter; wait 300; shot <scratch>\a.png"
 .\target\fast\sigwin.exe
 ```
-Steps: `size W H` (logical, default 1000x680), `scale S`, `wait MS`, `move/click/rclick/dblclick X Y`, `drag X1 Y1 X2 Y2`, `wheel X Y N` (+ = up), `type TEXT`, `key [ctrl+][shift+]NAME`, `shot PATH`, `record DIR` (save every frame drawn from now on as `DIR\NNNN.png`, for one-frame glitches; `record` alone stops; saving slows frames down, so give `wait`s more time).
+Steps: `size W H` (logical, default 1000x680), `scale S`, `wait MS`, `move/click/rclick/dblclick X Y`, `drag X1 Y1 X2 Y2`, `wheel X Y N` (+ = up), `type TEXT`, `key [ctrl+][shift+]NAME`, `shot PATH`, `record DIR` (save every frame drawn from now on as `DIR\NNNN.png`, for one-frame glitches; `record` alone stops; saving slows frames down, so give `wait`s more time), `window N` (later steps act on window 1, the main one, or 2, the image viewer).
 
 Theme follows the system (`SIGWIN_HEADLESS_THEME=dark|light`). Coordinates are window-client logical px; read them off a previous shot. Headless ignores theme and zoom settings.
 

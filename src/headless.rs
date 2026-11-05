@@ -42,6 +42,8 @@ enum Step {
     Shot(String),
     /// save every frame drawn from now on as `<dir>\NNNN.png`; empty: stop
     Record(String),
+    /// later steps act on window 1 (main) or 2 (the latest other one, the image viewer)
+    Window(u32),
 }
 
 fn parse(script: &str) -> anyhow::Result<Vec<Step>> {
@@ -89,6 +91,7 @@ fn parse(script: &str) -> anyhow::Result<Vec<Step>> {
             "key" => Step::Key(rest.split('+').map(|s| s.trim().to_string()).collect()),
             "shot" => Step::Shot(rest.to_string()),
             "record" => Step::Record(rest.to_string()),
+            "window" => Step::Window(rest.trim().parse()?),
             _ => anyhow::bail!("unknown step: {line}"),
         });
     }
@@ -151,6 +154,11 @@ struct Headless {
     queue: Arc<Queue>,
 }
 
+thread_local! {
+    /// The latest window after the main one.
+    static SECOND: RefCell<Option<Rc<MinimalSoftwareWindow>>> = const { RefCell::new(None) };
+}
+
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// True when running offscreen (no native window to hook).
@@ -211,7 +219,12 @@ pub fn install_if_requested() -> anyhow::Result<()> {
 impl Platform for Headless {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
         let w = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
-        *self.window.borrow_mut() = Some(w.clone());
+        let mut main = self.window.borrow_mut();
+        if main.is_none() {
+            *main = Some(w.clone());
+        } else {
+            SECOND.with_borrow_mut(|s| *s = Some(w.clone()));
+        }
         Ok(w)
     }
 
@@ -221,7 +234,7 @@ impl Platform for Headless {
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
         let w = self.window.borrow().clone().ok_or_else(|| PlatformError::Other("no window".into()))?;
-        let mut st = State { w, buf: Vec::new(), size: PhysicalSize::new(0, 0), scale: 1.0, logical: (1000.0, 680.0), record: None };
+        let mut st = State { main: w.clone(), w, buf: Vec::new(), size: PhysicalSize::new(0, 0), scale: 1.0, logical: (1000.0, 680.0), record: None };
         loop {
             let Some(step) = self.steps.borrow_mut().pop_front() else { break };
             tracing::debug!(?step, "headless");
@@ -250,6 +263,8 @@ impl Headless {
 }
 
 struct State {
+    main: Rc<MinimalSoftwareWindow>,
+    /// the window steps act on
     w: Rc<MinimalSoftwareWindow>,
     buf: Vec<Rgb8Pixel>,
     size: PhysicalSize,
@@ -377,6 +392,14 @@ impl State {
                 self.idle(Duration::ZERO, pump);
                 self.save(&path)?;
                 tracing::info!(path, "headless shot");
+            }
+            Step::Window(n) => {
+                self.w = match n {
+                    1 => self.main.clone(),
+                    _ => SECOND.with_borrow(|s| s.clone()).ok_or_else(|| anyhow::anyhow!("no second window"))?,
+                };
+                self.size = PhysicalSize::new(0, 0);
+                self.idle(Duration::ZERO, pump);
             }
             Step::Record(dir) => {
                 if !dir.is_empty() {

@@ -510,7 +510,9 @@ impl App {
                 }
             }
             Command::Send { text, files, quote, mentions } => self.send(text, files, quote, mentions).await,
-            Command::OpenAttachment(id) => self.open_attachment(&id),
+            Command::ViewImage { id, index, fit, from_file } => self.view_image(&id, index, fit, from_file),
+            Command::OpenViewed { id, index } => self.open_viewed(&id, index),
+            Command::SaveViewed { id, index, owner } => self.save_viewed(&id, index, owner),
             Command::ReadMore(id) => {
                 if let Ok(row) = id.parse::<u64>() {
                     *self.long.shown.entry(row).or_insert(view::READ_MORE_AT) += view::READ_MORE_STEP;

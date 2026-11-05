@@ -252,6 +252,17 @@ pub struct Thumb {
     pub rgba: Vec<u8>,
 }
 
+/// An image for the viewer window, already shrunk to the size asked for.
+pub struct ViewerImage {
+    pub id: String,
+    pub index: usize,
+    /// images in the message
+    pub count: usize,
+    /// upright size of the original
+    pub full: (u32, u32),
+    pub pixels: slint::SharedPixelBuffer<slint::Rgba8Pixel>,
+}
+
 /// Frames of all playing stickers in the message list together; the least recently shown
 /// sticker beyond this goes back to its still image.
 pub const ANIM_BUDGET: usize = 24 << 20;
@@ -315,6 +326,8 @@ pub enum Event {
     /// scroll the message list to row `id` (already in the last `Messages`) and flash it
     JumpTo(String),
     Thumb(Arc<Thumb>),
+    /// answer to `ViewImage`
+    ViewerImage(ViewerImage),
     /// answer to `StickerFrames` / `PickerFrames`
     Frames(Frames),
     /// sticker picker images (grid cells, pack covers), batched
@@ -343,7 +356,13 @@ pub enum Command {
     LoadOlder,
     /// `mentions`: members picked in the composer, their "@name"s become mentions
     Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member> },
-    OpenAttachment(String),
+    /// show image `index` of row `id` in the viewer, fitted to `fit` (physical px).
+    /// `from_file`: the file line was clicked; a row with other files then opens them outside.
+    ViewImage { id: String, index: usize, fit: (u32, u32), from_file: bool },
+    /// the viewer's "기본 앱으로 열기"
+    OpenViewed { id: String, index: usize },
+    /// the viewer's "저장"; `owner`: HWND for the file dialog
+    SaveViewed { id: String, index: usize, owner: isize },
     /// "더 읽기" on a row: show more of its text
     ReadMore(String),
     Search(String),

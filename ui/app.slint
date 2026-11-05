@@ -11,6 +11,7 @@ import { LinkPage } from "link.slint";
 // Structs and globals the Rust side uses.
 export { ThreadItem, ReactionItem, ReaderItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 export { Anim, Links, Theme } from "theme.slint";
+export { ImageViewer } from "viewer.slint";
 
 // a row of the chat notification settings dialog: label + the default, choices on the right
 component PrefRow inherits HorizontalLayout {
@@ -89,6 +90,7 @@ export component AppWindow inherits Window {
     callback attach();
     callback clear-attachments();
     callback attachment-clicked(string);
+    callback file-clicked(string);
     callback reply(string);
     callback cancel-reply();
     callback search-changed(string);
@@ -560,6 +562,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         attachment-clicked(id) => { root.attachment-clicked(id); }
+                        file-clicked(id) => { root.file-clicked(id); }
                         quote-clicked(id) => { root.show-message(id); }
                         reply(id) => { root.reply(id); }
                         show-info(t) => { root.info-text = t; }

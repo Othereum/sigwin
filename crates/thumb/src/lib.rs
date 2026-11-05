@@ -37,6 +37,36 @@ pub fn to_rgba(img: &DynamicImage) -> RgbaImage {
     img.to_rgba8()
 }
 
+/// Size of a `w` x `h` image shrunk to fit in `box_w` x `box_h` (never upscales).
+pub fn fit_size((w, h): (u32, u32), (box_w, box_h): (u32, u32)) -> (u32, u32) {
+    let s = (box_w as f64 / w.max(1) as f64).min(box_h as f64 / h.max(1) as f64).min(1.0);
+    if s >= 1.0 {
+        return (w, h);
+    }
+    (((w as f64 * s).round() as u32).max(1), ((h as f64 * s).round() as u32).max(1))
+}
+
+/// A still image for the viewer: upright (EXIF), shrunk to fit in `box_w` x `box_h`, with its
+/// upright full size. `None` when it is animated or has more than `max_pixels`: those go to an
+/// outside app. `thumbnail_exact` rather than `resample`: the latter's float buffers take 16
+/// bytes per source pixel, 192MB for a 12MP photo.
+pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> ImageResult<Option<(RgbaImage, (u32, u32))>> {
+    use image::ImageDecoder;
+    let reader = || image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format();
+    let (w, h) = reader()?.into_dimensions()?;
+    if w as u64 * h as u64 > max_pixels || is_animated(bytes) {
+        return Ok(None);
+    }
+    let mut decoder = reader()?.into_decoder()?;
+    let orientation = decoder.orientation()?;
+    let mut img = DynamicImage::from_decoder(decoder)?;
+    img.apply_orientation(orientation);
+    let full = (img.width(), img.height());
+    let (nw, nh) = fit_size(full, (box_w, box_h));
+    let out = if (nw, nh) == full { img } else { img.thumbnail_exact(nw, nh) };
+    Ok(Some((out.into_rgba8(), full)))
+}
+
 /// High-quality downscale so the longer side is `px` (never upscales). Filters in premultiplied
 /// alpha, otherwise transparent pixels' colors bleed into sticker edges as dark fringes.
 pub fn downscale(img: RgbaImage, px: u32) -> RgbaImage {
@@ -257,6 +287,18 @@ mod tests {
         assert!(up.pixels().any(|p| p[3] > 0 && p[3] < 255));
         assert_eq!(fit(disc(260), 140).dimensions(), (140, 140));
         assert_eq!(fit(RgbaImage::new(70, 35), 140).dimensions(), (140, 70));
+    }
+
+    #[test]
+    fn decode_view_fits_never_upscales_and_refuses() {
+        let png = png_rgba(&RgbaImage::new(400, 200)).unwrap();
+        let (img, full) = decode_view(&png, 100, 100, u64::MAX).unwrap().unwrap();
+        assert_eq!((img.dimensions(), full), ((100, 50), (400, 200)));
+        let (img, _) = decode_view(&png, 1000, 1000, u64::MAX).unwrap().unwrap();
+        assert_eq!(img.dimensions(), (400, 200));
+        assert!(decode_view(&png, 100, 100, 79_999).unwrap().is_none());
+        assert!(decode_view(&gif(3, 50), 100, 100, u64::MAX).unwrap().is_none());
+        assert!(decode_view(b"junk", 100, 100, u64::MAX).is_err());
     }
 
     #[test]

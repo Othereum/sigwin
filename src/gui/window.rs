@@ -285,6 +285,7 @@ pub(crate) fn visibility(app: &AppWindow, shown: bool) {
                 ui.released = true;
             });
             sigwin_clear_plain_styles();
+            viewer::close();
             tracing::debug!("hidden: dropped the open thread's rows and images");
         });
     });
