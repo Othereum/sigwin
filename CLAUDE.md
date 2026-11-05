@@ -11,7 +11,11 @@
 - `.claude/rules/presage.md`, `.claude/rules/slint.md`: gotchas, loaded automatically when you work on the matching files. Read them before changing backend/view/db or `ui/`.
 
 ## Hard constraint: memory
-**Target: under 100MB.** Today: ~15MB private / ~40MB working set with a real account. Every change must respect this:
+**Target: idle private memory under 30MB**, measured with a real account after sync, one thread open, nothing else going on. The rest of the budget depends on who started the work (reasons in `docs/decisions.md`):
+- Something the user opened (image viewer, sticker panel) may use what it needs, with a safety limit against abnormal input, and must return to idle levels when closed.
+- Automatic work (receiving, thumbnails, sync) has to stay small: no outside app would have done it instead, so all of it is added cost.
+
+Every change must respect this:
 - No GPU renderer, WebView, JVM, or extra runtimes. Slint uses `renderer-software` only (GPU renderers cost 200MB+; numbers in `docs/decisions.md`). Never enable the `renderer-femtovg` / `renderer-skia` features by default.
 - Never load whole threads: page messages through `db::Index::page` (60 rows); the open window is capped at `MAX_WINDOW` (600). `store.messages(thread, range)` does `fetch_all`: always bound the range.
 - Images: decode to thumbnails (`THUMB_MAX` 260px, stickers in the picker 96px), cache them on disk under `thumbs/`. Keep `slint::Image`s only for what's on screen; clear them on thread switch or when the panel closes.
