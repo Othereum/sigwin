@@ -2,6 +2,33 @@
 
 import { Theme } from "theme.slint";
 
+// a short message over the content; clicks go through it. Fixed dark look: the image viewer uses it
+// too, and globals aren't shared between windows.
+export component Notice inherits Rectangle {
+    in property <string> text;
+    in property <length> max-text-width;
+    width: min(label.preferred-width, root.max-text-width) + 28px;
+    height: min(label.preferred-height, 40px) + 16px;
+    border-radius: 8px;
+    background: #303034;
+    border-width: 1px;
+    border-color: #ffffff20;
+    drop-shadow-blur: 8px;
+    drop-shadow-color: #00000050;
+    label := Text {
+        x: 14px;
+        y: 8px;
+        width: parent.width - 28px;
+        height: parent.height - 16px;
+        text: root.text;
+        color: white;
+        font-size: 13px;
+        wrap: word-wrap;
+        overflow: elide;
+        horizontal-alignment: center;
+    }
+}
+
 export component Avatar inherits Rectangle {
     in property <string> initial;
     in property <color> tint;

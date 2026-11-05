@@ -32,6 +32,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 |---|---|
 | `src/gui.rs` | UI-only state, `apply(Event)` |
 | `src/gui/wire.rs` | Slint callbacks → `Command`s, per area |
+| `src/gui/notice.rs` | short notices and the connection banner |
 | `src/gui/rows.rs` | DTOs → Slint rows: rich text, row diffing |
 | `src/gui/scroll.rs` | message list scrolling and jumps |
 | `src/gui/anim.rs` | animated stickers: frames under a memory budget, the timer that flips them |

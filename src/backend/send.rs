@@ -42,7 +42,7 @@ impl App {
             .unwrap_or_default();
         let (body, body_ranges) = crate::mention::encode(&text, &mentions);
         if body.len() > view::MAX_LONG_TEXT_BYTES {
-            self.status("메시지가 너무 깁니다 (최대 64KB)");
+            self.notice("메시지가 너무 깁니다 (최대 64KB)");
             return;
         }
         // the message itself ends our typing indicator on the other side

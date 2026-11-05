@@ -133,7 +133,7 @@ impl App {
             .await;
             match decoded {
                 Ok(Ok(Some(pixels))) => {
-                    let _ = tx.send(Internal::Status(String::new()));
+                    let _ = tx.send(Internal::ProgressDone);
                     emit(Event::ViewerImage(crate::types::ViewerImage { id, index, count, pixels }));
                 }
                 other => {
@@ -147,8 +147,8 @@ impl App {
         });
     }
 
-    /// One at a time, in order. Failures leave a blank cell: the status line belongs to the image
-    /// being viewed.
+    /// One at a time, in order. Failures leave a blank cell: notices belong to the image being
+    /// viewed.
     pub(super) fn viewer_thumbs(&self, id: &str, px: u32) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let images = view::shown_attachments(dm).filter(|(_, a)| view::is_image(a));
@@ -203,7 +203,7 @@ impl App {
                 Ok(()) => "저장했습니다.".to_string(),
                 Err(e) => format!("저장 실패: {e}"),
             };
-            let _ = tx.send(Internal::Status(status));
+            let _ = tx.send(Internal::Notice(status));
         });
     }
 }
@@ -213,23 +213,23 @@ impl App {
 /// until it closes.
 const VIEW_MAX_PIXELS: u64 = 100_000_000;
 
-/// Downloads an attachment unless it is cached; false (status set) if that failed.
+/// Downloads an attachment unless it is cached; false (notice shown) if that failed.
 async fn fetch_attachment(manager: &Option<Mgr>, tx: &UnboundedSender<Internal>, path: &Path, ptr: &AttachmentPointer) -> bool {
     if path.exists() {
         return true;
     }
-    let _ = tx.send(Internal::Status("첨부파일 다운로드 중…".into()));
     let Some(m) = manager.as_ref() else { return false };
+    let _ = tx.send(Internal::Progress("첨부파일 다운로드 중…".into()));
     match m.get_attachment(ptr).await {
         Ok(data) => match sigwin_vault::write(path, &data) {
             Ok(()) => true,
             Err(e) => {
-                let _ = tx.send(Internal::Status(format!("저장 실패: {e}")));
+                let _ = tx.send(Internal::Notice(format!("저장 실패: {e}")));
                 false
             }
         },
         Err(e) => {
-            let _ = tx.send(Internal::Status(format!("다운로드 실패: {e}")));
+            let _ = tx.send(Internal::Notice(format!("다운로드 실패: {e}")));
             false
         }
     }
@@ -240,11 +240,11 @@ async fn open_outside(tx: &UnboundedSender<Internal>, path: PathBuf, open_dir: &
     let dir = open_dir.to_path_buf();
     match tokio::task::spawn_blocking(move || decrypt_for_open(&path, &dir, &name)).await {
         Ok(Ok(plain)) => {
-            let _ = tx.send(Internal::Status(String::new()));
+            let _ = tx.send(Internal::ProgressDone);
             open_with_default_app(&plain);
         }
         Ok(Err(e)) => {
-            let _ = tx.send(Internal::Status(format!("첨부파일을 열 수 없습니다: {e}")));
+            let _ = tx.send(Internal::Notice(format!("첨부파일을 열 수 없습니다: {e}")));
         }
         Err(_) => {}
     }

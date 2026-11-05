@@ -14,6 +14,7 @@ use crate::*;
 
 pub(crate) mod anim;
 pub(crate) mod drafts;
+pub(crate) mod notice;
 mod rows;
 mod scroll;
 pub(crate) mod viewer;
@@ -351,7 +352,10 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::ViewerImage(v) => viewer::arrived(app, v),
         Event::ViewerThumb(id, index, t) => viewer::thumb_arrived(&id, index, t),
         Event::Frames(f) => anim::frames_arrived(f),
-        Event::Status(s) => app.set_status_text(s.into()),
+        Event::Notice(s) => notice::show(app, &s),
+        Event::Progress(s) => notice::progress(app, &s),
+        Event::ProgressDone => notice::progress_done(app),
+        Event::Connection { text, at_once } => notice::connection(app, text, at_once),
         Event::Typing { group, who } => {
             let near_bottom = app.get_near_bottom();
             UI.with_borrow_mut(|ui| {

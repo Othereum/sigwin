@@ -33,23 +33,23 @@ impl App {
             return;
         }
         let Some((row, target, _, true, orig)) = self.target(id) else {
-            self.status("이 메시지는 수정할 수 없습니다");
+            self.notice("이 메시지는 수정할 수 없습니다");
             return;
         };
         if view::now_ms().saturating_sub(row) >= view::EDIT_WINDOW_MS {
-            self.status("보낸 지 24시간이 지난 메시지는 수정할 수 없습니다");
+            self.notice("보낸 지 24시간이 지난 메시지는 수정할 수 없습니다");
             return;
         }
         let (mut body, body_ranges) = crate::mention::encode(&text, mentions);
         if body.len() > view::MAX_LONG_TEXT_BYTES {
-            self.status("메시지가 너무 깁니다 (최대 64KB)");
+            self.notice("메시지가 너무 깁니다 (최대 64KB)");
             return;
         }
         let Some(mut m) = self.manager.clone() else { return };
         let long = match long_body(&mut m, &mut body, &self.paths.attachments).await {
             Ok(l) => l,
             Err(e) => {
-                self.status(format!("수정 실패: {e:#}"));
+                self.notice(format!("수정 실패: {e:#}"));
                 return;
             }
         };
@@ -69,7 +69,7 @@ impl App {
     pub(super) async fn delete(&mut self, id: &str) {
         let Some((row, target, _, true, _)) = self.target(id) else { return };
         if view::now_ms().saturating_sub(row) >= view::EDIT_WINDOW_MS {
-            self.status("보낸 지 24시간이 지난 메시지는 모두에게서 삭제할 수 없습니다");
+            self.notice("보낸 지 24시간이 지난 메시지는 모두에게서 삭제할 수 없습니다");
             return;
         }
         let dm = DataMessage { delete: Some(Delete { target_sent_timestamp: Some(target) }), ..Default::default() };

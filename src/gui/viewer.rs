@@ -83,6 +83,15 @@ pub(crate) fn open(app: &AppWindow, id: String, from_file: bool) {
     send_cmd(Command::ViewImage { id, index: 0, fit: screen_box(window::hwnd(app)), from_file });
 }
 
+/// A main window notice also shows here: the viewer usually covers it.
+pub(crate) fn set_notice(text: &SharedString) {
+    VIEWER.with_borrow(|v| {
+        if let Some(v) = v {
+            v.win.set_notice_text(text.clone());
+        }
+    });
+}
+
 /// Callable from the window's own callbacks: the window is dropped after they return.
 pub(crate) fn close() {
     PENDING.with_borrow_mut(|p| *p = None);

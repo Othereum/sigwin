@@ -362,7 +362,13 @@ pub enum Event {
     StickerThumbs(Vec<Thumb>),
     /// round photo of a thread (key = thread key); width 0 = none
     Avatar(Arc<Thumb>),
-    Status(String),
+    /// a short message that goes away by itself
+    Notice(String),
+    /// work in progress: shown until `ProgressDone` or the next notice
+    Progress(String),
+    ProgressDone,
+    /// what's going on with the connection, "" when all is well; not `at_once`: only if it lasts
+    Connection { text: String, at_once: bool },
     StickerPacks(Vec<PackDto>),
     StickerGrid { pack: String, items: Vec<StickerDto> },
     /// open the sticker panel on this (installed) pack

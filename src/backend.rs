@@ -160,13 +160,17 @@ struct SweepState {
 
 enum Internal {
     Received(Received),
+    /// the connection is back: the queued messages come next
+    Reconnected,
     ReceiveStopped(String),
     Linked(Result<Mgr, String>),
     Sent(u64, Result<(), String>),
     ThumbFailed(String),
     /// a long message's full text: (attachment key, text)
     LongText(String, String),
-    Status(String),
+    Notice(String),
+    Progress(String),
+    ProgressDone,
     PackInstalled(Result<String, String>),
     ReceiptsIndexed,
     PinsIndexed,
@@ -471,8 +475,14 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
 }
 
 impl App {
-    fn status(&self, s: impl Into<String>) {
-        (self.emit)(Event::Status(s.into()));
+    fn notice(&self, s: impl Into<String>) {
+        (self.emit)(Event::Notice(s.into()));
+    }
+    fn progress(&self, s: impl Into<String>) {
+        (self.emit)(Event::Progress(s.into()));
+    }
+    fn connection(&self, s: impl Into<String>, at_once: bool) {
+        (self.emit)(Event::Connection { text: s.into(), at_once });
     }
 
     async fn on_registered(&mut self, m: Mgr, fresh: bool) {
@@ -501,7 +511,7 @@ impl App {
             Command::StartLink(name) => self.start_link(name),
             Command::OpenThread(key) => {
                 if let Err(e) = self.open_thread(&key).await {
-                    self.status(format!("대화를 열지 못했습니다: {e:#}"));
+                    self.notice(format!("대화를 열지 못했습니다: {e:#}"));
                 }
             }
             Command::LoadOlder => {
@@ -539,11 +549,11 @@ impl App {
             Command::SendSticker { pack, id } => self.send_sticker(&pack, id).await,
             Command::InstallPack { id, key } => match (hex::decode(&id), blessed_key(&id).or_else(|| hex::decode(&key).ok())) {
                 (Ok(id), Some(key)) => self.install_pack(id, key),
-                _ => self.status("잘못된 스티커 팩입니다"),
+                _ => self.notice("잘못된 스티커 팩입니다"),
             },
             Command::InstallPackUrl(url) => match parse_pack_url(&url) {
                 Some((id, key)) => self.install_pack(id, key),
-                None => self.status("스티커 링크를 인식하지 못했습니다 (signal.art/addstickers 링크)"),
+                None => self.notice("스티커 링크를 인식하지 못했습니다 (signal.art/addstickers 링크)"),
             },
             Command::InstallPackFromMessage(id) => self.install_pack_from_message(&id),
             Command::StickerClicked(id) => self.sticker_clicked(&id).await,
@@ -647,9 +657,10 @@ impl App {
                 (self.emit)(Event::LinkStatus(format!("연결 실패: {e}. 다시 시도하세요.")));
             }
             Internal::Received(r) => self.received(r).await,
+            Internal::Reconnected => self.connection("동기화 중…", false),
             Internal::ReceiveStopped(msg) => {
                 self.synced = false;
-                self.status(msg);
+                self.connection(msg, false);
             }
             Internal::Sent(ts, Ok(())) => {
                 // presage stored the message before returning: swap the stub for the real row now
@@ -687,11 +698,15 @@ impl App {
                             "고정 해제"
                         }
                     };
-                    self.status(format!("{what} 실패: {e}"));
+                    self.notice(format!("{what} 실패: {e}"));
                     self.emit_messages(Scroll::KeepIfNotAtBottom).await;
                     return;
                 }
-                self.status(format!("전송 실패: {e}"));
+                // the open thread shows it on the row
+                let open = self.current.as_ref().map(|c| c.key.as_str());
+                if self.pending.iter().any(|p| p.ts == ts && Some(p.thread_key.as_str()) != open) {
+                    self.notice("다른 대화로 보낸 메시지를 전송하지 못했습니다");
+                }
                 let thread = self.pending.iter().find(|p| p.ts == ts).and_then(|p| parse_thread_key(&p.thread_key));
                 let after_seq = match thread {
                     Some(t) => self.index.page(&t, i64::MAX, 1).await.ok().and_then(|r| r.first().map(|r| r.0)),
@@ -714,9 +729,11 @@ impl App {
                     self.emit_messages(Scroll::Keep).await;
                 }
             }
-            Internal::Status(s) => self.status(s),
+            Internal::Notice(s) => self.notice(s),
+            Internal::Progress(s) => self.progress(s),
+            Internal::ProgressDone => (self.emit)(Event::ProgressDone),
             Internal::PackInstalled(Ok(id)) => {
-                self.status("스티커 팩을 추가했습니다");
+                (self.emit)(Event::ProgressDone);
                 (self.emit)(Event::OpenStickerPanel(id));
             }
             Internal::PinsIndexed => {
@@ -729,7 +746,7 @@ impl App {
                 self.persist_dirty = true;
                 self.current_dirty = true;
             }
-            Internal::PackInstalled(Err(e)) => self.status(format!("스티커 팩 추가 실패: {e}")),
+            Internal::PackInstalled(Err(e)) => self.notice(format!("스티커 팩 추가 실패: {e}")),
             Internal::Avatars(done) => {
                 self.avatars_running = false;
                 self.persist.avatars.extend(done.state);

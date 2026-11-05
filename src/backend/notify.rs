@@ -239,7 +239,7 @@ impl App {
     pub(super) async fn open_from_toast(&mut self, key: &str, msg: Option<u64>) {
         if self.current.as_ref().map(|c| c.key.as_str()) != Some(key) {
             if let Err(e) = self.open_thread(key).await {
-                self.status(format!("대화를 열지 못했습니다: {e:#}"));
+                self.notice(format!("대화를 열지 못했습니다: {e:#}"));
                 return;
             }
         }

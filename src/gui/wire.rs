@@ -140,7 +140,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         };
         if let Some(app) = weak.upgrade() {
             app.set_draft(fit.as_str().into());
-            app.set_status_text("메시지는 64KB까지 입력할 수 있습니다".into());
+            notice::show(&app, "메시지는 64KB까지 입력할 수 있습니다");
         }
         *prev = fit;
         cursor as i32
@@ -217,18 +217,14 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             clip::Probe::Image => {
                 let dir = UI.with_borrow(|ui| ui.paste_dir.clone());
                 let weak = app.as_weak();
-                app.set_status_text("이미지 붙여넣는 중…".into());
                 // encoding a large screenshot takes a moment: keep the UI responsive
                 std::thread::spawn(move || {
                     let res = clip::save_image(&dir);
                     let _ = slint::invoke_from_event_loop(move || {
                         let Some(app) = weak.upgrade() else { return };
                         match res {
-                            Ok(p) => {
-                                app.set_status_text(SharedString::new());
-                                add_files(&app, vec![p]);
-                            }
-                            Err(e) => app.set_status_text(format!("붙여넣기 실패: {e:#}").into()),
+                            Ok(p) => add_files(&app, vec![p]),
+                            Err(e) => notice::show(&app, &format!("붙여넣기 실패: {e:#}")),
                         }
                     });
                 });

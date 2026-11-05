@@ -1,7 +1,7 @@
 import { LineEdit, Button, ListView, Palette, Spinner } from "std-widgets.slint";
 import { ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, IconButton, MenuRow, Segmented, TextButton } from "widgets.slint";
+import { Avatar, IconButton, MenuRow, Notice, Segmented, TextButton } from "widgets.slint";
 import { Bubble } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
@@ -75,7 +75,10 @@ export component AppWindow inherits Window {
     // incoming messages that arrived while scrolled up
     in-out property <int> new-below;
     callback jump-to-bottom();
-    in property <string> status-text;
+    // a short message over the conversation pane (gui::notice)
+    in property <string> notice-text;
+    // what's going on with the connection, "" when all is well
+    in property <string> connection-text;
     in property <string> reply-preview;
     in property <[string]> pending-files;
     in-out property <string> search;
@@ -335,6 +338,19 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+                if root.connection-text != "": Rectangle {
+                    height: 30px;
+                    background: Theme.selected;
+                    Text {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        text: root.connection-text;
+                        color: Theme.text;
+                        font-size: 12.5px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                }
                 ListView {
                     for t in root.threads: ThreadRow {
                         item: t;
@@ -407,17 +423,6 @@ export component AppWindow inherits Window {
                             font-weight: 600;
                             vertical-alignment: center;
                         }
-                    }
-                }
-                Rectangle {
-                    height: 24px;
-                    Text {
-                        x: 12px;
-                        text: root.status-text;
-                        color: Theme.subtle;
-                        font-size: 11px;
-                        overflow: elide;
-                        width: parent.width - 24px;
                     }
                 }
             }
@@ -1167,5 +1172,13 @@ export component AppWindow inherits Window {
                 }
             }
         }
+    }
+
+    // over the conversation pane, just above the composer (the window's bottom when there is none)
+    if page == "main" && root.notice-text != "": Notice {
+        text: root.notice-text;
+        max-text-width: root.width - 300px - 76px;
+        x: 300px + (root.width - 300px - self.width) / 2;
+        y: composer-bar.absolute-position.y - self.height - 10px;
     }
 }

@@ -73,7 +73,7 @@ impl App {
             t.abort();
         }
         let tx = self.tx.clone();
-        self.status("동기화 중…");
+        self.connection("동기화 중…", true);
         self.recv_task = Some(tokio::task::spawn_local(async move {
             let mut m = m;
             let mut backoff = 2u64;
@@ -81,6 +81,7 @@ impl App {
                 match Box::pin(m.receive_messages()).await {
                     Ok(stream) => {
                         backoff = 2;
+                        let _ = tx.send(Internal::Reconnected);
                         pin_mut!(stream);
                         while let Some(r) = stream.next().await {
                             if tx.send(Internal::Received(r)).is_err() {
@@ -90,7 +91,8 @@ impl App {
                         let _ = tx.send(Internal::ReceiveStopped("연결이 끊어졌습니다. 다시 연결 중…".into()));
                     }
                     Err(e) => {
-                        let _ = tx.send(Internal::ReceiveStopped(format!("연결 실패 ({e}). {backoff}초 후 재시도")));
+                        warn!("receive: {e}");
+                        let _ = tx.send(Internal::ReceiveStopped(format!("연결 실패. {backoff}초 후 재시도")));
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(backoff)).await;
@@ -108,7 +110,7 @@ impl App {
                     self.sync_phone_mutes();
                 }
                 self.synced = true;
-                self.status("");
+                self.connection("", true);
                 self.threads_dirty = true;
             }
             Received::Contacts => {

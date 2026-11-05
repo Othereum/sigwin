@@ -14,7 +14,7 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(300), move || {
             n.set(n.get() + 1);
             if let Some(app) = weak.upgrade() {
-                app.set_status_text(format!("tick {}", n.get()).into());
+                app.set_connection_text(format!("tick {}", n.get()).into());
             }
         });
     }
@@ -363,7 +363,15 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     // one sender with a photo, the other falls back to the initial
     photo(format!("{}demo-a", avatar::MSG_PREFIX), 1, avatar::MSG_SIZE);
     photo(format!("{}demo-a", avatar::READ_PREFIX), 1, avatar::READ_SIZE);
-    emit(Event::Status("데모 모드".into()));
+    if let Ok(text) = std::env::var("SIGWIN_DEMO_NOTICE") {
+        emit(Event::Notice(text));
+    }
+    if let Ok(text) = std::env::var("SIGWIN_DEMO_CONNECTION") {
+        emit(Event::Connection { text, at_once: false });
+    }
+    if std::env::var_os("SIGWIN_DEMO_STATUS").is_some() {
+        demo_status(emit.clone());
+    }
     emit(Event::Account {
         name: "홍길동".into(),
         number: "+821012345678".into(),
@@ -446,9 +454,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
     let (tx, rx) = std::sync::mpsc::channel::<Command>();
     let every = std::time::Duration::from_secs(secs.max(2));
     std::thread::spawn(move || {
-        // after demo()'s own "데모 모드" status
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        emit(Event::Status(format!("알림 테스트: {}초마다 메시지 (다른 창을 클릭해 두세요)", every.as_secs())));
+        emit(Event::Connection { text: format!("알림 테스트: {}초마다 메시지", every.as_secs()), at_once: true });
         // a demo photo as stored bytes, like a profile avatar
         let src = image::RgbaImage::from_fn(320, 240, |x, y| {
             let (cx, cy) = (x as f32 - 160.0, y as f32 - 110.0);
@@ -559,11 +565,60 @@ fn demo_viewer_count() -> usize {
     std::env::var("SIGWIN_DEMO_VIEWER_COUNT").ok().and_then(|v| v.parse().ok()).unwrap_or(3)
 }
 
+/// Goes through the notices and connection states over and over, as a live backend would send them.
+fn demo_status(emit: backend::Emit) {
+    let wait = |secs: f32| std::thread::sleep(std::time::Duration::from_secs_f32(secs));
+    std::thread::spawn(move || {
+        let connection = |text: &str, at_once: bool| emit(Event::Connection { text: text.into(), at_once });
+        loop {
+            // start
+            connection("동기화 중…", true);
+            wait(3.0);
+            connection("", true);
+            wait(2.0);
+            // a notice goes away by itself
+            emit(Event::Notice("보낸 지 24시간이 지난 메시지는 수정할 수 없습니다".into()));
+            wait(8.0);
+            // progress stays until the work ends
+            emit(Event::Progress("첨부파일 다운로드 중…".into()));
+            wait(9.0);
+            emit(Event::ProgressDone);
+            wait(2.0);
+            // a long failure, cut at two lines
+            emit(Event::Notice(
+                "다운로드 실패: error sending request for url (https://cdn3.signal.org/attachments/abcdefghijklmnopqrstuvwxyz0123456789): connection timed out while waiting for a response from the server".into(),
+            ));
+            wait(8.0);
+            // a short drop: nothing shows
+            connection("연결이 끊어졌습니다. 다시 연결 중…", false);
+            wait(2.0);
+            connection("동기화 중…", false);
+            wait(1.0);
+            connection("", true);
+            wait(4.0);
+            // a long drop: the banner comes after the delay, then follows the retries
+            connection("연결이 끊어졌습니다. 다시 연결 중…", false);
+            wait(9.0);
+            connection("연결 실패. 2초 후 재시도", false);
+            wait(4.0);
+            connection("연결 실패. 4초 후 재시도", false);
+            wait(4.0);
+            connection("동기화 중…", false);
+            wait(3.0);
+            connection("", true);
+            wait(4.0);
+        }
+    });
+}
+
 /// `StickerFrames` / `PickerFrames`: `demo-st-1` and every 4th picker sticker are animated GIFs
 /// (a pulsing blob), decoded like real stickers.
 fn demo_frames(emit: &backend::Emit, c: &Command) {
     if let Command::ViewImage { id, index, fit, .. } = c {
         return demo_viewer(emit, id, *index, *fit);
+    }
+    if let Command::SaveViewed { .. } = c {
+        return emit(Event::Notice("저장했습니다.".into()));
     }
     if let Command::ViewerThumbs { id, px } = c {
         for index in 0..demo_viewer_count() {

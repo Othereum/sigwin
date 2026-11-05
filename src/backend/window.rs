@@ -147,7 +147,7 @@ impl App {
                 if loaded {
                     self.emit_messages(Scroll::Keep).await;
                 }
-                self.status(if passed { "메시지를 찾을 수 없습니다" } else { "너무 오래된 메시지라 이동할 수 없습니다" });
+                self.notice(if passed { "메시지를 찾을 수 없습니다" } else { "너무 오래된 메시지라 이동할 수 없습니다" });
                 return Ok(());
             }
             loaded = true;
