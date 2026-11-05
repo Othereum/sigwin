@@ -78,6 +78,7 @@ export component ImageViewer inherits Window {
 
     // the parent of the controls, so hovering them still counts
     hover := TouchArea {
+        clicked => { root.dismiss(); }
         if hover.has-hover && root.caption != "": ViewerButton {
             x: 12px;
             y: (root.height - self.height) / 2;
@@ -105,6 +106,8 @@ export component ImageViewer inherits Window {
             height: bar.preferred-height;
             border-radius: 8px;
             background: #000000c0;
+            // clicks between the buttons don't close the window
+            TouchArea {}
             bar := HorizontalLayout {
                 padding: 4px;
                 spacing: 2px;
