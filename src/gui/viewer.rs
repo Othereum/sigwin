@@ -2,7 +2,8 @@
 //! the window's frame buffer don't outlive it. It also closes when its row goes away (deleted,
 //! expired, another thread opened).
 //!
-//! An image opens at its own size within the screen, drawn 1:1. Dragging moves the window, or the
+//! An image opens at its own size within the screen, drawn 1:1, centered on where it was clicked.
+//! Dragging moves the window, or the
 //! image on the axes where that is bigger than the window; a click, Esc or the ✕ near the top
 //! right corner closes it. The wheel scales image and window together around the cursor; the window stops at
 //! the screen, the image goes on. A notch that would pass the original's size stops at it for a
@@ -80,13 +81,14 @@ struct Viewer {
 
 thread_local! {
     static VIEWER: RefCell<Option<Viewer>> = const { RefCell::new(None) };
-    /// row whose first image is on its way (the window opens when it arrives)
-    static PENDING: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// row whose first image is on its way (the window opens when it arrives), and the cursor at
+    /// the click: it may have moved on by then
+    static PENDING: RefCell<Option<(String, Option<(i32, i32)>)>> = const { RefCell::new(None) };
 }
 
 pub(crate) fn open(app: &AppWindow, id: String, index: usize, from_file: bool) {
     close();
-    PENDING.with_borrow_mut(|p| *p = Some(id.clone()));
+    PENDING.with_borrow_mut(|p| *p = Some((id.clone(), cursor_pos())));
     send_cmd(Command::ViewImage { id, index, fit: screen_box(window::hwnd(app)), from_file });
 }
 
@@ -122,11 +124,12 @@ fn row_has_image(id: &str) -> bool {
 pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
     let same = VIEWER.with_borrow(|v| v.as_ref().is_some_and(|v| v.id == img.id));
     if !same {
-        let wanted = PENDING.with_borrow_mut(|p| if p.as_deref() == Some(&img.id) { p.take() } else { None });
-        if wanted.is_none() || !row_has_image(&img.id) {
+        let wanted = PENDING.with_borrow_mut(|p| if p.as_ref().is_some_and(|(id, _)| *id == img.id) { p.take() } else { None });
+        let Some((_, clicked)) = wanted else { return };
+        if !row_has_image(&img.id) {
             return;
         }
-        if let Err(e) = create(app, img) {
+        if let Err(e) = create(app, img, clicked) {
             tracing::warn!("image viewer: {e}");
         }
         return;
@@ -181,7 +184,7 @@ fn show_details(win: &ImageViewer, img: &ViewerImage) {
     win.set_current(img.index as i32);
 }
 
-fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformError> {
+fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) -> Result<(), slint::PlatformError> {
     let win = ImageViewer::new()?;
     win.on_go(|index| go_to(index as usize));
     win.on_prev(|| step(-1));
@@ -233,8 +236,12 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
     win.set_shown_w(pixels.0 as i32);
     win.set_shown_h(pixels.1 as i32);
     win.window().set_size(slint::PhysicalSize::new(size.0, size.1));
-    if let Some((x, y, w, h)) = work_area(window::hwnd(app)) {
-        win.window().set_position(slint::PhysicalPosition::new(x + (w - size.0 as i32) / 2, y + (h - size.1 as i32) / 2));
+    let area = work_area(window::hwnd(app));
+    // no cursor: the middle of the screen
+    let center = clicked.or(area.map(|(x, y, w, h)| (x + w / 2, y + h / 2)));
+    if let Some((cx, cy)) = center {
+        let (x, y, ..) = on_screen(area, cx - size.0 as i32 / 2, cy - size.1 as i32 / 2, size.0, size.1);
+        win.window().set_position(slint::PhysicalPosition::new(x, y));
     }
     win.show()?;
     // the native window doesn't exist yet: show only asks for it
