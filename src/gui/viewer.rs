@@ -36,6 +36,8 @@ const NEAR_ORIGINAL: f64 = 0.05;
 /// The wheel does nothing for this long after landing on 100%: notches within a burst are at most
 /// 65ms apart, so a fast spin still catches there.
 const HOLD_AT_ORIGINAL: Duration = Duration::from_millis(120);
+/// The scale readout stays this long after the last wheel notch.
+const SCALE_SHOWN: Duration = Duration::from_secs(1);
 /// From this scale the original's pixels show as they are.
 const SMOOTH_BELOW: f64 = 3.0;
 
@@ -52,6 +54,7 @@ struct Viewer {
     count: usize,
     /// the wheel does nothing until then
     wheel_held: Cell<Option<Instant>>,
+    hide_scale: slint::Timer,
     refit: slint::Timer,
     /// Pans and zooms only resample the visible part of `pixels.original`. Kept until the image or
     /// the window goes, and shared with `source` once that shows it, not a copy.
@@ -210,6 +213,7 @@ fn create(app: &AppWindow, mut img: ViewerImage) -> Result<(), slint::PlatformEr
             wanted_index: Cell::new(img.index),
             count: img.count,
             wheel_held: Cell::new(None),
+            hide_scale: slint::Timer::default(),
             refit: slint::Timer::default(),
             pixels: img.pixels,
             patch_id: Cell::new(0),
@@ -284,6 +288,9 @@ fn wheel_scale(scale: f64, notches: f32) -> f64 {
 fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
     let moved = VIEWER.with_borrow(|v| {
         let v = v.as_ref()?;
+        // also at the limits and during the hold: it tells why nothing moves
+        v.win.set_scale_on(true);
+        v.hide_scale.start(slint::TimerMode::SingleShot, SCALE_SHOWN, || with_current(|v| v.win.set_scale_on(false)));
         if v.wheel_held.get().is_some_and(|until| Instant::now() < until) {
             return None;
         }
