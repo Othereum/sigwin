@@ -3,28 +3,44 @@
 use super::*;
 
 impl App {
-    pub(super) async fn fetch_range(&self, thread: &Thread, tss: &[u64]) -> anyhow::Result<Vec<(u64, Content)>> {
-        let (Some(&max), Some(&min)) = (tss.first(), tss.last()) else { return Ok(Vec::new()) };
-        let mut v: Vec<(u64, Content)> = self
-            .store
-            .messages(thread, min..=max)
-            .await?
-            .filter_map(Result::ok)
-            .map(|c| (c.metadata.client_timestamp.timestamp_millis() as u64, c))
-            .collect();
-        v.sort_by_key(|(ts, _)| *ts);
-        Ok(v)
+    /// The messages of `rows` (`(seq, ts)`, any order), in display order.
+    pub(super) async fn fetch_range(&self, thread: &Thread, rows: &[(i64, u64)]) -> anyhow::Result<Vec<(u64, Content)>> {
+        let (Some(min), Some(max)) = (rows.iter().map(|r| r.1).min(), rows.iter().map(|r| r.1).max()) else {
+            return Ok(Vec::new());
+        };
+        let mut rows = rows.to_vec();
+        rows.sort_by_key(|r| r.0);
+        // the store only reads timestamp ranges, and one message from a wrong clock can stretch
+        // the range over the whole thread: then read the rows one by one
+        let mut found: HashMap<u64, Content> = if self.index.count_between(thread, min, max).await? <= rows.len() as u64 * 2 {
+            self.store
+                .messages(thread, min..=max)
+                .await?
+                .filter_map(Result::ok)
+                .map(|c| (c.metadata.client_timestamp.timestamp_millis() as u64, c))
+                .collect()
+        } else {
+            let mut m = HashMap::with_capacity(rows.len());
+            for (_, ts) in &rows {
+                if let Ok(Some(c)) = self.store.message(thread, *ts).await {
+                    m.insert(*ts, c);
+                }
+            }
+            m
+        };
+        Ok(rows.into_iter().filter_map(|(_, ts)| Some((ts, found.remove(&ts)?))).collect())
     }
 
     pub(super) async fn open_thread(&mut self, key: &str) -> anyhow::Result<()> {
         let thread = parse_thread_key(key).context("bad thread key")?;
-        let mut tss = self.index.page(&thread, u64::MAX >> 1, PAGE).await?;
-        let mut window = self.fetch_range(&thread, &tss).await?;
+        let mut rows = self.index.page(&thread, i64::MAX, PAGE).await?;
+        let mut window = self.fetch_range(&thread, &rows).await?;
+        let mut oldest_seq = rows.last().map_or(i64::MAX, |r| r.0);
         // receipts etc. take rows without producing bubbles: fetch more until the view can scroll
-        while tss.len() as u32 == PAGE && window.len() < MAX_WINDOW && displayable(&window, self.me) < 30 {
-            let oldest = window.first().map(|(t, _)| *t).unwrap_or(0);
-            tss = self.index.page(&thread, oldest, PAGE).await?;
-            let mut older = self.fetch_range(&thread, &tss).await?;
+        while rows.len() as u32 == PAGE && window.len() < MAX_WINDOW && displayable(&window, self.me) < 30 {
+            rows = self.index.page(&thread, oldest_seq, PAGE).await?;
+            oldest_seq = rows.last().map_or(oldest_seq, |r| r.0);
+            let mut older = self.fetch_range(&thread, &rows).await?;
             older.append(&mut window);
             window = older;
         }
@@ -52,8 +68,9 @@ impl App {
             is_group,
             members,
             group_id,
-            has_more: tss.len() as u32 == PAGE,
+            has_more: rows.len() as u32 == PAGE,
             window,
+            oldest_seq,
         });
         self.mark_read(key);
         self.emit_messages(Scroll::Bottom).await;
@@ -73,19 +90,21 @@ impl App {
         if !open.has_more || open.window.len() >= MAX_WINDOW {
             return Ok(false);
         }
-        let oldest = open.window.first().map(|(t, _)| *t).unwrap_or(u64::MAX >> 1);
+        let mut oldest_seq = open.oldest_seq;
         let thread = open.thread.clone();
-        let mut tss = self.index.page(&thread, oldest, PAGE).await?;
-        let mut older = self.fetch_range(&thread, &tss).await?;
-        while tss.len() as u32 == PAGE && older.len() < MAX_WINDOW / 2 && displayable(&older, self.me) < 20 {
-            let o = older.first().map(|(t, _)| *t).unwrap_or(0);
-            tss = self.index.page(&thread, o, PAGE).await?;
-            let mut more = self.fetch_range(&thread, &tss).await?;
+        let mut rows = self.index.page(&thread, oldest_seq, PAGE).await?;
+        oldest_seq = rows.last().map_or(oldest_seq, |r| r.0);
+        let mut older = self.fetch_range(&thread, &rows).await?;
+        while rows.len() as u32 == PAGE && older.len() < MAX_WINDOW / 2 && displayable(&older, self.me) < 20 {
+            rows = self.index.page(&thread, oldest_seq, PAGE).await?;
+            oldest_seq = rows.last().map_or(oldest_seq, |r| r.0);
+            let mut more = self.fetch_range(&thread, &rows).await?;
             more.append(&mut older);
             older = more;
         }
         let Some(open) = self.current.as_mut() else { return Ok(false) };
-        open.has_more = tss.len() as u32 == PAGE;
+        open.oldest_seq = oldest_seq;
+        open.has_more = rows.len() as u32 == PAGE;
         let mut w = older;
         w.append(&mut open.window);
         open.window = w;
@@ -117,7 +136,13 @@ impl App {
                 (self.emit)(Event::JumpTo(row));
                 return Ok(());
             }
-            let passed = open.window.first().is_some_and(|(t, _)| *t < target);
+            // a synced message's row can have another timestamp than the one it's quoted by:
+            // not knowing the target doesn't rule it out unless the window is past it by time
+            let oldest_ts = open.window.first().map(|(t, _)| *t);
+            let passed = match self.index.seq_of(&open.thread, target).await? {
+                Some(seq) => seq >= open.oldest_seq,
+                None => oldest_ts.is_some_and(|t| t < target),
+            };
             if passed || !self.extend_older().await? {
                 if loaded {
                     self.emit_messages(Scroll::Keep).await;
@@ -132,29 +157,19 @@ impl App {
     pub(super) async fn reload_window(&mut self) -> anyhow::Result<()> {
         let Some(open) = self.current.as_ref() else { return Ok(()) };
         let thread = open.thread.clone();
-        let oldest = open.window.first().map(|(t, _)| *t);
-        let window: Vec<(u64, Content)> = match oldest {
-            Some(oldest) => {
-                let mut v: Vec<_> = self
-                    .store
-                    .messages(&thread, oldest..)
-                    .await?
-                    .filter_map(Result::ok)
-                    .map(|c| (c.metadata.client_timestamp.timestamp_millis() as u64, c))
-                    .collect();
-                v.sort_by_key(|(ts, _)| *ts);
-                v
-            }
-            None => {
-                let tss = self.index.page(&thread, u64::MAX >> 1, PAGE).await?;
-                self.fetch_range(&thread, &tss).await?
-            }
+        let rows = if open.oldest_seq == i64::MAX {
+            self.index.page(&thread, i64::MAX, PAGE).await?
+        } else {
+            self.index.rows_from(&thread, open.oldest_seq).await?
         };
+        let window = self.fetch_range(&thread, &rows).await?;
+        let oldest_seq = rows.iter().map(|r| r.0).min();
         // the header carries the disappearing-message timer, which may just have changed
         let members = self.emit_header(&thread).await;
         if let Some(open) = self.current.as_mut() {
             open.window = window;
             open.members = members;
+            open.oldest_seq = oldest_seq.unwrap_or(open.oldest_seq).min(open.oldest_seq);
         }
         if self.focused {
             if let Some(key) = self.current.as_ref().map(|o| o.key.clone()) {
@@ -167,12 +182,9 @@ impl App {
 
     pub(super) async fn emit_messages(&mut self, scroll: Scroll) {
         let Some(open) = self.current.as_ref() else { return };
-        let (from, to) = match (open.window.first(), open.window.last()) {
-            (Some((a, _)), Some((b, _))) => (*a, *b),
-            _ => (0, 0),
-        };
+        let tss: Vec<u64> = open.window.iter().map(|(t, _)| *t).collect();
         let mut receipts: HashMap<u64, HashMap<Uuid, u8>> = HashMap::new();
-        match self.index.receipts_between(from, to).await {
+        match self.index.receipts_for(&tss).await {
             Ok(rows) => {
                 for (ts, who, level) in rows {
                     receipts.entry(ts).or_default().insert(Uuid::from_bytes(*who.as_bytes()), level);
@@ -180,7 +192,7 @@ impl App {
             }
             Err(e) => warn!("receipts: {e:#}"),
         }
-        let my_deletes = self.index.my_deletes_between(from, to).await.unwrap_or_else(|e| {
+        let my_deletes = self.index.my_deletes_in(&tss).await.unwrap_or_else(|e| {
             warn!("deletes: {e:#}");
             Default::default()
         });

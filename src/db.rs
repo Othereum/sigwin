@@ -1,5 +1,5 @@
 //! Small read-only queries on presage's sqlite schema that the `Store` trait doesn't offer:
-//! listing threads by recency and paging message timestamps without loading whole threads.
+//! listing threads by recency and paging messages in display order without loading whole threads.
 
 use presage::store::Thread;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -59,7 +59,79 @@ pub struct Index {
 
 pub struct ThreadRow {
     pub thread: Thread,
+    /// newest sent timestamp (a wrong clock can put it in the future)
     pub last_ts: u64,
+    /// sent timestamp of the last message stored, what the thread's bottom row is built from
+    pub tail_ts: u64,
+}
+
+/// Display order: stored order, not sent timestamps, which come from the senders' clocks.
+///
+/// Triggers rather than app code, so every save path is covered and a crash can't lose a row.
+/// presage's save is an `INSERT OR REPLACE`, which also replaces a message deleted for everyone.
+/// That must keep its place, hence two details: the outer `OR REPLACE` overrides any conflict
+/// clause inside a trigger (so `WHERE NOT EXISTS`, not `OR IGNORE`), and delete triggers don't
+/// fire for replaced rows while `recursive_triggers` is off (the default).
+async fn ensure_order(pool: &SqlitePool) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS ls_order (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id INTEGER NOT NULL,
+            ts INTEGER NOT NULL,
+            UNIQUE (thread_id, ts)
+        )",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS ls_order_page ON ls_order (thread_id, seq)").execute(&mut *tx).await?;
+    let triggers: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master
+         WHERE type = 'trigger' AND tbl_name = 'thread_messages' AND name IN ('ls_order_add', 'ls_order_del')",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if triggers == 2 {
+        return Ok(tx.commit().await?);
+    }
+    // first run, or a presage migration rebuilt the table (which drops its triggers).
+    // Existing history keeps the order it always had: by sent timestamp
+    sqlx::query(
+        "DELETE FROM ls_order WHERE NOT EXISTS
+            (SELECT 1 FROM thread_messages m WHERE m.thread_id = ls_order.thread_id AND m.ts = ls_order.ts)",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO ls_order (thread_id, ts)
+         SELECT m.thread_id, m.ts FROM thread_messages m
+         WHERE NOT EXISTS (SELECT 1 FROM ls_order o WHERE o.thread_id = m.thread_id AND o.ts = m.ts)
+         ORDER BY m.ts",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "CREATE TRIGGER IF NOT EXISTS ls_order_add AFTER INSERT ON thread_messages BEGIN
+            INSERT INTO ls_order (thread_id, ts)
+            SELECT new.thread_id, new.ts
+            WHERE NOT EXISTS (SELECT 1 FROM ls_order WHERE thread_id = new.thread_id AND ts = new.ts);
+        END",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "CREATE TRIGGER IF NOT EXISTS ls_order_del AFTER DELETE ON thread_messages BEGIN
+            DELETE FROM ls_order WHERE thread_id = old.thread_id AND ts = old.ts;
+        END",
+    )
+    .execute(&mut *tx)
+    .await?;
+    Ok(tx.commit().await?)
+}
+
+/// A list of timestamps as one bind value, for `IN (SELECT value FROM json_each(?))`.
+fn json_list(tss: &[u64]) -> String {
+    format!("[{}]", tss.iter().map(u64::to_string).collect::<Vec<_>>().join(","))
 }
 
 fn unzip(thread: &Thread) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
@@ -132,6 +204,7 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        ensure_order(&pool).await?;
         migrate(&pool).await?;
         Ok(Self { pool })
     }
@@ -292,21 +365,19 @@ impl Index {
         Ok(())
     }
 
-    /// Our messages deleted for everyone, sent within [from, to].
-    pub async fn my_deletes_between(&self, from: u64, to: u64) -> anyhow::Result<std::collections::HashSet<u64>> {
-        let rows = sqlx::query("SELECT ts FROM ls_deleted_mine WHERE ts BETWEEN ? AND ?")
-            .bind(from as i64)
-            .bind(to as i64)
+    /// Which of these sent timestamps are our messages deleted for everyone.
+    pub async fn my_deletes_in(&self, tss: &[u64]) -> anyhow::Result<std::collections::HashSet<u64>> {
+        let rows = sqlx::query("SELECT ts FROM ls_deleted_mine WHERE ts IN (SELECT value FROM json_each(?))")
+            .bind(json_list(tss))
             .fetch_all(&self.pool)
             .await?;
         Ok(rows.into_iter().filter_map(|r| r.try_get::<i64, _>("ts").ok()).map(|t| t as u64).collect())
     }
 
     /// Receipts for messages sent within [from, to].
-    pub async fn receipts_between(&self, from: u64, to: u64) -> anyhow::Result<Vec<(u64, uuid::Uuid, u8)>> {
-        let rows = sqlx::query("SELECT target_ts, who, level FROM ls_receipts WHERE target_ts BETWEEN ? AND ?")
-            .bind(from as i64)
-            .bind(to as i64)
+    pub async fn receipts_for(&self, tss: &[u64]) -> anyhow::Result<Vec<(u64, uuid::Uuid, u8)>> {
+        let rows = sqlx::query("SELECT target_ts, who, level FROM ls_receipts WHERE target_ts IN (SELECT value FROM json_each(?))")
+            .bind(json_list(tss))
             .fetch_all(&self.pool)
             .await?;
         Ok(rows
@@ -322,7 +393,8 @@ impl Index {
 
     pub async fn threads(&self) -> anyhow::Result<Vec<ThreadRow>> {
         let rows = sqlx::query(
-            "SELECT t.group_master_key AS gk, t.recipient_id AS rid, MAX(m.ts) AS last_ts
+            "SELECT t.group_master_key AS gk, t.recipient_id AS rid, MAX(m.ts) AS last_ts,
+                (SELECT o.ts FROM ls_order o WHERE o.thread_id = t.id ORDER BY o.seq DESC LIMIT 1) AS tail_ts
              FROM threads t JOIN thread_messages m ON m.thread_id = t.id
              GROUP BY t.id ORDER BY last_ts DESC",
         )
@@ -333,6 +405,7 @@ impl Index {
             let gk: Option<Vec<u8>> = row.try_get("gk")?;
             let rid: Option<Vec<u8>> = row.try_get("rid")?;
             let last_ts: i64 = row.try_get("last_ts")?;
+            let tail_ts: Option<i64> = row.try_get("tail_ts")?;
             let thread = match (gk, rid) {
                 (Some(gk), _) => match gk.try_into() {
                     Ok(key) => Thread::Group(key),
@@ -347,7 +420,7 @@ impl Index {
                 },
                 _ => continue,
             };
-            out.push(ThreadRow { thread, last_ts: last_ts as u64 });
+            out.push(ThreadRow { thread, last_ts: last_ts as u64, tail_ts: tail_ts.unwrap_or(last_ts) as u64 });
         }
         Ok(out)
     }
@@ -374,38 +447,223 @@ impl Index {
             .collect())
     }
 
-    /// Timestamps of up to `limit` messages strictly older than `before`, newest first.
-    pub async fn page(&self, thread: &Thread, before: u64, limit: u32) -> anyhow::Result<Vec<u64>> {
+    /// `(seq, ts)` of up to `limit` messages displayed before `before`, last displayed first.
+    pub async fn page(&self, thread: &Thread, before: i64, limit: u32) -> anyhow::Result<Vec<(i64, u64)>> {
         let (gk, rid) = unzip(thread);
         let rows = sqlx::query(
-            "SELECT ts FROM thread_messages
+            "SELECT seq, ts FROM ls_order
              WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
-               AND ts < ?
-             ORDER BY ts DESC LIMIT ?",
+               AND seq < ?
+             ORDER BY seq DESC LIMIT ?",
         )
         .bind(gk)
         .bind(rid)
-        .bind(before.min(i64::MAX as u64) as i64)
+        .bind(before)
         .bind(limit as i64)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows
-            .into_iter()
-            .filter_map(|r| r.try_get::<i64, _>("ts").ok())
-            .map(|t| t as u64)
-            .collect())
+        Ok(order_rows(rows))
     }
+
+    /// `(seq, ts)` of the messages displayed from `from` on, in display order.
+    pub async fn rows_from(&self, thread: &Thread, from: i64) -> anyhow::Result<Vec<(i64, u64)>> {
+        let (gk, rid) = unzip(thread);
+        let rows = sqlx::query(
+            "SELECT seq, ts FROM ls_order
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND seq >= ?
+             ORDER BY seq ASC",
+        )
+        .bind(gk)
+        .bind(rid)
+        .bind(from)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(order_rows(rows))
+    }
+
+    /// Display position of a stored message.
+    pub async fn seq_of(&self, thread: &Thread, ts: u64) -> anyhow::Result<Option<i64>> {
+        let (gk, rid) = unzip(thread);
+        Ok(sqlx::query_scalar(
+            "SELECT seq FROM ls_order
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND ts = ?",
+        )
+        .bind(gk)
+        .bind(rid)
+        .bind(ts as i64)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    /// How many messages of the thread have a sent timestamp within [min, max].
+    pub async fn count_between(&self, thread: &Thread, min: u64, max: u64) -> anyhow::Result<u64> {
+        let (gk, rid) = unzip(thread);
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ls_order
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND ts BETWEEN ? AND ?",
+        )
+        .bind(gk)
+        .bind(rid)
+        .bind(min as i64)
+        .bind(max as i64)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(n as u64)
+    }
+}
+
+fn order_rows(rows: Vec<sqlx::sqlite::SqliteRow>) -> Vec<(i64, u64)> {
+    rows.into_iter()
+        .filter_map(|r| Some((r.try_get::<i64, _>("seq").ok()?, r.try_get::<i64, _>("ts").ok()? as u64)))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
+    use presage::libsignal_service::content::{Content, DataMessage, Metadata};
+    use presage::libsignal_service::protocol::ServiceId;
+    use presage::store::ContentsStore;
+    use presage_store_sqlite::{OnNewIdentity, SqliteStore};
+    use uuid::Uuid;
+
+    /// A real presage store on a scratch file, so the triggers meet its actual table and saves.
+    struct Db {
+        store: SqliteStore,
+        options: SqliteConnectOptions,
+        dir: std::path::PathBuf,
+    }
+
+    impl Db {
+        async fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!("sigwin-db-test-{}-{n}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let options = SqliteConnectOptions::new().filename(dir.join("db.sqlite")).create_if_missing(true);
+            let store = SqliteStore::open_with_options(options.clone(), OnNewIdentity::Trust).await.unwrap();
+            Self { store, options, dir }
+        }
+        async fn index(&self) -> Index {
+            Index::open(self.options.clone()).await.unwrap()
+        }
+        async fn save(&self, ts: u64, body: &str) {
+            let id = ServiceId::Aci(Uuid::from_u128(2).into());
+            let dm = DataMessage { body: Some(body.into()), ..Default::default() };
+            let at = chrono::DateTime::from_timestamp_millis(ts as i64).unwrap();
+            let c = Content::from_body(dm, Metadata {
+                sender: id,
+                destination: id,
+                sender_device: 1u32.try_into().unwrap(),
+                pni_verified: None,
+                client_timestamp: at,
+                server_timestamp: at,
+                needs_receipt: false,
+                unidentified_sender: false,
+                was_plaintext: false,
+                server_guid: None,
+            });
+            self.store.save_message(&thread(), c).await.unwrap();
+        }
+    }
+
+    impl Drop for Db {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn thread() -> Thread {
+        Thread::Contact(ServiceId::Aci(Uuid::from_u128(2).into()))
+    }
+
+    /// Sent timestamps in display order.
+    async fn order(index: &Index) -> Vec<u64> {
+        index.rows_from(&thread(), 0).await.unwrap().into_iter().map(|(_, ts)| ts).collect()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn display_order_is_stored_order() {
+        let mut db = Db::new().await;
+        let index = db.index().await;
+        db.save(100, "a").await;
+        db.save(50, "wrong clock").await;
+        db.save(200, "b").await;
+        assert_eq!(order(&index).await, [100, 50, 200]);
+        // saved again (a delete for everyone replaces the row): keeps its place
+        db.save(100, "tombstone").await;
+        assert_eq!(order(&index).await, [100, 50, 200]);
+        // the thread's bottom row, not the newest timestamp
+        db.save(150, "late").await;
+        let row = index.threads().await.unwrap().remove(0);
+        assert_eq!((row.last_ts, row.tail_ts), (200, 150));
+        // removed for real: gone from the order too
+        assert!(db.store.delete_message(&thread(), 200).await.unwrap());
+        assert_eq!(order(&index).await, [100, 50, 150]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn pages_walk_back_in_display_order() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        for ts in [10, 40, 20, 30] {
+            db.save(ts, "m").await;
+        }
+        let first = index.page(&thread(), i64::MAX, 2).await.unwrap();
+        assert_eq!(first.iter().map(|r| r.1).collect::<Vec<_>>(), [30, 20]);
+        let second = index.page(&thread(), first[1].0, 2).await.unwrap();
+        assert_eq!(second.iter().map(|r| r.1).collect::<Vec<_>>(), [40, 10]);
+        assert!(index.page(&thread(), second[1].0, 2).await.unwrap().is_empty());
+        assert_eq!(index.seq_of(&thread(), 40).await.unwrap(), Some(second[0].0));
+        assert_eq!(index.seq_of(&thread(), 41).await.unwrap(), None);
+        assert_eq!(index.count_between(&thread(), 20, 40).await.unwrap(), 3);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn existing_history_keeps_its_order_and_lost_triggers_come_back() {
+        let mut db = Db::new().await;
+        for ts in [30, 10, 20] {
+            db.save(ts, "old").await;
+        }
+        let index = db.index().await;
+        assert_eq!(order(&index).await, [10, 20, 30]);
+        db.save(5, "new").await;
+        // opening again changes nothing
+        let index = db.index().await;
+        assert_eq!(order(&index).await, [10, 20, 30, 5]);
+        // what a presage migration rebuilding the table does; a save meanwhile isn't tracked
+        sqlx::query("DROP TRIGGER ls_order_add").execute(&index.pool).await.unwrap();
+        sqlx::query("DROP TRIGGER ls_order_del").execute(&index.pool).await.unwrap();
+        db.save(7, "untracked").await;
+        assert!(db.store.delete_message(&thread(), 20).await.unwrap());
+        let index = db.index().await;
+        assert_eq!(order(&index).await, [10, 30, 5, 7]);
+        db.save(6, "tracked again").await;
+        assert_eq!(order(&index).await, [10, 30, 5, 7, 6]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn lookups_by_timestamp_list() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        let who = Uuid::from_u128(3);
+        index.record_receipts(who, &[1, 2, 3], 1).await.unwrap();
+        index.record_my_delete(2).await.unwrap();
+        index.record_my_delete(4).await.unwrap();
+        let tss: Vec<u64> = index.receipts_for(&[1, 3, 9]).await.unwrap().into_iter().map(|r| r.0).collect();
+        assert_eq!(tss.len(), 2);
+        assert!(tss.contains(&1) && tss.contains(&3));
+        assert_eq!(index.my_deletes_in(&[2, 3]).await.unwrap().into_iter().collect::<Vec<_>>(), [2]);
+        assert!(index.receipts_for(&[]).await.unwrap().is_empty());
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn schema_version_is_recorded_and_kept() {
-        let opts = SqliteConnectOptions::from_str("sqlite::memory:").unwrap();
-        let index = Index::open(opts).await.unwrap();
+        let db = Db::new().await;
+        let index = db.index().await;
         let v: i64 = sqlx::query_scalar("SELECT value FROM ls_meta WHERE key = 'schema'")
             .fetch_one(&index.pool)
             .await

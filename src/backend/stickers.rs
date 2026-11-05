@@ -217,6 +217,7 @@ impl App {
         let ts = self.next_send_ts();
         let image_key = format!("pending-{ts}");
         let Some(thread_key) = self.current.as_ref().map(|o| o.key.clone()) else { return };
+        let (turn, done) = self.send_turn(&thread_key);
         self.pending.push(Pending {
             ts,
             thread_key,
@@ -242,6 +243,10 @@ impl App {
         });
         self.emit_messages(Scroll::Bottom).await;
         tokio::task::spawn_local(async move {
+            let _done = done;
+            if let Some(turn) = turn {
+                let _ = turn.await;
+            }
             let started = std::time::Instant::now();
             let res = Box::pin(send_sticker_task(manager, thread, s, group_revision, dir, ts)).await;
             info!(ms = started.elapsed().as_millis() as u64, ok = res.is_ok(), "sticker sent");

@@ -226,6 +226,8 @@ struct Open {
     /// group identifier (what typing messages carry), None for 1:1
     group_id: Option<[u8; 32]>,
     window: Vec<(u64, Content)>,
+    /// display position of the window's first row, where older pages continue; `i64::MAX` when empty
+    oldest_seq: i64,
     has_more: bool,
 }
 
@@ -248,6 +250,8 @@ struct App {
     thumbs_requested: HashSet<String>,
     long: view::LongTexts,
     pending: Vec<Pending>,
+    /// per thread: resolves when the last message queued for sending is done
+    send_tail: HashMap<String, oneshot::Receiver<()>>,
     ops: Vec<PendingOp>,
     /// who is typing in the open thread
     typing: HashMap<Uuid, Instant>,
@@ -374,6 +378,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         thumbs_requested: HashSet::new(),
         long: Default::default(),
         pending: Vec::new(),
+        send_tail: HashMap::new(),
         ops: Vec::new(),
         typing: HashMap::new(),
         typing_shown: String::new(),

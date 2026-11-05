@@ -11,6 +11,7 @@ impl App {
             return;
         }
         let thread = open.thread.clone();
+        let key = open.key.clone();
         let quote = quote_id.and_then(|id| id.parse::<u64>().ok()).and_then(|qts| {
             let (_, c) = open.window.iter().find(|(t, _)| *t == qts)?;
             let Kind::Msg { dm, .. } = view::classify(c, self.me) else { return None };
@@ -54,7 +55,7 @@ impl App {
         };
         self.pending.push(Pending {
             ts,
-            thread_key: open.key.clone(),
+            thread_key: key.clone(),
             text: text.clone(),
             quote: quote_label,
             quote_author,
@@ -66,12 +67,25 @@ impl App {
         self.emit_messages(Scroll::Bottom).await;
         let tx = self.tx.clone();
         let dir = self.paths.attachments.clone();
+        let (turn, done) = self.send_turn(&key);
         tokio::task::spawn_local(async move {
+            let _done = done;
+            if let Some(turn) = turn {
+                let _ = turn.await;
+            }
             let started = std::time::Instant::now();
             let res = Box::pin(send_task(manager, thread, body, body_ranges, files, quote, group_revision, ts, dir)).await;
             info!(ms = started.elapsed().as_millis() as u64, ok = res.is_ok(), "message sent");
             let _ = tx.send(Internal::Sent(ts, res.map_err(|e| format!("{e:#}"))));
         });
+    }
+
+    /// A thread's messages go out one at a time: they're displayed in the order presage stores
+    /// them, after each send, and recipients get them in the order the server took them.
+    /// Returns what to wait for before sending, and what to drop when done.
+    pub(super) fn send_turn(&mut self, key: &str) -> (Option<oneshot::Receiver<()>>, oneshot::Sender<()>) {
+        let (done, tail) = oneshot::channel();
+        (self.send_tail.insert(key.to_string(), tail), done)
     }
 
     /// Unique, increasing send timestamps (they are the message ids).

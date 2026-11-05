@@ -20,13 +20,13 @@ UI thread (Slint)  --Command-->  backend thread (tokio current_thread + LocalSet
 | `src/backend/receive.rs` | incoming content, receipts (batched delivery/read), notifications, pin/receipt index backfills |
 | `src/backend/threads.rs` | thread list: names, snippets, unread, read receipts queue, avatars |
 | `src/backend/window.rs` | the open thread's window: paging, jumps, `emit_messages`, header |
-| `src/backend/send.rs` | sending text and attachments, pending rows, `deliver` |
+| `src/backend/send.rs` | sending text and attachments (one at a time per thread), pending rows, `deliver` |
 | `src/backend/ops.rs` | reactions, edits, deletes, pins (`App.ops`, `load_pins`) |
 | `src/backend/typing.rs` | typing indicators in and out |
 | `src/backend/stickers.rs` | sticker packs: picker thumbs, grids, sending, installing |
 | `src/backend/files.rs` | attachment / thumbnail caches (encrypted), opening attachments, `seal_legacy_files` |
 | `src/view.rs` | `Content` → `MsgDto` rows: folds reactions and edits, receipt status, day separators, snippets |
-| `src/db.rs` | own SQL on presage's DB: thread list by recency, timestamp paging, `ls_receipts` index. Our `ls_*` tables are versioned in `ls_meta` (`SCHEMA`); new tables are just added, changes to existing ones go through `migrate` steps (rebuildable ones dropped and backfilled again), since auto-updates carry old DBs forward |
+| `src/db.rs` | own SQL on presage's DB: thread list by recency, paging in display order (`ls_order`: stored order, kept by triggers on presage's table), `ls_receipts` index. Our `ls_*` tables are versioned in `ls_meta` (`SCHEMA`); new tables are just added, changes to existing ones go through `migrate` steps (rebuildable ones dropped and backfilled again), since auto-updates carry old DBs forward |
 | `src/types.rs` | `Command` / `Event` / DTOs crossing threads (all `Send`), thread keys `c:<uuid>` / `g:<hex>` |
 | `src/secret.rs` | random 256-bit DB key, stored DPAPI-protected (`db.key`) |
 | `src/picker.rs` | file dialog in a child process (`--pick-files <hwnd>`) |

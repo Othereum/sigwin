@@ -61,24 +61,24 @@ impl App {
             self.persist.snippets_deep = true;
             self.persist_dirty = true;
         }
-        let mut list: Vec<(u64, ThreadDto)> = Vec::with_capacity(rows.len());
+        let mut list: Vec<(i64, ThreadDto)> = Vec::with_capacity(rows.len());
         let mut seen = HashSet::new();
         for row in rows {
             let key = thread_key(&row.thread);
             seen.insert(key.clone());
             let (display_ts, snippet) = match self.persist.snippets.get(&key) {
                 // cached before mentions were resolved: recompute
-                Some((last, ts, s)) if *last == row.last_ts && !s.contains('\u{FFFC}') => (*ts, s.clone()),
+                Some((last, ts, s)) if *last == row.tail_ts && !s.contains('\u{FFFC}') => (*ts, s.clone()),
                 _ => {
-                    let (ts, s) = self.compute_snippet(&row.thread, row.last_ts).await;
-                    self.persist.snippets.insert(key.clone(), (row.last_ts, ts, s.clone()));
+                    let (ts, s) = self.compute_snippet(&row.thread, row.tail_ts).await;
+                    self.persist.snippets.insert(key.clone(), (row.tail_ts, ts, s.clone()));
                     self.persist_dirty = true;
                     (ts, s)
                 }
             };
             let name = self.thread_name(&row.thread).await;
             list.push((
-                display_ts,
+                self.index.seq_of(&row.thread, display_ts).await.ok().flatten().unwrap_or(0),
                 ThreadDto {
                     unread: self.persist.unread.get(&key).copied().unwrap_or(0),
                     is_group: matches!(row.thread, Thread::Group(_)),
@@ -118,6 +118,13 @@ impl App {
             }
         }
         list.sort_by(|a, b| b.0.cmp(&a.0));
+        // the UI re-sorts by `ts` when there are drafts: a late message's old timestamp
+        // mustn't sink its thread there. `time` keeps the message's own
+        let mut floor = 0;
+        for (_, t) in list.iter_mut().rev() {
+            floor = floor.max(t.ts);
+            t.ts = floor;
+        }
         self.threads = list.into_iter().map(|(_, t)| t).collect();
         self.mute_due = self.next_mute_change();
         self.emit_threads().await;
@@ -201,14 +208,14 @@ impl App {
     /// Newest message that makes a snippet. 1:1 threads collect receipts (also for our group
     /// messages), so look past them page by page, as far back as opening the thread would.
     pub(super) async fn compute_snippet(&mut self, thread: &Thread, last_ts: u64) -> (u64, String) {
-        let mut before = last_ts.saturating_add(1);
+        let mut before = i64::MAX;
         let mut scanned = 0usize;
         while scanned < MAX_WINDOW {
-            let Ok(tss) = self.index.page(thread, before, PAGE).await else {
+            let Ok(page) = self.index.page(thread, before, PAGE).await else {
                 return (last_ts, String::new());
             };
-            let Some(&oldest) = tss.last() else { break };
-            let Ok(rows) = self.fetch_range(thread, &tss).await else {
+            let Some(&(oldest, _)) = page.last() else { break };
+            let Ok(rows) = self.fetch_range(thread, &page).await else {
                 return (last_ts, String::new());
             };
             for (ts, c) in rows.iter().rev() {
@@ -216,10 +223,10 @@ impl App {
                     return (*ts, s);
                 }
             }
-            if (tss.len() as u32) < PAGE {
+            if (page.len() as u32) < PAGE {
                 break;
             }
-            scanned += tss.len();
+            scanned += page.len();
             before = oldest;
         }
         (0, String::new())
