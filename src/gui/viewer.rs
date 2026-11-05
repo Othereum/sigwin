@@ -20,7 +20,7 @@ use super::*;
 use crate::types::{ViewerImage, ViewerPixels};
 
 /// Share of the monitor's work area a newly shown image may take.
-const SCREEN_SHARE: f32 = 0.9;
+const SCREEN_SHARE: f32 = 0.8;
 /// `min-width` / `min-height` of `ImageViewer`.
 const MIN_SIZE: (f32, f32) = (360.0, 240.0);
 /// Smooth what's visible this long after the last change of view: longer than the gaps within a
