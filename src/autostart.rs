@@ -1,7 +1,7 @@
 //! Start with Windows: a value under HKCU `...\CurrentVersion\Run` pointing at the installed
 //! exe. Only the installed copy registers itself (a dev build or a downloaded exe would leave
 //! a path that moves or disappears). With "start hidden" the command carries `--background`:
-//! the window is hidden into the tray as soon as it exists.
+//! the window isn't shown until the tray icon is used, so there is no flash.
 //!
 //! Task Manager's Startup tab keeps its own on/off flag under `StartupApproved\Run`; turning
 //! the setting on clears that flag so the choice made here wins.

@@ -1,5 +1,14 @@
 //! The image viewer: its own window, created per opening and dropped on close, so the image and
-//! the window's frame buffer don't outlive it.
+//! the window's frame buffer don't outlive it. It also closes when its row goes away (deleted,
+//! expired, another thread opened).
+//!
+//! An image opens at its own size within the screen, drawn 1:1. Dragging moves the window, or the
+//! image once that is bigger than the window; a click, Esc or the ✕ near the top right corner
+//! closes it. The wheel scales image and window together around the cursor; the window stops at
+//! the screen, the image goes on.
+//!
+//! While the view changes the original's pixels are stretched as they are, then the visible part
+//! is resampled on a thread and drawn over them.
 
 use std::cell::Cell;
 use std::time::Duration;
