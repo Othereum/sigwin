@@ -7,7 +7,7 @@
 //! closes it. The wheel scales image and window together around the cursor; the window stops at
 //! the screen, the image goes on. A notch that would pass the original's size stops at it for a
 //! moment, even in the middle of a fast spin. The window's size follows the image, so the system
-//! can't snap or maximize it.
+//! can't snap, maximize or minimize it.
 //!
 //! While the view changes the original's pixels are stretched as they are, then the visible part
 //! is resampled on a thread and drawn over them.
@@ -528,10 +528,12 @@ fn repaint() {
     with_current(|v| v.win.set_repaint_flip(!v.win.get_repaint_flip()));
 }
 
-/// The styles the system snaps and maximizes a window by.
+/// The styles the system snaps, maximizes and minimizes a window by. Minimized alone, the viewer
+/// would have no taskbar button to come back from.
 #[cfg(windows)]
-const NO_SNAP: windows_sys::Win32::UI::WindowsAndMessaging::WINDOW_STYLE =
-    windows_sys::Win32::UI::WindowsAndMessaging::WS_THICKFRAME | windows_sys::Win32::UI::WindowsAndMessaging::WS_MAXIMIZEBOX;
+const NO_SNAP: windows_sys::Win32::UI::WindowsAndMessaging::WINDOW_STYLE = windows_sys::Win32::UI::WindowsAndMessaging::WS_THICKFRAME
+    | windows_sys::Win32::UI::WindowsAndMessaging::WS_MAXIMIZEBOX
+    | windows_sys::Win32::UI::WindowsAndMessaging::WS_MINIMIZEBOX;
 
 /// winit gives every window `WS_EX_APPWINDOW`, which keeps even an owned one on the taskbar, and
 /// a resizable one `NO_SNAP`, and sets them again whenever its flags change.
