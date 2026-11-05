@@ -17,7 +17,6 @@ slint = { version = "1.18.1", default-features = false, features = [
     "software-renderer-systemfonts",
     "raw-window-handle-06",
     "unstable-winit-030",
-    "image-default-formats",
 ] }
 # patched (see [patch.crates-io]): text styles API `styled_text::sigwin_*`
 i-slint-core = { version = "=1.18.1", default-features = false }
