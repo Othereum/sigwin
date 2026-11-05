@@ -374,7 +374,7 @@ impl StickerJob {
         self.fitted(dir).exists() || self.source(dir).exists()
     }
 
-    /// The resampled result is cached too (`-<px>px.enc`): resampling costs ~10x the decode.
+    /// The resampled result is cached too (`-<px>px.enc`).
     pub(super) fn make(self, dir: &Path) -> anyhow::Result<Thumb> {
         let fitted = self.fitted(dir);
         // older caches kept small sources at their own size

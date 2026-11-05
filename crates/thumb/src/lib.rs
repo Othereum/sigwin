@@ -85,7 +85,8 @@ pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> Ima
 pub fn resize_view(src: &[u8], size: (u32, u32), crop: (f64, f64, f64, f64), out: (u32, u32), opaque: bool) -> Option<RgbaImage> {
     use fast_image_resize::images::{Image, ImageRef};
     use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-    let filter = if (out.0 as f64) < crop.2 { FilterType::Lanczos3 } else { FilterType::CatmullRom };
+    let shrinks = (out.0 as f64) * (out.1 as f64) < crop.2 * crop.3;
+    let filter = if shrinks { FilterType::Lanczos3 } else { FilterType::CatmullRom };
     let options = ResizeOptions::new()
         .resize_alg(ResizeAlg::Convolution(filter))
         .crop(crop.0, crop.1, crop.2, crop.3)
@@ -103,40 +104,25 @@ pub fn downscale(img: RgbaImage, px: u32) -> RgbaImage {
     if w.max(h) <= px || w == 0 || h == 0 {
         return img;
     }
-    resample(img, px, image::imageops::FilterType::Lanczos3)
+    resample(img, px)
 }
 
-/// Resamples so the longer side is exactly `px`: down with Lanczos3, up with Catmull-Rom (no
-/// ringing). For images drawn at a fixed size: the renderer would scale them nearest-neighbor.
+/// Resamples so the longer side is exactly `px`. For images drawn at a fixed size: the renderer
+/// would scale them nearest-neighbor.
 pub fn fit(img: RgbaImage, px: u32) -> RgbaImage {
     let (w, h) = img.dimensions();
     if w.max(h) == px || w == 0 || h == 0 {
         return img;
     }
-    if w.max(h) > px {
-        return resample(img, px, image::imageops::FilterType::Lanczos3);
-    }
-    resample(img, px, image::imageops::FilterType::CatmullRom)
+    resample(img, px)
 }
 
 /// Resamples in premultiplied alpha so the longer side is `px`.
-fn resample(img: RgbaImage, px: u32, filter: image::imageops::FilterType) -> RgbaImage {
+fn resample(img: RgbaImage, px: u32) -> RgbaImage {
     let (w, h) = img.dimensions();
     let s = px as f32 / w.max(h) as f32;
-    let (nw, nh) = (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1));
-    let mut pm = image::Rgba32FImage::new(w, h);
-    for (d, p) in pm.pixels_mut().zip(img.pixels()) {
-        let a = p[3] as f32 / 255.0;
-        *d = image::Rgba([p[0] as f32 / 255.0 * a, p[1] as f32 / 255.0 * a, p[2] as f32 / 255.0 * a, a]);
-    }
-    let small = image::imageops::resize(&pm, nw, nh, filter);
-    let mut out = RgbaImage::new(nw, nh);
-    for (d, p) in out.pixels_mut().zip(small.pixels()) {
-        let a = p[3].clamp(0.0, 1.0);
-        let un = |c: f32| if a > 0.0 { (c / a).clamp(0.0, 1.0) * 255.0 + 0.5 } else { 0.0 };
-        *d = image::Rgba([un(p[0]) as u8, un(p[1]) as u8, un(p[2]) as u8, (a * 255.0 + 0.5) as u8]);
-    }
-    out
+    let out = (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1));
+    resize_view(img.as_raw(), (w, h), (0.0, 0.0, w as f64, h as f64), out, false).unwrap_or(img)
 }
 
 /// Center-crops to a square and resamples it to exactly `px` (smaller sources are upscaled
@@ -144,12 +130,7 @@ fn resample(img: RgbaImage, px: u32, filter: image::imageops::FilterType) -> Rgb
 pub fn square(img: &DynamicImage, px: u32) -> RgbaImage {
     let (w, h) = (img.width(), img.height());
     let s = w.min(h);
-    let sq = img.crop_imm((w - s) / 2, (h - s) / 2, s, s).to_rgba8();
-    let out = downscale(sq, px);
-    if out.width() == px {
-        return out;
-    }
-    image::imageops::resize(&out, px, px, image::imageops::FilterType::CatmullRom)
+    fit(img.crop_imm((w - s) / 2, (h - s) / 2, s, s).to_rgba8(), px)
 }
 
 /// Frames of an animated image, resampled, with each frame's display time in µs (APNG times
@@ -316,6 +297,20 @@ mod tests {
         assert!(up.pixels().any(|p| p[3] > 0 && p[3] < 255));
         assert_eq!(fit(disc(260), 140).dimensions(), (140, 140));
         assert_eq!(fit(RgbaImage::new(70, 35), 140).dimensions(), (140, 70));
+    }
+
+    #[test]
+    fn fit_survives_every_ratio() {
+        // the resizer has crashed on sizes that line pixels up exactly
+        for w in 1..40u32 {
+            for h in [1, 7, w, w * 3] {
+                let img = RgbaImage::from_fn(w, h, |x, y| image::Rgba([x as u8, y as u8, 200, (x * 9 + y * 5) as u8]));
+                for px in 1..90 {
+                    let out = fit(img.clone(), px);
+                    assert_eq!(out.width().max(out.height()), px, "{w}x{h} to {px}");
+                }
+            }
+        }
     }
 
     #[test]

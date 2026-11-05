@@ -36,3 +36,15 @@ Large images (synthetic JPEG, headless, opaque): 100MP peaks at 765MB and holds 
 The viewer keeps the original from the moment it opens instead of decoding it again on the first zoom. Whoever opens an image usually zooms it, so waiting would decode most images twice and delay the first smoothing by as long as a decode (200MP: 1.3s), to save memory that returns on close anyway.
 
 `fast_image_resize` (5.5.0 and 6.1.0) has a crash reachable from safe code: when enlarging with a kernel that is zero at whole numbers (Catmull-Rom), a first output pixel centered exactly on a source pixel trims its bound past the next pixel's, `b.start -= x_first` underflows and it reads out of bounds. `viewer::patch_crop` can't produce such a crop, and a test holds it to that.
+
+## Sticker and avatar resampling (measured 2026-11-06, synthetic images, heap peak without the source)
+`fit` moved from `image`'s resize in f32 to `fast_image_resize`:
+| job | `image`, f32 | fir |
+|---|---|---|
+| sticker 512 to 140 | 5.1ms / 5.7MB | 0.53ms / 1.5MB |
+| sticker 112 to 140 | 0.46ms / 0.8MB | 0.10ms / 0.2MB |
+| photo 4000x3000 to 400 | 140ms / 213MB | 20ms / 54MB |
+
+Eight bits per channel cost little: over white and black the results differ by 0.3 of 255 on average and 10 at most, along edges, not visible side by side, with no dark fringes.
+
+`decode_thumb` keeps `thumbnail`: at 4000x3000 to 400 it takes 14ms and 1MB, fir 8.5ms and 5.7MB without premultiplying. It runs on its own for every image received, so memory decides.
