@@ -14,7 +14,7 @@
    clean and equals `origin/main` and the release is new, builds `--release`, signs `sigwin.exe`
    with minisign (trusted comment `sigwin <version>`), verifies the signature against
    `PUBLIC_KEY`, asks for confirmation and creates tag `v<version>` plus the GitHub release with
-   `sigwin.exe`, `sigwin.exe.minisig` and `licenses.html`. Needs `cargo-about`, `minisign` and
+   `sigwin.exe`, `sigwin.exe.minisig` and `licenses.html`, then fetches the new tag. Needs `cargo-about`, `minisign` and
    `gh` (logged in) in `PATH`; the key defaults to `~\.minisign\sigwin.key` (`-Key` to change).
 3. Installed apps check `releases/latest` after the first sync (at once on the login screen), then hourly (and when the window
    gains focus after an hour without a check), download and verify the exe, swap it in, and

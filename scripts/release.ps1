@@ -69,3 +69,7 @@ if ($answer -ne "y") { Write-Host "Not published. Files are in $out"; exit 1 }
 gh release create $tag --target $sha $exe "$exe.minisig" $licenses --title "Sigwin $v" --generate-notes
 Run "gh release create"
 Write-Host "Published $tag"
+
+# gh made the tag on GitHub; bring it here. The release is already out, so failing here isn't fatal
+git fetch origin --quiet
+if ($LASTEXITCODE -ne 0) { Write-Warning "git fetch failed: run it by hand to get $tag" }
