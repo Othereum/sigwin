@@ -542,6 +542,8 @@ mod tests {
             static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let dir = std::env::temp_dir().join(format!("sigwin-db-test-{}-{n}", std::process::id()));
+            // an earlier run with the same process id may have left its DB here
+            let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let options = SqliteConnectOptions::new().filename(dir.join("db.sqlite")).create_if_missing(true);
             let store = SqliteStore::open_with_options(options.clone(), OnNewIdentity::Trust).await.unwrap();
