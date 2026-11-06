@@ -190,6 +190,8 @@ export component AppWindow inherits Window {
     in property <bool> menu-can-edit;
     in property <bool> menu-can-delete;
     in property <bool> menu-pinned;
+    // what the message's "정보" shows; "" hides the row (incoming messages have none)
+    in property <string> menu-info;
     // the menu shows the pin durations instead of the actions
     in-out property <bool> menu-pin-step;
     callback open-menu(string, length, length);
@@ -1022,6 +1024,13 @@ export component AppWindow inherits Window {
                     text: "수정";
                     clicked => {
                         root.edit-message(root.menu-id);
+                        root.menu-id = "";
+                    }
+                }
+                if root.menu-info != "" && !root.menu-pin-step: MenuRow {
+                    text: "정보";
+                    clicked => {
+                        root.info-text = root.menu-info;
                         root.menu-id = "";
                     }
                 }

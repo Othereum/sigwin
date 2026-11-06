@@ -378,12 +378,13 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     app.on_open_menu(move |id, x, y| {
         let Some(app) = weak.upgrade() else { return };
-        let Some((mine, can_edit, can_delete, pinned)) = UI.with_borrow(|ui| {
+        let Some((mine, can_edit, can_delete, pinned, info)) = UI.with_borrow(|ui| {
             let m = ui.last.iter().find(|m| m.id == id.as_str())?;
-            (!m.system && !m.deleted && !m.pending).then(|| (m.my_reaction.clone(), m.can_edit, m.can_delete, m.pinned))
+            (!m.system && !m.deleted && !m.pending).then(|| (m.my_reaction.clone(), m.can_edit, m.can_delete, m.pinned, m.receipt_info.clone()))
         }) else {
             return;
         };
+        app.set_menu_info(info.into());
         app.set_menu_pinned(pinned);
         app.set_menu_pin_step(false);
         app.set_menu_mine(mine.into());
