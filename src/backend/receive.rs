@@ -126,9 +126,9 @@ impl App {
         // read on another device -> clear our badge for that thread
         if let ContentBody::SynchronizeMessage(SyncMessage { read, .. }) = &c.body {
             for r in read {
-                let (Some(aci), Some(ts)) = (r.sender_aci.as_deref(), r.timestamp) else { continue };
-                let Some(sid) = ServiceId::parse_from_service_id_string(aci) else { continue };
-                if let Ok(Some(t)) = self.store.thread_for_sender_and_timestamp(&sid, ts).await {
+                // newer clients send only the binary form of the sender
+                let (Some(aci), Some(ts)) = (r.parse_sender_aci(), r.timestamp) else { continue };
+                if let Ok(Some(t)) = self.store.thread_for_sender_and_timestamp(&ServiceId::Aci(aci), ts).await {
                     let key = thread_key(&t);
                     self.notes.remove(notify::By::Thread(&key));
                     let upto = self.persist.read_upto.entry(key.clone()).or_default();
