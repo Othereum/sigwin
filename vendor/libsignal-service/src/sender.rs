@@ -697,6 +697,9 @@ where
                             .get_pre_key(&recipient, *missing_device_id)
                             .await?;
 
+                        // sigwin patch: see cipher::SESSION_LOCK
+                        let _session =
+                            crate::cipher::SESSION_LOCK.lock().await;
                         process_prekey_bundle(
                             &remote_address,
                             &self
@@ -1084,6 +1087,8 @@ where
                     continue;
                 }
 
+                // sigwin patch: see cipher::SESSION_LOCK
+                let _session = crate::cipher::SESSION_LOCK.lock().await;
                 let pre_key_address = get_preferred_protocol_address(
                     &self.protocol_store,
                     recipient,

@@ -30,6 +30,13 @@ use crate::{
     ServiceIdExt,
 };
 
+// sigwin patch: serializes every session read-modify-write. libsignal loads a session, awaits the
+// store, then saves it; a send or receive overlapping that lost the other's update, so the next
+// send was unreadable or reused a message key. Global because ciphers and senders are created per
+// use and only share the store. Never held across the network.
+pub(crate) static SESSION_LOCK: futures::lock::Mutex<()> =
+    futures::lock::Mutex::new(());
+
 /// Decrypts incoming messages and encrypts outgoing messages.
 ///
 /// Equivalent of SignalServiceCipher in Java.
@@ -281,6 +288,9 @@ where
         envelope: &Envelope,
         csprng: &mut R,
     ) -> Result<Plaintext, ServiceError> {
+        // sigwin patch: see SESSION_LOCK
+        let _session = SESSION_LOCK.lock().await;
+
         let local_service: ServiceId =
             ServiceId::parse_from_service_id_string(self.local_address.name())
                 .expect("valid protocol address name");
@@ -578,13 +588,17 @@ where
             content_length = content.len(),
         )
     )]
-    pub(crate) async fn encrypt<R: Rng + CryptoRng>(
+    // sigwin patch: pub (was pub(crate)) so tests/session_lock.rs can catch a missed SESSION_LOCK
+    pub async fn encrypt<R: Rng + CryptoRng>(
         &mut self,
         address: &ProtocolAddress,
         unidentified_access: Option<&SenderCertificate>,
         content: &[u8],
         csprng: &mut R,
     ) -> Result<OutgoingPushMessage, ServiceError> {
+        // sigwin patch: see SESSION_LOCK
+        let _session = SESSION_LOCK.lock().await;
+
         let mut rng = rng();
 
         let session_record = self

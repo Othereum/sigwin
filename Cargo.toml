@@ -105,6 +105,7 @@ libsignal-service = { path = "vendor/libsignal-service" }
 [dev-dependencies]
 blake2 = "0.10"
 ed25519-dalek = "3.0.0"
+rand = "0.9" # not the latest: must match the version libsignal-protocol's traits use
 [profile.dev.package.sha2]
 opt-level = 3
 [profile.dev.package.image]

@@ -5,6 +5,7 @@ Every hunk is marked `// sigwin patch: <why>` in the source; search for "sigwin 
 ## `vendor/libsignal-service`
 Same rev presage pins, wired via `[patch."https://github.com/whisperfish/libsignal-service-rs"]`. Re-vendor at the new rev when bumping presage.
 - `send_message_to_group` sends to up to `GROUP_SEND_CONCURRENCY` (16) members at once; upstream awaited them one by one (members x RTT).
+- **Session lock**: `cipher.rs` adds `SESSION_LOCK`, taken in `ServiceCipher::decrypt` and `encrypt` (now `pub`, for the test) and around both `process_prekey_bundle` calls in `sender.rs`. libsignal loads a session, awaits the store, then saves it, with nothing stopping another task from overlapping. A receive overlapping a send lost the send's update and the peer couldn't read our next message ("invalid Whisper message", shown there as an undeliverable message); two sends reused a counter, so one message key. Upstream bug. `tests/session_lock.rs` fails if this hunk is missed.
 
 ## `vendor/i-slint-renderer-software` (Slint 1.18.1, via `[patch.crates-io]`)
 Re-vendor the matching version together with `i-slint-core` when upgrading Slint, then re-apply:
