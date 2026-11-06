@@ -3,10 +3,12 @@
 use super::*;
 
 impl App {
-    /// One-time: index pin messages presage stored before we kept our own pin index.
+    /// One-time: index pin and edit messages presage stored before we kept our own indexes.
     /// Walks every thread oldest first in pages, so pins and unpins apply in order.
     pub(super) fn backfill_pins(&self) {
         let (store, index, me, tx) = (self.store.clone(), self.index.clone(), self.me, self.tx.clone());
+        // a second replay could bring back a pin whose unpin is still being sent
+        let pins = !self.persist.pins_indexed;
         tokio::task::spawn_local(async move {
             let Ok(threads) = index.threads().await else { return };
             let mut n = 0usize;
@@ -21,10 +23,13 @@ impl App {
                         let mut msgs: Vec<Content> = msgs.flatten().collect();
                         msgs.sort_by_key(|c| c.metadata.client_timestamp.timestamp_millis());
                         for c in &msgs {
-                            match record_pin(&index, &key, c, me).await {
-                                Ok(true) => n += 1,
-                                Ok(false) => {}
-                                Err(e) => warn!("index pins: {e:#}"),
+                            let pin = if pins { record_pin(&index, &key, c, me).await } else { Ok(false) };
+                            for r in [pin, record_edit(&index, &key, c, me).await] {
+                                match r {
+                                    Ok(true) => n += 1,
+                                    Ok(false) => {}
+                                    Err(e) => warn!("index pins: {e:#}"),
+                                }
                             }
                         }
                     }
@@ -34,7 +39,7 @@ impl App {
                     tokio::task::yield_now().await;
                 }
             }
-            info!("pin index backfilled: {n} pin messages");
+            info!("pin and edit index backfilled: {n} messages");
             let _ = tx.send(Internal::PinsIndexed);
         });
     }
@@ -203,6 +208,9 @@ impl App {
         let is_open = self.current.as_ref().is_some_and(|o| o.key == key);
         if let Err(e) = record_pin(&self.index, &key, &c, self.me).await {
             warn!("record pin: {e:#}");
+        }
+        if let Err(e) = record_edit(&self.index, &key, &c, self.me).await {
+            warn!("record edit: {e:#}");
         }
         let kind = view::classify(&c, self.me);
         match kind {

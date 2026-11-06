@@ -224,7 +224,7 @@ impl App {
         let mut items = built.items;
         // rows by sent timestamp, for the pin marks
         let rows: HashMap<u64, String> = open.window.iter().map(|(t, c)| (c.timestamp(), t.to_string())).collect();
-        let pins = self.load_pins().await;
+        let mut pins = self.load_pins().await;
         for p in &pins {
             let Some(row) = p.id.parse().ok().and_then(|t: u64| rows.get(&t)) else { continue };
             if let Some(m) = items.iter_mut().find(|m| &m.id == row) {
@@ -237,7 +237,13 @@ impl App {
             if let Some(m) = items.iter_mut().find(|m| m.id == row) {
                 match &op.op {
                     Op::React(e) => view::set_my_reaction(m, e.as_deref()),
-                    Op::Edit(t) => view::set_edited_text(m, t),
+                    Op::Edit { text, target } => {
+                        view::set_edited_text(m, text);
+                        let id = target.to_string();
+                        if let Some(p) = pins.iter_mut().find(|p| p.id == id) {
+                            p.text = text.replace('\n', " ");
+                        }
+                    }
                     Op::Delete(_) => view::set_deleted(m),
                     Op::Pin { .. } | Op::Unpin { .. } => {}
                 }

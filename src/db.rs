@@ -181,6 +181,19 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        // where the newest edit of a message is stored: edits are rows of their own, so finding
+        // one for a message outside the window would otherwise mean reading the thread
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_edits (
+                thread TEXT NOT NULL,
+                target_ts INTEGER NOT NULL,
+                sender BLOB NOT NULL,
+                edit_ts INTEGER NOT NULL,
+                PRIMARY KEY (thread, target_ts, sender)
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
         // title and cover of installed sticker packs: presage keeps every sticker's bytes in one
         // JSON column, so listing packs from its table means reading all of them
         sqlx::query(
@@ -256,6 +269,34 @@ impl Index {
                 Some((ts as u64, uuid::Uuid::from_slice(&author).ok()?, at as u64, exp as u64))
             })
             .collect())
+    }
+
+    /// An edit of `target` by `sender`, stored at `edit_ts`; only the newest is kept.
+    pub async fn record_edit(&self, thread: &str, target: u64, sender: uuid::Uuid, edit_ts: u64) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO ls_edits (thread, target_ts, sender, edit_ts) VALUES (?, ?, ?, ?)
+             ON CONFLICT (thread, target_ts, sender) DO UPDATE SET edit_ts = MAX(edit_ts, excluded.edit_ts)",
+        )
+        .bind(thread)
+        .bind(target as i64)
+        .bind(sender.as_bytes().as_slice())
+        .bind(edit_ts as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Stored timestamp of the newest edit of `target` by `sender`. Per sender because only the
+    /// author's edits count, and a stranger's must not hide them.
+    pub async fn latest_edit(&self, thread: &str, target: u64, sender: uuid::Uuid) -> anyhow::Result<Option<u64>> {
+        let ts: Option<i64> =
+            sqlx::query_scalar("SELECT edit_ts FROM ls_edits WHERE thread = ? AND target_ts = ? AND sender = ?")
+                .bind(thread)
+                .bind(target as i64)
+                .bind(sender.as_bytes().as_slice())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(ts.map(|t| t as u64))
     }
 
     /// Ids of installed sticker packs. Reads the id column only, not the manifests.
@@ -660,6 +701,56 @@ mod tests {
         assert!(tss.contains(&1) && tss.contains(&3));
         assert_eq!(index.my_deletes_in(&[2, 3]).await.unwrap().into_iter().collect::<Vec<_>>(), [2]);
         assert!(index.receipts_for(&[]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn latest_edit_is_the_newest_per_sender() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        let (author, other) = (Uuid::from_u128(3), Uuid::from_u128(4));
+        assert_eq!(index.latest_edit("t", 1, author).await.unwrap(), None);
+        index.record_edit("t", 1, author, 20).await.unwrap();
+        // arriving out of order doesn't bring an older text back
+        index.record_edit("t", 1, author, 10).await.unwrap();
+        index.record_edit("t", 1, other, 30).await.unwrap();
+        index.record_edit("u", 1, author, 40).await.unwrap();
+        assert_eq!(index.latest_edit("t", 1, author).await.unwrap(), Some(20));
+        assert_eq!(index.latest_edit("t", 2, author).await.unwrap(), None);
+    }
+
+    /// `ContentExt::timestamp` of an edit is its target's, but the row is stored under the
+    /// metadata's: `ls_edits` must hold the latter to read the edit back.
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_edit_is_stored_under_its_own_timestamp() {
+        use presage::libsignal_service::content::ContentBody;
+        use presage::proto::EditMessage;
+        use presage::store::ContentExt;
+        let db = Db::new().await;
+        db.save(100, "original").await;
+        let id = ServiceId::Aci(Uuid::from_u128(2).into());
+        let at = chrono::DateTime::from_timestamp_millis(300).unwrap();
+        let edit = EditMessage {
+            target_sent_timestamp: Some(100),
+            data_message: Some(DataMessage { body: Some("edited".into()), ..Default::default() }),
+        };
+        let c = Content::from_body(edit, Metadata {
+            sender: id,
+            destination: id,
+            sender_device: 1u32.try_into().unwrap(),
+            pni_verified: None,
+            client_timestamp: at,
+            server_timestamp: at,
+            needs_receipt: false,
+            unidentified_sender: false,
+            was_plaintext: false,
+            server_guid: None,
+        });
+        assert_eq!(c.timestamp(), 100);
+        db.store.save_message(&thread(), c).await.unwrap();
+        let stored = db.store.message(&thread(), 300).await.unwrap().unwrap();
+        assert!(matches!(stored.body, ContentBody::EditMessage(_)));
+        let original = db.store.message(&thread(), 100).await.unwrap().unwrap();
+        assert!(matches!(original.body, ContentBody::DataMessage(_)));
     }
 
     #[tokio::test(flavor = "current_thread")]

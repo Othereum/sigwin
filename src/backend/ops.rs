@@ -63,7 +63,7 @@ impl App {
             ..Default::default()
         };
         let edit = EditMessage { target_sent_timestamp: Some(target), data_message: Some(dm) };
-        self.send_op(row, Op::Edit(text), edit.into()).await;
+        self.send_op(row, Op::Edit { text, target }, edit.into()).await;
     }
 
     pub(super) async fn delete(&mut self, id: &str) {
@@ -164,12 +164,13 @@ impl App {
                 self.pin_expiry = Some(self.pin_expiry.map_or(expires, |t| t.min(expires)));
             }
             // pinned before this device was linked: nothing to show
-            let Some(dm) = c.as_ref().and_then(|c| match view::classify(c, self.me) {
-                Kind::Msg { dm, .. } => Some(dm.clone()),
+            let Some((dm, by)) = c.as_ref().and_then(|c| match view::classify(c, self.me) {
+                Kind::Msg { dm, .. } => Some((dm.clone(), c.metadata.sender.raw_uuid())),
                 _ => None,
             }) else {
                 continue;
             };
+            let dm = self.latest_edit(&key, &thread, target, by).await.unwrap_or(dm);
             for u in view::mentioned(&dm) {
                 self.name(u).await;
             }
@@ -179,6 +180,22 @@ impl App {
             out.push(PinDto { id: target.to_string(), sender, text });
         }
         out
+    }
+
+    /// The newest text `author` gave message `target`, if they edited it.
+    async fn latest_edit(&self, key: &str, thread: &Thread, target: u64, author: Uuid) -> Option<DataMessage> {
+        let at = match self.index.latest_edit(key, target, author).await {
+            Ok(at) => at?,
+            Err(e) => {
+                warn!("latest edit: {e:#}");
+                return None;
+            }
+        };
+        let c = self.store.message(thread, at).await.ok().flatten()?;
+        match view::classify(&c, self.me) {
+            Kind::Edit { dm, .. } => Some(dm.clone()),
+            _ => None,
+        }
     }
 
     pub(super) async fn send_op(&mut self, row: u64, op: Op, mut body: ContentBody) {
@@ -223,5 +240,14 @@ pub(super) async fn record_pin(index: &Index, key: &str, c: &Content, me: Uuid) 
         Kind::Unpin { target } => index.unpin(key, target, at).await?,
         _ => return Ok(false),
     }
+    Ok(true)
+}
+
+/// Notes where a stored edit is, for showing it without the window; true if `c` was one.
+pub(super) async fn record_edit(index: &Index, key: &str, c: &Content, me: Uuid) -> anyhow::Result<bool> {
+    let Kind::Edit { target, .. } = view::classify(c, me) else { return Ok(false) };
+    // not `c.timestamp()`: for an edit that's the target's
+    let at = c.metadata.client_timestamp.timestamp_millis() as u64;
+    index.record_edit(key, target, c.metadata.sender.raw_uuid(), at).await?;
     Ok(true)
 }

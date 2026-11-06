@@ -123,6 +123,9 @@ struct Persist {
     /// pin messages stored before the pin index existed have been indexed
     #[serde(default)]
     pins_indexed: bool,
+    /// edit messages stored before the edit index existed have been indexed
+    #[serde(default)]
+    edits_indexed: bool,
     /// layout of the attachment and thumbnail caches on disk (`CACHE_FORMAT` once converted)
     #[serde(default)]
     cache_format: u32,
@@ -194,7 +197,8 @@ struct PendingOp {
 enum Op {
     /// None: reaction taken back
     React(Option<String>),
-    Edit(String),
+    /// `target`: sent timestamp of the edited message
+    Edit { text: String, target: u64 },
     /// sent timestamp of the target
     Delete(u64),
     /// already written to the pin index; undone if sending fails
@@ -521,7 +525,7 @@ impl App {
         if !self.persist.receipts_indexed {
             self.backfill_receipts();
         }
-        if !self.persist.pins_indexed {
+        if !self.persist.pins_indexed || !self.persist.edits_indexed {
             self.backfill_pins();
         }
     }
@@ -687,10 +691,18 @@ impl App {
             Internal::Sent(ts, Ok(())) => {
                 // presage stored the message before returning: swap the stub for the real row now
                 self.pending.retain(|p| p.ts != ts);
-                if let Some(Op::Delete(target)) = self.ops.iter().find(|o| o.ts == ts).map(|o| &o.op) {
-                    if let Err(e) = self.index.record_my_delete(*target).await {
-                        warn!("record delete: {e:#}");
+                match self.ops.iter().find(|o| o.ts == ts) {
+                    Some(PendingOp { op: Op::Delete(target), .. }) => {
+                        if let Err(e) = self.index.record_my_delete(*target).await {
+                            warn!("record delete: {e:#}");
+                        }
                     }
+                    Some(PendingOp { op: Op::Edit { target, .. }, thread_key, .. }) => {
+                        if let Err(e) = self.index.record_edit(thread_key, *target, self.me, ts).await {
+                            warn!("record edit: {e:#}");
+                        }
+                    }
+                    _ => {}
                 }
                 self.ops.retain(|o| o.ts != ts);
                 if let Err(e) = self.reload_window().await {
@@ -705,7 +717,7 @@ impl App {
                     let op = self.ops.remove(i);
                     let what = match op.op {
                         Op::React(_) => "반응",
-                        Op::Edit(_) => "수정",
+                        Op::Edit { .. } => "수정",
                         Op::Delete(_) => "삭제",
                         Op::Pin { target } => {
                             if let Err(e) = self.index.unpin(&op.thread_key, target, ts).await {
@@ -761,6 +773,7 @@ impl App {
             }
             Internal::PinsIndexed => {
                 self.persist.pins_indexed = true;
+                self.persist.edits_indexed = true;
                 self.persist_dirty = true;
                 self.current_dirty = true;
             }
