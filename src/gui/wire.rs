@@ -146,6 +146,20 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         cursor as i32
     });
 
+    let weak = app.as_weak();
+    app.on_link_check(move || {
+        if let Some(app) = weak.upgrade() {
+            linkcard::edited(&app);
+        }
+    });
+
+    let weak = app.as_weak();
+    app.on_link_dismiss(move || {
+        if let Some(app) = weak.upgrade() {
+            linkcard::dismiss(&app);
+        }
+    });
+
     let s = send.clone();
     let weak = app.as_weak();
     app.on_send(move |text| {
@@ -180,7 +194,9 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             return;
         }
         let mentions = UI.with_borrow_mut(|ui| std::mem::take(&mut ui.picked));
-        s(Command::Send { text: text.to_string(), files, quote, mentions });
+        // `files` were taken above: with attachments there is no preview
+        let link = linkcard::take_for_send(&app, if files.is_empty() { &text } else { "" });
+        s(Command::Send { text: text.to_string(), files, quote, mentions, link });
         app.set_mention_items(ModelRc::default());
         app.set_draft(SharedString::new());
         app.set_pending_files(ModelRc::default());
@@ -408,6 +424,8 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         app.set_reply_preview(SharedString::new());
         app.set_edit_preview(text.replace('\n', " ").into());
         app.set_draft(text.into());
+        // an edit keeps no preview: the bar of what was being written goes
+        linkcard::update(&app);
         app.invoke_focus_composer();
         app.invoke_composer_to_end();
     });
@@ -581,12 +599,16 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             muted_mentions: app.get_set_muted_mentions(),
             muted_replies: app.get_set_muted_replies(),
             badge_muted: app.get_set_badge_muted(),
+            link_previews: app.get_set_link_previews(),
         };
         let (old, path) = UI.with_borrow_mut(|ui| (std::mem::replace(&mut ui.settings, new.clone()), ui.settings_path.clone()));
         if old == new {
             return;
         }
         new.publish();
+        if old.link_previews != new.link_previews {
+            linkcard::update(&app);
+        }
         if (old.badge_count, old.badge_muted) != (new.badge_count, new.badge_muted) {
             UI.with_borrow(|ui| show_total_unread(&app, ui));
         }

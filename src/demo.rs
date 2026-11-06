@@ -270,6 +270,9 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             (m.img_w, m.img_h) = (400, 300);
         }
     }
+    if std::env::var_os("SIGWIN_DEMO_LINK").is_some() {
+        demo_link_rows(&mut items);
+    }
     if std::env::var_os("SIGWIN_DEMO_GRID").is_some() {
         // the newest rows, bare, with a caption and with a file
         let last = items.len() - DEMO_GRIDS.len();
@@ -414,9 +417,75 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             demo_grids(&emit);
         });
     }
+    if std::env::var_os("SIGWIN_DEMO_LINK").is_some() {
+        // after the rows, as downloads do; one image never arrives
+        let emit = emit.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            emit(Event::Thumb(Arc::new(demo_link_image("demo-link-wide", 300, 158))));
+            emit(Event::Thumb(Arc::new(demo_link_image("demo-link-small", 64, 64))));
+        });
+    }
     if std::env::var_os("SIGWIN_DEMO_STICKERS").is_some() {
         demo_stickers(emit);
     }
+}
+
+fn demo_link_image(key: &str, w: u32, h: u32) -> types::Thumb {
+    let (pw, ph) = (types::physical_px(w), types::physical_px(h));
+    let img = image::RgbaImage::from_fn(pw, ph, |x, y| image::Rgba([(x * 255 / pw) as u8, 90, (y * 255 / ph) as u8, 255]));
+    types::Thumb { key: key.into(), width: pw, height: ph, rgba: img.into_raw() }
+}
+
+/// SIGWIN_DEMO_LINK: the newest rows carry previews of every shape.
+fn demo_link_rows(items: &mut [types::MsgDto]) {
+    let card = |title: &str, description: &str, domain: &str, key: &str, size: (u32, u32)| {
+        Some(types::LinkCard {
+            url: format!("https://{domain}/demo"),
+            title: title.into(),
+            description: description.into(),
+            domain: domain.into(),
+            image_key: key.into(),
+            img_w: size.0,
+            img_h: size.1,
+        })
+    };
+    let rows = [
+        ("https://youtube.com/demo 이거 봐봐", false, card("합성 데이터로 만든 영상 제목", "영상 설명이 이 자리에 나옵니다.", "youtube.com", "demo-link-wide", (300, 158))),
+        ("https://www.example.kr/demo", true, card("내가 보낸 링크의 제목", "", "example.kr", "demo-link-wide", (300, 158))),
+        ("https://news.example.kr/demo", false, card("아주 긴 뉴스 제목이 두 줄을 넘어가면 어떻게 잘리는지 확인하기 위해 일부러 길게 쓴 제목입니다 정말로 길게 썼습니다", "설명도 길게 씁니다. 두 줄을 넘는 설명은 끝에서 잘리고 말줄임표가 나와야 합니다. 그래서 충분히 길게 씁니다. 더 길게 씁니다.", "news.example.kr", "demo-link-small", (64, 64))),
+        ("https://blog.example.kr/demo", false, card("이미지 없는 미리보기", "설명만 있습니다.", "blog.example.kr", "", (0, 0))),
+        ("https://photo.example.kr/demo", false, card("이미지가 아직 도착하지 않은 카드", "", "photo.example.kr", "demo-link-missing", (300, 158))),
+    ];
+    let last = items.len() - rows.len();
+    for ((text, outgoing, link), m) in rows.into_iter().zip(&mut items[last..]) {
+        m.text = text.into();
+        m.outgoing = outgoing;
+        m.link = link;
+        m.big_emoji = false;
+        m.sticker = false;
+        m.image_key.clear();
+        m.attachment.clear();
+        m.quote.clear();
+        m.quote_author.clear();
+    }
+}
+
+/// `App::link_preview`: any link gets a card shortly, except on a host starting with "fail".
+fn demo_link_fetch(emit: &backend::Emit, url: &str) {
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let domain = crate::link::domain(url);
+    let card = (!domain.starts_with("fail")).then(|| types::LinkCard {
+        url: url.into(),
+        title: "입력창 미리보기 제목".into(),
+        description: "입력창에 나오는 설명입니다.".into(),
+        domain,
+        image_key: "demo-compose".into(),
+        img_w: 300,
+        img_h: 158,
+    });
+    emit(Event::Thumb(Arc::new(demo_link_image("demo-compose-c", 44, 44))));
+    emit(Event::LinkPreview { url: url.into(), card });
 }
 
 /// `App::set_mute` on the demo list.
@@ -648,6 +717,9 @@ fn demo_status(emit: backend::Emit) {
 /// `StickerFrames` / `PickerFrames`: `demo-st-1` and every 4th picker sticker are animated GIFs
 /// (a pulsing blob), decoded like real stickers.
 fn demo_frames(emit: &backend::Emit, c: &Command) {
+    if let Command::LinkPreview(Some(url)) = c {
+        return demo_link_fetch(emit, url);
+    }
     if let Command::ViewImage { id, index, fit, .. } = c {
         return demo_viewer(emit, id, *index, *fit);
     }

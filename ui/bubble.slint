@@ -124,6 +124,83 @@ export component MsgImage inherits Rectangle {
     }
 }
 
+// a link's preview: a wide image on top, a small one beside the text; clicking opens the link
+component LinkPreview inherits Rectangle {
+    in property <MsgItem> m;
+    callback menu(string, length, length);
+    property <bool> wide: m.link-img-w > 100px;
+    property <bool> small: m.link-img-w > 0px && !wide;
+    preferred-width: 300px;
+    border-radius: 8px;
+    clip: true;
+    background: m.outgoing ? (ta.has-hover ? #ffffff48 : #ffffff30) : Theme.dark ? (ta.has-hover ? #ffffff22 : #ffffff14) : (ta.has-hover ? #0000001c : #00000010);
+    VerticalLayout {
+        if wide: Rectangle {
+            height: m.link-img-h;
+            background: #80808030;
+            Image {
+                width: 100%;
+                height: 100%;
+                source: m.link-image;
+                image-fit: cover;
+            }
+        }
+        HorizontalLayout {
+            padding: 8px;
+            spacing: 8px;
+            if small: Rectangle {
+                width: m.link-img-w;
+                height: m.link-img-h;
+                border-radius: 6px;
+                clip: true;
+                background: #80808030;
+                Image {
+                    width: 100%;
+                    height: 100%;
+                    source: m.link-image;
+                    image-fit: cover;
+                }
+            }
+            VerticalLayout {
+                spacing: 2px;
+                alignment: center;
+                if m.link-title != "": Text {
+                    text: m.link-title;
+                    color: m.outgoing ? white : Theme.text;
+                    font-size: 13px;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                    overflow: elide;
+                    height: min(self.preferred-height, 36px);
+                }
+                if m.link-desc != "": Text {
+                    text: m.link-desc;
+                    color: m.outgoing ? #ffffffd0 : Theme.subtle;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    overflow: elide;
+                    height: min(self.preferred-height, 34px);
+                }
+                Text {
+                    text: m.link-domain;
+                    color: m.outgoing ? #ffffffb0 : Theme.subtle;
+                    font-size: 11px;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Links.open(m.link-url); }
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
+}
+
 // hover toolbar beside a bubble: reply, more (the menu has the reactions)
 export component MsgTools inherits Rectangle {
     in property <bool> shown;
@@ -406,6 +483,10 @@ export component Bubble inherits VerticalLayout {
                             wrap: word-wrap;
                         }
                     }
+                }
+                if m.link-url != "": LinkPreview {
+                    m: m;
+                    menu(id, x, y) => { root.menu(id, x, y); }
                 }
                 // With @mentions or links the visible glyphs come from a StyledText on top (same font
                 // and size, only colors and underlines differ, so it lays out like the TextInput) and

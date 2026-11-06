@@ -226,7 +226,16 @@ pub(crate) fn to_item(
     }
     let spoilers = hidden_spoilers(m, revealed);
     let has_rich = !m.mentions.is_empty() || !links.is_empty() || !spoilers.is_empty();
+    let card = m.link.as_ref();
+    let text_of = |f: fn(&types::LinkCard) -> &String| card.map(f).map_or(SharedString::new(), |s| s.as_str().into());
     MsgItem {
+        link_url: text_of(|c| &c.url),
+        link_title: text_of(|c| &c.title),
+        link_desc: text_of(|c| &c.description),
+        link_domain: text_of(|c| &c.domain),
+        link_image: card.and_then(|c| thumbs.get(&c.image_key)).cloned().unwrap_or_default(),
+        link_img_w: card.map_or(0.0, |c| c.img_w as f32),
+        link_img_h: card.map_or(0.0, |c| c.img_h as f32),
         reactions: ModelRc::new(VecModel::from(reactions)),
         big_emoji: m.big_emoji,
         id: m.id.as_str().into(),

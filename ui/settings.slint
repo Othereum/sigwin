@@ -64,6 +64,7 @@ export component SettingsPage inherits Rectangle {
     in-out property <int> theme;
     in-out property <int> zoom;
     in-out property <bool> enter-sends;
+    in-out property <bool> link-previews;
     in-out property <bool> autostart;
     in-out property <bool> start-hidden;
     in-out property <bool> auto-update;
@@ -237,6 +238,14 @@ export component SettingsPage inherits Rectangle {
                                     root.enter-sends = i == 0;
                                     root.changed();
                                 }
+                            }
+                        }
+                        SettingRow {
+                            label: "링크 미리보기 만들기";
+                            hint: "보내는 메시지에 링크의 제목과 이미지를 붙입니다. 이를 위해 그 사이트에 접속하므로 사이트에 내 IP 주소가 보입니다.";
+                            Switch {
+                                checked <=> root.link-previews;
+                                toggled => { root.changed(); }
                             }
                         }
                     }

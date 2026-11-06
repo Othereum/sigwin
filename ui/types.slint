@@ -76,6 +76,14 @@ export struct MsgItem {
     frame: [int],
     img-w: length,
     img-h: length,
+    // the preview of a link in the text (link-url empty: none); link-img-w 0: no image
+    link-url: string,
+    link-title: string,
+    link-desc: string,
+    link-domain: string,
+    link-image: image,
+    link-img-w: length,
+    link-img-h: length,
     // several images: the grid drawn instead of `image`
     cells: [ImageCell],
     deleted: bool,

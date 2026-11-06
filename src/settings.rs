@@ -35,6 +35,8 @@ pub struct Settings {
     pub muted_replies: bool,
     /// they count in the badge
     pub badge_muted: bool,
+    /// a link in the composer gets a preview, fetched from its site
+    pub link_previews: bool,
 }
 
 impl Default for Settings {
@@ -53,6 +55,7 @@ impl Default for Settings {
             muted_mentions: true,
             muted_replies: true,
             badge_muted: true,
+            link_previews: true,
         }
     }
 }

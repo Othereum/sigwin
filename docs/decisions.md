@@ -39,6 +39,11 @@ The viewer keeps the original from the moment it opens instead of decoding it ag
 
 Going to another image of an album decodes it on the spot. 12MP in the `fast` build took 220ms: 50ms decoding and fitting, 118ms copying into the UI's buffer and 50ms freeing the previous image, those two slow because the main crate is unoptimized there. `decode_view` now fills the UI's buffer itself, in the optimized crate. Measured on a synthetic JPEG with everything optimized, that barely changes the time (73ms to 70ms) but lowers the peak (103MB to 84MB). Decoding the neighbouring images ahead would remove the rest of the wait, at about 96MB more while the viewer is open; not done, it's fast enough.
 
+## Link previews
+A preview is made by the sender's app and travels in the message, so showing a received one contacts nothing but Signal. Making one means the sender contacts the site, which sees their IP address. Signal Desktop does the same, without a proxy: its content proxy isn't used for this, and the Storage Service field for proxied previews is retired. So it's a setting, on by default as in Signal, and receiving never fetches: a link someone else sends must not make us reveal anything.
+
+Rejected: fetching at send time only. The user wouldn't see or be able to remove what goes out. Letting presage do it: no switch, a blocked send, the url in its log. A preview with no fields to stop presage's fetch: Signal iOS requires the url field and drops the whole message without it.
+
 ## Sticker and avatar resampling (measured 2026-11-06, synthetic images, heap peak without the source)
 `fit` moved from `image`'s resize in f32 to `fast_image_resize`:
 | job | `image`, f32 | fir |

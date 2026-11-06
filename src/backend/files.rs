@@ -275,6 +275,7 @@ pub(super) fn remove_files(c: &Content, ts: u64, attachments: &Path, thumbs: &Pa
     if let Some(data) = dm.sticker.as_ref().and_then(|s| s.data.as_ref()) {
         keys.push(view::attachment_key(data, ts, 99));
     }
+    keys.extend(dm.preview.iter().filter_map(|p| p.image.as_ref()).map(|a| view::attachment_key(a, ts, view::LINK_IMAGE_INDEX)));
     for k in keys {
         let _ = std::fs::remove_file(attachment_path(attachments, &k));
         let _ = std::fs::remove_file(thumbs.join(format!("{k}.enc")));

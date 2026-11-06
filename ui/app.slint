@@ -80,6 +80,15 @@ export component AppWindow inherits Window {
     // what's going on with the connection, "" when all is well
     in property <string> connection-text;
     in property <string> reply-preview;
+    // the link preview above the composer (url empty: none)
+    in property <string> compose-link-url;
+    in property <string> compose-link-title;
+    in property <string> compose-link-desc;
+    in property <string> compose-link-domain;
+    in property <image> compose-link-image;
+    in property <bool> compose-link-has-image;
+    callback link-check();
+    callback link-dismiss();
     in property <[string]> pending-files;
     in-out property <string> search;
     in-out property <string> draft;
@@ -110,6 +119,7 @@ export component AppWindow inherits Window {
     // index into the zoom steps (see settings::ZOOMS)
     in-out property <int> set-zoom: 1;
     in-out property <bool> enter-sends: true;
+    in-out property <bool> set-link-previews: true;
     in-out property <bool> set-autostart;
     in-out property <bool> set-start-hidden: true;
     in-out property <bool> set-auto-update: true;
@@ -676,6 +686,46 @@ export component AppWindow inherits Window {
                     IconButton { label: "✕"; width: 28px; height: 28px; clicked => { root.clear-attachments(); } }
                 }
             }
+            if root.current-key != "" && root.compose-link-url != "" && root.pending-files.length == 0 && root.edit-preview == "": Rectangle {
+                background: Theme.sidebar;
+                HorizontalLayout {
+                    padding: 8px;
+                    padding-left: 16px;
+                    spacing: 8px;
+                    if root.compose-link-has-image: Image {
+                        width: 44px;
+                        height: 44px;
+                        source: root.compose-link-image;
+                        // already resampled to this size
+                        image-fit: fill;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 1px;
+                        Text {
+                            text: root.compose-link-title;
+                            color: Theme.text;
+                            font-size: 12px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+                        if root.compose-link-desc != "": Text {
+                            text: root.compose-link-desc;
+                            color: Theme.subtle;
+                            font-size: 12px;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: root.compose-link-domain;
+                            color: Theme.subtle;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+                    }
+                    IconButton { label: "✕"; width: 28px; height: 28px; clicked => { root.link-dismiss(); } }
+                }
+            }
             composer-bar := Rectangle {
                 visible: root.current-key != "";
                 min-height: self.visible ? 48px : 0px;
@@ -766,6 +816,7 @@ export component AppWindow inherits Window {
                                                 self.set-selection-offsets(cut, cut);
                                             }
                                             root.composing(self.text != "");
+                                            root.link-check();
                                             root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
                                         }
                                         cursor-position-changed => {
@@ -814,6 +865,7 @@ export component AppWindow inherits Window {
         theme <=> root.set-theme;
         zoom <=> root.set-zoom;
         enter-sends <=> root.enter-sends;
+        link-previews <=> root.set-link-previews;
         autostart <=> root.set-autostart;
         start-hidden <=> root.set-start-hidden;
         auto-update <=> root.set-auto-update;

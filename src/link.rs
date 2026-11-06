@@ -58,6 +58,62 @@ pub fn target(url: &str) -> String {
     if url.to_ascii_lowercase().starts_with("www.") { format!("https://{url}") } else { url.to_string() }
 }
 
+/// Links in `text` a preview can be for, the way receivers will find them in the body.
+pub fn preview_urls(text: &str) -> Vec<String> {
+    let mut urls = presage::model::previews::extract_urls_from_text_block(text);
+    urls.retain(|u| !is_sneaky(u));
+    urls
+}
+
+/// Whether a preview claiming to be for `url` may be shown on a message with this `body`.
+pub fn preview_allowed(url: &str, body: &str) -> bool {
+    preview_urls(body).iter().any(|u| u == url)
+}
+
+/// Links dressed up as something else (Signal Desktop's `isLinkSneaky`): an image and a title on
+/// them would make them look more real. Mixed scripts in a domain are judged by its punycode: a
+/// label in another script beside plain ones, not a mix inside one label.
+fn is_sneaky(href: &str) -> bool {
+    const MAX_HREF: usize = 2048;
+    if href.len() > MAX_HREF || href.chars().any(|c| ('\u{2500}'..='\u{25ff}').contains(&c)) {
+        return true;
+    }
+    let Ok(url) = url::Url::parse(href) else { return true };
+    if !url.username().is_empty() || url.password().is_some() {
+        return true;
+    }
+    let Some(host) = url.host_str() else { return true };
+    if host.contains('%') {
+        return true;
+    }
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 || labels.iter().any(|l| l.is_empty()) {
+        return true;
+    }
+    let puny = labels.iter().filter(|l| l.starts_with("xn--")).count();
+    puny != 0 && puny != labels.len()
+}
+
+/// The site's name on a preview card. Punycode stays as it is: it can't pass for another site.
+pub fn domain(url: &str) -> String {
+    let Ok(url) = url::Url::parse(url) else { return String::new() };
+    let host = url.host_str().unwrap_or_default();
+    host.strip_prefix("www.").unwrap_or(host).to_string()
+}
+
+/// Text from a preview, which anyone can make say anything: one line, no control or direction
+/// characters, at most `max` characters.
+pub fn clean_preview_text(text: &str, max: usize) -> String {
+    let hidden = |c: char| c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}');
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out: String = line.chars().filter(|c| !hidden(*c)).take(max + 1).collect();
+    if out.chars().count() > max {
+        out = out.chars().take(max).collect::<String>().trim_end().to_string();
+        out.push('…');
+    }
+    out
+}
+
 pub fn open(url: &str) {
     // only web links ever reach here (see `find`); never pass anything else to the shell
     if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -93,6 +149,31 @@ mod tests {
 
     fn urls(t: &str) -> Vec<&str> {
         find(t).into_iter().map(|(s, e)| &t[s..e]).collect()
+    }
+
+    #[test]
+    fn sneaky_links_get_no_preview() {
+        assert_eq!(preview_urls("봐 https://www.youtube.com/watch?v=abc"), ["https://www.youtube.com/watch?v=abc"]);
+        for bad in [
+            "http://youtube.com/a",
+            "https://youtube.com@evil.com/a",
+            "https://localhost/a",
+            "https://single/a",
+            "https://аррӏе.com/a",
+            "https://192.168.0.1/a",
+        ] {
+            assert!(preview_urls(bad).is_empty(), "{bad}");
+        }
+        assert!(preview_allowed("https://a.kr/x", "여기 https://a.kr/x 봐"));
+        assert!(!preview_allowed("https://b.kr/x", "여기 https://a.kr/x 봐"));
+        assert!(!preview_allowed("", "여기 https://a.kr/x 봐"));
+    }
+
+    #[test]
+    fn preview_text_is_one_short_line() {
+        assert_eq!(clean_preview_text(" 제목\n\t둘째\u{202e}줄 ", 20), "제목 둘째줄");
+        assert_eq!(clean_preview_text("가나다라", 3), "가나다…");
+        assert_eq!(domain("https://www.youtube.com/watch"), "youtube.com");
     }
 
     #[test]

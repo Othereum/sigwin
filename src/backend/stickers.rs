@@ -226,6 +226,7 @@ impl App {
             quote_id: String::new(),
             attachment: String::new(),
             image_key: image_key.clone(),
+            link: None,
             error: None,
             after_seq: None,
             job: SendJob::Sticker(s),

@@ -165,6 +165,47 @@ pub fn attachment_key(ptr: &AttachmentPointer, ts: u64, idx: usize) -> String {
     }
 }
 
+/// `attachment_key` index of a link preview's image (not in `attachments`, like a sticker's).
+pub const LINK_IMAGE_INDEX: usize = 98;
+/// Size of that image on the card (logical px): a wide one on top, others beside the text.
+const LINK_IMAGE_WIDE: (u32, u32) = (300, 158);
+const LINK_IMAGE_SMALL: (u32, u32) = (64, 64);
+/// Cut-offs for what a preview can say (characters).
+pub const LINK_TITLE_MAX: usize = 200;
+pub const LINK_DESC_MAX: usize = 300;
+
+/// An image too small or of unknown size stays small (site logos).
+pub fn link_image_size(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
+    match (w, h) {
+        (Some(w), Some(h)) if w >= 200 && h >= 100 && w >= h => LINK_IMAGE_WIDE,
+        _ => LINK_IMAGE_SMALL,
+    }
+}
+
+/// The preview to show on a message, and its image to fetch. Like Signal's clients, it counts
+/// only if its url really is a link in the text.
+pub fn link_card(dm: &DataMessage, ts: u64) -> Option<(crate::types::LinkCard, Option<WantedCell>)> {
+    let p = dm.preview.first()?;
+    let url = p.url.as_deref()?;
+    if !crate::link::preview_allowed(url, dm.body.as_deref()?) {
+        return None;
+    }
+    let title = crate::link::clean_preview_text(p.title.as_deref().unwrap_or_default(), LINK_TITLE_MAX);
+    let description = crate::link::clean_preview_text(p.description.as_deref().unwrap_or_default(), LINK_DESC_MAX);
+    if title.is_empty() && p.image.is_none() {
+        return None;
+    }
+    let mut card = crate::types::LinkCard { url: url.to_string(), title, description, domain: crate::link::domain(url), ..Default::default() };
+    let wanted = p.image.as_ref().map(|a| {
+        let size = link_image_size(a.width, a.height);
+        let file_key = attachment_key(a, ts, LINK_IMAGE_INDEX);
+        card.image_key = format!("{file_key}@{}x{}", size.0, size.1);
+        (card.img_w, card.img_h) = size;
+        WantedCell { key: card.image_key.clone(), file_key, ptr: a.clone(), size }
+    });
+    Some((card, wanted))
+}
+
 /// Content type of a long message's full text: the body carries only its first 2KB.
 pub const LONG_TEXT: &str = "text/x-signal-plain";
 /// Signal's limits: inline body, and the long-text attachment.
@@ -825,6 +866,14 @@ pub fn build(
                 if others > 0 {
                     m.attachment = format!("{} 외 {}개", m.attachment, others);
                 }
+                // not next to attachments (Signal's clients don't send that), and it would give
+                // away what a spoiler in the text hides
+                if !m.sticker && m.attachment.is_empty() && m.image_key.is_empty() && !m.styles.iter().any(|s| s.2 == STYLE_SPOILER) {
+                    if let Some((card, image)) = link_card(dm, *ts) {
+                        m.link = Some(card);
+                        wanted_cells.extend(image);
+                    }
+                }
                 if let Some(r) = reactions.get(ts).filter(|r| !r.is_empty()) {
                     let mut counts: Vec<(String, u32)> = Vec::new();
                     for (_, e) in r {
@@ -1185,6 +1234,49 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn link_preview_shows_only_for_a_link_in_the_text() {
+        let name = |_: &Uuid| String::new();
+        let (empty, long) = (HashMap::new(), LongTexts::default());
+        let image = AttachmentPointer { digest: Some(vec![7; 32]), width: Some(1280), height: Some(720), ..Default::default() };
+        let preview = |url: &str| presage::proto::Preview {
+            url: Some(url.into()),
+            title: Some("제목".into()),
+            image: Some(image.clone()),
+            ..Default::default()
+        };
+        let run = |dm: DataMessage| {
+            let window = [(5u64, incoming(dm))];
+            build(&window, Uuid::from_u128(1), &[], &empty, &Default::default(), &long, &name)
+        };
+        let url = "https://www.youtube.com/watch?v=x";
+        let body = format!("봐 {url}");
+
+        let b = run(DataMessage { body: Some(body.clone()), preview: vec![preview(url)], ..Default::default() });
+        let card = b.items[0].link.as_ref().unwrap();
+        assert_eq!((card.domain.as_str(), card.title.as_str(), card.img_w), ("youtube.com", "제목", 300));
+        assert_eq!(b.wanted_cells[0].key, card.image_key);
+
+        // claims to be another site than the link in the text
+        let b = run(DataMessage { body: Some("https://evil.example.kr/a".into()), preview: vec![preview(url)], ..Default::default() });
+        assert!(b.items[0].link.is_none());
+        assert!(b.wanted_cells.is_empty());
+
+        // beside a file: the file is what shows
+        let pdf = AttachmentPointer { content_type: Some("application/pdf".into()), ..Default::default() };
+        let b = run(DataMessage { body: Some(body.clone()), preview: vec![preview(url)], attachments: vec![pdf], ..Default::default() });
+        assert!(b.items[0].link.is_none());
+
+        // it would give away what the spoiler hides
+        let spoiler = BodyRange {
+            start: Some(0),
+            length: Some(body.encode_utf16().count() as u32),
+            associated_value: Some(AssociatedValue::Style(presage::proto::body_range::Style::Spoiler as i32)),
+        };
+        let b = run(DataMessage { body: Some(body.clone()), body_ranges: vec![spoiler], preview: vec![preview(url)], ..Default::default() });
+        assert!(b.items[0].link.is_none());
     }
 
     #[test]

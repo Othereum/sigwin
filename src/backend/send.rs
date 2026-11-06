@@ -3,7 +3,8 @@
 use super::*;
 
 impl App {
-    pub(super) async fn send(&mut self, text: String, files: Vec<PathBuf>, quote_id: Option<String>, mentions: Vec<crate::mention::Member>) {
+    pub(super) async fn send(&mut self, text: String, files: Vec<PathBuf>, quote_id: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String>) {
+        let link = self.link_for_send(link);
         if self.manager.is_none() {
             return;
         }
@@ -62,9 +63,10 @@ impl App {
             quote_id: quote.as_ref().and_then(|q| q.id).map(|i| i.to_string()).unwrap_or_default(),
             attachment,
             image_key: String::new(),
+            link: link.card(),
             error: None,
             after_seq: None,
-            job: SendJob::Text { body, body_ranges, files, quote },
+            job: SendJob::Text { body, body_ranges, files, quote, link },
         });
         self.emit_messages(Scroll::Bottom).await;
         self.start_send(ts).await;
@@ -129,7 +131,7 @@ impl App {
 /// What a pending row sends.
 #[derive(Clone)]
 pub(super) enum SendJob {
-    Text { body: String, body_ranges: Vec<BodyRange>, files: Vec<PathBuf>, quote: Option<Quote> },
+    Text { body: String, body_ranges: Vec<BodyRange>, files: Vec<PathBuf>, quote: Option<Quote>, link: LinkSend },
     Sticker(StickerSend),
 }
 
@@ -158,8 +160,8 @@ async fn send_job(m: Mgr, thread: Thread, job: SendJob, group_revision: u32, ts:
     let mut tries = 0;
     loop {
         let res = match job.clone() {
-            SendJob::Text { body, body_ranges, files, quote } => {
-                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, group_revision, ts, dir.clone())).await
+            SendJob::Text { body, body_ranges, files, quote, link } => {
+                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, link, group_revision, ts, dir.clone())).await
             }
             SendJob::Sticker(s) => Box::pin(send_sticker_task(m.clone(), thread.clone(), s, group_revision, dir.clone(), ts)).await,
         };
@@ -188,6 +190,7 @@ pub(super) async fn send_task(
     body_ranges: Vec<BodyRange>,
     files: Vec<PathBuf>,
     quote: Option<Quote>,
+    link: LinkSend,
     group_revision: u32,
     ts: u64,
     attachments_dir: PathBuf,
@@ -223,10 +226,12 @@ pub(super) async fn send_task(
     if !specs.is_empty() {
         attachments.extend(m.upload_attachments(specs).await?.into_iter().collect::<Result<Vec<_>, _>>()?);
     }
+    let preview = Box::pin(for_message(&m, &text, !files.is_empty(), link, ts, &attachments_dir)).await;
     let dm = DataMessage {
         body: (!text.is_empty()).then_some(text),
         body_ranges,
         attachments,
+        preview,
         quote,
         timestamp: Some(ts),
         ..Default::default()
@@ -274,6 +279,7 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     m.quote_author = p.quote_author.clone();
     m.quote_id = p.quote_id.clone();
     m.attachment = p.attachment.clone();
+    m.link = p.link.clone();
     if !p.image_key.is_empty() {
         m.image_key = p.image_key.clone();
         m.img_w = view::STICKER_SIZE;

@@ -14,6 +14,7 @@ use crate::*;
 
 pub(crate) mod anim;
 pub(crate) mod drafts;
+pub(crate) mod linkcard;
 pub(crate) mod notice;
 mod rows;
 mod scroll;
@@ -81,6 +82,7 @@ pub(crate) struct Ui {
     /// the window sat hidden in the tray and the open thread's rows and images were dropped;
     /// showing it again reloads the thread (`window::visibility`)
     released: bool,
+    pub(crate) link: linkcard::State,
 }
 
 pub(crate) fn send_cmd(c: Command) {
@@ -338,6 +340,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 }
             });
         }
+        Event::LinkPreview { url, card } => linkcard::fetched(app, &url, card),
         Event::Thumb(_) if UI.with_borrow(|ui| ui.released) => {}
         Event::Thumb(t) => {
             let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
@@ -346,11 +349,14 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 ui.thumbs.insert(t.key.clone(), img.clone());
                 for (i, m) in ui.last.iter().enumerate() {
                     let cell = m.cells.iter().position(|c| c.key == t.key);
-                    if cell.is_none() && m.image_key != t.key {
+                    let link = m.link.as_ref().is_some_and(|l| l.image_key == t.key);
+                    if cell.is_none() && !link && m.image_key != t.key {
                         continue;
                     }
                     let Some(mut row) = slint::Model::row_data(&*ui.messages, i) else { continue };
-                    if let Some(n) = cell {
+                    if link {
+                        row.link_image = img.clone();
+                    } else if let Some(n) = cell {
                         // a new model, not a change inside the old one: a ListView row didn't
                         // show that until it was scrolled away and back
                         let mut cells: Vec<ImageCell> = slint::Model::iter(&row.cells).collect();

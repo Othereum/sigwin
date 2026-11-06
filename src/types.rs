@@ -149,6 +149,19 @@ pub struct CellDto {
     pub more: u32,
 }
 
+/// A link preview: on a message, or in the composer before sending.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LinkCard {
+    pub url: String,
+    pub title: String,
+    pub description: String,
+    pub domain: String,
+    /// key into the UI thumbnail cache, empty when there is no image
+    pub image_key: String,
+    pub img_w: u32,
+    pub img_h: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MsgDto {
     pub id: String,
@@ -177,6 +190,8 @@ pub struct MsgDto {
     pub image_key: String,
     pub img_w: u32,
     pub img_h: u32,
+    /// the preview of a link in the text, as the sender's app made it
+    pub link: Option<LinkCard>,
     /// several images: the grid drawn instead of `image_key`, which is its first cell's
     pub cells: Vec<CellDto>,
     pub deleted: bool,
@@ -352,6 +367,8 @@ pub enum Scroll {
 }
 
 pub enum Event {
+    /// the preview of the composer's link; None: there is none to show
+    LinkPreview { url: String, card: Option<LinkCard> },
     Loading(String),
     NeedLink,
     LinkQr(String),
@@ -404,7 +421,10 @@ pub enum Command {
     OpenThread(String),
     LoadOlder,
     /// `mentions`: members picked in the composer, their "@name"s become mentions
-    Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member> },
+    /// `link`: the url to preview on the message
+    Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String> },
+    /// the composer's link changed: fetch this one's preview (contacts its site), None cancels
+    LinkPreview(Option<String>),
     /// show image `index` of row `id` in the viewer, shrunk to fit in `fit` (physical px).
     /// `from_file`: the file line was clicked; a row with other files then opens them outside.
     ViewImage { id: String, index: usize, fit: (u32, u32), from_file: bool },

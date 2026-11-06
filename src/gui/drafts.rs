@@ -108,6 +108,7 @@ pub(crate) fn switch(app: &AppWindow, ui: &mut Ui, next: &str) -> Draft {
     let mut d = ui.drafts.get(next).cloned().unwrap_or_default();
     d.files.retain(|p| p.exists());
     ui.editing = None;
+    linkcard::reset(ui);
     ui.picked = d.mentions.clone();
     ui.files = d.files.clone();
     ui.reply_to = d.quote.as_ref().map(|q| q.0.clone());
@@ -118,6 +119,7 @@ pub(crate) fn switch(app: &AppWindow, ui: &mut Ui, next: &str) -> Draft {
 /// the composer's callbacks.
 pub(crate) fn restore(app: &AppWindow, d: Draft) {
     app.set_draft(d.text.into());
+    linkcard::clear(app);
     app.set_reply_preview(d.quote.map(|q| q.1).unwrap_or_default().into());
     app.set_edit_preview(SharedString::new());
     app.set_pending_files(ModelRc::new(VecModel::from(file_names(&d.files))));

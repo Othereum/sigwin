@@ -38,6 +38,7 @@ use crate::types::{
 use crate::view::{self, Kind, THUMB_MAX};
 
 pub(crate) mod files;
+pub(crate) mod linkpreview;
 mod mute;
 pub(crate) mod notify;
 mod ops;
@@ -49,6 +50,7 @@ mod typing;
 mod window;
 
 use files::*;
+use linkpreview::*;
 use ops::*;
 use send::*;
 use stickers::*;
@@ -165,6 +167,7 @@ enum Internal {
     ReceiveStopped(String),
     Linked(Result<Mgr, String>),
     Sent(u64, Result<(), String>),
+    LinkFetched(String, Option<Box<(Fetched, Vec<crate::types::Thumb>)>>),
     ThumbFailed(String),
     /// a long message's full text: (attachment key, text)
     LongText(String, String),
@@ -218,6 +221,8 @@ struct Pending {
     attachment: String,
     /// sticker preview: thumbnail key, already emitted to the UI
     image_key: String,
+    /// the link preview going with it; its thumbnail is the composer's, already emitted
+    link: Option<crate::types::LinkCard>,
     error: Option<String>,
     /// failed: last message stored at that moment, the row stays right below it
     after_seq: Option<i64>,
@@ -260,6 +265,10 @@ struct App {
     thumb_gate: Arc<tokio::sync::Semaphore>,
     long: view::LongTexts,
     pending: Vec<Pending>,
+    /// the composer's link preview
+    link_draft: Option<LinkDraft>,
+    /// makes each one's thumbnail keys unique
+    link_seq: u64,
     /// per thread: resolves when the last message queued for sending is done
     send_tail: HashMap<String, oneshot::Receiver<()>>,
     ops: Vec<PendingOp>,
@@ -395,6 +404,8 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         thumb_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         long: Default::default(),
         pending: Vec::new(),
+        link_draft: None,
+        link_seq: 0,
         send_tail: HashMap::new(),
         ops: Vec::new(),
         typing: HashMap::new(),
@@ -518,7 +529,9 @@ impl App {
     async fn command(&mut self, cmd: Command) {
         match cmd {
             Command::StartLink(name) => self.start_link(name),
+            Command::LinkPreview(url) => self.link_preview(url),
             Command::OpenThread(key) => {
+                self.link_preview(None);
                 if let Err(e) = self.open_thread(&key).await {
                     self.notice(format!("대화를 열지 못했습니다: {e:#}"));
                 }
@@ -528,7 +541,7 @@ impl App {
                     warn!("load_older: {e:#}");
                 }
             }
-            Command::Send { text, files, quote, mentions } => self.send(text, files, quote, mentions).await,
+            Command::Send { text, files, quote, mentions, link } => self.send(text, files, quote, mentions, link).await,
             Command::ViewImage { id, index, fit, from_file } => self.view_image(&id, index, fit, from_file),
             Command::ViewerThumbs { id, px } => self.viewer_thumbs(&id, px),
             Command::OpenViewed { id, index } => self.open_viewed(&id, index),
@@ -727,6 +740,7 @@ impl App {
                 }
                 self.emit_messages(Scroll::KeepIfNotAtBottom).await;
             }
+            Internal::LinkFetched(url, res) => self.link_fetched(url, res),
             Internal::ThumbFailed(key) => {
                 // allow a retry next time the thread is opened
                 self.thumbs_requested.remove(&key);

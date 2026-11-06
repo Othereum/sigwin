@@ -37,6 +37,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/gui/scroll.rs` | message list scrolling and jumps |
 | `src/gui/anim.rs` | animated stickers: frames under a memory budget, the timer that flips them |
 | `src/gui/drafts.rs` | per-thread composer drafts |
+| `src/gui/linkcard.rs` | the link preview above the composer |
 | `src/gui/viewer.rs` | image viewer window |
 | `src/gui/window.rs` | theme, zoom, native window handle, releasing memory while hidden |
 | `src/winhook.rs` | window-proc subclass: repaint on restore, focus events, close to tray |
@@ -59,6 +60,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/backend/threads.rs` | thread list: names, snippets, unread, read receipts queue |
 | `src/backend/window.rs` | the open thread's window: paging, jumps, header |
 | `src/backend/send.rs` | sending text and attachments, pending rows |
+| `src/backend/linkpreview.rs` | link previews on outgoing messages: fetching, attaching, stopping presage's own fetch |
 | `src/backend/ops.rs` | reactions, edits, deletes, pins |
 | `src/backend/typing.rs` | typing indicators |
 | `src/backend/stickers.rs` | sticker packs: picker, sending, installing |
