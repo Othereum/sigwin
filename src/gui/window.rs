@@ -1,5 +1,9 @@
 //! Window-level settings: theme, zoom, native window handle and focus.
 
+use slint::winit_030::winit::event::WindowEvent;
+use slint::winit_030::winit::keyboard::{Key, ModifiersState, NamedKey, PhysicalKey};
+use slint::winit_030::{EventResult, WinitWindowAccessor};
+
 use super::*;
 
 /// Light / dark per the setting. "System" is Slint's default binding at startup; switching
@@ -193,9 +197,57 @@ pub(crate) fn to_front(app: &AppWindow) {
     app.show().ok();
 }
 
+/// The letter Slint's shortcuts expect for a Ctrl+key press, when winit reports it differently.
+/// Slint matches only lowercase "a", "c", ...: with Caps Lock on, winit says "A". While an IME
+/// handles the key (Hangul composition), winit says `Process` and Slint drops the press.
+fn ctrl_letter(logical: &Key, physical: PhysicalKey, mods: ModifiersState) -> Option<char> {
+    if !mods.control_key() || mods.alt_key() {
+        return None;
+    }
+    match logical {
+        Key::Character(s) if !mods.shift_key() => {
+            let mut chars = s.chars();
+            let c = chars.next().filter(|c| c.is_ascii_uppercase() && chars.next().is_none())?;
+            Some(c.to_ascii_lowercase())
+        }
+        Key::Named(NamedKey::Process) => {
+            let PhysicalKey::Code(code) = physical else { return None };
+            let name = format!("{code:?}");
+            let c = name.strip_prefix("Key").filter(|l| l.len() == 1)?.chars().next()?;
+            Some(c.to_ascii_lowercase())
+        }
+        _ => None,
+    }
+}
+
+/// Keep Ctrl shortcuts working in every text field regardless of Caps Lock and the IME.
+fn fix_ctrl_shortcuts(app: &AppWindow) {
+    let mods = std::cell::Cell::new(ModifiersState::empty());
+    app.window().on_winit_window_event(move |window, event| {
+        match event {
+            WindowEvent::ModifiersChanged(m) => mods.set(m.state()),
+            WindowEvent::KeyboardInput { event: e, is_synthetic: false, .. } if e.state.is_pressed() => {
+                if let Some(c) = ctrl_letter(&e.logical_key, e.physical_key, mods.get()) {
+                    let text = c.to_string().into();
+                    let event = if e.repeat {
+                        slint::platform::WindowEvent::KeyPressRepeated { text }
+                    } else {
+                        slint::platform::WindowEvent::KeyPressed { text }
+                    };
+                    let _ = window.dispatch_event_with_result(event);
+                    return EventResult::PreventDefault;
+                }
+            }
+            _ => {}
+        }
+        EventResult::Propagate
+    });
+}
+
 /// Slint exposes neither focus nor minimize/restore: hook the window procedure once the
 /// native window exists (it is created when the event loop starts).
 pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
+    fix_ctrl_shortcuts(app);
     let send = send.clone();
     let weak = app.as_weak();
     let tries = std::cell::Cell::new(0u32);
@@ -318,5 +370,38 @@ fn set_dev_icon(hwnd: isize) {
                 SendMessageW(hwnd as _, WM_SETICON, which as usize, icon as isize);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slint::winit_030::winit::keyboard::KeyCode;
+
+    const A: PhysicalKey = PhysicalKey::Code(KeyCode::KeyA);
+
+    #[test]
+    fn ctrl_letter_fixes_caps_lock_and_ime() {
+        let ctrl = ModifiersState::CONTROL;
+        let upper = Key::Character("A".into());
+        let process = Key::Named(NamedKey::Process);
+        assert_eq!(ctrl_letter(&upper, A, ctrl), Some('a'));
+        assert_eq!(ctrl_letter(&process, A, ctrl), Some('a'));
+        assert_eq!(ctrl_letter(&process, A, ctrl | ModifiersState::SHIFT), Some('a'));
+    }
+
+    #[test]
+    fn ctrl_letter_leaves_other_keys_alone() {
+        let ctrl = ModifiersState::CONTROL;
+        let upper = Key::Character("A".into());
+        // already what Slint expects
+        assert_eq!(ctrl_letter(&Key::Character("a".into()), A, ctrl), None);
+        // Ctrl+Shift+letter is the app's own shortcut, Ctrl+Alt may be AltGr, no Ctrl is typing
+        assert_eq!(ctrl_letter(&upper, A, ctrl | ModifiersState::SHIFT), None);
+        assert_eq!(ctrl_letter(&upper, A, ctrl | ModifiersState::ALT), None);
+        assert_eq!(ctrl_letter(&upper, A, ModifiersState::empty()), None);
+        // a function key during composition isn't a letter
+        let f1 = PhysicalKey::Code(KeyCode::F1);
+        assert_eq!(ctrl_letter(&Key::Named(NamedKey::Process), f1, ctrl), None);
     }
 }
