@@ -59,7 +59,7 @@ pub struct ThreadPrefs {
     pub mentions: Option<bool>,
     /// ... replies to our messages still notify
     pub replies: Option<bool>,
-    /// ... the unread messages count in the badge
+    /// ... the chat counts in the badge
     pub badge: Option<bool>,
 }
 

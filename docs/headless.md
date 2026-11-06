@@ -15,6 +15,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 - `SIGWIN_DEMO_GRID=1` (the newest rows show 2, 3, 4, 5 and 8 images as grids, with a caption and a file on some; one cell stays blank, as until its image arrives)
 - `SIGWIN_DEMO_UPDATE=<version>` (the sidebar "new version ready" bar), `SIGWIN_DEMO_UPDATE_AVAILABLE=<version>` ("new version available" bar, automatic download off)
 - `SIGWIN_DEMO_NOTICE=<text>` (a notice over the conversation pane), `SIGWIN_DEMO_CONNECTION=<text>` (the connection banner, after its delay like a real drop), `SIGWIN_DEMO_STATUS=1` (loops through notices, progress, short and long connection drops)
+- `SIGWIN_DEMO_BADGE=<ms>` (the real tray and taskbar badges step through none and 1 to 10 every <ms>; needs a real window, so it's for the user; run it with a scratch `SIGWIN_DATA`)
 - `SIGWIN_DEMO_TICK=1` (periodic updates, for the minimize/restore repro)
 - `SIGWIN_DEMO_NOTIFY=<secs>` (a fake incoming message every <secs>, through the real `Notifier` and real toasts: 1:1 with photo, group, reaction, disappearing; needs a real window and an unfocused app, so it's for the user; run it with a scratch `SIGWIN_DATA`)
 - `SIGWIN_SELFTEST=1` (with `SIGWIN_DEMO=1`: measures the file dialog and notification memory cost)

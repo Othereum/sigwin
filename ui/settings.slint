@@ -60,7 +60,7 @@ export component SettingsPage inherits Rectangle {
     in-out property <bool> notify;
     in-out property <int> preview;
     in-out property <bool> sound;
-    in-out property <bool> badge;
+    in-out property <int> badge-count;
     in-out property <int> theme;
     in-out property <int> zoom;
     in-out property <bool> enter-sends;
@@ -149,11 +149,12 @@ export component SettingsPage inherits Rectangle {
                             }
                         }
                         SettingRow {
-                            label: "작업 표시줄 배지";
-                            hint: "작업 표시줄 아이콘에 안 읽은 메시지 수를 표시합니다";
-                            Switch {
-                                checked <=> root.badge;
-                                toggled => { root.changed(); }
+                            label: "알림 배지";
+                            hint: "작업 표시줄과 알림 영역 아이콘에 표시합니다";
+                            Segmented {
+                                options: ["읽지 않은 메시지", "읽지 않은 대화"];
+                                current <=> root.badge-count;
+                                changed => { root.changed(); }
                             }
                         }
                         SettingGroup {

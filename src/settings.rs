@@ -15,7 +15,8 @@ pub struct Settings {
     pub preview: u8,
     /// toasts play a sound
     pub sound: bool,
-    pub badge: bool,
+    /// the badge counts (taskbar, tray, window title): 0 = unread messages, 1 = unread chats
+    pub badge_count: u8,
     /// 0 = follow the system, 1 = light, 2 = dark
     pub theme: u8,
     /// UI size in percent, on top of the monitor's scaling
@@ -32,7 +33,7 @@ pub struct Settings {
     pub muted_mentions: bool,
     /// ... and for replies to our messages
     pub muted_replies: bool,
-    /// their unread messages count in the badge (taskbar, window title)
+    /// they count in the badge
     pub badge_muted: bool,
 }
 
@@ -42,7 +43,7 @@ impl Default for Settings {
             notify: true,
             preview: 0,
             sound: true,
-            badge: true,
+            badge_count: 0,
             theme: 0,
             zoom: 100,
             enter_sends: true,
@@ -63,6 +64,7 @@ impl Settings {
         let mut s: Self = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         s.preview = s.preview.min(2);
         s.theme = s.theme.min(2);
+        s.badge_count = s.badge_count.min(1);
         if !ZOOMS.contains(&s.zoom) {
             s.zoom = 100;
         }
@@ -164,9 +166,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sigwin-settings-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = path(&dir);
-        std::fs::write(&p, r#"{"zoom": 333, "theme": 9, "notify": false}"#).unwrap();
+        std::fs::write(&p, r#"{"zoom": 333, "theme": 9, "notify": false, "badge_count": 9}"#).unwrap();
         let s = Settings::load(&p);
-        assert_eq!((s.zoom, s.theme, s.notify, s.badge), (100, 2, false, true));
+        assert_eq!((s.zoom, s.theme, s.notify, s.badge_count), (100, 2, false, 1));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

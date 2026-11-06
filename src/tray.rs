@@ -6,6 +6,7 @@
 //! (열기 / 종료). If the icon can't be added (no taskbar yet) closing still quits and
 //! `--background` shows the window anyway, so the app is never hidden with no way back.
 //! Explorer's restart sends "TaskbarCreated": the icon is added again then.
+//! The icon carries a badge for the unread count (`badge`); the exact count is in its tooltip.
 
 #[cfg(windows)]
 pub use win::*;
@@ -14,6 +15,7 @@ pub use win::*;
 mod stub {
     pub fn install(_on_open: impl Fn() + 'static) {}
     pub fn remove() {}
+    pub fn update() {}
     pub fn active() -> bool {
         false
     }
@@ -29,8 +31,10 @@ mod win {
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Shell::{
-        Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
+        Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+        NOTIFY_ICON_MESSAGE,
     };
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
     /// Callback message of the icon (WM_APP + 1).
@@ -95,27 +99,55 @@ mod win {
     }
 
     fn add_icon() {
+        let ok = notify(NIM_ADD);
+        ADDED.set(ok);
+        if !ok {
+            tracing::warn!("tray icon not added");
+        }
+    }
+
+    /// Redraws the icon for the current unread count.
+    pub fn update() {
+        if ADDED.get() && !notify(NIM_MODIFY) {
+            tracing::debug!("tray icon not updated");
+        }
+    }
+
+    /// Sends the icon and tooltip for the current unread count to the shell.
+    fn notify(op: NOTIFY_ICON_MESSAGE) -> bool {
         let hwnd = OWNER.get();
+        let n = crate::badge::count();
         // id 1 is the app icon, 2 the dev build's (only in dev builds, build.rs)
         let id: usize = if crate::install::is_dev_build() { 2 } else { 1 };
-        // SAFETY: loads our own icon resource at the small-icon size; shared icons need no cleanup
-        let icon = unsafe {
-            let inst = GetModuleHandleW(std::ptr::null());
-            let size = GetSystemMetrics(SM_CXSMICON);
-            LoadImageW(inst, id as _, IMAGE_ICON, size, size, LR_SHARED)
+        // SAFETY: plain queries on our own window; loads our own icon resource at the
+        // small-icon size for the DPI (not LR_SHARED: the size changes with it)
+        let (base, size) = unsafe {
+            let size = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForWindow(hwnd as HWND)).max(16);
+            (LoadImageW(GetModuleHandleW(std::ptr::null()), id as _, IMAGE_ICON, size, size, 0), size)
+        };
+        let badged = if n > 0 && !base.is_null() {
+            crate::badge::win::tray_icon(base as _, size, n)
+        } else {
+            std::ptr::null_mut()
         };
         let mut d = data(hwnd);
         d.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         d.uCallbackMessage = WM_TRAY;
-        d.hIcon = icon as _;
-        for (dst, src) in d.szTip.iter_mut().zip(wide("Sigwin")) {
+        d.hIcon = if badged.is_null() { base as _ } else { badged };
+        let tip = if n > 0 { format!("Sigwin - {}", crate::badge::description()) } else { "Sigwin".into() };
+        for (dst, src) in d.szTip.iter_mut().zip(wide(&tip)) {
             *dst = src;
         }
-        // SAFETY: valid struct for our window
-        let ok = unsafe { Shell_NotifyIconW(NIM_ADD, &d) } != 0;
-        ADDED.set(ok);
-        if !ok {
-            tracing::warn!("tray icon not added");
+        // SAFETY: valid struct for our window; the shell copies the icon, so ours go right after
+        unsafe {
+            let ok = Shell_NotifyIconW(op, &d) != 0;
+            if !badged.is_null() {
+                DestroyIcon(badged);
+            }
+            if !base.is_null() {
+                DestroyIcon(base as _);
+            }
+            ok
         }
     }
 

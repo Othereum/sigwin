@@ -245,7 +245,6 @@ fn main() -> anyhow::Result<()> {
     let settings_path = settings::path(&data_dir());
     let prefs = settings::Settings::load(&settings_path);
     prefs.publish();
-    badge::set_enabled(prefs.badge);
     if prefs.autostart {
         // keeps the command current (exe moved by a reinstall, flag changed)
         autostart::apply(true, prefs.start_hidden, false);

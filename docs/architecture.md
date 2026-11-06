@@ -47,7 +47,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/clip.rs` | pasting files and images from the clipboard |
 | `src/picker.rs` | file dialogs in a child process |
 | `src/settings.rs` | user settings, owned by the UI thread |
-| `src/badge.rs` | unread count on the taskbar icon |
+| `src/badge.rs` | unread count on the taskbar and tray icons |
 | `src/tray.rs` | notification-area icon |
 | `src/toast.rs` | Windows toasts on their own worker thread |
 

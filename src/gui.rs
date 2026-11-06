@@ -131,15 +131,20 @@ pub(crate) fn header_avatar(app: &AppWindow, ui: &Ui) {
     app.set_current_photo(row.photo);
 }
 
-/// Unread count for the taskbar badge and the window title; chats with notifications off
+/// Unread count for the taskbar and tray badges and the window title; chats with notifications off
 /// count only when the setting says so.
 pub(crate) fn show_total_unread(app: &AppWindow, ui: &Ui) {
     let now = view::now_ms();
     let all = ui.settings.badge_muted;
     let counts = |t: &&ThreadDto| !t.mute.active(now) || t.prefs.badge.unwrap_or(all);
-    let total: u32 = ui.thread_dtos.iter().filter(counts).map(|t| t.unread).sum();
+    let counted = ui.thread_dtos.iter().filter(counts);
+    let (total, noun) = if ui.settings.badge_count == 1 {
+        (counted.filter(|t| t.unread > 0).count() as u32, "대화")
+    } else {
+        (counted.map(|t| t.unread).sum(), "메시지")
+    };
     app.set_total_unread(total as i32);
-    badge::set_count(total);
+    badge::set_count(total, noun);
 }
 
 pub(crate) fn qr_image(url: &str) -> Option<Image> {

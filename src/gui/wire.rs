@@ -571,7 +571,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             notify: app.get_set_notify(),
             preview: app.get_set_preview().clamp(0, 2) as u8,
             sound: app.get_set_sound(),
-            badge: app.get_set_badge(),
+            badge_count: app.get_set_badge_count().clamp(0, 1) as u8,
             theme: app.get_set_theme().clamp(0, 2) as u8,
             zoom: settings::ZOOMS.get(app.get_set_zoom().max(0) as usize).copied().unwrap_or(100),
             enter_sends: app.get_enter_sends(),
@@ -587,8 +587,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             return;
         }
         new.publish();
-        badge::set_enabled(new.badge);
-        if old.badge_muted != new.badge_muted {
+        if (old.badge_count, old.badge_muted) != (new.badge_count, new.badge_muted) {
             UI.with_borrow(|ui| show_total_unread(&app, ui));
         }
         if (old.autostart, old.start_hidden) != (new.autostart, new.start_hidden) {
