@@ -831,7 +831,9 @@ fn demo_videos(emit: &backend::Emit) {
     let thumb = |key: String, img: image::RgbaImage| {
         emit(Event::Thumb(Arc::new(types::Thumb { key, width: img.width(), height: img.height(), rgba: img.into_raw() })));
     };
-    let blur = |w, h| sigwin_thumb::cover(&sigwin_thumb::blurhash(HASH, 32, 32).expect("valid"), types::physical_px(w), types::physical_px(h));
+    let file = std::env::var_os("SIGWIN_DEMO_VIDEO").filter(|v| v != "1");
+    let hash = file.as_ref().and_then(|path| demo_video_hash(std::path::Path::new(path))).unwrap_or_else(|| HASH.into());
+    let blur = |w, h| sigwin_thumb::cover(&sigwin_thumb::blurhash(&hash, 32, 32).expect("valid"), types::physical_px(w), types::physical_px(h));
     std::thread::sleep(std::time::Duration::from_millis(300));
     thumb("demo-video-0".into(), blur(400, 225));
     thumb("demo-video-1".into(), blur(300, 450));
@@ -841,7 +843,6 @@ fn demo_videos(emit: &backend::Emit) {
     // the first frame replaces the blurhash
     std::thread::sleep(std::time::Duration::from_millis(1500));
     let (w, h) = (types::physical_px(400), types::physical_px(225));
-    let file = std::env::var_os("SIGWIN_DEMO_VIDEO").filter(|v| v != "1");
     let frame = file.and_then(|path| demo_video_frame(std::path::Path::new(&path)));
     thumb("demo-video-0".into(), match frame {
         Some(f) => sigwin_thumb::cover(&f, w, h),
@@ -855,10 +856,17 @@ fn demo_video_frame(path: &std::path::Path) -> Option<image::RgbaImage> {
     let sealed = std::env::temp_dir().join(format!("sigwin-demo-video-{}.enc", std::process::id()));
     sigwin_vault::write(&sealed, &std::fs::read(path).ok()?).ok()?;
     let started = std::time::Instant::now();
-    let frame = crate::videoframe::first_frame(&sealed);
+    let frame = crate::videoframe::first_frame(&sealed).map(|d| d.map(|d| d.frame));
     tracing::info!("demo video frame: {:?} in {:?}", frame.as_ref().map(|f| f.as_ref().map(|i| i.dimensions())).map_err(|e| e.to_string()), started.elapsed());
     let _ = std::fs::remove_file(&sealed);
     frame.ok().flatten()
+}
+
+/// The blurhash a real video would be sent with, by the way a file being sent goes.
+fn demo_video_hash(path: &std::path::Path) -> Option<String> {
+    let v = crate::videoframe::first_frame_plain(path).ok().flatten()?;
+    tracing::info!("demo video to send: size {:?}", v.size);
+    v.blurhash()
 }
 
 /// SIGWIN_DEMO_GRID: images of the newest rows.

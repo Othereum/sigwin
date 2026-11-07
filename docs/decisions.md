@@ -53,6 +53,8 @@ Decoding: Media Foundation in a child, fed through a pipe. Rejected: the shell's
 
 The child takes 27 to 69MB at its peak for 0.2 to 3.5MB test videos, about 90ms, and exits. Larger videos weren't measured; its input is held in memory, so expect the file size on top. The first frame is what's shown, even if it is black.
 
+Sending: the same child reads the file being sent for its size and blurhash, so other clients can draw the video before fetching it. One it can't decode goes without them instead of failing the send. Photos get the same, decoded in the app since it's the `image` crate, on a blocking thread. A photo's size is sent as shown, with EXIF applied, because the file keeps its EXIF.
+
 ## Sticker and avatar resampling (measured 2026-11-06, synthetic images, heap peak without the source)
 `fit` moved from `image`'s resize in f32 to `fast_image_resize`:
 | job | `image`, f32 | fir |

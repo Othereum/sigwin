@@ -7,7 +7,7 @@
 
 use std::io::{Read, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 
 use anyhow::Context;
 use sigwin_thumb::RgbaImage;
@@ -20,6 +20,8 @@ const MAX_INPUT: u64 = 256 * 1024 * 1024;
 const MAX_PIXELS: u64 = 100_000_000;
 /// A decoder that hangs must not stay around.
 const TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Before the frame's pixels, the child writes the video's width and height, then the frame's.
+const HEADER: usize = 16;
 
 /// Call first thing in `main`: returns true if this process was the decoding child.
 pub fn run_if_child() -> bool {
@@ -35,20 +37,46 @@ pub fn run_if_child() -> bool {
     if read.is_err() || data.len() as u64 > MAX_INPUT {
         return true;
     }
-    if let Some(img) = decode(data) {
+    if let Some(v) = decode(data) {
         let mut out = std::io::stdout().lock();
-        let _ = out.write_all(&img.width().to_le_bytes());
-        let _ = out.write_all(&img.height().to_le_bytes());
-        let _ = out.write_all(img.as_raw());
+        for n in [v.size.0, v.size.1, v.frame.width(), v.frame.height()] {
+            let _ = out.write_all(&n.to_le_bytes());
+        }
+        let _ = out.write_all(v.frame.as_raw());
         let _ = out.flush();
     }
     true
 }
 
-/// The first frame of an encrypted video file, at most `PHOTO_THUMB_MAX` on its longer side.
-/// `None`: the child couldn't decode it, and wouldn't next time either.
-pub fn first_frame(src: &Path) -> anyhow::Result<Option<RgbaImage>> {
+/// What the child read from a video.
+pub struct Decoded {
+    /// Upright, at most `PHOTO_THUMB_MAX` on its longer side.
+    pub frame: RgbaImage,
+    /// The video's own size, as shown (upright).
+    pub size: (u32, u32),
+}
+
+impl Decoded {
+    /// Blurhash of the frame. It only has a few components: more pixels would just cost more.
+    pub fn blurhash(self) -> Option<String> {
+        sigwin_thumb::encode_blurhash(&sigwin_thumb::downscale(self.frame, 64))
+    }
+}
+
+/// Reads an encrypted video file. `None`: the child couldn't decode it, and wouldn't next time either.
+pub fn first_frame(src: &Path) -> anyhow::Result<Option<Decoded>> {
     let file = std::fs::File::open(src).context("open video")?;
+    run_child(|stdin| sigwin_vault::decrypt(file, stdin))
+}
+
+/// Same for a plain file, one the user is sending.
+pub fn first_frame_plain(src: &Path) -> anyhow::Result<Option<Decoded>> {
+    let mut file = std::fs::File::open(src).context("open video")?;
+    run_child(|mut stdin| std::io::copy(&mut file, &mut stdin).map(drop))
+}
+
+/// `feed` writes the plain video, and closes the pipe by dropping it.
+fn run_child(feed: impl FnOnce(ChildStdin) -> std::io::Result<()>) -> anyhow::Result<Option<Decoded>> {
     let mut cmd = Command::new(std::env::current_exe().context("own path")?);
     cmd.arg(ARG).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     #[cfg(windows)]
@@ -61,10 +89,10 @@ pub fn first_frame(src: &Path) -> anyhow::Result<Option<RgbaImage>> {
     let stdin = child.stdin.take().context("decoder stdin")?;
     let stdout = child.stdout.take().context("decoder stdout")?;
     // the child reads all of it before it writes anything. A child that died breaks the pipe.
-    let fed = sigwin_vault::decrypt(file, stdin);
+    let fed = feed(stdin);
     let max = crate::view::PHOTO_THUMB_MAX as u64;
     let mut out = Vec::new();
-    let read = stdout.take(8 + max * max * 4).read_to_end(&mut out);
+    let read = stdout.take(HEADER as u64 + max * max * 4).read_to_end(&mut out);
     let _ = child.kill();
     let _ = child.wait();
     if let Err(e) = fed {
@@ -77,20 +105,22 @@ pub fn first_frame(src: &Path) -> anyhow::Result<Option<RgbaImage>> {
     Ok(parse(out))
 }
 
-fn parse(out: Vec<u8>) -> Option<RgbaImage> {
-    let w = u32::from_le_bytes(out.get(..4)?.try_into().ok()?);
-    let h = u32::from_le_bytes(out.get(4..8)?.try_into().ok()?);
-    RgbaImage::from_raw(w, h, out[8..].to_vec())
+fn parse(out: Vec<u8>) -> Option<Decoded> {
+    let n = |i: usize| Some(u32::from_le_bytes(out.get(i * 4..i * 4 + 4)?.try_into().ok()?));
+    let (size, w, h) = ((n(0)?, n(1)?), n(2)?, n(3)?);
+    Some(Decoded { frame: RgbaImage::from_raw(w, h, out[HEADER..].to_vec())?, size })
 }
 
 #[cfg(windows)]
-fn decode(data: Vec<u8>) -> Option<RgbaImage> {
+fn decode(data: Vec<u8>) -> Option<Decoded> {
     let (img, rotation) = mf::first_frame(data)?;
-    Some(sigwin_thumb::rotated(sigwin_thumb::downscale(img, crate::view::PHOTO_THUMB_MAX), rotation))
+    let (w, h) = img.dimensions();
+    let size = if matches!(rotation, 90 | 270) { (h, w) } else { (w, h) };
+    Some(Decoded { frame: sigwin_thumb::rotated(sigwin_thumb::downscale(img, crate::view::PHOTO_THUMB_MAX), rotation), size })
 }
 
 #[cfg(not(windows))]
-fn decode(_data: Vec<u8>) -> Option<RgbaImage> {
+fn decode(_data: Vec<u8>) -> Option<Decoded> {
     None
 }
 
@@ -248,12 +278,15 @@ mod mf {
 #[test]
 fn parse_needs_the_exact_size() {
     let frame = |w: u32, h: u32, n: usize| {
-        let mut v = w.to_le_bytes().to_vec();
-        v.extend(h.to_le_bytes());
-        v.resize(8 + n, 7);
+        let mut v = Vec::new();
+        for x in [1920u32, 1080, w, h] {
+            v.extend(x.to_le_bytes());
+        }
+        v.resize(HEADER + n, 7);
         v
     };
-    assert_eq!(parse(frame(2, 3, 24)).unwrap().dimensions(), (2, 3));
+    let d = parse(frame(2, 3, 24)).unwrap();
+    assert_eq!((d.frame.dimensions(), d.size), ((2, 3), (1920, 1080)));
     assert!(parse(frame(2, 3, 23)).is_none());
     assert!(parse(vec![1, 2, 3]).is_none());
     assert!(parse(Vec::new()).is_none());

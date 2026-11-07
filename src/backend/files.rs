@@ -394,12 +394,12 @@ fn make_video_thumb(key: &str, orig: &Path, thumb: &Path, no_frame: &Path, w: u3
     let frame = match cached {
         Some(f) => f,
         None => {
-            let Some(f) = crate::videoframe::first_frame(orig)? else {
+            let Some(v) = crate::videoframe::first_frame(orig)? else {
                 let _ = std::fs::write(no_frame, []);
                 anyhow::bail!("not decodable here");
             };
-            save_cached(thumb, sigwin_thumb::png_rgba(&f));
-            f
+            save_cached(thumb, sigwin_thumb::png_rgba(&v.frame));
+            v.frame
         }
     };
     let cell = sigwin_thumb::cover(&frame, w, h);

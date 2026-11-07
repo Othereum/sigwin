@@ -12,9 +12,35 @@ pub fn decode(bytes: &[u8]) -> ImageResult<DynamicImage> {
     image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.decode()
 }
 
-/// Decodes and shrinks to fit in `max` x `max` (never upscales).
+/// Decodes, turned the way its EXIF says.
+fn decode_upright(bytes: &[u8]) -> ImageResult<DynamicImage> {
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.into_decoder()?;
+    let orientation = image::ImageDecoder::orientation(&mut decoder)?;
+    let mut img = DynamicImage::from_decoder(decoder)?;
+    img.apply_orientation(orientation);
+    Ok(img)
+}
+
+/// Decodes upright and resizes to fit in `max` x `max`, enlarging a smaller image too.
 pub fn decode_thumb(bytes: &[u8], max: u32) -> ImageResult<DynamicImage> {
-    Ok(decode(bytes)?.thumbnail(max, max))
+    Ok(decode_upright(bytes)?.thumbnail(max, max))
+}
+
+/// A photo file's size as shown (EXIF applied) and its blurhash. Past `max_pixels` it isn't
+/// decoded and has no blurhash, nor does one that turns out broken after its header.
+pub fn photo_facts(path: &std::path::Path, max_pixels: u64) -> ImageResult<((u32, u32), Option<String>)> {
+    use image::ImageDecoder;
+    use image::metadata::Orientation::{Rotate90, Rotate90FlipH, Rotate270, Rotate270FlipH};
+    let mut decoder = image::ImageReader::open(path)?.with_guessed_format()?.into_decoder()?;
+    let (w, h) = decoder.dimensions();
+    let orientation = decoder.orientation()?;
+    let size = if matches!(orientation, Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH) { (h, w) } else { (w, h) };
+    if w as u64 * h as u64 > max_pixels {
+        return Ok((size, None));
+    }
+    let Ok(mut img) = DynamicImage::from_decoder(decoder) else { return Ok((size, None)) };
+    img.apply_orientation(orientation);
+    Ok((size, encode_blurhash(&img.thumbnail(64, 64).to_rgba8())))
 }
 
 /// Decodes to RGBA.
@@ -65,27 +91,82 @@ fn base83(s: &[u8]) -> Option<u32> {
     s.iter().try_fold(0u32, |n, c| Some(n * 83 + BASE83.iter().position(|b| b == c)? as u32))
 }
 
+fn push_base83(out: &mut String, v: u32, digits: u32) {
+    for d in (0..digits).rev() {
+        out.push(BASE83[(v / 83u32.pow(d) % 83) as usize] as char);
+    }
+}
+
+fn srgb_to_linear(v: u8) -> f32 {
+    let v = v as f32 / 255.0;
+    if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+}
+
+fn linear_to_srgb(v: f32) -> u8 {
+    let v = v.clamp(0.0, 1.0);
+    let v = if v <= 0.0031308 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+    (v * 255.0 + 0.5) as u8
+}
+
+/// Per pixel, `n` cosines: the basis of a blurhash along one side.
+fn cos_table(n: usize, len: u32) -> Vec<f32> {
+    use std::f32::consts::PI;
+    (0..len).flat_map(|p| (0..n).map(move |i| (PI * p as f32 * i as f32 / len as f32).cos())).collect()
+}
+
+/// A blurhash of 4 x 3 components, what Signal's clients send. Costs a little for every pixel, so
+/// give it a small image. `None` for an empty one.
+pub fn encode_blurhash(img: &RgbaImage) -> Option<String> {
+    const NX: usize = 4;
+    const NY: usize = 3;
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let (cos_x, cos_y) = (cos_table(NX, w), cos_table(NY, h));
+    let mut sums = [[0f32; 3]; NX * NY];
+    for (x, y, p) in img.enumerate_pixels() {
+        let rgb = [srgb_to_linear(p[0]), srgb_to_linear(p[1]), srgb_to_linear(p[2])];
+        for (n, sum) in sums.iter_mut().enumerate() {
+            let basis = cos_x[x as usize * NX + n % NX] * cos_y[y as usize * NY + n / NX];
+            for (s, v) in sum.iter_mut().zip(rgb) {
+                *s += v * basis;
+            }
+        }
+    }
+    let area = w as f32 * h as f32;
+    let dc = sums[0].map(|v| v / area);
+    let ac = sums[1..].iter().map(|c| c.map(|v| v * 2.0 / area));
+    let largest = ac.clone().flatten().fold(0f32, |m, v| m.max(v.abs()));
+    let max_digit = ((largest * 166.0 - 0.5).floor() as i32).clamp(0, 82) as u32;
+    let max = (max_digit + 1) as f32 / 166.0;
+    let level = |v: f32| {
+        let v = v / max;
+        ((v.signum() * v.abs().sqrt() * 9.0 + 9.5).floor() as i32).clamp(0, 18) as u32
+    };
+
+    let mut out = String::with_capacity(4 + 2 * NX * NY);
+    push_base83(&mut out, (NX - 1 + (NY - 1) * 9) as u32, 1);
+    push_base83(&mut out, max_digit, 1);
+    let [r, g, b] = dc.map(|v| linear_to_srgb(v) as u32);
+    push_base83(&mut out, r << 16 | g << 8 | b, 4);
+    for [r, g, b] in ac {
+        push_base83(&mut out, level(r) * 19 * 19 + level(g) * 19 + level(b), 2);
+    }
+    Some(out)
+}
+
 /// Draws a blurhash at `w` x `h`. It comes from the sender, so anything malformed is `None`.
 pub fn blurhash(hash: &str, w: u32, h: u32) -> Option<RgbaImage> {
-    use std::f32::consts::PI;
     let s = hash.as_bytes();
     let size = base83(s.get(..1)?)? as usize;
     let (nx, ny) = (size % 9 + 1, size / 9 + 1);
     if s.len() != 4 + 2 * nx * ny || w == 0 || h == 0 {
         return None;
     }
-    let linear = |v: u32| {
-        let v = (v & 255) as f32 / 255.0;
-        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-    };
-    let srgb = |v: f32| {
-        let v = v.clamp(0.0, 1.0);
-        let v = if v <= 0.0031308 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
-        (v * 255.0 + 0.5) as u8
-    };
     let max = (base83(&s[1..2])? + 1) as f32 / 166.0;
     let dc = base83(&s[2..6])?;
-    let mut colors = vec![[linear(dc >> 16), linear(dc >> 8), linear(dc)]];
+    let mut colors = vec![[srgb_to_linear((dc >> 16) as u8), srgb_to_linear((dc >> 8) as u8), srgb_to_linear(dc as u8)]];
     for pair in s[6..].chunks_exact(2) {
         let v = base83(pair)?;
         let ac = |q: u32| {
@@ -94,10 +175,7 @@ pub fn blurhash(hash: &str, w: u32, h: u32) -> Option<RgbaImage> {
         };
         colors.push([ac(v / (19 * 19)), ac(v / 19 % 19), ac(v % 19)]);
     }
-    let table = |n: usize, len: u32| -> Vec<f32> {
-        (0..len).flat_map(|p| (0..n).map(move |i| (PI * p as f32 * i as f32 / len as f32).cos())).collect()
-    };
-    let (cos_x, cos_y) = (table(nx, w), table(ny, h));
+    let (cos_x, cos_y) = (cos_table(nx, w), cos_table(ny, h));
     Some(RgbaImage::from_fn(w, h, |x, y| {
         let mut c = [0f32; 3];
         for j in 0..ny {
@@ -108,7 +186,7 @@ pub fn blurhash(hash: &str, w: u32, h: u32) -> Option<RgbaImage> {
                 }
             }
         }
-        image::Rgba([srgb(c[0]), srgb(c[1]), srgb(c[2]), 255])
+        image::Rgba([linear_to_srgb(c[0]), linear_to_srgb(c[1]), linear_to_srgb(c[2]), 255])
     }))
 }
 
@@ -128,6 +206,21 @@ fn blurhash_draws_and_refuses_malformed() {
         assert!(blurhash(bad, 32, 32).is_none(), "{bad}");
     }
     assert!(blurhash("LEHV6nWB2yk8pyo0adR*.7kCMdnj", 0, 32).is_none());
+}
+
+#[test]
+fn blurhash_encodes_like_signal_desktop() {
+    let gradient = |w, h| RgbaImage::from_fn(w, h, |x, y| image::Rgba([(x * 31) as u8, (y * 27) as u8, (x * y * 5) as u8, 255]));
+    // from the library Signal Desktop uses (blurhash 2.0.5), same pixels, but with the largest
+    // absolute component as the format's C and Swift encoders have it: that library takes the
+    // largest signed one, which clips strong negatives (these two would start "LC" and "LE")
+    assert_eq!(encode_blurhash(&gradient(8, 6)).unwrap(), "LgFNSP2,a{xZz=NffQnje.f8fQf6");
+    assert_eq!(encode_blurhash(&gradient(5, 9)).unwrap(), "Lf8?ZQKtSKx@l[Vza~iyf%fjfQfj");
+    let flat = RgbaImage::from_pixel(2, 2, image::Rgba([255, 128, 0, 255]));
+    assert_eq!(encode_blurhash(&flat).unwrap(), "L~TNoS}.fQ}.}.}VfQ}VfQfQfQfQ");
+    assert!(encode_blurhash(&RgbaImage::new(0, 0)).is_none());
+    // what we send, we can draw
+    assert!(blurhash(&encode_blurhash(&gradient(8, 6)).unwrap(), 4, 3).is_some());
 }
 
 /// Size of a `w` x `h` image shrunk to fit in `box_w` x `box_h` (never upscales).
@@ -464,6 +557,52 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A JPEG of 40 x 20 whose EXIF says to turn it 90 degrees clockwise to show it: dark on the
+    /// left, bright on the right.
+    fn sideways_jpeg() -> Vec<u8> {
+        use image::ImageEncoder;
+        let img = RgbaImage::from_fn(40, 20, |x, _| if x < 20 { image::Rgba([0, 0, 0, 255]) } else { image::Rgba([255, 255, 255, 255]) });
+        let rgb = DynamicImage::ImageRgba8(img).to_rgb8();
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 95)
+            .write_image(rgb.as_raw(), 40, 20, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        // little-endian TIFF with one entry: Orientation (0x0112), a short, 6
+        let tiff = [b"II*\0".as_slice(), &[8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0]].concat();
+        let exif = [b"Exif\0\0".as_slice(), &tiff].concat();
+        let len = (exif.len() + 2) as u16;
+        let app1 = [[0xFF, 0xE1].as_slice(), &len.to_be_bytes(), &exif].concat();
+        jpeg.splice(2..2, app1);
+        jpeg
+    }
+
+    #[test]
+    fn thumbs_and_facts_come_out_upright() {
+        let jpeg = sideways_jpeg();
+        let thumb = decode_thumb(&jpeg, 40).unwrap().to_rgba8();
+        assert_eq!(thumb.dimensions(), (20, 40));
+        // the dark half turned to the top
+        assert!(thumb.get_pixel(10, 5)[0] < 50 && thumb.get_pixel(10, 35)[0] > 200);
+
+        let dir = std::env::temp_dir().join(format!("sigwin-thumb-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.jpg");
+        std::fs::write(&path, &jpeg).unwrap();
+        let (size, hash) = photo_facts(&path, u64::MAX).unwrap();
+        assert_eq!(size, (20, 40));
+        let drawn = blurhash(&hash.unwrap(), 8, 16).unwrap();
+        assert!(drawn.get_pixel(4, 1)[0] < drawn.get_pixel(4, 14)[0]);
+        // too large to decode: the size alone
+        assert_eq!(photo_facts(&path, 799).unwrap(), ((20, 40), None));
+        // cut after its header: the size alone too
+        let scan = jpeg.windows(2).position(|m| m == [0xFF, 0xDA]).unwrap();
+        std::fs::write(&path, &jpeg[..scan + 14]).unwrap();
+        assert_eq!(photo_facts(&path, u64::MAX).unwrap().0, (20, 40));
+        std::fs::write(&path, b"junk").unwrap();
+        assert!(photo_facts(&path, u64::MAX).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

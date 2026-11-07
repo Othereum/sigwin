@@ -199,13 +199,16 @@ pub(super) async fn send_task(
     let long = long_body(&mut m, &mut text, &attachments_dir).await?;
     let mut specs = Vec::new();
     for path in &files {
-        let data = std::fs::read(path).with_context(|| format!("{} 읽기 실패", path.display()))?;
         let ct = mime_guess::from_path(path).first_or_octet_stream().to_string();
-        let (width, height) = if ct.starts_with("image/") {
-            image::image_dimensions(path).map(|(w, h)| (Some(w), Some(h))).unwrap_or((None, None))
+        let (size, blur_hash) = if ct.starts_with("image/") {
+            read_facts(path, photo_facts).await
+        } else if ct.starts_with("video/") {
+            read_facts(path, video_facts).await
         } else {
             (None, None)
         };
+        let (width, height) = size.unzip();
+        let data = std::fs::read(path).with_context(|| format!("{} 읽기 실패", path.display()))?;
         specs.push((
             AttachmentSpec {
                 content_type: ct,
@@ -217,7 +220,7 @@ pub(super) async fn send_task(
                 width,
                 height,
                 caption: None,
-                blur_hash: None,
+                blur_hash,
             },
             data,
         ));
@@ -237,6 +240,35 @@ pub(super) async fn send_task(
         ..Default::default()
     };
     deliver(&mut m, thread, dm.into(), ts, group_revision).await
+}
+
+/// A size and a blurhash, as the message has them.
+type Facts = (Option<(u32, u32)>, Option<String>);
+
+/// Past this a photo goes without a blurhash: decoding it isn't worth delaying the send.
+const SEND_MAX_PIXELS: u64 = 100_000_000;
+
+fn photo_facts(path: &Path) -> anyhow::Result<Facts> {
+    let (size, hash) = sigwin_thumb::photo_facts(path, SEND_MAX_PIXELS)?;
+    Ok((Some(size), hash))
+}
+
+fn video_facts(path: &Path) -> anyhow::Result<Facts> {
+    let v = crate::videoframe::first_frame_plain(path)?;
+    Ok(v.map_or((None, None), |v| (Some(v.size), v.blurhash())))
+}
+
+/// What a file being sent says about itself. One this PC can't decode goes without it.
+async fn read_facts(path: &Path, read: fn(&Path) -> anyhow::Result<Facts>) -> Facts {
+    let path = path.to_path_buf();
+    let read = tokio::task::spawn_blocking(move || read(&path));
+    match read.await.map_err(anyhow::Error::from).and_then(|r| r) {
+        Ok(facts) => facts,
+        Err(e) => {
+            warn!("read file to send: {e:#}");
+            (None, None)
+        }
+    }
 }
 
 /// Signal's long messages: past 2KB the body keeps only its start and the full text goes as a
