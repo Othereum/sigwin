@@ -45,6 +45,7 @@ base64 = "0.22"
 # pure-Rust sqlcipher crypto: no OpenSSL needed on Windows
 libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-custom-crypto"] }
 unicode-segmentation = "1"
+emojis = "0.9.1" # the reaction picker's emoji list
 # streaming PNG encoder for pasted clipboard images (same version the image crate uses)
 png = "0.18"
 # Slint-generated UI: a separate crate so Rust-only edits don't recompile it

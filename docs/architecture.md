@@ -44,7 +44,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/format.rs` | composing text styles with markers |
 | `src/mention.rs` | composing @mentions: finding the query, filtering members, Signal's wire form |
 | `src/link.rs` | URL detection in message text, opening links |
-| `src/emoji.rs` | emoji-only message detection |
+| `src/emoji.rs` | emoji-only message detection, the reaction picker's emoji list and recent row |
 | `src/clip.rs` | pasting files and images from the clipboard |
 | `src/picker.rs` | file dialogs in a child process |
 | `src/settings.rs` | user settings, owned by the UI thread |
@@ -98,6 +98,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `ui/app.slint` | `AppWindow`: what Rust uses, main layout, overlays |
 | `ui/types.slint`, `ui/theme.slint` | rows filled by Rust, colors and the `Links` hook |
 | `ui/bubble.slint` | message bubble |
+| `ui/reactions.slint` | reaction buttons and the emoji picker of the message menu |
 | `ui/viewer.slint` | image viewer window |
 | `ui/widgets.slint` | small shared widgets |
 | `ui/thread_row.slint`, `ui/stickers.slint`, `ui/settings.slint`, `ui/link.slint` | thread list row, sticker panel, settings page, linking page |

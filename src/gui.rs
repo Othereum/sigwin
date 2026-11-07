@@ -205,6 +205,10 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             drafts::show_threads(ui);
             header_avatar(app, ui);
         }),
+        Event::RecentReactions(list) => {
+            let list: Vec<SharedString> = list.iter().map(|e| e.as_str().into()).collect();
+            app.set_recent_emoji(ModelRc::new(VecModel::from(list)));
+        }
         Event::Header { name, sub } => {
             app.set_current_name(name.into());
             app.set_current_sub(sub.into());

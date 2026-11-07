@@ -6,6 +6,7 @@ import { Bubble } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
 import { SettingsPage } from "settings.slint";
+import { EmojiPicker, PickerLayout, ReactionCell } from "reactions.slint";
 import { WhatsNewPage } from "whatsnew.slint";
 import { LinkPage } from "link.slint";
 
@@ -212,6 +213,21 @@ export component AppWindow inherits Window {
     in property <string> menu-info;
     // the menu shows the pin durations instead of the actions
     in-out property <bool> menu-pin-step;
+    // the menu shows the emoji picker instead of the actions
+    in-out property <bool> menu-picker;
+    in-out property <int> picker-tab;
+    // the open tab's rows (empty while the picker is closed) and the emoji we reacted with lately
+    in property <[[string]]> picker-rows;
+    in property <[string]> recent-emoji;
+    callback picker-tab-changed(int);
+    // the menu closed: the Rust side drops the grid's rows
+    callback picker-closed();
+    changed menu-id => {
+        if (root.menu-id == "") {
+            root.menu-picker = false;
+            root.picker-closed();
+        }
+    }
     callback open-menu(string, length, length);
     // seconds, 0 = until unpinned
     callback pin-message(string, int);
@@ -1075,7 +1091,7 @@ export component AppWindow inherits Window {
             }
         }
         card := Rectangle {
-            property <length> w: 6 * 36px + 12px;
+            property <length> w: (root.menu-picker ? PickerLayout.columns : 7) * PickerLayout.cell + 12px;
             width: w;
             height: menu-col.preferred-height;
             x: max(8px, min(root.menu-x, root.width - w - 8px));
@@ -1090,24 +1106,44 @@ export component AppWindow inherits Window {
             menu-col := VerticalLayout {
                 padding: 6px;
                 spacing: 2px;
-                HorizontalLayout {
-                    for e in ["❤️", "👍", "👎", "😂", "😮", "😢"]: Rectangle {
-                        width: 36px;
-                        height: 36px;
-                        border-radius: 18px;
-                        background: e == root.menu-mine ? Theme.selected : (eta.has-hover ? Theme.hover : transparent);
-                        Text { text: e; font-size: 20px; }
-                        eta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => {
-                                root.react(root.menu-id, e);
-                                root.menu-id = "";
-                            }
+                if root.menu-picker: EmojiPicker {
+                    mine: root.menu-mine;
+                    recent: root.recent-emoji;
+                    rows: root.picker-rows;
+                    tab: root.picker-tab;
+                    tab-changed(i) => {
+                        root.picker-tab = i;
+                        root.picker-tab-changed(i);
+                    }
+                    picked(e) => {
+                        root.react(root.menu-id, e);
+                        root.menu-id = "";
+                    }
+                }
+                if !root.menu-picker: HorizontalLayout {
+                    for e in ["❤️", "👍", "👎", "😂", "😮", "😢"]: ReactionCell {
+                        emoji: e;
+                        mine: e == root.menu-mine;
+                        picked => {
+                            root.react(root.menu-id, e);
+                            root.menu-id = "";
+                        }
+                    }
+                    // any other emoji; ours when it is none of the six
+                    plus := ReactionCell {
+                        emoji: "＋";
+                        nudge: 0px;
+                        mine: root.menu-mine != "" && root.menu-mine != "❤️" && root.menu-mine != "👍" && root.menu-mine != "👎"
+                            && root.menu-mine != "😂" && root.menu-mine != "😮" && root.menu-mine != "😢";
+                        picked => {
+                            root.picker-tab = 0;
+                            root.menu-picker = true;
+                            root.picker-tab-changed(0);
                         }
                     }
                 }
-                Rectangle { height: 1px; background: Theme.border; }
-                if root.menu-pin-step: HorizontalLayout {
+                if !root.menu-picker: Rectangle { height: 1px; background: Theme.border; }
+                if root.menu-pin-step && !root.menu-picker: HorizontalLayout {
                     padding-left: 10px;
                     Text {
                         height: 28px;
@@ -1117,7 +1153,7 @@ export component AppWindow inherits Window {
                         vertical-alignment: center;
                     }
                 }
-                for d in root.menu-pin-step ? [
+                for d in root.menu-pin-step && !root.menu-picker ? [
                     { label: "24시간", secs: 86400 },
                     { label: "7일", secs: 604800 },
                     { label: "30일", secs: 2592000 },
@@ -1129,14 +1165,14 @@ export component AppWindow inherits Window {
                         root.menu-id = "";
                     }
                 }
-                if !root.menu-pin-step: MenuRow {
+                if !root.menu-pin-step && !root.menu-picker: MenuRow {
                     text: "답장";
                     clicked => {
                         root.reply(root.menu-id);
                         root.menu-id = "";
                     }
                 }
-                if !root.menu-pin-step: MenuRow {
+                if !root.menu-pin-step && !root.menu-picker: MenuRow {
                     text: root.menu-pinned ? "고정 해제" : "고정";
                     clicked => {
                         if (root.menu-pinned) {
@@ -1147,14 +1183,14 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                if root.menu-can-edit && !root.menu-pin-step: MenuRow {
+                if root.menu-can-edit && !root.menu-pin-step && !root.menu-picker: MenuRow {
                     text: "수정";
                     clicked => {
                         root.edit-message(root.menu-id);
                         root.menu-id = "";
                     }
                 }
-                if root.menu-info != "" && !root.menu-pin-step: MenuRow {
+                if root.menu-info != "" && !root.menu-pin-step && !root.menu-picker: MenuRow {
                     text: "정보";
                     clicked => {
                         root.info-title = "메시지 정보";
@@ -1162,7 +1198,7 @@ export component AppWindow inherits Window {
                         root.menu-id = "";
                     }
                 }
-                if root.menu-can-delete && !root.menu-pin-step: MenuRow {
+                if root.menu-can-delete && !root.menu-pin-step && !root.menu-picker: MenuRow {
                     text: "모두에게서 삭제";
                     danger: true;
                     clicked => {

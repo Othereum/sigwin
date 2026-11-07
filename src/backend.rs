@@ -159,6 +159,9 @@ struct Persist {
     /// thread key -> its own notification settings (only threads with any)
     #[serde(default)]
     thread_prefs: HashMap<String, crate::types::ThreadPrefs>,
+    /// emoji we reacted with, newest first (the reaction picker's recent row)
+    #[serde(default)]
+    recent_reactions: Vec<String>,
 }
 
 #[derive(Default, Clone, Copy, Serialize, Deserialize)]
@@ -554,6 +557,7 @@ impl App {
         self.me = m.registration_data().service_ids.aci;
         self.manager = Some(m);
         (self.emit)(Event::Ready);
+        (self.emit)(Event::RecentReactions(self.persist.recent_reactions.clone()));
         self.threads_dirty = true;
         if fresh {
             if let Some(m) = self.manager.as_mut() {

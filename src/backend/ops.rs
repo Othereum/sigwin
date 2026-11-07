@@ -24,6 +24,11 @@ impl App {
             }),
             ..Default::default()
         };
+        if !remove {
+            crate::emoji::bump_recent(&mut self.persist.recent_reactions, &emoji, crate::emoji::PICKER_COLUMNS);
+            self.save_persist();
+            (self.emit)(Event::RecentReactions(self.persist.recent_reactions.clone()));
+        }
         self.send_op(row, Op::React { emoji: (!remove).then_some(emoji), target }, dm.into()).await;
     }
 

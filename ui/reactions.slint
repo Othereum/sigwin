@@ -1,0 +1,99 @@
+// Reaction picker: the message menu's emoji grid (the "＋" after the quick reactions).
+import { ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export global PickerLayout {
+    out property <length> cell: 36px;
+    // emoji per row (the backend builds rows of this many)
+    out property <int> columns: 8;
+    out property <int> visible-rows: 6;
+}
+
+// one emoji button: the quick row, the recent row and the grid
+export component ReactionCell inherits Rectangle {
+    in property <string> emoji;
+    // our own reaction on the message
+    in property <bool> mine;
+    callback picked();
+    width: PickerLayout.cell;
+    height: PickerLayout.cell;
+    border-radius: PickerLayout.cell / 2;
+    background: root.mine ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
+    // emoji glyphs sit high in their line box: 1px below the centre (plain symbols like "＋": 0)
+    in property <length> nudge: 1px;
+    Text { text: root.emoji; font-size: 20px; y: (parent.height - self.height) / 2 + root.nudge; }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+export component EmojiPicker inherits VerticalLayout {
+    // our own reaction, highlighted
+    in property <string> mine;
+    in property <[string]> recent;
+    // rows of the open tab (`PickerLayout.columns` emoji each); swapped whole when the tab changes
+    in property <[[string]]> rows;
+    in-out property <int> tab;
+    callback picked(string);
+    callback tab-changed(int);
+    spacing: 2px;
+
+    HorizontalLayout {
+        for icon[i] in ["😀", "🧑", "🐶", "🍔", "⚽", "🚗", "💡", "🔣"]: Rectangle {
+            width: PickerLayout.cell;
+            height: 32px;
+            Text {
+                text: icon;
+                font-size: 18px;
+                y: (parent.height - self.height) / 2 + 1px;
+                opacity: i == root.tab ? 1.0 : (tab-ta.has-hover ? 0.85 : 0.55);
+            }
+            Rectangle {
+                y: parent.height - 2px;
+                height: 2px;
+                x: 6px;
+                width: parent.width - 12px;
+                border-radius: 1px;
+                background: i == root.tab ? Theme.accent : transparent;
+            }
+            tab-ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.tab = i;
+                    root.tab-changed(i);
+                }
+            }
+        }
+    }
+    Rectangle { height: 1px; background: Theme.border; }
+    if root.recent.length > 0: VerticalLayout {
+        spacing: 2px;
+        Text {
+            text: "최근 사용";
+            font-size: 11px;
+            color: Theme.subtle;
+            horizontal-alignment: left;
+        }
+        HorizontalLayout {
+            alignment: start;
+            for e in root.recent: ReactionCell {
+                emoji: e;
+                mine: e == root.mine;
+                picked => { root.picked(e); }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.border; }
+    }
+    ListView {
+        height: PickerLayout.visible-rows * PickerLayout.cell;
+        for row in root.rows: HorizontalLayout {
+            alignment: start;
+            for e in row: ReactionCell {
+                emoji: e;
+                mine: e == root.mine;
+                picked => { root.picked(e); }
+            }
+        }
+    }
+}

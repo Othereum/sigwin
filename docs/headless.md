@@ -10,7 +10,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 - `SIGWIN_DEMO_RELOAD=1` (uneven rows + the list re-sent every 250ms, like a live account)
 - `SIGWIN_DEMO_OLDER=<ms>` (60 rows, older pages of 60 loaded at the top after <ms>); with `SIGWIN_DEMO_CAP=<rows>` the window is bounded like the real one and moves through the rows
 - `SIGWIN_DEMO_TALL=<row>:<chars>[,...]` (very long messages at those rows, a line per 20 characters)
-- `SIGWIN_DEMO_MENU=1|edit|pin`
+- `SIGWIN_DEMO_MENU=1|edit|pin|picker[<tab 0-7>]` (`picker`: the emoji picker on that tab, with a few recent emoji)
 - `SIGWIN_DEMO_SETTINGS=1`
 - `SIGWIN_DEMO_VIDEO=1|<path>` (the newest rows show videos: blurhash and size label replaced by a frame and length after 2s, downloading, nothing, in a grid; with a path the frame is that file's first, through the encrypted file and the decoding child, and the blurhash is the one that file would be sent with)
 - `SIGWIN_DEMO_VIEWER=1|<width>x<height>` (a photo on the newest row; clicking it opens the image viewer with three fake images, the first of the given size; `SIGWIN_DEMO_VIEWER_COUNT=<n>` for a longer album)

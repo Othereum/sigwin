@@ -409,12 +409,31 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         app.set_menu_info(info.into());
         app.set_menu_pinned(pinned);
         app.set_menu_pin_step(false);
+        app.set_menu_picker(false);
         app.set_menu_mine(mine.into());
         app.set_menu_can_edit(can_edit);
         app.set_menu_can_delete(can_delete);
         app.set_menu_x(x);
         app.set_menu_y(y);
         app.set_menu_id(id);
+    });
+
+    // the emoji grid exists only while the picker is open: built per tab, dropped on close
+    let weak = app.as_weak();
+    app.on_picker_tab_changed(move |tab| {
+        let Some(app) = weak.upgrade() else { return };
+        let all = emoji::picker_tab(tab.max(0) as usize);
+        let rows: Vec<ModelRc<SharedString>> = all
+            .chunks(emoji::PICKER_COLUMNS)
+            .map(|row| ModelRc::new(VecModel::from(row.iter().map(|e| SharedString::from(*e)).collect::<Vec<_>>())))
+            .collect();
+        app.set_picker_rows(ModelRc::new(VecModel::from(rows)));
+    });
+    let weak = app.as_weak();
+    app.on_picker_closed(move || {
+        if let Some(app) = weak.upgrade() {
+            app.set_picker_rows(ModelRc::default());
+        }
     });
 
     let s = send.clone();

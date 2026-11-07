@@ -409,6 +409,8 @@ pub enum Scroll {
 }
 
 pub enum Event {
+    /// the emoji we reacted with lately, newest first (the picker's recent row)
+    RecentReactions(Vec<String>),
     /// the preview of the composer's link; None: there is none to show
     LinkPreview { url: String, card: Option<LinkCard> },
     Loading(String),

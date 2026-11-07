@@ -57,11 +57,18 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         slint::Timer::single_shot(std::time::Duration::from_millis(400), move || {
             let Some(app) = weak.upgrade() else { return };
             apply(&app, Event::Typing { group: true, who: vec![("demo-a".into(), "김민준".into())] });
+            apply(&app, Event::RecentReactions(["🎉", "🙏", "👍", "🔥"].map(String::from).to_vec()));
             if what == "edit" {
                 app.invoke_edit_message("294".into());
             } else if what == "pin" {
                 app.invoke_open_menu("297".into(), 520.0, 300.0);
                 app.set_menu_pin_step(true);
+            } else if let Some(tab) = what.strip_prefix("picker").map(|t| t.parse::<i32>().unwrap_or(0)) {
+                // "picker" or "picker<tab>": the emoji picker on that tab
+                app.invoke_open_menu("297".into(), 520.0, 200.0);
+                app.set_menu_picker(true);
+                app.set_picker_tab(tab);
+                app.invoke_picker_tab_changed(tab);
             } else {
                 app.invoke_open_menu("297".into(), 520.0, 300.0);
             }
