@@ -70,6 +70,8 @@ const TYPING_MAX_GROUP: usize = 12;
 const TYPING_RESEND: Duration = Duration::from_secs(10);
 const TYPING_IDLE: Duration = Duration::from_secs(5);
 const TYPING_TIMEOUT: Duration = Duration::from_secs(15);
+/// back at the newest messages this long, the window lets go of what scrolling up loaded
+const SETTLE_AFTER: Duration = Duration::from_secs(30);
 /// how often to look for expired disappearing messages
 const SWEEP_EVERY: Duration = Duration::from_secs(300);
 /// Signal keeps at most this many pinned messages per chat; a newer pin pushes out the oldest
@@ -308,6 +310,8 @@ struct App {
     focused: bool,
     /// the window lost rows since the last `emit_messages`
     moved: bool,
+    /// when a window that grew lets go again, while the user stays at the newest messages
+    settle_at: Option<Instant>,
     /// the message list is at its bottom (always, until the UI says otherwise)
     at_bottom: bool,
     synced: bool,
@@ -444,6 +448,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         sweeping: false,
         focused: true,
         moved: false,
+        settle_at: None,
         at_bottom: true,
         synced: false,
         tx,

@@ -91,16 +91,33 @@ impl App {
         Ok(())
     }
 
-    /// Keeps the window within `MAX_WINDOW` by dropping its oldest rows.
-    async fn trim_oldest(&mut self) -> anyhow::Result<()> {
-        let Some(open) = self.current.as_mut().filter(|o| o.window.len() > MAX_WINDOW) else { return Ok(()) };
-        let extra = open.window.len() - MAX_WINDOW;
+    /// Keeps the newest `keep` rows of the window at most.
+    async fn trim_oldest(&mut self, keep: usize) -> anyhow::Result<()> {
+        let Some(open) = self.current.as_mut().filter(|o| o.window.len() > keep) else { return Ok(()) };
+        let extra = open.window.len() - keep;
         open.window.drain(..extra);
         if let Some(seq) = self.index.seq_of(&open.thread, open.window[0].0).await? {
             open.oldest_seq = seq;
         }
         open.has_more = true;
         self.moved = true;
+        Ok(())
+    }
+
+    /// Scrolling up is over once the user has stayed at the newest messages for a while: what it
+    /// loaded goes, and scrolling up again loads it back like any older page.
+    pub(super) async fn settle_window(&mut self) -> anyhow::Result<()> {
+        if !self.sees_latest() || self.current.as_ref().is_none_or(|o| o.window.len() <= PAGE as usize) {
+            self.settle_at = None;
+            return Ok(());
+        }
+        let due = *self.settle_at.get_or_insert_with(|| Instant::now() + SETTLE_AFTER);
+        if Instant::now() < due {
+            return Ok(());
+        }
+        self.settle_at = None;
+        self.trim_oldest(PAGE as usize).await?;
+        self.emit_messages(Scroll::KeepIfNotAtBottom).await;
         Ok(())
     }
 
@@ -176,7 +193,7 @@ impl App {
         open.end_seq = (rows.len() as u32 == PAGE).then_some(end);
         open.tail_seq = end;
         open.window.append(&mut newer);
-        self.trim_oldest().await?;
+        self.trim_oldest(MAX_WINDOW).await?;
         Ok(true)
     }
 
@@ -315,7 +332,7 @@ impl App {
         // of the rows further from the view
         if self.current.as_ref().is_some_and(|o| o.window.len() > MAX_WINDOW + PAGE as usize) {
             if self.at_bottom {
-                self.trim_oldest().await?;
+                self.trim_oldest(MAX_WINDOW).await?;
             } else {
                 self.trim_newest().await?;
             }

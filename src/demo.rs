@@ -347,6 +347,12 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                         (start, end) = (total - 60, total);
                         show(start, end, Scroll::Bottom);
                     }
+                    // like App::settle_window, without its wait
+                    Command::AtBottom(true) if end == total && end - start > 60 => {
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
+                        start = total - 60;
+                        show(start, end, Scroll::KeepIfNotAtBottom);
+                    }
                     // like App::jump_to: move the window to the target, margin either side
                     Command::JumpTo(id) => {
                         let Ok(target) = id.parse::<usize>() else { continue };

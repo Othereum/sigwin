@@ -284,6 +284,9 @@ impl App {
                 warn!("reload window: {e:#}");
             }
         }
+        if let Err(e) = self.settle_window().await {
+            warn!("settle window: {e:#}");
+        }
         if self.threads_dirty && self.manager.is_some() {
             self.threads_dirty = false;
             if let Err(e) = self.rebuild_threads().await {
