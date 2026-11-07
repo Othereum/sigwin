@@ -9,8 +9,9 @@
 - **MAJOR** stays 0 until the core features feel complete.
 
 ## Publishing
-1. Bump `version` in `Cargo.toml` (and `Cargo.lock` via `cargo build`), commit, push `main`.
-2. Write the release notes to `target\release-notes.md` (see below) and have the user check them.
+1. Write the release notes to `target\release-notes.md` (see below) and have the user check them
+   along with the version. This comes before the push: writing them can turn up a missed fix.
+2. Bump `version` in `Cargo.toml` (and `Cargo.lock` via `cargo build`), commit, push `main`.
 3. Run `scripts\release.ps1` (in a terminal: it asks for the key password). It refuses missing or
    empty notes, checks the tree is
    clean and equals `origin/main` and the release is new, builds `--release`, signs `sigwin.exe`
