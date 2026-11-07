@@ -24,7 +24,7 @@ impl App {
             }),
             ..Default::default()
         };
-        self.send_op(row, Op::React((!remove).then_some(emoji)), dm.into()).await;
+        self.send_op(row, Op::React { emoji: (!remove).then_some(emoji), target }, dm.into()).await;
     }
 
     pub(super) async fn edit(&mut self, id: &str, text: String, mentions: &[crate::mention::Member]) {
@@ -240,6 +240,14 @@ pub(super) async fn record_pin(index: &Index, key: &str, c: &Content, me: Uuid) 
         Kind::Unpin { target } => index.unpin(key, target, at).await?,
         _ => return Ok(false),
     }
+    Ok(true)
+}
+
+/// Applies a stored reaction to the reaction index; true if `c` was one.
+pub(super) async fn record_reaction(index: &Index, key: &str, c: &Content, me: Uuid) -> anyhow::Result<bool> {
+    let Kind::Reaction { target, emoji, remove } = view::classify(c, me) else { return Ok(false) };
+    let at = c.metadata.client_timestamp.timestamp_millis() as u64;
+    index.record_reaction(key, target, c.metadata.sender.raw_uuid(), if remove { "" } else { &emoji }, at).await?;
     Ok(true)
 }
 

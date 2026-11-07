@@ -3,7 +3,7 @@
 use super::*;
 
 impl App {
-    /// One-time: index pin and edit messages presage stored before we kept our own indexes.
+    /// One-time: index pin, edit and reaction messages presage stored before we kept our own indexes.
     /// Walks every thread oldest first in pages, so pins and unpins apply in order.
     pub(super) fn backfill_pins(&self) {
         let (store, index, me, tx) = (self.store.clone(), self.index.clone(), self.me, self.tx.clone());
@@ -24,7 +24,7 @@ impl App {
                         msgs.sort_by_key(|c| c.metadata.client_timestamp.timestamp_millis());
                         for c in &msgs {
                             let pin = if pins { record_pin(&index, &key, c, me).await } else { Ok(false) };
-                            for r in [pin, record_edit(&index, &key, c, me).await] {
+                            for r in [pin, record_edit(&index, &key, c, me).await, record_reaction(&index, &key, c, me).await] {
                                 match r {
                                     Ok(true) => n += 1,
                                     Ok(false) => {}
@@ -39,7 +39,7 @@ impl App {
                     tokio::task::yield_now().await;
                 }
             }
-            info!("pin and edit index backfilled: {n} messages");
+            info!("pin, edit and reaction index backfilled: {n} messages");
             let _ = tx.send(Internal::PinsIndexed);
         });
     }
@@ -211,6 +211,9 @@ impl App {
         }
         if let Err(e) = record_edit(&self.index, &key, &c, self.me).await {
             warn!("record edit: {e:#}");
+        }
+        if let Err(e) = record_reaction(&self.index, &key, &c, self.me).await {
+            warn!("record reaction: {e:#}");
         }
         let kind = view::classify(&c, self.me);
         match kind {

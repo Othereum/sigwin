@@ -669,6 +669,20 @@ fn fit(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
     }
 }
 
+/// What a row shows but the window's rows may not say: kept apart from them, because what
+/// changes a message is stored later than the message and may be outside the window.
+#[derive(Default)]
+pub struct Indexed {
+    /// target ts -> recipient -> 1 delivered / 2 read
+    pub status: HashMap<u64, HashMap<Uuid, u8>>,
+    /// our messages deleted for everyone (the stored row no longer says who sent it)
+    pub my_deletes: std::collections::HashSet<u64>,
+    /// target ts -> (who, emoji), oldest first
+    pub reactions: HashMap<u64, Vec<(Uuid, String)>>,
+    /// stored edits of window rows that aren't in the window themselves: (stored ts, content)
+    pub edits: Vec<(u64, Content)>,
+}
+
 pub struct Built {
     pub items: Vec<MsgDto>,
     /// image attachments that need a thumbnail: (key, pointer, square box in logical px to fit into, 0 = as is)
@@ -724,36 +738,22 @@ pub fn build(
     window: &[(u64, Content)],
     me: Uuid,
     members: &[Uuid],
-    // target ts -> recipient -> 1 delivered / 2 read (from the receipt index)
-    status: &HashMap<u64, HashMap<Uuid, u8>>,
-    // our messages deleted for everyone (the stored row no longer says who sent it)
-    my_deletes: &std::collections::HashSet<u64>,
+    indexed: &Indexed,
     long: &LongTexts,
     name_of: &dyn Fn(&Uuid) -> String,
 ) -> Built {
-    let mut reactions: HashMap<u64, Vec<(Uuid, String)>> = HashMap::new();
+    let Indexed { status, my_deletes, reactions, edits: outside } = indexed;
     let mut edits: HashMap<u64, (u64, &DataMessage, Uuid)> = HashMap::new();
     let now = now_ms();
     let mut next_expiry: Option<u64> = None;
 
-    for (ts, c) in window {
-        match classify(c, me) {
-            Kind::Reaction { target, emoji, remove } => {
-                let sender = c.metadata.sender.raw_uuid();
-                let list = reactions.entry(target).or_default();
-                list.retain(|(s, _)| *s != sender);
-                if !remove {
-                    list.push((sender, emoji));
-                }
+    for (ts, c) in outside.iter().chain(window) {
+        if let Kind::Edit { target, dm } = classify(c, me) {
+            let sender = c.metadata.sender.raw_uuid();
+            let e = edits.entry(target).or_insert((*ts, dm, sender));
+            if *ts >= e.0 {
+                *e = (*ts, dm, sender);
             }
-            Kind::Edit { target, dm } => {
-                let sender = c.metadata.sender.raw_uuid();
-                let e = edits.entry(target).or_insert((*ts, dm, sender));
-                if *ts >= e.0 {
-                    *e = (*ts, dm, sender);
-                }
-            }
-            _ => {}
         }
     }
 
@@ -1239,7 +1239,7 @@ mod tests {
     #[test]
     fn link_preview_shows_only_for_a_link_in_the_text() {
         let name = |_: &Uuid| String::new();
-        let (empty, long) = (HashMap::new(), LongTexts::default());
+        let long = LongTexts::default();
         let image = AttachmentPointer { digest: Some(vec![7; 32]), width: Some(1280), height: Some(720), ..Default::default() };
         let preview = |url: &str| presage::proto::Preview {
             url: Some(url.into()),
@@ -1249,7 +1249,7 @@ mod tests {
         };
         let run = |dm: DataMessage| {
             let window = [(5u64, incoming(dm))];
-            build(&window, Uuid::from_u128(1), &[], &empty, &Default::default(), &long, &name)
+            build(&window, Uuid::from_u128(1), &[], &Default::default(), &long, &name)
         };
         let url = "https://www.youtube.com/watch?v=x";
         let body = format!("봐 {url}");
@@ -1289,11 +1289,10 @@ mod tests {
             ..Default::default()
         };
         let name = |_: &Uuid| String::new();
-        let empty = HashMap::new();
         let long = LongTexts::default();
         let run = |attachments: Vec<AttachmentPointer>| {
             let window = [(5u64, incoming(DataMessage { attachments, ..Default::default() }))];
-            build(&window, Uuid::from_u128(1), &[], &empty, &Default::default(), &long, &name)
+            build(&window, Uuid::from_u128(1), &[], &Default::default(), &long, &name)
         };
 
         let b = run(vec![photo(1), pdf(2), photo(3), photo(4), pdf(5)]);
@@ -1319,6 +1318,27 @@ mod tests {
         assert_eq!(b.wanted_thumbs.len(), 1);
     }
 
+    /// What changed a message may be stored past the window's end.
+    #[test]
+    fn rows_show_reactions_and_edits_stored_outside_the_window() {
+        let original = incoming(DataMessage { body: Some("before".into()), ..Default::default() });
+        let (row, author) = (original.metadata.client_timestamp.timestamp_millis() as u64, original.metadata.sender.raw_uuid());
+        let edit = EditMessage {
+            target_sent_timestamp: Some(row),
+            data_message: Some(DataMessage { body: Some("after".into()), ..Default::default() }),
+        };
+        let mut indexed = Indexed {
+            edits: vec![(row + 1, Content::from_body(edit, original.metadata.clone()))],
+            ..Default::default()
+        };
+        indexed.reactions.insert(row, vec![(author, "up".into()), (Uuid::from_u128(1), "up".into())]);
+        let window = [(row, original)];
+        let b = build(&window, Uuid::from_u128(1), &[], &indexed, &LongTexts::default(), &|_: &Uuid| String::new());
+        assert_eq!(b.items[0].text, "after");
+        assert_eq!(b.items[0].reactions, [("up".to_string(), 2)]);
+        assert_eq!(b.items[0].my_reaction, "up");
+    }
+
     #[test]
     fn long_text_attachment_is_part_of_the_body() {
         let long = AttachmentPointer { content_type: Some(LONG_TEXT.into()), digest: Some(vec![7; 32]), ..Default::default() };
@@ -1326,8 +1346,7 @@ mod tests {
         let dm = DataMessage { body: Some("앞부분".into()), attachments: vec![long, photo], ..Default::default() };
         let window = [(5u64, incoming(dm))];
         let name = |_: &Uuid| String::new();
-        let empty = HashMap::new();
-        let run = |long: &LongTexts| build(&window, Uuid::from_u128(1), &[], &empty, &Default::default(), long, &name);
+        let run = |long: &LongTexts| build(&window, Uuid::from_u128(1), &[], &Default::default(), long, &name);
         let b = run(&LongTexts::default());
         assert_eq!(b.items[0].text, "앞부분");
         assert_eq!(b.wanted_texts.len(), 1);

@@ -126,6 +126,9 @@ struct Persist {
     /// edit messages stored before the edit index existed have been indexed
     #[serde(default)]
     edits_indexed: bool,
+    /// reactions stored before the reaction index existed have been indexed
+    #[serde(default)]
+    reactions_indexed: bool,
     /// layout of the attachment and thumbnail caches on disk (`CACHE_FORMAT` once converted)
     #[serde(default)]
     cache_format: u32,
@@ -195,8 +198,8 @@ struct PendingOp {
 }
 
 enum Op {
-    /// None: reaction taken back
-    React(Option<String>),
+    /// `emoji` None: reaction taken back; `target`: sent timestamp of the message
+    React { emoji: Option<String>, target: u64 },
     /// `target`: sent timestamp of the edited message
     Edit { text: String, target: u64 },
     /// sent timestamp of the target
@@ -525,7 +528,7 @@ impl App {
         if !self.persist.receipts_indexed {
             self.backfill_receipts();
         }
-        if !self.persist.pins_indexed || !self.persist.edits_indexed {
+        if !self.persist.pins_indexed || !self.persist.edits_indexed || !self.persist.reactions_indexed {
             self.backfill_pins();
         }
     }
@@ -702,6 +705,12 @@ impl App {
                             warn!("record edit: {e:#}");
                         }
                     }
+                    Some(PendingOp { op: Op::React { emoji, target }, thread_key, .. }) => {
+                        let emoji = emoji.as_deref().unwrap_or_default();
+                        if let Err(e) = self.index.record_reaction(thread_key, *target, self.me, emoji, ts).await {
+                            warn!("record reaction: {e:#}");
+                        }
+                    }
                     _ => {}
                 }
                 self.ops.retain(|o| o.ts != ts);
@@ -716,7 +725,7 @@ impl App {
                     // nothing to retry from: drop the optimistic change
                     let op = self.ops.remove(i);
                     let what = match op.op {
-                        Op::React(_) => "반응",
+                        Op::React { .. } => "반응",
                         Op::Edit { .. } => "수정",
                         Op::Delete(_) => "삭제",
                         Op::Pin { target } => {
@@ -774,6 +783,7 @@ impl App {
             Internal::PinsIndexed => {
                 self.persist.pins_indexed = true;
                 self.persist.edits_indexed = true;
+                self.persist.reactions_indexed = true;
                 self.persist_dirty = true;
                 self.current_dirty = true;
             }
@@ -865,6 +875,9 @@ impl App {
                         if exp <= now {
                             remove_files(&c, ts, &att_dir, &thumb_dir);
                             deleted |= store.delete_message(&row.thread, ts).await.unwrap_or(false);
+                            if let Err(e) = index.forget_reactions(&key, c.timestamp()).await {
+                                warn!("forget reactions: {e:#}");
+                            }
                         } else {
                             st.hold = Some(st.hold.map_or(ts, |h| h.min(ts)));
                             st.due = st.due.min(exp);

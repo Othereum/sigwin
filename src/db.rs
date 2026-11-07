@@ -1,6 +1,8 @@
 //! Small read-only queries on presage's sqlite schema that the `Store` trait doesn't offer:
 //! listing threads by recency and paging messages in display order without loading whole threads.
 
+use std::collections::HashMap;
+
 use presage::store::Thread;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
@@ -194,6 +196,21 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        // who reacted how, so a message shows its reactions whichever rows are loaded (they are
+        // stored as rows of their own, later in the thread). `emoji` "" = taken back: kept so
+        // that an older reaction arriving late can't bring it back
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_reactions (
+                thread TEXT NOT NULL,
+                target_ts INTEGER NOT NULL,
+                sender BLOB NOT NULL,
+                emoji TEXT NOT NULL,
+                at INTEGER NOT NULL,
+                PRIMARY KEY (thread, target_ts, sender)
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
         // title and cover of installed sticker packs: presage keeps every sticker's bytes in one
         // JSON column, so listing packs from its table means reading all of them
         sqlx::query(
@@ -297,6 +314,79 @@ impl Index {
                 .fetch_optional(&self.pool)
                 .await?;
         Ok(ts.map(|t| t as u64))
+    }
+
+    /// Newest edits of `targets`: (target, sender, stored timestamp of the edit).
+    pub async fn edits_for(&self, thread: &str, targets: &[u64]) -> anyhow::Result<Vec<(u64, uuid::Uuid, u64)>> {
+        let rows = sqlx::query(
+            "SELECT target_ts, sender, edit_ts FROM ls_edits
+             WHERE thread = ? AND target_ts IN (SELECT value FROM json_each(?))",
+        )
+        .bind(thread)
+        .bind(json_list(targets))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let ts: i64 = r.try_get("target_ts").ok()?;
+                let who: Vec<u8> = r.try_get("sender").ok()?;
+                let at: i64 = r.try_get("edit_ts").ok()?;
+                Some((ts as u64, uuid::Uuid::from_slice(&who).ok()?, at as u64))
+            })
+            .collect())
+    }
+
+    /// `sender`'s reaction to `target`, sent at `at` (`emoji` "": taken back). One per sender;
+    /// the newest counts, in whatever order they arrive.
+    pub async fn record_reaction(&self, thread: &str, target: u64, sender: uuid::Uuid, emoji: &str, at: u64) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO ls_reactions (thread, target_ts, sender, emoji, at) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT (thread, target_ts, sender) DO UPDATE SET emoji = excluded.emoji, at = excluded.at
+             WHERE excluded.at >= ls_reactions.at",
+        )
+        .bind(thread)
+        .bind(target as i64)
+        .bind(sender.as_bytes().as_slice())
+        .bind(emoji)
+        .bind(at as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Reactions standing on `targets`, oldest first: target -> (sender, emoji).
+    pub async fn reactions_for(&self, thread: &str, targets: &[u64]) -> anyhow::Result<HashMap<u64, Vec<(uuid::Uuid, String)>>> {
+        let rows = sqlx::query(
+            "SELECT target_ts, sender, emoji FROM ls_reactions
+             WHERE thread = ? AND emoji <> '' AND target_ts IN (SELECT value FROM json_each(?))
+             ORDER BY at",
+        )
+        .bind(thread)
+        .bind(json_list(targets))
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out: HashMap<u64, Vec<(uuid::Uuid, String)>> = HashMap::new();
+        for r in rows {
+            let (Ok(ts), Ok(who), Ok(emoji)) =
+                (r.try_get::<i64, _>("target_ts"), r.try_get::<Vec<u8>, _>("sender"), r.try_get::<String, _>("emoji"))
+            else {
+                continue;
+            };
+            let Ok(who) = uuid::Uuid::from_slice(&who) else { continue };
+            out.entry(ts as u64).or_default().push((who, emoji));
+        }
+        Ok(out)
+    }
+
+    /// The message `target` is gone for good (disappearing): so is what we noted about it.
+    pub async fn forget_reactions(&self, thread: &str, target: u64) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM ls_reactions WHERE thread = ? AND target_ts = ?")
+            .bind(thread)
+            .bind(target as i64)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     /// Ids of installed sticker packs. Reads the id column only, not the manifests.
@@ -716,6 +806,44 @@ mod tests {
         index.record_edit("u", 1, author, 40).await.unwrap();
         assert_eq!(index.latest_edit("t", 1, author).await.unwrap(), Some(20));
         assert_eq!(index.latest_edit("t", 2, author).await.unwrap(), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_newest_reaction_stands_whatever_the_arrival_order() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        let (a, b) = (Uuid::from_u128(3), Uuid::from_u128(4));
+        index.record_reaction("t", 1, a, "up", 10).await.unwrap();
+        index.record_reaction("t", 1, b, "heart", 5).await.unwrap();
+        // replaced by a newer one; an older one arriving late changes nothing
+        index.record_reaction("t", 1, a, "laugh", 20).await.unwrap();
+        index.record_reaction("t", 1, a, "wow", 15).await.unwrap();
+        // another thread and another message stay apart
+        index.record_reaction("u", 1, a, "fire", 30).await.unwrap();
+        index.record_reaction("t", 2, a, "fire", 30).await.unwrap();
+        let got = index.reactions_for("t", &[1]).await.unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[&1], [(b, "heart".to_string()), (a, "laugh".to_string())]);
+        // taken back: stays gone even if the reaction it took back arrives afterwards
+        index.record_reaction("t", 1, a, "", 25).await.unwrap();
+        index.record_reaction("t", 1, a, "laugh", 20).await.unwrap();
+        assert_eq!(index.reactions_for("t", &[1]).await.unwrap()[&1], [(b, "heart".to_string())]);
+        index.forget_reactions("t", 1).await.unwrap();
+        assert!(index.reactions_for("t", &[1]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn edits_for_lists_the_targets_edits_only() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        let (a, b) = (Uuid::from_u128(3), Uuid::from_u128(4));
+        index.record_edit("t", 1, a, 20).await.unwrap();
+        index.record_edit("t", 1, b, 21).await.unwrap();
+        index.record_edit("t", 2, a, 22).await.unwrap();
+        index.record_edit("u", 1, a, 23).await.unwrap();
+        let mut got = index.edits_for("t", &[1]).await.unwrap();
+        got.sort_by_key(|e| e.2);
+        assert_eq!(got, [(1, a, 20), (1, b, 21)]);
     }
 
     /// `ContentExt::timestamp` of an edit is its target's, but the row is stored under the

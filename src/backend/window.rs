@@ -122,7 +122,10 @@ impl App {
         let mut loaded = false;
         loop {
             let Some(open) = self.current.as_ref() else { return Ok(()) };
-            if let Some(pos) = open.window.iter().position(|(_, c)| c.timestamp() == target) {
+            // an edit has the target's sent timestamp, but no row of its own
+            let me = self.me;
+            let is_target = |c: &Content| c.timestamp() == target && !matches!(view::classify(c, me), Kind::Edit { .. });
+            if let Some(pos) = open.window.iter().position(|(_, c)| is_target(c)) {
                 if displayable(&open.window[..pos], self.me) < JUMP_MARGIN && self.extend_older().await? {
                     loaded = true;
                     continue;
@@ -197,10 +200,29 @@ impl App {
             Default::default()
         });
         let Some(open) = self.current.as_ref() else { return };
+        let reactions = self.index.reactions_for(&open.key, &tss).await.unwrap_or_else(|e| {
+            warn!("reactions: {e:#}");
+            Default::default()
+        });
+        // edits stored past the window's end: they still change the rows
+        let mut edits = Vec::new();
+        match self.index.edits_for(&open.key, &tss).await {
+            Ok(rows) => {
+                for (_, _, at) in rows {
+                    if open.window.iter().all(|(t, _)| *t != at) {
+                        if let Ok(Some(c)) = self.store.message(&open.thread, at).await {
+                            edits.push((at, c));
+                        }
+                    }
+                }
+            }
+            Err(e) => warn!("edits: {e:#}"),
+        }
+        let indexed = view::Indexed { status: receipts, my_deletes, reactions, edits };
         // resolve names first (async), then build synchronously
         let mut senders: Vec<Uuid> = open.window.iter().map(|(_, c)| c.metadata.sender.raw_uuid()).collect();
         senders.extend(open.members.iter().copied());
-        senders.extend(receipts.values().flat_map(|m| m.keys().copied()));
+        senders.extend(indexed.status.values().flat_map(|m| m.keys().copied()));
         let mentioned: Vec<Uuid> =
             open.window.iter().filter_map(|(_, c)| view::data_message(c)).flat_map(view::mentioned).collect();
         senders.sort();
@@ -215,7 +237,7 @@ impl App {
         }
         let Some(open) = self.current.as_ref() else { return };
         let names = &self.names;
-        let built = view::build(&open.window, self.me, &open.members, &receipts, &my_deletes, &self.long, &|u| {
+        let built = view::build(&open.window, self.me, &open.members, &indexed, &self.long, &|u| {
             names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())
         });
         let key = open.key.clone();
@@ -223,7 +245,13 @@ impl App {
         let next_expiry = built.next_expiry;
         let mut items = built.items;
         // rows by sent timestamp, for the pin marks
-        let rows: HashMap<u64, String> = open.window.iter().map(|(t, c)| (c.timestamp(), t.to_string())).collect();
+        let rows: HashMap<u64, String> = open
+            .window
+            .iter()
+            // an edit has its target's sent timestamp, but no row of its own
+            .filter(|(_, c)| !matches!(view::classify(c, self.me), Kind::Edit { .. }))
+            .map(|(t, c)| (c.timestamp(), t.to_string()))
+            .collect();
         let mut pins = self.load_pins().await;
         for p in &pins {
             let Some(row) = p.id.parse().ok().and_then(|t: u64| rows.get(&t)) else { continue };
@@ -236,7 +264,7 @@ impl App {
             let row = op.row.to_string();
             if let Some(m) = items.iter_mut().find(|m| m.id == row) {
                 match &op.op {
-                    Op::React(e) => view::set_my_reaction(m, e.as_deref()),
+                    Op::React { emoji, .. } => view::set_my_reaction(m, emoji.as_deref()),
                     Op::Edit { text, target } => {
                         view::set_edited_text(m, text);
                         let id = target.to_string();
