@@ -453,6 +453,21 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let weak = app.as_weak();
+    app.on_edit_last(move || {
+        let Some(app) = weak.upgrade() else { return false };
+        // a reply or attachments being written count as a draft, an edit in progress stays
+        let id = UI.with_borrow(|ui| {
+            if ui.editing.is_some() || ui.reply_to.is_some() || !ui.files.is_empty() {
+                return None;
+            }
+            ui.last.iter().rev().find(|m| m.can_edit).map(|m| m.id.clone())
+        });
+        let Some(id) = id else { return false };
+        app.invoke_edit_message(id.into());
+        true
+    });
+
+    let weak = app.as_weak();
     app.on_cancel_edit(move || {
         UI.with_borrow_mut(|ui| ui.editing = None);
         if let Some(app) = weak.upgrade() {

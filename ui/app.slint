@@ -202,6 +202,7 @@ export component AppWindow inherits Window {
     callback pin-message(string, int);
     callback react(string, string);
     callback edit-message(string);
+    callback edit-last() -> bool;
     callback delete-message(string);
 
     // thread menu (right click in the list, bell in the header); tmenu-key is "" when closed
@@ -792,6 +793,11 @@ export component AppWindow inherits Window {
                                             root.mention-items = [];
                                             return accept;
                                         }
+                                    }
+                                    // empty composer: edit my last message (not while an IME is composing)
+                                    if (event.text == Key.UpArrow && !event.modifiers.shift && !event.modifiers.control && !event.modifiers.alt
+                                        && root.draft == "" && composer.preedit-text == "" && root.edit-last()) {
+                                        return accept;
                                     }
                                     if (event.text == Key.Return && !event.modifiers.shift && root.enter-sends != event.modifiers.control) {
                                         root.send(composer.text);
