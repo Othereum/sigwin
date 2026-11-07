@@ -1,11 +1,11 @@
 // "What's new" page: this version's release notes (over the conversation pane, like settings).
 
+import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { NoteLine } from "types.slint";
 import { IconButton } from "widgets.slint";
 
 export component WhatsNewPage inherits Rectangle {
-    in property <string> version;
     in property <[NoteLine]> lines;
     callback close();
     background: Theme.pane;
@@ -33,40 +33,33 @@ export component WhatsNewPage inherits Rectangle {
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
         }
-        Flickable {
+        // a ListView for its scrollbar. Rows have explicit heights from their wrapped text (a
+        // layout would size a wrapping Text as one line and the content come out too short)
+        ListView {
             vertical-stretch: 1;
-            max-width: 100000px;
-            content-height: body.preferred-height;
-            HorizontalLayout {
-                width: parent.width;
-                alignment: center;
-                body := VerticalLayout {
-                    width: min(560px, root.width - 48px);
-                    padding-top: 12px;
-                    padding-bottom: 24px;
-                    spacing: 6px;
-                    Text {
-                        text: root.version;
+            for line[i] in root.lines: Rectangle {
+                property <length> top: (i == 0 ? 12px : 0px) + (line.kind == 0 ? 12px : line.kind == 3 && i > 0 ? 16px : 0px);
+                property <length> bottom: i == root.lines.length - 1 ? 24px : 6px;
+                height: top + txt.preferred-height + bottom;
+                col := Rectangle {
+                    width: min(560px, parent.width - 48px);
+                    x: (parent.width - self.width) / 2;
+                    if line.kind == 1: Text {
+                        x: 0px;
+                        y: top;
+                        text: "•";
                         color: Theme.subtle;
-                        font-size: 12px;
+                        font-size: 13.5px;
                     }
-                    for line in root.lines: HorizontalLayout {
-                        spacing: 8px;
-                        padding-top: line.kind == 0 ? 12px : 0px;
-                        if line.kind == 1: Text {
-                            text: "•";
-                            color: Theme.subtle;
-                            font-size: 13.5px;
-                            vertical-alignment: top;
-                        }
-                        Text {
-                            text: line.text;
-                            color: line.kind == 0 ? Theme.accent : Theme.text;
-                            font-size: line.kind == 0 ? 12.5px : 13.5px;
-                            font-weight: line.kind == 0 ? 700 : 400;
-                            wrap: word-wrap;
-                            horizontal-stretch: 1;
-                        }
+                    txt := Text {
+                        x: line.kind == 1 ? 14px : 0px;
+                        y: top;
+                        width: parent.width - self.x;
+                        text: line.text;
+                        color: line.kind == 0 ? Theme.accent : Theme.text;
+                        font-size: line.kind == 3 ? 16px : line.kind == 0 ? 12.5px : 13.5px;
+                        font-weight: line.kind == 0 || line.kind == 3 ? 700 : 400;
+                        wrap: word-wrap;
                     }
                 }
             }

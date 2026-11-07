@@ -47,13 +47,22 @@ pub(crate) fn wire(app: &AppWindow) {
     let weak = app.as_weak();
     app.on_open_whatsnew(move || {
         let Some(app) = weak.upgrade() else { return };
-        let lines: Vec<NoteLine> = whatsnew::notes()
+        // from the offer: what the update brought. From settings: everything
+        let notes = whatsnew::notes();
+        let notes = if app.get_whatsnew_offer() {
+            let last = UI.with_borrow(|ui| ui.settings.last_seen_version.clone());
+            whatsnew::since(notes, &last, CURRENT)
+        } else {
+            notes
+        };
+        let lines: Vec<NoteLine> = notes
             .into_iter()
             .map(|l| NoteLine {
                 kind: match l.kind {
                     Kind::Heading => 0,
                     Kind::Bullet => 1,
                     Kind::Text => 2,
+                    Kind::Version => 3,
                 },
                 text: l.text.into(),
             })

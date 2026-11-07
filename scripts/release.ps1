@@ -1,8 +1,10 @@
 # Build, sign and publish a release from this machine (see docs/release.md).
 #   .\scripts\release.ps1                       # key: ~\.minisign\sigwin.key
 #   .\scripts\release.ps1 -Key D:\keys\sigwin.key
-# Publishes target\release-notes.md as the release's notes and embeds it in the exe for the app's
-# "what's new" panel, then removes it (-Notes to change).
+# Publishes target\release-notes.md as the release's notes (-Notes to change) and removes it. The
+# app's "what's new" panel shows every version an update skipped, so the exe embeds the notes of
+# all releases: the previous release's changelog.md asset plus this version on top, uploaded again
+# as this release's changelog.md.
 # Needs: cargo, cargo-about, minisign, gh (logged in). minisign asks for the key password.
 param(
     [string]$Key = (Join-Path $env:USERPROFILE ".minisign\sigwin.key"),
@@ -25,10 +27,12 @@ if (-not (Test-Path $Notes)) { throw "release notes not found: $Notes" }
 $Notes = (Resolve-Path $Notes).Path
 $notesText = [IO.File]::ReadAllText($Notes, [Text.UTF8Encoding]::new($false))
 if (-not $notesText.Trim()) { throw "release notes are empty: $Notes" }
-# the app shows these in its "what's new" panel: headings and bullets (src/whatsnew.rs)
-if ($notesText -notmatch '(?m)^##? ' -or $notesText -notmatch '(?m)^[-*] ') {
+# the app shows these in its "what's new" panel: headings and bullets (src/whatsnew.rs); a
+# single '#' line would start a version there, and the script writes those itself
+if ($notesText -notmatch '(?m)^## ' -or $notesText -notmatch '(?m)^[-*] ') {
     throw "release notes need a '## ' heading and '- ' bullets: $Notes"
 }
+if ($notesText -match '(?m)^# ') { throw "release notes may not have a '# ' line, use '## ': $Notes" }
 
 # release only what is on origin/main
 if ((git branch --show-current) -ne "main") { throw "not on main" }
@@ -49,11 +53,25 @@ $pub = [regex]::Match((Get-Content src\update.rs -Raw), 'const PUBLIC_KEY: &str 
 if (-not $pub) { throw "PUBLIC_KEY not found in src/update.rs" }
 
 $out = New-Item -ItemType Directory -Force target\release-dist
+
+# every version's notes, newest first, from the previous release's asset. No asset = a broken
+# history, so stop rather than start over quietly.
+$prev = gh release list --exclude-drafts --limit 1 --json tagName --jq ".[0].tagName"; Run "gh release list"
+if (-not $prev) { throw "no previous release to take the notes history from" }
+$old = Join-Path $out "previous-changelog.md"
+Remove-Item $old -ErrorAction SilentlyContinue
+gh release download $prev --pattern changelog.md --output $old --clobber; Run "gh release download changelog.md from $prev"
+$oldText = [IO.File]::ReadAllText($old, [Text.UTF8Encoding]::new($false))
+Remove-Item $old
+if ($oldText -notmatch '(?m)^# \d') { throw "$prev's changelog.md has no version blocks" }
+$changelog = Join-Path $out "changelog.md"
+[IO.File]::WriteAllText($changelog, "# $v`n`n$($notesText.Trim())`n`n$($oldText.TrimStart())", [Text.UTF8Encoding]::new($false))
+
 $licenses = Join-Path $out "licenses.html"
 cargo about generate -c build-support/about.toml build-support/about.hbs -o $licenses; Run "cargo about"
 $env:SIGWIN_LICENSES = (Resolve-Path $licenses).Path
 # embedded in the exe for the "what's new" panel (build.rs, src/whatsnew.rs)
-$env:SIGWIN_NOTES = $Notes
+$env:SIGWIN_NOTES = $changelog
 # leaves out everything that marks dev builds (build.rs `sigwin_dev`)
 $env:SIGWIN_RELEASE = "1"
 # keep this machine's paths (user name, repo dir) out of panic locations; the last match wins,
@@ -84,7 +102,7 @@ $answer = Read-Host "Publish $tag from $($sha.Substring(0, 7)) with these notes?
 if ($answer -ne "y") { Write-Host "Not published. Files are in $out"; exit 1 }
 
 # --generate-notes adds the link comparing with the last release below the notes
-gh release create $tag --target $sha $exe "$exe.minisig" $licenses --title "Sigwin $v" --notes-file $Notes --generate-notes
+gh release create $tag --target $sha $exe "$exe.minisig" $licenses $changelog --title "Sigwin $v" --notes-file $Notes --generate-notes
 Run "gh release create"
 Write-Host "Published $tag"
 # they were this version's: the next release must not pick them up by accident

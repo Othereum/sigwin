@@ -38,7 +38,8 @@ app restarts, so each running app downloads a broken release at most once per la
 ## Release notes
 Written per release from `git log <last tag>..HEAD` and the actual changes, not kept in a file along
 the way: several commits often make one change for users, and a bug made and fixed between two
-releases was never seen by anyone. GitHub releases are the record; there is no changelog file.
+releases was never seen by anyone. GitHub releases are the record; the repository has no changelog
+file (the one on each release is an asset, see "In the app").
 - In the app's languages, from the user's side: what they can now do or what no longer goes wrong.
   No function names or internals.
 - `## 새 기능` and `## 수정`, leaving out an empty one. Only what differs from the last release.
@@ -48,10 +49,18 @@ releases was never seen by anyone. GitHub releases are the record; there is no c
   `##` as a section). Notes of past releases stay as they are.
 
 ### In the app
-`scripts\release.ps1` embeds the notes in the exe (`SIGWIN_NOTES` → `build.rs`), so the signed exe
-carries its own version's notes and nothing is fetched. After an update the sidebar offers them
-once as a "what's new" panel (`src/whatsnew.rs`, `gui/whatsnew.rs`); Settings > 정보 shows them
-again. The script refuses notes without a `## ` heading and `- ` bullets.
+`scripts\release.ps1` embeds the notes of every version in the exe (`SIGWIN_NOTES` → `build.rs`),
+so the signed exe carries them and nothing is fetched. After an update the sidebar offers them
+once as a "what's new" panel (`src/whatsnew.rs`, `gui/whatsnew.rs`), covering every version since
+the one last seen, newest first, so an update that skipped versions loses nothing. With no version
+recorded it shows all of them. Settings > 정보 shows all again. The script refuses notes without a
+`## ` heading and `- ` bullets, or with a `# ` line.
+
+The history is a `changelog.md` asset on every release: one `# <version>` block per release,
+newest first. The script downloads the previous release's, puts this version on top, embeds the
+result and uploads it with the new release. A previous release without the asset stops the
+script (the history would restart); a release made without the script needs the asset added by
+hand. History starts at 0.2.3, the first release with notes.
 - Format: `##` headings (any text) are sections, `- ` lines are bullets, anything else is plain
   text; links, images and HTML are never rendered. The parser is lenient, so a new heading needs
   no app change. Notes and parser are built together, so an older app never reads a newer format.

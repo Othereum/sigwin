@@ -1,8 +1,11 @@
-//! "What's new" after an update: this version's release notes, embedded in the exe
+//! "What's new" after an update: the release notes of every version so far, embedded in the exe
 //! (`SIGWIN_NOTES`, set by scripts/release.ps1; see docs/release.md "Release notes").
 //!
+//! The embedded text is one block per version, newest first, each starting with a `# <version>`
+//! line. `since` picks the blocks an update brought.
+//!
 //! The notes and this parser are built together, so no older app reads a newer notes format.
-//! The parser is lenient on purpose: any heading is a section, anything it doesn't know is
+//! The parser is lenient on purpose: any other heading is a section, anything it doesn't know is
 //! plain text, so notes can use a new heading without an app change. Nothing is rendered but
 //! text (no links, images or HTML).
 
@@ -10,6 +13,8 @@ static NOTES: &str = include_str!(concat!(env!("OUT_DIR"), "/release-notes.md"))
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind {
+    /// `# 0.2.3`: starts one version's block
+    Version,
     Heading,
     Bullet,
     Text,
@@ -37,8 +42,10 @@ pub fn parse(text: &str) -> Vec<Line> {
         if line.is_empty() {
             continue;
         }
-        let (kind, body) = if line.starts_with('#') {
+        let (kind, body) = if line.starts_with("##") {
             (Kind::Heading, line.trim_start_matches('#'))
+        } else if line.starts_with('#') {
+            (Kind::Version, line.trim_start_matches('#').trim().trim_start_matches('v'))
         } else if let Some(b) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
             (Kind::Bullet, b)
         } else {
@@ -50,6 +57,23 @@ pub fn parse(text: &str) -> Vec<Line> {
         }
     }
     out
+}
+
+/// The blocks newer than `last` (all of them if it is empty: nothing says what was seen) up to
+/// `current`. Text before the first version line (a dev build's notes) always stays.
+pub fn since(lines: Vec<Line>, last: &str, current: &str) -> Vec<Line> {
+    let (last, current) = (crate::install::version(last), crate::install::version(current));
+    let mut keep = true;
+    lines
+        .into_iter()
+        .filter(|l| {
+            if l.kind == Kind::Version {
+                let v = crate::install::version(&l.text);
+                keep = v <= current && (last.iter().all(|&n| n == 0) || v > last);
+            }
+            keep
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -85,8 +109,21 @@ mod tests {
         let l = parse("## 새 기능\n\n- 하나\n* 둘\n\n설명\n##\n## 수정\n- 셋\n");
         let kinds: Vec<_> = l.iter().map(|x| x.kind).collect();
         assert_eq!(kinds, [Kind::Heading, Kind::Bullet, Kind::Bullet, Kind::Text, Kind::Heading, Kind::Bullet]);
+        assert_eq!(parse("# v1.2")[0], Line { kind: Kind::Version, text: "1.2".into() });
         assert_eq!(l[0].text, "새 기능");
         assert_eq!(l[2].text, "둘");
+    }
+
+    #[test]
+    fn picks_the_versions_an_update_brought() {
+        let all = || parse("# 0.2.5\n## 수정\n- c\n# v0.2.4\n- b\n# 0.2.3\n- a\n# 0.10.0\n- future\n");
+        let texts = |v: Vec<Line>| v.into_iter().filter(|l| l.kind == Kind::Version).map(|l| l.text).collect::<Vec<_>>();
+        assert_eq!(texts(since(all(), "0.2.3", "0.2.5")), ["0.2.5", "0.2.4"]);
+        assert_eq!(texts(since(all(), "0.2.5", "0.2.5")), Vec::<String>::new());
+        // never recorded: everything up to this version
+        assert_eq!(texts(since(all(), "", "0.2.5")), ["0.2.5", "0.2.4", "0.2.3"]);
+        // notes without version lines (a dev build) stay whole
+        assert_eq!(since(parse("- x"), "0.2.3", "0.2.5").len(), 1);
     }
 
     #[test]
