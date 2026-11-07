@@ -348,7 +348,8 @@ export component Bubble inherits VerticalLayout {
     padding-top: m.day-sep != "" || m.typing ? 8px : m.collapse-above ? 1px : 6px;
     // the newest row gets extra room below so it doesn't touch the composer
     in property <bool> last;
-    padding-bottom: (m.typing ? 8px : (m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 12px) : m.collapse-below ? 1px : 6px)) + (last ? 10px : 0px);
+    // the chips and the readers hang below the bubble: room for the part under its edge
+    padding-bottom: (m.typing ? 8px : (m.reactions.length > 0 ? (no-bubble ? 30px : 16px) : m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 12px) : m.collapse-below ? 1px : 6px)) + (last ? 10px : 0px);
     // bubble corners: 18px, 4px on the side that joins a neighbour of the same run
     out property <length> r-tl: !m.outgoing && m.collapse-above ? 4px : 18px;
     out property <length> r-tr: m.outgoing && m.collapse-above ? 4px : 18px;
@@ -363,8 +364,6 @@ export component Bubble inherits VerticalLayout {
     // photo with text: the photo sits flush on top of the bubble, the text below it
     property <bool> flush: m.has-image && !m.sticker && m.text != "" && m.quote == "";
     property <bool> no-bubble: m.sticker || m.big-emoji || bare;
-    // outgoing bubble color behind the reaction chips (white-on-accent styling)
-    property <bool> on-accent: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted;
     // height of the day separator above the message itself (centering a jump on the bubble)
     out property <length> lead: m.day-sep != "" ? root.padding-top + 36px + root.spacing : 0px;
 
@@ -449,6 +448,8 @@ export component Bubble inherits VerticalLayout {
         }
         Rectangle {
             max-width: root.flush ? max(m.img-w, 200px) : root.max-w;
+            // a short bubble is at least as wide as its chips
+            min-width: m.reactions.length > 0 ? chips.width + 16px : 0px;
             border-top-left-radius: root.r-tl;
             border-top-right-radius: root.r-tr;
             border-bottom-left-radius: root.r-bl;
@@ -659,53 +660,60 @@ export component Bubble inherits VerticalLayout {
                         }
                     }
                 }
-                if (!m.hide-time && !root.inline-time) || m.reactions.length > 0: HorizontalLayout {
+                if !m.hide-time && !root.inline-time: HorizontalLayout {
                     alignment: end;
-                    spacing: 4px;
-                    if m.reactions.length > 0: HorizontalLayout {
-                        horizontal-stretch: 1;
-                        spacing: 4px;
-                        // pill chips; ours is outlined. A click shows who reacted.
-                        for r in m.reactions: Rectangle {
-                            border-radius: 11px;
-                            border-width: 1px;
-                            border-color: r.mine ? (on-accent ? white : Theme.accent) : transparent;
-                            background: on-accent
-                                ? (r.mine ? #ffffff50 : #ffffff30)
-                                : r.mine ? Theme.accent.with-alpha(0.22)
-                                : Theme.dark ? #ffffff1c : #00000014;
-                            HorizontalLayout {
-                                padding-left: 6px;
-                                padding-right: r.count > 1 ? 7px : 6px;
-                                padding-top: 1px;
-                                padding-bottom: 1px;
-                                spacing: 3px;
-                                Text {
-                                    text: r.emoji;
-                                    font-size: 14px;
-                                    vertical-alignment: center;
-                                }
-                                if r.count > 1: Text {
-                                    text: r.count;
-                                    font-size: 11px;
-                                    font-weight: r.mine ? 700 : 400;
-                                    color: on-accent ? white : Theme.text;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.show-reactors(r.emoji + "  " + r.who); }
-                            }
-                        }
-                    }
-                    if !m.hide-time && !root.inline-time: MsgMeta {
+                    MsgMeta {
                         m: m;
                         info(t) => { root.show-info(t); }
                     }
                 }
             }
             }
+            }
+            // reactions: pill chips straddling the bubble's bottom edge, ringed in the pane color like the
+            // readers; `Bubble.padding-bottom` makes room. Always present (hidden when empty) so the bubble
+            // can take its width as a minimum. A click shows who reacted.
+            chips := Rectangle {
+                visible: m.reactions.length > 0;
+                x: 8px;
+                y: root.no-bubble ? parent.height + 2px : parent.height - 11px;
+                width: m.reactions.length > 0 ? chip-row.preferred-width : 0px;
+                height: m.reactions.length > 0 ? chip-row.preferred-height : 0px;
+                border-radius: 13px;
+                background: Theme.pane;
+                chip-row := HorizontalLayout {
+                    padding: 2px;
+                    spacing: 2px;
+                    for r in m.reactions: Rectangle {
+                        border-radius: 11px;
+                        border-width: r.mine ? 1.5px : 0px;
+                        border-color: Theme.accent;
+                        background: Theme.bubble-in;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: r.count > 1 ? 7px : 6px;
+                            padding-top: 1px;
+                            padding-bottom: 1px;
+                            spacing: 3px;
+                            Text {
+                                text: r.emoji;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
+                            if r.count > 1: Text {
+                                text: r.count;
+                                font-size: 11px;
+                                font-weight: r.mine ? 700 : 400;
+                                color: Theme.text;
+                                vertical-alignment: center;
+                            }
+                        }
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.show-reactors(r.emoji + "  " + r.who); }
+                        }
+                    }
+                }
             }
             // who read it: overlapping round photos straddling the bubble's bottom edge (ringed in the
             // pane color), a "+N" circle for the rest; `Bubble.padding-bottom` makes room for the lower half
