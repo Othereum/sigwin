@@ -1,7 +1,7 @@
 import { LineEdit, Button, ListView, Palette, Spinner } from "std-widgets.slint";
 import { ThreadItem, MsgItem, PinItem, MentionItem, NoteLine, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, IconButton, MenuRow, Notice, Segmented, TextButton } from "widgets.slint";
+import { Avatar, IconButton, MenuRow, Notice, Segmented, StickerIcon, TextButton } from "widgets.slint";
 import { Bubble } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
@@ -861,13 +861,18 @@ export component AppWindow inherits Window {
                     padding-top: 6px;
                     padding-bottom: 6px;
                     spacing: 8px;
-                    IconButton {
-                        label: "📎";
-                        clicked => { root.attach(); }
-                    }
-                    IconButton {
-                        label: "☺";
-                        clicked => { root.toggle-stickers(); }
+                    // the two icons sit closer to each other than to the rest
+                    HorizontalLayout {
+                        spacing: 4px;
+                        IconButton {
+                            label: "📎";
+                            clicked => { root.attach(); }
+                        }
+                        IconButton {
+                            label: "";
+                            clicked => { root.toggle-stickers(); }
+                            StickerIcon { }
+                        }
                     }
                     Rectangle {
                         border-radius: 18px;
