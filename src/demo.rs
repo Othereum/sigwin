@@ -248,6 +248,11 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     for i in [0u32, 1, 2, 3, 7] {
         photo(format!("c:demo-{i}"), i, avatar::SIZE);
     }
+    // SIGWIN_DEMO_NOPHOTO leaves our own photo out, to see the initial placeholder
+    if std::env::var_os("SIGWIN_DEMO_NOPHOTO").is_none() {
+        photo(avatar::ME_SIDEBAR.into(), 4, avatar::ME_SIDEBAR_SIZE);
+        photo(avatar::ME_CARD.into(), 4, avatar::ME_CARD_SIZE);
+    }
     emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
     let names = ["김민준", "이서연", "박지훈", "Alice Kim", "Bob", "김지원", "최유나"];
     emit(Event::Members(names.iter().enumerate().map(|(i, n)| (format!("00000000-0000-0000-0000-00000000000{i}"), n.to_string())).collect()));

@@ -2,7 +2,7 @@
 
 import { Button, Switch } from "std-widgets.slint";
 import { Links, Theme } from "theme.slint";
-import { DangerButton, IconButton, Segmented } from "widgets.slint";
+import { Avatar, DangerButton, IconButton, Segmented } from "widgets.slint";
 
 export component SettingSection inherits VerticalLayout {
     in property <string> title;
@@ -76,6 +76,10 @@ export component SettingsPage inherits Rectangle {
     in property <bool> update-ready;
     in property <string> update-available;
     callback check-update();
+    in property <image> account-photo;
+    in property <bool> account-has-photo;
+    in property <string> account-initial;
+    in property <color> account-tint;
     in property <string> account-name;
     in property <string> account-number;
     in property <string> account-device;
@@ -124,6 +128,37 @@ export component SettingsPage inherits Rectangle {
                 body := VerticalLayout {
                     width: min(560px, root.width - 48px);
                     padding-bottom: 24px;
+                    HorizontalLayout {
+                        padding-top: 20px;
+                        padding-bottom: 4px;
+                        spacing: 16px;
+                        Avatar {
+                            size: 64px;
+                            y: 0px;
+                            initial: root.account-initial;
+                            tint: root.account-tint;
+                            photo: root.account-photo;
+                            has-photo: root.account-has-photo;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            Text {
+                                text: root.account-name != "" ? root.account-name : "내 계정";
+                                color: Theme.text;
+                                font-size: 17px;
+                                font-weight: 700;
+                                overflow: elide;
+                            }
+                            Text { text: root.account-number; color: Theme.subtle; font-size: 12.5px; overflow: elide; }
+                            if root.account-device != "": Text {
+                                text: "이 기기: " + root.account-device;
+                                color: Theme.subtle;
+                                font-size: 12.5px;
+                                overflow: elide;
+                            }
+                        }
+                    }
                     SettingSection {
                         title: "알림";
                         SettingRow {
@@ -253,10 +288,6 @@ export component SettingsPage inherits Rectangle {
                     }
                     SettingSection {
                         title: "계정";
-                        SettingRow {
-                            label: root.account-name != "" ? root.account-name : "내 계정";
-                            hint: root.account-number + (root.account-device != "" ? "  ·  이 기기: " + root.account-device : "");
-                        }
                         SettingRow {
                             label: "읽음 확인 · 입력 중 표시";
                             hint: root.account-phone;

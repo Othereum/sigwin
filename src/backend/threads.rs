@@ -135,9 +135,13 @@ impl App {
 
     /// Queues the photos of listed threads not seen yet this session.
     pub(super) fn load_avatars(&mut self) {
-        let me = thread_key(&Thread::Contact(ServiceId::Aci(self.me.into())));
-        let keys: Vec<String> =
-            self.threads.iter().filter(|t| t.key != me && !self.avatars_done.contains(&t.key)).map(|t| t.key.clone()).collect();
+        let me = Thread::Contact(ServiceId::Aci(self.me.into()));
+        for (key, size) in [(crate::avatar::ME_SIDEBAR, crate::avatar::ME_SIDEBAR_SIZE), (crate::avatar::ME_CARD, crate::avatar::ME_CARD_SIZE)] {
+            if self.avatars_done.insert(key.to_string()) {
+                self.avatar_queue.push_front(crate::avatar::Want { key: key.into(), thread: me.clone(), size });
+            }
+        }
+        let keys: Vec<String> = self.threads.iter().filter(|t| !self.avatars_done.contains(&t.key)).map(|t| t.key.clone()).collect();
         for key in keys {
             if let Some(thread) = parse_thread_key(&key) {
                 self.avatars_done.insert(key.clone());
@@ -181,6 +185,7 @@ impl App {
         let job = crate::avatar::Job {
             store: self.store.clone(),
             index: self.index.clone(),
+            own: (self.me, manager.registration_data().profile_key()),
             manager,
             emit: self.emit.clone(),
             dir: self.paths.thumbs.clone(),

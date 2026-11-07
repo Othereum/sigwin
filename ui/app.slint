@@ -135,6 +135,13 @@ export component AppWindow inherits Window {
     in-out property <bool> update-checking;
     callback check-update();
     callback install-update();
+    // our own photo in the sidebar header (the card on the settings page has its own)
+    in property <image> me-photo;
+    in property <bool> me-has-photo;
+    in property <image> account-photo;
+    in property <bool> account-has-photo;
+    in property <string> account-initial;
+    in property <color> account-tint;
     in property <string> account-name;
     in property <string> account-number;
     in property <string> account-device;
@@ -357,6 +364,29 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     padding: 10px;
                     spacing: 6px;
+                    Rectangle {
+                        width: 32px;
+                        // as tall as the search box beside it
+                        min-height: 36px;
+                        Avatar {
+                            y: (parent.height - self.height) / 2;
+                            size: 32px;
+                            initial: root.account-initial;
+                            tint: root.account-tint;
+                            photo: root.me-photo;
+                            has-photo: root.me-has-photo;
+                        }
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if (root.settings-open) {
+                                    root.settings-open = false;
+                                } else {
+                                    root.open-settings();
+                                }
+                            }
+                        }
+                    }
                     LineEdit {
                         placeholder-text: "검색";
                         text <=> root.search;
@@ -949,6 +979,10 @@ export component AppWindow inherits Window {
         update-ready: root.update-version != "";
         update-available: root.update-available;
         check-update => { root.check-update(); }
+        account-photo: root.account-photo;
+        account-has-photo: root.account-has-photo;
+        account-initial: root.account-initial;
+        account-tint: root.account-tint;
         account-name: root.account-name;
         account-number: root.account-number;
         account-device: root.account-device;

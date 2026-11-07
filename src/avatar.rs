@@ -1,4 +1,4 @@
-//! Profile and group photos for the thread list.
+//! Profile and group photos for the thread list, and our own photo (sidebar button, settings card).
 //!
 //! Sources, in order: the contact's Signal profile avatar (fetched with their profile key, cached
 //! by presage in `profile_avatars`), the contact photo synced from the phone, the group avatar
@@ -15,6 +15,7 @@ use std::time::Duration;
 use presage::libsignal_service::content::GroupContextV2;
 use presage::libsignal_service::prelude::Uuid;
 use presage::libsignal_service::protocol::ServiceId;
+use presage::libsignal_service::zkgroup::profiles::ProfileKey;
 use presage::store::{ContentsStore, Thread};
 use presage_store_sqlite::SqliteStore;
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,12 @@ pub const READ_SIZE: u32 = 16;
 pub const READ_PREFIX: &str = "r:";
 /// Emitted key prefix of a message-list avatar: `m:<uuid>`.
 pub const MSG_PREFIX: &str = "m:";
+/// Emitted keys of our own photo: in the sidebar header and on the settings page.
+pub const ME_SIDEBAR: &str = "me:sidebar";
+pub const ME_CARD: &str = "me:card";
+/// logical sizes of the two (ui/app.slint sidebar button, ui/settings.slint card)
+pub const ME_SIDEBAR_SIZE: u32 = 32;
+pub const ME_CARD_SIZE: u32 = 64;
 
 /// One photo to load: emitted key, whose photo, logical size.
 pub struct Want {
@@ -64,6 +71,8 @@ pub struct Job {
     pub emit: Emit,
     pub dir: PathBuf,
     pub state: HashMap<String, State>,
+    /// our uuid and profile key: the store files ours under neither
+    pub own: (Uuid, ProfileKey),
 }
 
 /// Result of a job: updated states and whether any profile was refetched (names may have changed).
@@ -115,7 +124,8 @@ impl Job {
     async fn contact(&mut self, uuid: Uuid, st: &mut State, now: u64) -> (Option<Vec<u8>>, bool) {
         let sid = ServiceId::Aci(uuid.into());
         let mut fetched = false;
-        if let Ok(Some(key)) = self.store.profile_key(&sid).await {
+        let key = if uuid == self.own.0 { Some(self.own.1) } else { self.store.profile_key(&sid).await.ok().flatten() };
+        if let Some(key) = key {
             let cached = self.store.profile(uuid, key).await.ok().flatten();
             if cached.is_none() || now.saturating_sub(st.checked) > PROFILE_REFRESH.as_secs() {
                 fetched = true;

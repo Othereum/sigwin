@@ -278,6 +278,16 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             let img = (t.width > 0).then(|| {
                 Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height))
             });
+            if t.key == avatar::ME_SIDEBAR {
+                app.set_me_has_photo(img.is_some());
+                app.set_me_photo(img.unwrap_or_default());
+                return;
+            }
+            if t.key == avatar::ME_CARD {
+                app.set_account_has_photo(img.is_some());
+                app.set_account_photo(img.unwrap_or_default());
+                return;
+            }
             if let Some(uuid) = t.key.strip_prefix(avatar::READ_PREFIX) {
                 let Some(img) = img else { return };
                 ui.sender_avatars.insert(t.key.clone(), img);
@@ -484,6 +494,10 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             let state = |v: Option<bool>| if v == Some(false) { "꺼짐" } else { "켜짐" };
             let pending = if receipts.is_none() || typing.is_none() { " (아직 받지 못함)" } else { "" };
             let phone = format!("{} · {} — 휴대폰 Signal 앱의 설정을 따릅니다{pending}", state(receipts), state(typing));
+            // the placeholder when there is no photo: the profile name's first letter
+            let letter = if name.is_empty() { "나".to_string() } else { initial(&name) };
+            app.set_account_initial(letter.into());
+            app.set_account_tint(tint("me"));
             app.set_account_name(name.into());
             app.set_account_number(number.into());
             app.set_account_device(device.into());
