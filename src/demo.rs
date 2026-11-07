@@ -840,26 +840,36 @@ fn demo_videos(emit: &backend::Emit) {
     for (i, (w, h)) in [(150, 300), (150, 150), (150, 150)].into_iter().enumerate() {
         thumb(format!("demo-video-grid-{i}"), blur(w, h));
     }
+    let label = |key: &str, text: &str| emit(Event::MediaLabel { key: key.into(), text: text.into() });
+    label("demo-video-0", "12MB");
+    label("demo-video-1", "245MB");
+    label("demo-video-2", "1.2GB");
+    label("demo-video-grid-0", "38MB");
+    label("demo-video-grid-1", "2.4MB");
+    label("demo-video-grid-2", "1:02:05");
     // the first frame replaces the blurhash
     std::thread::sleep(std::time::Duration::from_millis(1500));
     let (w, h) = (types::physical_px(400), types::physical_px(225));
-    let frame = file.and_then(|path| demo_video_frame(std::path::Path::new(&path)));
-    thumb("demo-video-0".into(), match frame {
-        Some(f) => sigwin_thumb::cover(&f, w, h),
-        None => image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([(x * 255 / w) as u8, (y * 255 / h) as u8, 120, 255])),
-    });
+    let (frame, seconds) = match file.and_then(|path| demo_video_frame(std::path::Path::new(&path))) {
+        Some((f, seconds)) => (sigwin_thumb::cover(&f, w, h), seconds),
+        None => (image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([(x * 255 / w) as u8, (y * 255 / h) as u8, 120, 255])), 75),
+    };
+    thumb("demo-video-0".into(), frame);
+    label("demo-video-0", &view::length_text(seconds));
 }
 
 /// A real video's frame, by the way real ones go: encrypted on disk, through the decoding child.
-fn demo_video_frame(path: &std::path::Path) -> Option<image::RgbaImage> {
+fn demo_video_frame(path: &std::path::Path) -> Option<(image::RgbaImage, u32)> {
     sigwin_vault::init([9; 32]);
     let sealed = std::env::temp_dir().join(format!("sigwin-demo-video-{}.enc", std::process::id()));
     sigwin_vault::write(&sealed, &std::fs::read(path).ok()?).ok()?;
     let started = std::time::Instant::now();
-    let frame = crate::videoframe::first_frame(&sealed).map(|d| d.map(|d| d.frame));
-    tracing::info!("demo video frame: {:?} in {:?}", frame.as_ref().map(|f| f.as_ref().map(|i| i.dimensions())).map_err(|e| e.to_string()), started.elapsed());
+    let decoded = crate::videoframe::first_frame(&sealed);
+    let shown = decoded.as_ref().map(|d| d.as_ref().map(|d| (d.frame.dimensions(), d.seconds))).map_err(|e| e.to_string());
+    tracing::info!("demo video frame and seconds: {shown:?} in {:?}", started.elapsed());
     let _ = std::fs::remove_file(&sealed);
-    frame.ok().flatten()
+    let d = decoded.ok().flatten()?;
+    Some((d.frame, d.seconds))
 }
 
 /// The blurhash a real video would be sent with, by the way a file being sent goes.

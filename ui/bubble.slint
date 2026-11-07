@@ -55,6 +55,20 @@ component PlayMark inherits Rectangle {
     }
 }
 
+// a video's length or a file's size, in a corner of its picture
+component MediaLabel inherits Rectangle {
+    in property <string> text;
+    width: label.preferred-width + 10px;
+    height: label.preferred-height + 2px;
+    border-radius: 4px;
+    background: #00000090;
+    label := Text {
+        text: root.text;
+        font-size: 11px;
+        color: white;
+    }
+}
+
 export component MsgImage inherits Rectangle {
     in property <MsgItem> m;
     // flush: as wide as the bubble (which clips the corners), otherwise a fixed size
@@ -104,6 +118,11 @@ export component MsgImage inherits Rectangle {
         z: -1;
     }
     if m.video: PlayMark { }
+    if m.media-label != "": MediaLabel {
+        text: m.media-label;
+        x: 6px;
+        y: parent.height - self.height - 6px;
+    }
     if m.cells.length == 0: TouchArea {
         mouse-cursor: pointer;
         clicked => { root.attachment-clicked(m.id, 0); }
@@ -128,6 +147,11 @@ export component MsgImage inherits Rectangle {
             image-fit: fill;
         }
         if cell.video && cell.more == 0: PlayMark { }
+        if cell.label != "" && cell.more == 0: MediaLabel {
+            text: cell.label;
+            x: 6px;
+            y: parent.height - self.height - 6px;
+        }
         if cell.more > 0: Rectangle {
             background: #00000080;
             Text {

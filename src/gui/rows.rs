@@ -47,7 +47,7 @@ pub(crate) fn update_rows(ui: &mut Ui, items: &[MsgDto], dark: bool) {
         ui.messages.remove(0);
     }
     for (k, m) in items[..add].iter().enumerate() {
-        ui.messages.insert(k, to_item(m, &ui.thumbs, &ui.anims, &ui.sender_avatars, &ui.revealed, dark));
+        ui.messages.insert(k, to_item(m, &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, dark));
     }
     let old = &ui.last[drop..];
     let at = add;
@@ -55,7 +55,7 @@ pub(crate) fn update_rows(ui: &mut Ui, items: &[MsgDto], dark: bool) {
     let max = old.len().min(items.len());
     let pre = old.iter().zip(items).take_while(|(a, b)| a.id == b.id).count();
     let suf = old.iter().rev().zip(items.iter().rev()).take(max - pre).take_while(|(a, b)| a.id == b.id).count();
-    let item = |m: &MsgDto| to_item(m, &ui.thumbs, &ui.anims, &ui.sender_avatars, &ui.revealed, dark);
+    let item = |m: &MsgDto| to_item(m, &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, dark);
     for i in (0..pre).chain(old.len() - suf..old.len()) {
         let j = if i < pre { i } else { i + items.len() - old.len() };
         if old[i] != items[j] {
@@ -213,6 +213,7 @@ pub(crate) fn reader_items(m: &MsgDto, senders: &HashMap<String, Image>) -> Mode
 pub(crate) fn to_item(
     m: &MsgDto,
     thumbs: &HashMap<String, Image>,
+    labels: &HashMap<String, String>,
     anims: &super::anim::Anims,
     senders: &HashMap<String, Image>,
     revealed: &std::collections::HashSet<String>,
@@ -220,6 +221,7 @@ pub(crate) fn to_item(
 ) -> MsgItem {
     let image = thumbs.get(&m.image_key).cloned();
     let (frames, frame) = anims.models(&m.image_key);
+    let label_of = |key: &str| labels.get(key).map_or(SharedString::new(), |t| t.as_str().into());
     let cells: Vec<ImageCell> = m
         .cells
         .iter()
@@ -231,6 +233,7 @@ pub(crate) fn to_item(
             image: thumbs.get(&c.key).cloned().unwrap_or_default(),
             more: c.more as i32,
             video: c.video,
+            label: label_of(&c.key),
         })
         .collect();
     let avatar = if m.show_avatar { senders.get(&m.sender_key).cloned() } else { None };
@@ -285,6 +288,7 @@ pub(crate) fn to_item(
         attachment: m.attachment.as_str().into(),
         has_image: !m.image_key.is_empty(),
         video: m.video,
+        media_label: if m.sticker || !m.cells.is_empty() { SharedString::new() } else { label_of(&m.image_key) },
         image: image.unwrap_or_default(),
         frames,
         frame,
@@ -332,7 +336,7 @@ pub(crate) fn reveal_spoilers(app: &AppWindow, id: &str) {
         ui.revealed.insert(id.to_string());
         if let Some(i) = ui.last.iter().position(|m| m.id == id) {
             if i < ui.messages.row_count() {
-                let item = to_item(&ui.last[i], &ui.thumbs, &ui.anims, &ui.sender_avatars, &ui.revealed, dark);
+                let item = to_item(&ui.last[i], &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, dark);
                 ui.messages.set_row_data(i, item);
             }
         }
@@ -343,7 +347,7 @@ pub(crate) fn reveal_spoilers(app: &AppWindow, id: &str) {
 pub(crate) fn refresh_rows(app: &AppWindow) {
     let dark = app.global::<Theme>().get_dark();
     UI.with_borrow_mut(|ui| {
-        let rows: Vec<MsgItem> = ui.last.iter().map(|m| to_item(m, &ui.thumbs, &ui.anims, &ui.sender_avatars, &ui.revealed, dark)).collect();
+        let rows: Vec<MsgItem> = ui.last.iter().map(|m| to_item(m, &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, dark)).collect();
         ui.messages.set_vec(rows);
         ui.typing_row = false;
         sync_typing(ui);
@@ -372,7 +376,7 @@ mod tests {
         for (old, new) in cases {
             let mut ui = Ui::default();
             ui.last = rows(old);
-            ui.messages.set_vec(ui.last.iter().map(|m| to_item(m, &HashMap::new(), &Default::default(), &HashMap::new(), &Default::default(), false)).collect::<Vec<_>>());
+            ui.messages.set_vec(ui.last.iter().map(|m| to_item(m, &HashMap::new(), &HashMap::new(), &Default::default(), &HashMap::new(), &Default::default(), false)).collect::<Vec<_>>());
             let new = rows(new);
             update_rows(&mut ui, &new, false);
             let got: Vec<String> = ui.messages.iter().map(|m| m.text.to_string()).collect();

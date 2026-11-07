@@ -332,6 +332,7 @@ pub(crate) fn visibility(app: &AppWindow, shown: bool) {
             UI.with_borrow_mut(|ui| {
                 ui.anims.clear_list();
                 ui.thumbs.clear();
+                ui.media_labels.clear();
                 ui.sender_avatars.clear();
                 ui.messages.set_vec(Vec::new());
                 ui.last.clear();

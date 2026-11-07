@@ -20,8 +20,9 @@ const MAX_INPUT: u64 = 256 * 1024 * 1024;
 const MAX_PIXELS: u64 = 100_000_000;
 /// A decoder that hangs must not stay around.
 const TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
-/// Before the frame's pixels, the child writes the video's width and height, then the frame's.
-const HEADER: usize = 16;
+/// Before the frame's pixels, the child writes the video's width, height and seconds, then the
+/// frame's width and height.
+const HEADER: usize = 20;
 
 /// Call first thing in `main`: returns true if this process was the decoding child.
 pub fn run_if_child() -> bool {
@@ -39,7 +40,7 @@ pub fn run_if_child() -> bool {
     }
     if let Some(v) = decode(data) {
         let mut out = std::io::stdout().lock();
-        for n in [v.size.0, v.size.1, v.frame.width(), v.frame.height()] {
+        for n in [v.size.0, v.size.1, v.seconds, v.frame.width(), v.frame.height()] {
             let _ = out.write_all(&n.to_le_bytes());
         }
         let _ = out.write_all(v.frame.as_raw());
@@ -54,6 +55,8 @@ pub struct Decoded {
     pub frame: RgbaImage,
     /// The video's own size, as shown (upright).
     pub size: (u32, u32),
+    /// How long it plays. 0: the file doesn't say.
+    pub seconds: u32,
 }
 
 impl Decoded {
@@ -107,16 +110,26 @@ fn run_child(feed: impl FnOnce(ChildStdin) -> std::io::Result<()>) -> anyhow::Re
 
 fn parse(out: Vec<u8>) -> Option<Decoded> {
     let n = |i: usize| Some(u32::from_le_bytes(out.get(i * 4..i * 4 + 4)?.try_into().ok()?));
-    let (size, w, h) = ((n(0)?, n(1)?), n(2)?, n(3)?);
-    Some(Decoded { frame: RgbaImage::from_raw(w, h, out[HEADER..].to_vec())?, size })
+    let (size, seconds, w, h) = ((n(0)?, n(1)?), n(2)?, n(3)?, n(4)?);
+    Some(Decoded { frame: RgbaImage::from_raw(w, h, out[HEADER..].to_vec())?, size, seconds })
+}
+
+/// Whole seconds of a length in 100ns units, the way Media Foundation counts. A short clip isn't
+/// shown as nothing at all.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn whole_seconds(hns: u64) -> u32 {
+    if hns == 0 {
+        return 0;
+    }
+    u32::try_from(hns.saturating_add(5_000_000) / 10_000_000).unwrap_or(u32::MAX).max(1)
 }
 
 #[cfg(windows)]
 fn decode(data: Vec<u8>) -> Option<Decoded> {
-    let (img, rotation) = mf::first_frame(data)?;
+    let (img, rotation, seconds) = mf::first_frame(data)?;
     let (w, h) = img.dimensions();
     let size = if matches!(rotation, 90 | 270) { (h, w) } else { (w, h) };
-    Some(Decoded { frame: sigwin_thumb::rotated(sigwin_thumb::downscale(img, crate::view::PHOTO_THUMB_MAX), rotation), size })
+    Some(Decoded { frame: sigwin_thumb::rotated(sigwin_thumb::downscale(img, crate::view::PHOTO_THUMB_MAX), rotation), size, seconds })
 }
 
 #[cfg(not(windows))]
@@ -132,6 +145,7 @@ mod mf {
     use sigwin_thumb::RgbaImage;
     use windows::Win32::Media::MediaFoundation::*;
     use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, IStream};
+    use windows::Win32::System::Variant::VT_UI8;
     use windows::core::{HRESULT, Interface};
     use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW};
 
@@ -159,8 +173,8 @@ mod mf {
 
     type Out = *mut *mut c_void;
 
-    /// The frame, and how many degrees clockwise it should be turned to show.
-    pub fn first_frame(data: Vec<u8>) -> Option<(RgbaImage, u32)> {
+    /// The frame, how many degrees clockwise it should be turned to show, and the video's seconds.
+    pub fn first_frame(data: Vec<u8>) -> Option<(RgbaImage, u32, u32)> {
         unsafe {
             let startup: unsafe extern "system" fn(u32, u32) -> HRESULT = symbol("mfplat.dll", "MFStartup")?;
             let on_stream: unsafe extern "system" fn(*mut c_void, Out) -> HRESULT = symbol("mfplat.dll", "MFCreateMFByteStreamOnStream")?;
@@ -199,6 +213,10 @@ mod mf {
             // phones store the angle beside upright-sensor pixels, and nothing below applies it
             let native = reader.GetNativeMediaType(FIRST_VIDEO, 0).ok()?;
             let rotation = native.GetUINT32(&MF_MT_VIDEO_ROTATION).unwrap_or(0);
+            let seconds = reader.GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE.0 as u32, &MF_PD_DURATION).map_or(0, |p| {
+                let v = &p.Anonymous.Anonymous;
+                if v.vt == VT_UI8 { super::whole_seconds(v.Anonymous.uhVal) } else { 0 }
+            });
 
             let mut raw = null_mut();
             new_type(&mut raw).ok().ok()?;
@@ -225,7 +243,7 @@ mod mf {
             let stride = current.GetUINT32(&MF_MT_DEFAULT_STRIDE).map_or(w as i32 * 4, |s| s as i32);
             let px = copy_rows(start, len as usize, stride, h, (x0, y0, cw, ch));
             let _ = buffer.Unlock();
-            Some((sigwin_thumb::from_bgrx(px?, cw, ch)?, rotation))
+            Some((sigwin_thumb::from_bgrx(px?, cw, ch)?, rotation, seconds))
         }
     }
 
@@ -276,17 +294,26 @@ mod mf {
 }
 
 #[test]
+fn lengths_round_to_seconds() {
+    assert_eq!(whole_seconds(0), 0);
+    assert_eq!(whole_seconds(1), 1);
+    assert_eq!(whole_seconds(14_000_000), 1);
+    assert_eq!(whole_seconds(15_000_000), 2);
+    assert_eq!(whole_seconds(u64::MAX), u32::try_from(u64::MAX / 10_000_000).unwrap_or(u32::MAX));
+}
+
+#[test]
 fn parse_needs_the_exact_size() {
     let frame = |w: u32, h: u32, n: usize| {
         let mut v = Vec::new();
-        for x in [1920u32, 1080, w, h] {
+        for x in [1920u32, 1080, 75, w, h] {
             v.extend(x.to_le_bytes());
         }
         v.resize(HEADER + n, 7);
         v
     };
     let d = parse(frame(2, 3, 24)).unwrap();
-    assert_eq!((d.frame.dimensions(), d.size), ((2, 3), (1920, 1080)));
+    assert_eq!((d.frame.dimensions(), d.size, d.seconds), ((2, 3), (1920, 1080), 75));
     assert!(parse(frame(2, 3, 23)).is_none());
     assert!(parse(vec![1, 2, 3]).is_none());
     assert!(parse(Vec::new()).is_none());

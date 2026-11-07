@@ -135,7 +135,7 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, paging: Paging, scr
         }
         let dark = app.global::<Theme>().get_dark();
         if rebuild {
-            ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.anims, &ui.sender_avatars, &ui.revealed, dark)).collect::<Vec<_>>());
+            ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, dark)).collect::<Vec<_>>());
             ui.typing_row = false;
         } else {
             update_rows(ui, &items, dark);
@@ -173,6 +173,7 @@ fn forget_unshown_thumbs(ui: &mut Ui, items: &[MsgDto]) {
         .collect();
     let card = ui.link.key.clone();
     ui.thumbs.retain(|k, _| shown.contains(k.as_str()) || k.ends_with(COMPOSER_KEY) || *k == card);
+    ui.media_labels.retain(|k, _| shown.contains(k.as_str()));
 }
 
 /// An older page arrived: keep the row that was on top (`anchor`, the oldest row so far) at

@@ -20,8 +20,12 @@ impl App {
         let tx = self.tx.clone();
         let gate = self.thumb_gate.clone();
         tokio::task::spawn_local(async move {
+            let mut labelled = false;
             if !thumb_path.exists() {
                 if !orig_path.exists() {
+                    let text = view::undownloaded_label(&ptr);
+                    labelled = !text.is_empty();
+                    emit(Event::MediaLabel { key: key.clone(), text });
                     let Some(m) = manager else { return };
                     match m.get_attachment(&ptr).await {
                         Ok(data) => {
@@ -45,6 +49,9 @@ impl App {
                 make_shaped_thumb(&k, &orig_path, &thumb_path, shape)
             })
             .await;
+            if labelled {
+                emit(Event::MediaLabel { key: key.clone(), text: String::new() });
+            }
             match res {
                 Ok(Ok(t)) => emit(Event::Thumb(Arc::new(t))),
                 _ => {
@@ -60,6 +67,7 @@ impl App {
     pub(super) fn request_video_thumb(&self, key: String, file_key: String, ptr: AttachmentPointer, size: (u32, u32)) {
         let thumb_path = self.paths.thumbs.join(format!("{file_key}.enc"));
         let no_frame = no_frame_path(&self.paths.thumbs, &file_key);
+        let length_path = length_path(&self.paths.thumbs, &file_key);
         let orig_path = attachment_path(&self.paths.attachments, &file_key);
         let (w, h) = (crate::types::physical_px(size.0), crate::types::physical_px(size.1));
         let manager = self.manager.clone();
@@ -77,6 +85,7 @@ impl App {
                     return;
                 }
                 if !orig_path.exists() {
+                    emit(Event::MediaLabel { key: key.clone(), text: view::undownloaded_label(&ptr) });
                     if !view::auto_fetches_video(&ptr) {
                         return;
                     }
@@ -106,15 +115,24 @@ impl App {
             }
             let permit = gate.acquire_owned().await;
             let k = key.clone();
+            let emit_done = emit.clone();
             let res = tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                make_video_thumb(&k, &orig_path, &thumb_path, &no_frame, w, h)
+                let t = make_video_thumb(&k, &orig_path, &thumb_path, &length_path, &no_frame, w, h)?;
+                emit_done(Event::Thumb(Arc::new(t)));
+                // the picture doesn't wait for this: a thumbnail cached before lengths were kept
+                // has to read its video again
+                let text = view::length_text(video_length(&length_path, &orig_path));
+                emit_done(Event::MediaLabel { key: k, text });
+                anyhow::Ok(())
             })
             .await;
             match res {
-                Ok(Ok(t)) => emit(Event::Thumb(Arc::new(t))),
+                Ok(Ok(())) => {}
                 Ok(Err(e)) => {
                     warn!("video frame: {e:#}");
+                    // it was downloaded, so its size no longer applies
+                    emit(Event::MediaLabel { key: key.clone(), text: String::new() });
                     let _ = tx.send(Internal::ThumbFailed(key));
                 }
                 Err(_) => {
@@ -371,6 +389,41 @@ pub(super) fn remove_files(c: &Content, ts: u64, attachments: &Path, thumbs: &Pa
         let _ = std::fs::remove_file(attachment_path(attachments, &k));
         let _ = std::fs::remove_file(thumbs.join(format!("{k}.enc")));
         let _ = std::fs::remove_file(no_frame_path(thumbs, &k));
+        let _ = std::fs::remove_file(length_path(thumbs, &k));
+    }
+}
+
+/// A video's seconds, encrypted like everything else derived from an attachment. Kept next to its
+/// frame, which is what the cache is emptied of.
+fn length_path(thumbs: &Path, key: &str) -> PathBuf {
+    thumbs.join(format!("{key}.len"))
+}
+
+fn save_length(path: &Path, seconds: u32) {
+    if let Err(e) = sigwin_vault::write_cache(path, &seconds.to_le_bytes()) {
+        warn!("save video length: {e}");
+    }
+}
+
+/// The saved length, or else the one read from the video if that is here. 0: not known. A video
+/// that doesn't say isn't asked again.
+fn video_length(path: &Path, orig: &Path) -> u32 {
+    if let Some(saved) = sigwin_vault::read(path).ok().and_then(|b| <[u8; 4]>::try_from(b).ok()) {
+        return u32::from_le_bytes(saved);
+    }
+    if !orig.exists() {
+        return 0;
+    }
+    match crate::videoframe::first_frame(orig) {
+        Ok(v) => {
+            let seconds = v.map_or(0, |v| v.seconds);
+            save_length(path, seconds);
+            seconds
+        }
+        Err(e) => {
+            warn!("video length: {e:#}");
+            0
+        }
     }
 }
 
@@ -389,7 +442,7 @@ fn blur_thumb(key: &str, hash: &str, w: u32, h: u32) -> Option<Thumb> {
     Some(Thumb { key: key.to_string(), width: cell.width(), height: cell.height(), rgba: cell.into_raw() })
 }
 
-fn make_video_thumb(key: &str, orig: &Path, thumb: &Path, no_frame: &Path, w: u32, h: u32) -> anyhow::Result<Thumb> {
+fn make_video_thumb(key: &str, orig: &Path, thumb: &Path, length: &Path, no_frame: &Path, w: u32, h: u32) -> anyhow::Result<Thumb> {
     let cached = if thumb.exists() { load_cached(thumb).ok() } else { None };
     let frame = match cached {
         Some(f) => f,
@@ -399,6 +452,7 @@ fn make_video_thumb(key: &str, orig: &Path, thumb: &Path, no_frame: &Path, w: u3
                 anyhow::bail!("not decodable here");
             };
             save_cached(thumb, sigwin_thumb::png_rgba(&v.frame));
+            save_length(length, v.seconds);
             v.frame
         }
     };
@@ -584,6 +638,26 @@ pub(super) fn clear_dir(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_lengths_are_sealed_and_read_back() {
+        sigwin_vault::init([3; 32]);
+        let dir = std::env::temp_dir().join(format!("sigwin-length-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (path, orig) = (length_path(&dir, "k"), dir.join("not-here.enc"));
+        // nothing saved, and no video to read it from: unknown, and not remembered as unknown
+        assert_eq!(video_length(&path, &orig), 0);
+        assert!(!path.exists());
+
+        save_length(&path, 75);
+        assert_eq!(video_length(&path, &orig), 75);
+        assert!(sigwin_vault::is_sealed(&path));
+        // a broken file is read as missing
+        std::fs::write(&path, b"junk").unwrap();
+        assert_eq!(video_length(&path, &orig), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn seals_legacy_cache_files() {

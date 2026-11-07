@@ -417,6 +417,9 @@ pub enum Event {
     /// scroll the message list to row `id` (already in the last `Messages`) and flash it
     JumpTo(String),
     Thumb(Arc<Thumb>),
+    /// text over the picture known by `key`: a video's length, or the size of what isn't
+    /// downloaded yet. Empty: none.
+    MediaLabel { key: String, text: String },
     /// answer to `ViewImage`
     ViewerImage(ViewerImage),
     /// one of the answers to `ViewerThumbs`: message id, image index, thumbnail

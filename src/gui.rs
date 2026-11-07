@@ -39,6 +39,8 @@ pub(crate) struct Ui {
     pub(crate) messages: Rc<VecModel<MsgItem>>,
     /// thumbnails for the open thread only; cleared on thread switch to bound memory
     thumbs: HashMap<String, Image>,
+    /// text over pictures, by the same keys
+    media_labels: HashMap<String, String>,
     /// animated stickers' frames (message list, open thread; the hovered picker sticker)
     anims: anim::Anims,
     /// round photos by thread key, for the whole session (~6KB each at 40px)
@@ -209,6 +211,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 let mut restored = None;
                 if switched {
                     ui.thumbs.clear();
+                    ui.media_labels.clear();
                     ui.anims.clear_list();
                     ui.sender_avatars.clear();
                     ui.revealed.clear();
@@ -380,6 +383,33 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 }
             });
         }
+        Event::MediaLabel { .. } if UI.with_borrow(|ui| ui.released) => {}
+        Event::MediaLabel { key, text } => {
+            UI.with_borrow_mut(|ui| {
+                let shown: SharedString = text.as_str().into();
+                if text.is_empty() {
+                    ui.media_labels.remove(&key);
+                } else {
+                    ui.media_labels.insert(key.clone(), text);
+                }
+                for (i, m) in ui.last.iter().enumerate() {
+                    let cell = m.cells.iter().position(|c| c.key == key);
+                    if cell.is_none() && (m.image_key != key || m.sticker) {
+                        continue;
+                    }
+                    let Some(mut row) = slint::Model::row_data(&*ui.messages, i) else { continue };
+                    if let Some(n) = cell {
+                        // a new model, as for `Thumb`
+                        let mut cells: Vec<ImageCell> = slint::Model::iter(&row.cells).collect();
+                        cells[n].label = shown.clone();
+                        row.cells = ModelRc::new(VecModel::from(cells));
+                    } else {
+                        row.media_label = shown.clone();
+                    }
+                    slint::Model::set_row_data(&*ui.messages, i, row);
+                }
+            });
+        }
         Event::ViewerImage(v) => viewer::arrived(app, v),
         Event::ViewerThumb(id, index, t) => viewer::thumb_arrived(&id, index, t),
         Event::Frames(f) => anim::frames_arrived(f),
@@ -447,7 +477,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         }
         Event::Storage { db, attachments, thumbs } => {
             app.set_storage_text(
-                format!("메시지 DB {}  ·  첨부파일 {}  ·  썸네일 캐시 {}", size_text(db), size_text(attachments), size_text(thumbs)).into(),
+                format!("메시지 DB {}  ·  첨부파일 {}  ·  썸네일 캐시 {}", view::size_text(db), view::size_text(attachments), view::size_text(thumbs)).into(),
             );
         }
         Event::StickerGrid { pack, items } => {
@@ -473,12 +503,3 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
     }
 }
 
-pub(crate) fn size_text(b: u64) -> String {
-    const MB: f64 = 1024.0 * 1024.0;
-    match b as f64 {
-        x if x >= 1024.0 * MB => format!("{:.1}GB", x / 1024.0 / MB),
-        x if x >= 10.0 * MB => format!("{:.0}MB", x / MB),
-        x if x >= 0.1 * MB => format!("{:.1}MB", x / MB),
-        x => format!("{:.0}KB", (x / 1024.0).ceil()),
-    }
-}

@@ -292,6 +292,31 @@ pub fn auto_fetches_video(ptr: &AttachmentPointer) -> bool {
         && ptr.size.is_some_and(|s| s <= VIDEO_AUTO_MAX)
 }
 
+pub fn size_text(b: u64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    match b as f64 {
+        x if x >= 1024.0 * MB => format!("{:.1}GB", x / 1024.0 / MB),
+        x if x >= 10.0 * MB => format!("{:.0}MB", x / MB),
+        x if x >= 0.1 * MB => format!("{:.1}MB", x / MB),
+        x => format!("{:.0}KB", (x / 1024.0).ceil()),
+    }
+}
+
+/// How a picture says the size of a file that isn't here yet.
+pub fn undownloaded_label(ptr: &AttachmentPointer) -> String {
+    ptr.size.map_or(String::new(), |s| size_text(s as u64))
+}
+
+/// A video's length as players show it. Empty when it isn't known.
+pub fn length_text(seconds: u32) -> String {
+    let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    match (seconds, h) {
+        (0, _) => String::new(),
+        (_, 0) => format!("{m}:{s:02}"),
+        _ => format!("{h}:{m:02}:{s:02}"),
+    }
+}
+
 fn attachment_label(ptr: &AttachmentPointer) -> String {
     let ct = ptr.content_type.as_deref().unwrap_or("");
     if let Some(name) = ptr.file_name.as_deref().filter(|n| !n.is_empty()) {
@@ -1315,6 +1340,18 @@ mod tests {
         };
         let b = run(DataMessage { body: Some(body.clone()), body_ranges: vec![spoiler], preview: vec![preview(url)], ..Default::default() });
         assert!(b.items[0].link.is_none());
+    }
+
+    #[test]
+    fn labels_read_like_players_and_file_lists() {
+        assert_eq!(length_text(0), "");
+        assert_eq!(length_text(1), "0:01");
+        assert_eq!(length_text(75), "1:15");
+        assert_eq!(length_text(3600), "1:00:00");
+        assert_eq!(length_text(3725), "1:02:05");
+        let ptr = |size| AttachmentPointer { size, ..Default::default() };
+        assert_eq!(undownloaded_label(&ptr(None)), "");
+        assert_eq!(undownloaded_label(&ptr(Some(45 * 1024 * 1024))), "45MB");
     }
 
     #[test]
