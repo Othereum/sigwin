@@ -44,6 +44,15 @@ A preview is made by the sender's app and travels in the message, so showing a r
 
 Rejected: fetching at send time only. The user wouldn't see or be able to remove what goes out. Letting presage do it: no switch, a blocked send, the url in its log. A preview with no fields to stop presage's fetch: Signal iOS requires the url field and drops the whole message without it.
 
+## Video thumbnails
+A message carries a video's blurhash and size at most, so its real picture has to come from the file. Signal Desktop does the same: it downloads the video and takes a frame.
+
+Whole downloads with a size limit, not partial ones. The CDN seems to take `Range` and CBC can start anywhere, so the index and first frame alone would do. That needs ranged reads the vendored service doesn't offer, a decoder asking for bytes as it goes, and either `incrementalMac` or decoding unverified bytes when the sender left it out. Too much for what it saves. Automatic downloads are limited because `get_attachment` holds the whole file in memory while it arrives; `view::auto_fetches_video` is the one place that decides, for a later setting.
+
+Decoding: Media Foundation in a child, fed through a pipe. Rejected: the shell's thumbnails (need a plain file and keep a copy in its thumbnail cache), bundling ffmpeg (an extra runtime and size), a Rust H.264 decoder with a demuxer (H.264 only, and it adds size). A codec Windows lacks leaves the blurhash, as does anything over the limit. Its functions are looked up at run time, because linking them would load the media stack on every start of the app.
+
+The child takes 27 to 69MB at its peak for 0.2 to 3.5MB test videos, about 90ms, and exits. Larger videos weren't measured; its input is held in memory, so expect the file size on top. The first frame is what's shown, even if it is black.
+
 ## Sticker and avatar resampling (measured 2026-11-06, synthetic images, heap peak without the source)
 `fit` moved from `image`'s resize in f32 to `fast_image_resize`:
 | job | `image`, f32 | fir |

@@ -40,6 +40,96 @@ pub fn to_rgba(img: &DynamicImage) -> RgbaImage {
     img.to_rgba8()
 }
 
+/// An image from rows of BGRX pixels, the order Windows video decoders give.
+pub fn from_bgrx(mut px: Vec<u8>, w: u32, h: u32) -> Option<RgbaImage> {
+    for p in px.chunks_exact_mut(4) {
+        p.swap(0, 2);
+        p[3] = 255;
+    }
+    RgbaImage::from_raw(w, h, px)
+}
+
+/// Turns clockwise by 90, 180 or 270 degrees; other angles leave it as it is.
+pub fn rotated(img: RgbaImage, degrees: u32) -> RgbaImage {
+    match degrees {
+        90 => image::imageops::rotate90(&img),
+        180 => image::imageops::rotate180(&img),
+        270 => image::imageops::rotate270(&img),
+        _ => img,
+    }
+}
+
+const BASE83: &[u8; 83] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~";
+
+fn base83(s: &[u8]) -> Option<u32> {
+    s.iter().try_fold(0u32, |n, c| Some(n * 83 + BASE83.iter().position(|b| b == c)? as u32))
+}
+
+/// Draws a blurhash at `w` x `h`. It comes from the sender, so anything malformed is `None`.
+pub fn blurhash(hash: &str, w: u32, h: u32) -> Option<RgbaImage> {
+    use std::f32::consts::PI;
+    let s = hash.as_bytes();
+    let size = base83(s.get(..1)?)? as usize;
+    let (nx, ny) = (size % 9 + 1, size / 9 + 1);
+    if s.len() != 4 + 2 * nx * ny || w == 0 || h == 0 {
+        return None;
+    }
+    let linear = |v: u32| {
+        let v = (v & 255) as f32 / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    let srgb = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        let v = if v <= 0.0031308 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+        (v * 255.0 + 0.5) as u8
+    };
+    let max = (base83(&s[1..2])? + 1) as f32 / 166.0;
+    let dc = base83(&s[2..6])?;
+    let mut colors = vec![[linear(dc >> 16), linear(dc >> 8), linear(dc)]];
+    for pair in s[6..].chunks_exact(2) {
+        let v = base83(pair)?;
+        let ac = |q: u32| {
+            let q = (q as f32 - 9.0) / 9.0;
+            q * q.abs() * max
+        };
+        colors.push([ac(v / (19 * 19)), ac(v / 19 % 19), ac(v % 19)]);
+    }
+    let table = |n: usize, len: u32| -> Vec<f32> {
+        (0..len).flat_map(|p| (0..n).map(move |i| (PI * p as f32 * i as f32 / len as f32).cos())).collect()
+    };
+    let (cos_x, cos_y) = (table(nx, w), table(ny, h));
+    Some(RgbaImage::from_fn(w, h, |x, y| {
+        let mut c = [0f32; 3];
+        for j in 0..ny {
+            for i in 0..nx {
+                let basis = cos_x[x as usize * nx + i] * cos_y[y as usize * ny + j];
+                for (out, v) in c.iter_mut().zip(colors[i + j * nx]) {
+                    *out += v * basis;
+                }
+            }
+        }
+        image::Rgba([srgb(c[0]), srgb(c[1]), srgb(c[2]), 255])
+    }))
+}
+
+#[test]
+fn blurhash_draws_and_refuses_malformed() {
+    // one component: 0xFF8000 everywhere (base83 of 16744448)
+    let n = 0xFF8000u32;
+    let digits: Vec<u8> = [83u32.pow(3), 83u32.pow(2), 83, 1].iter().map(|d| BASE83[(n / d % 83) as usize]).collect();
+    let flat = format!("00{}", String::from_utf8(digits).unwrap());
+    let img = blurhash(&flat, 4, 3).unwrap();
+    assert_eq!(img.dimensions(), (4, 3));
+    assert_eq!(img.get_pixel(3, 2).0, [255, 128, 0, 255]);
+    // the format's own example: dark at the bottom right, no panic on 4 x 3 components
+    let img = blurhash("LEHV6nWB2yk8pyo0adR*.7kCMdnj", 32, 32).unwrap();
+    assert_eq!(img.dimensions(), (32, 32));
+    for bad in ["", "L", "LEHV6nWB2yk8pyo0adR*.7kCMdn", "LEHV6nWB2yk8pyo0adR*.7kCMdnjj", "LEHV6nWB2yk8pyo0adR*.7kCMd한", "\u{1F600}0000000"] {
+        assert!(blurhash(bad, 32, 32).is_none(), "{bad}");
+    }
+    assert!(blurhash("LEHV6nWB2yk8pyo0adR*.7kCMdnj", 0, 32).is_none());
+}
+
 /// Size of a `w` x `h` image shrunk to fit in `box_w` x `box_h` (never upscales).
 pub fn fit_size((w, h): (u32, u32), (box_w, box_h): (u32, u32)) -> (u32, u32) {
     let s = (box_w as f64 / w.max(1) as f64).min(box_h as f64 / h.max(1) as f64).min(1.0);

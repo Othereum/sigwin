@@ -9,7 +9,7 @@ use i_slint_core::styled_text::{sigwin_clear_plain_styles, sigwin_set_plain_styl
 use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::types::{Command, Event, MsgDto, Paging, Scroll, ThreadDto};
+use crate::types::{ClickedMedia, Command, Event, MsgDto, Paging, Scroll, ThreadDto};
 use crate::*;
 
 pub(crate) mod anim;

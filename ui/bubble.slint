@@ -36,6 +36,25 @@ export component MsgMeta inherits HorizontalLayout {
     }
 }
 
+// marks a picture as a video
+component PlayMark inherits Rectangle {
+    width: 40px;
+    height: 40px;
+    border-radius: 20px;
+    background: #00000090;
+    Text {
+        // the triangle's weight sits left of its box
+        x: 14px;
+        y: 0px;
+        height: 100%;
+        text: "▶";
+        font-family: "Segoe UI Symbol";
+        font-size: 16px;
+        color: white;
+        vertical-alignment: center;
+    }
+}
+
 export component MsgImage inherits Rectangle {
     in property <MsgItem> m;
     // flush: as wide as the bubble (which clips the corners), otherwise a fixed size
@@ -79,6 +98,12 @@ export component MsgImage inherits Rectangle {
         source: m.frames.length > 0 ? m.frames[m.frame[0]] : m.image;
         image-fit: m.sticker ? contain : cover;
     }
+    if m.video: Rectangle {
+        // until the picture arrives, or if there is none
+        background: #80808030;
+        z: -1;
+    }
+    if m.video: PlayMark { }
     if m.cells.length == 0: TouchArea {
         mouse-cursor: pointer;
         clicked => { root.attachment-clicked(m.id, 0); }
@@ -102,6 +127,7 @@ export component MsgImage inherits Rectangle {
             // already resampled to this size
             image-fit: fill;
         }
+        if cell.video && cell.more == 0: PlayMark { }
         if cell.more > 0: Rectangle {
             background: #00000080;
             Text {

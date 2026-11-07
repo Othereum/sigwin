@@ -65,6 +65,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/backend/typing.rs` | typing indicators |
 | `src/backend/stickers.rs` | sticker packs: picker, sending, installing |
 | `src/backend/files.rs` | attachment and thumbnail caches, opening and viewing attachments |
+| `src/videoframe.rs` | a video's first frame, decoded by Media Foundation in a child process |
 | `src/backend/mute.rs` | per-thread notification settings, the phone's values from the Storage Service |
 | `src/backend/notify.rs` | when notifications show and go away, after Signal Desktop |
 | `src/view.rs` | stored content → message rows: reactions, edits, receipts, day separators, snippets |

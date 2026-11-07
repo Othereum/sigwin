@@ -1,8 +1,10 @@
 //! Backend thread: owns the presage `Manager` (which is `!Send`) on a single-threaded
 //! tokio runtime, talks to the UI only through `Command`s in and `Event`s out.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -178,6 +180,8 @@ enum Internal {
     Sent(u64, Result<(), String>),
     LinkFetched(String, Option<Box<(Fetched, Vec<crate::types::Thumb>)>>),
     ThumbFailed(String),
+    /// a video the user opened has arrived, by its file key: it can show its frame now
+    VideoFetched(String),
     /// a long message's full text: (attachment key, text)
     LongText(String, String),
     Notice(String),
@@ -286,9 +290,12 @@ struct App {
     current_dirty: bool,
     threads_dirty: bool,
     /// thumbnails and long texts asked for in the open thread
-    thumbs_requested: HashSet<String>,
+    /// (shared with the tasks: a video waiting for its turn is dropped once it's no longer in here)
+    thumbs_requested: Rc<RefCell<HashSet<String>>>,
     /// held while making a message's thumbnail
     thumb_gate: Arc<tokio::sync::Semaphore>,
+    /// held while downloading a video nobody asked for
+    video_gate: Arc<tokio::sync::Semaphore>,
     long: view::LongTexts,
     pending: Vec<Pending>,
     /// the composer's link preview
@@ -432,8 +439,9 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         current: None,
         current_dirty: false,
         threads_dirty: false,
-        thumbs_requested: HashSet::new(),
+        thumbs_requested: Default::default(),
         thumb_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+        video_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         long: Default::default(),
         pending: Vec::new(),
         link_draft: None,
@@ -588,6 +596,7 @@ impl App {
             }
             Command::Send { text, files, quote, mentions, link } => self.send(text, files, quote, mentions, link).await,
             Command::ViewImage { id, index, fit, from_file } => self.view_image(&id, index, fit, from_file),
+            Command::OpenVideo { id, index } => self.open_video(&id, index),
             Command::ViewerThumbs { id, px } => self.viewer_thumbs(&id, px),
             Command::OpenViewed { id, index } => self.open_viewed(&id, index),
             Command::SaveViewed { id, index, owner } => self.save_viewed(&id, index, owner),
@@ -645,7 +654,7 @@ impl App {
             Command::ClearThumbs => {
                 let dir = self.paths.thumbs.clone();
                 let _ = tokio::task::spawn_blocking(move || clear_dir(&dir)).await;
-                self.thumbs_requested.clear();
+                self.thumbs_requested.borrow_mut().clear();
                 self.emit_storage();
             }
             Command::SetMute { key, set } => self.set_mute(&key, set),
@@ -804,11 +813,15 @@ impl App {
             Internal::LinkFetched(url, res) => self.link_fetched(url, res),
             Internal::ThumbFailed(key) => {
                 // allow a retry next time the thread is opened
-                self.thumbs_requested.remove(&key);
+                self.thumbs_requested.borrow_mut().remove(&key);
+            }
+            Internal::VideoFetched(file_key) => {
+                self.thumbs_requested.borrow_mut().retain(|k| !k.starts_with(&file_key));
+                self.emit_messages(Scroll::Keep).await;
             }
             Internal::LongText(key, text) => {
                 // still the thread it was asked for
-                if self.thumbs_requested.contains(&key) {
+                if self.thumbs_requested.borrow().contains(&key) {
                     self.long.full.insert(key, text);
                     self.emit_messages(Scroll::Keep).await;
                 }

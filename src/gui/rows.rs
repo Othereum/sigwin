@@ -230,6 +230,7 @@ pub(crate) fn to_item(
             h: c.h as f32,
             image: thumbs.get(&c.key).cloned().unwrap_or_default(),
             more: c.more as i32,
+            video: c.video,
         })
         .collect();
     let avatar = if m.show_avatar { senders.get(&m.sender_key).cloned() } else { None };
@@ -283,6 +284,7 @@ pub(crate) fn to_item(
         quote_id: m.quote_id.as_str().into(),
         attachment: m.attachment.as_str().into(),
         has_image: !m.image_key.is_empty(),
+        video: m.video,
         image: image.unwrap_or_default(),
         frames,
         frame,

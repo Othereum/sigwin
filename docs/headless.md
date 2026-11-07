@@ -12,6 +12,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 - `SIGWIN_DEMO_TALL=<row>:<chars>[,...]` (very long messages at those rows, a line per 20 characters)
 - `SIGWIN_DEMO_MENU=1|edit|pin`
 - `SIGWIN_DEMO_SETTINGS=1`
+- `SIGWIN_DEMO_VIDEO=1|<path>` (the newest rows show videos: blurhash replaced by a frame after 2s, blurhash only, nothing, in a grid; with a path the frame is that file's first, through the encrypted file and the decoding child)
 - `SIGWIN_DEMO_VIEWER=1|<width>x<height>` (a photo on the newest row; clicking it opens the image viewer with three fake images, the first of the given size; `SIGWIN_DEMO_VIEWER_COUNT=<n>` for a longer album)
 - `SIGWIN_DEMO_GRID=1` (the newest rows show 2, 3, 4, 5 and 8 images as grids, with a caption and a file on some; one cell stays blank, as until its image arrives)
 - `SIGWIN_DEMO_LINK=1` (the newest rows show link previews of every shape, one image never arrives; a link typed in the composer gets a fake preview shortly, none on a host starting with "fail")

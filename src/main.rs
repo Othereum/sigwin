@@ -27,6 +27,7 @@ mod toast;
 mod tray;
 mod types;
 mod update;
+mod videoframe;
 mod view;
 mod winhook;
 
@@ -71,7 +72,7 @@ fn data_dir() -> PathBuf {
 }
 
 fn main() -> anyhow::Result<()> {
-    if picker::run_if_child() {
+    if picker::run_if_child() || videoframe::run_if_child() {
         return Ok(());
     }
     let filter = tracing_subscriber::EnvFilter::builder()

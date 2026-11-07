@@ -103,7 +103,7 @@ impl App {
         let span = self.latest_rows(&thread).await?;
         let is_group = matches!(thread, Thread::Group(_));
         let members = self.emit_header(&thread).await;
-        self.thumbs_requested.clear();
+        self.thumbs_requested.borrow_mut().clear();
         self.long = Default::default();
         // the UI drops message-list avatars on thread switch
         let in_list = |k: &str| k.starts_with(crate::avatar::MSG_PREFIX) || k.starts_with(crate::avatar::READ_PREFIX);
@@ -457,22 +457,27 @@ impl App {
                 .chain(built.wanted_cells.iter().map(|c| c.key.as_str()))
                 .chain(built.long_keys.iter().map(String::as_str))
                 .collect();
-            self.thumbs_requested.retain(|k| keep.contains(k.as_str()));
+            self.thumbs_requested.borrow_mut().retain(|k| keep.contains(k.as_str()));
             self.long.full.retain(|k, _| keep.contains(k.as_str()));
             self.long.shown.retain(|row, _| open.window.iter().any(|(t, _)| t == row));
         }
         for (k, ptr, fit) in built.wanted_thumbs {
-            if self.thumbs_requested.insert(k.clone()) {
+            if self.thumbs_requested.borrow_mut().insert(k.clone()) {
                 self.request_thumb(k.clone(), k, ptr, ThumbShape::Fit(fit));
             }
         }
-        for c in built.wanted_cells {
-            if self.thumbs_requested.insert(c.key.clone()) {
-                self.request_thumb(c.key, c.file_key, c.ptr, ThumbShape::Cover(c.size.0, c.size.1));
+        // newest first: videos take turns, and the newest are the ones on screen
+        for c in built.wanted_cells.into_iter().rev() {
+            if self.thumbs_requested.borrow_mut().insert(c.key.clone()) {
+                if view::is_video(&c.ptr) {
+                    self.request_video_thumb(c.key, c.file_key, c.ptr, c.size);
+                } else {
+                    self.request_thumb(c.key, c.file_key, c.ptr, ThumbShape::Cover(c.size.0, c.size.1));
+                }
             }
         }
         for (k, ptr) in built.wanted_texts {
-            if self.thumbs_requested.insert(k.clone()) {
+            if self.thumbs_requested.borrow_mut().insert(k.clone()) {
                 self.request_long_text(k, ptr);
             }
         }

@@ -273,6 +273,9 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     if std::env::var_os("SIGWIN_DEMO_LINK").is_some() {
         demo_link_rows(&mut items);
     }
+    if std::env::var_os("SIGWIN_DEMO_VIDEO").is_some() {
+        demo_video_rows(&mut items);
+    }
     if std::env::var_os("SIGWIN_DEMO_GRID").is_some() {
         // the newest rows, bare, with a caption and with a file
         let last = items.len() - DEMO_GRIDS.len();
@@ -444,6 +447,10 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         typing: None,
     });
     emit(Event::Storage { db: 23 * 1024 * 1024, attachments: 148 * 1024 * 1024, thumbs: 3_400_000 });
+    if std::env::var_os("SIGWIN_DEMO_VIDEO").is_some() {
+        let emit = emit.clone();
+        std::thread::spawn(move || demo_videos(&emit));
+    }
     if std::env::var_os("SIGWIN_DEMO_GRID").is_some() {
         // after the rows, as downloads do
         let emit = emit.clone();
@@ -794,6 +801,64 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
             emit(Event::Frames(types::Frames::decode(key, &gif, fit, types::ANIM_BUDGET / 2)));
         }
     });
+}
+
+/// SIGWIN_DEMO_VIDEO: the newest rows show videos: with a frame on the way, with a blurhash only,
+/// with nothing, and in a grid with an image.
+fn demo_video_rows(items: &mut [types::MsgDto]) {
+    let last = items.len() - 4;
+    for (n, m) in items[last..].iter_mut().enumerate() {
+        m.big_emoji = false;
+        m.sticker = false;
+        m.quote.clear();
+        m.quote_author.clear();
+        m.attachment.clear();
+        m.text = if n == 1 { "동영상 설명이 함께 있는 메시지".into() } else { String::new() };
+        if n == 3 {
+            view::set_photo_grid(m, 3, |i, _, _| format!("demo-video-grid-{i}"));
+            m.cells[0].video = true;
+            m.cells[2].video = true;
+        } else {
+            m.video = true;
+            m.image_key = format!("demo-video-{n}");
+            (m.img_w, m.img_h) = if n == 1 { (300, 450) } else { (400, 225) };
+        }
+    }
+}
+
+fn demo_videos(emit: &backend::Emit) {
+    const HASH: &str = "LEHV6nWB2yk8pyo0adR*.7kCMdnj";
+    let thumb = |key: String, img: image::RgbaImage| {
+        emit(Event::Thumb(Arc::new(types::Thumb { key, width: img.width(), height: img.height(), rgba: img.into_raw() })));
+    };
+    let blur = |w, h| sigwin_thumb::cover(&sigwin_thumb::blurhash(HASH, 32, 32).expect("valid"), types::physical_px(w), types::physical_px(h));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    thumb("demo-video-0".into(), blur(400, 225));
+    thumb("demo-video-1".into(), blur(300, 450));
+    for (i, (w, h)) in [(150, 300), (150, 150), (150, 150)].into_iter().enumerate() {
+        thumb(format!("demo-video-grid-{i}"), blur(w, h));
+    }
+    // the first frame replaces the blurhash
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let (w, h) = (types::physical_px(400), types::physical_px(225));
+    let file = std::env::var_os("SIGWIN_DEMO_VIDEO").filter(|v| v != "1");
+    let frame = file.and_then(|path| demo_video_frame(std::path::Path::new(&path)));
+    thumb("demo-video-0".into(), match frame {
+        Some(f) => sigwin_thumb::cover(&f, w, h),
+        None => image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([(x * 255 / w) as u8, (y * 255 / h) as u8, 120, 255])),
+    });
+}
+
+/// A real video's frame, by the way real ones go: encrypted on disk, through the decoding child.
+fn demo_video_frame(path: &std::path::Path) -> Option<image::RgbaImage> {
+    sigwin_vault::init([9; 32]);
+    let sealed = std::env::temp_dir().join(format!("sigwin-demo-video-{}.enc", std::process::id()));
+    sigwin_vault::write(&sealed, &std::fs::read(path).ok()?).ok()?;
+    let started = std::time::Instant::now();
+    let frame = crate::videoframe::first_frame(&sealed);
+    tracing::info!("demo video frame: {:?} in {:?}", frame.as_ref().map(|f| f.as_ref().map(|i| i.dimensions())).map_err(|e| e.to_string()), started.elapsed());
+    let _ = std::fs::remove_file(&sealed);
+    frame.ok().flatten()
 }
 
 /// SIGWIN_DEMO_GRID: images of the newest rows.

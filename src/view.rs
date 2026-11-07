@@ -272,6 +272,26 @@ pub fn is_image(ptr: &AttachmentPointer) -> bool {
     ) && ptr.size.unwrap_or(0) < 15 * 1024 * 1024
 }
 
+pub fn is_video(ptr: &AttachmentPointer) -> bool {
+    ptr.content_type.as_deref().is_some_and(|c| c.starts_with("video/"))
+}
+
+/// Drawn in the message itself, as a picture or a grid cell.
+pub fn is_media(ptr: &AttachmentPointer) -> bool {
+    is_image(ptr) || is_video(ptr)
+}
+
+/// Largest video downloaded just to show its picture. `get_attachment` holds the whole file in
+/// memory while it arrives, and nobody asked for this one.
+const VIDEO_AUTO_MAX: u32 = 30 * 1024 * 1024;
+
+/// Whether a video is downloaded without being asked for: the one place that decides. Others show
+/// their blurhash until they are opened. A kind Windows can't usually decode isn't worth the traffic.
+pub fn auto_fetches_video(ptr: &AttachmentPointer) -> bool {
+    matches!(ptr.content_type.as_deref(), Some("video/mp4" | "video/quicktime" | "video/3gpp" | "video/x-m4v"))
+        && ptr.size.is_some_and(|s| s <= VIDEO_AUTO_MAX)
+}
+
 fn attachment_label(ptr: &AttachmentPointer) -> String {
     let ct = ptr.content_type.as_deref().unwrap_or("");
     if let Some(name) = ptr.file_name.as_deref().filter(|n| !n.is_empty()) {
@@ -652,6 +672,7 @@ pub fn set_photo_grid(m: &mut MsgDto, count: usize, mut key: impl FnMut(usize, u
             w,
             h,
             more: if n + 1 == GRID_SHOWN { more } else { 0 },
+            video: false,
         })
         .collect();
     let Some(first) = m.cells.first() else { return };
@@ -844,7 +865,7 @@ pub fn build(
                 let mut others = 0;
                 let mut photos = Vec::new();
                 for (i, a) in shown_attachments(dm) {
-                    if !m.sticker && is_image(a) {
+                    if !m.sticker && is_media(a) {
                         photos.push((i, a));
                     } else if m.attachment.is_empty() {
                         m.attachment = attachment_label(a);
@@ -857,9 +878,16 @@ pub fn build(
                     let (w, h) = fit(a.width, a.height);
                     m.img_w = w;
                     m.img_h = h;
-                    // pre-resample to the on-screen size (nearest-neighbor scaling is jagged)
-                    wanted.push((key.clone(), a.clone(), w.max(h)));
-                    m.image_key = key;
+                    if is_video(a) {
+                        // the sender's size may be missing or wrong: cut to fill the box
+                        m.video = true;
+                        m.image_key = format!("{key}@{w}x{h}");
+                        wanted_cells.push(WantedCell { key: m.image_key.clone(), file_key: key, ptr: a.clone(), size: (w, h) });
+                    } else {
+                        // pre-resample to the on-screen size (nearest-neighbor scaling is jagged)
+                        wanted.push((key.clone(), a.clone(), w.max(h)));
+                        m.image_key = key;
+                    }
                 } else {
                     set_photo_grid(&mut m, photos.len(), |n, w, h| {
                         let (i, a) = photos[n];
@@ -869,6 +897,9 @@ pub fn build(
                         wanted_cells.push(WantedCell { key: key.clone(), file_key, ptr: a.clone(), size: (w, h) });
                         key
                     });
+                    for (cell, (_, a)) in m.cells.iter_mut().zip(&photos) {
+                        cell.video = is_video(a);
+                    }
                 }
                 if others > 0 {
                     m.attachment = format!("{} 외 {}개", m.attachment, others);
@@ -1284,6 +1315,47 @@ mod tests {
         };
         let b = run(DataMessage { body: Some(body.clone()), body_ranges: vec![spoiler], preview: vec![preview(url)], ..Default::default() });
         assert!(b.items[0].link.is_none());
+    }
+
+    #[test]
+    fn videos_show_as_pictures_and_only_small_ones_download_by_themselves() {
+        let video = |d: u8| AttachmentPointer {
+            content_type: Some("video/mp4".into()),
+            size: Some(1024),
+            width: Some(1920),
+            height: Some(1080),
+            digest: Some(vec![d; 32]),
+            ..Default::default()
+        };
+        let photo = |d: u8| AttachmentPointer { content_type: Some("image/png".into()), digest: Some(vec![d; 32]), ..Default::default() };
+        let name = |_: &Uuid| String::new();
+        let long = LongTexts::default();
+        let run = |attachments: Vec<AttachmentPointer>| {
+            let window = [(5u64, incoming(DataMessage { attachments, ..Default::default() }))];
+            build(&window, Uuid::from_u128(1), &[], &Default::default(), &long, &name)
+        };
+
+        let b = run(vec![video(1)]);
+        let m = &b.items[0];
+        assert!(m.video && m.attachment.is_empty() && m.cells.is_empty());
+        assert_eq!((m.img_w, m.img_h), (400, 225));
+        assert_eq!(b.wanted_cells[0].key, m.image_key);
+        assert_eq!(b.wanted_cells[0].file_key, attachment_key(&video(1), 5, 0));
+        assert!(b.wanted_thumbs.is_empty());
+
+        // a grid knows which cells are videos, and a click finds the right one
+        let b = run(vec![photo(1), video(2), photo(3)]);
+        let m = &b.items[0];
+        assert!(!m.video);
+        assert_eq!(m.cells.iter().map(|c| c.video).collect::<Vec<_>>(), [false, true, false]);
+        assert_eq!(m.clicked_media(1), crate::types::ClickedMedia::Video(0));
+        assert_eq!(m.clicked_media(2), crate::types::ClickedMedia::Image(1));
+
+        assert!(auto_fetches_video(&video(1)));
+        assert!(auto_fetches_video(&AttachmentPointer { size: Some(VIDEO_AUTO_MAX), ..video(1) }));
+        assert!(!auto_fetches_video(&AttachmentPointer { size: Some(VIDEO_AUTO_MAX + 1), ..video(1) }));
+        assert!(!auto_fetches_video(&AttachmentPointer { size: None, ..video(1) }));
+        assert!(!auto_fetches_video(&AttachmentPointer { content_type: Some("video/webm".into()), ..video(1) }));
     }
 
     #[test]

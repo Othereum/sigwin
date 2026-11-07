@@ -26,6 +26,7 @@ export struct ImageCell {
     image: image,
     // images not shown, covered by this cell's "+N"
     more: int,
+    video: bool,
 }
 
 export struct ReactionItem {
@@ -71,6 +72,8 @@ export struct MsgItem {
     attachment: string,
     has-image: bool,
     image: image,
+    // `image` is the picture of a video: drawn with a play mark, clicking opens the video
+    video: bool,
     // animated sticker: frames and the current one's index in `frame[0]` (empty: show `image`)
     frames: [image],
     frame: [int],

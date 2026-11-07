@@ -54,6 +54,97 @@ impl App {
         });
     }
 
+    /// A video's picture, cut to `size` (logical px): its blurhash right away, its first frame once
+    /// that can be had. Videos are downloaded one at a time, newest first, and only while the row
+    /// is still in the window.
+    pub(super) fn request_video_thumb(&self, key: String, file_key: String, ptr: AttachmentPointer, size: (u32, u32)) {
+        let thumb_path = self.paths.thumbs.join(format!("{file_key}.enc"));
+        let no_frame = no_frame_path(&self.paths.thumbs, &file_key);
+        let orig_path = attachment_path(&self.paths.attachments, &file_key);
+        let (w, h) = (crate::types::physical_px(size.0), crate::types::physical_px(size.1));
+        let manager = self.manager.clone();
+        let emit = self.emit.clone();
+        let tx = self.tx.clone();
+        let gate = self.thumb_gate.clone();
+        let fetch_gate = self.video_gate.clone();
+        let requested = self.thumbs_requested.clone();
+        tokio::task::spawn_local(async move {
+            if !thumb_path.exists() {
+                if let Some(t) = ptr.blur_hash.as_deref().and_then(|b| blur_thumb(&key, b, w, h)) {
+                    emit(Event::Thumb(Arc::new(t)));
+                }
+                if no_frame.exists() {
+                    return;
+                }
+                if !orig_path.exists() {
+                    if !view::auto_fetches_video(&ptr) {
+                        return;
+                    }
+                    let _turn = fetch_gate.acquire_owned().await;
+                    if !requested.borrow().contains(&key) {
+                        return;
+                    }
+                    if !orig_path.exists() {
+                        let Some(m) = manager else { return };
+                        let data = match m.get_attachment(&ptr).await {
+                            Ok(data) => data,
+                            Err(e) => {
+                                warn!("download video: {e}");
+                                let _ = tx.send(Internal::ThumbFailed(key));
+                                return;
+                            }
+                        };
+                        let path = orig_path.clone();
+                        let saved = tokio::task::spawn_blocking(move || sigwin_vault::write(&path, &data)).await;
+                        if !matches!(saved, Ok(Ok(()))) {
+                            warn!("save video failed");
+                            let _ = tx.send(Internal::ThumbFailed(key));
+                            return;
+                        }
+                    }
+                }
+            }
+            let permit = gate.acquire_owned().await;
+            let k = key.clone();
+            let res = tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                make_video_thumb(&k, &orig_path, &thumb_path, &no_frame, w, h)
+            })
+            .await;
+            match res {
+                Ok(Ok(t)) => emit(Event::Thumb(Arc::new(t))),
+                Ok(Err(e)) => {
+                    warn!("video frame: {e:#}");
+                    let _ = tx.send(Internal::ThumbFailed(key));
+                }
+                Err(_) => {
+                    let _ = tx.send(Internal::ThumbFailed(key));
+                }
+            }
+        });
+    }
+
+    /// Video `index` of row `id`, in the default app. Once downloaded it can show its first frame.
+    pub(super) fn open_video(&self, id: &str, index: usize) {
+        let Some((ts, dm)) = self.row_message(id) else { return };
+        let Some((i, a)) = view::shown_attachments(dm).filter(|(_, a)| view::is_video(a)).nth(index) else { return };
+        let file_key = view::attachment_key(a, ts, i);
+        let path = attachment_path(&self.paths.attachments, &file_key);
+        let ptr = a.clone();
+        let manager = self.manager.clone();
+        let tx = self.tx.clone();
+        let open_dir = self.paths.open.clone();
+        tokio::task::spawn_local(async move {
+            let had = path.exists();
+            if fetch_attachment(&manager, &tx, &path, &ptr).await {
+                if !had {
+                    let _ = tx.send(Internal::VideoFetched(file_key));
+                }
+                open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
+            }
+        });
+    }
+
     /// Downloads (or reads from the cache) a long message's full text.
     pub(super) fn request_long_text(&self, key: String, ptr: AttachmentPointer) {
         let path = attachment_path(&self.paths.attachments, &key);
@@ -88,7 +179,7 @@ impl App {
     pub(super) fn open_attachment(&self, id: &str) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let jobs: Vec<(PathBuf, AttachmentPointer)> = view::shown_attachments(dm)
-            .filter(|(_, a)| !view::is_image(a))
+            .filter(|(_, a)| !view::is_media(a))
             .map(|(i, a)| (attachment_path(&self.paths.attachments, &view::attachment_key(a, ts, i)), a.clone()))
             .collect();
         let manager = self.manager.clone();
@@ -279,7 +370,40 @@ pub(super) fn remove_files(c: &Content, ts: u64, attachments: &Path, thumbs: &Pa
     for k in keys {
         let _ = std::fs::remove_file(attachment_path(attachments, &k));
         let _ = std::fs::remove_file(thumbs.join(format!("{k}.enc")));
+        let _ = std::fs::remove_file(no_frame_path(thumbs, &k));
     }
+}
+
+/// Empty file saying a video's frame can't be decoded here, so it isn't tried on every visit.
+/// Emptying the thumbnail cache forgets it (a codec may have been installed since).
+fn no_frame_path(thumbs: &Path, key: &str) -> PathBuf {
+    thumbs.join(format!("{key}.none"))
+}
+
+/// The blurhash is in the message and is never saved. Drawn small, then enlarged smoothly: it has
+/// no detail to lose, and the cost of drawing grows with every pixel.
+fn blur_thumb(key: &str, hash: &str, w: u32, h: u32) -> Option<Thumb> {
+    const DRAWN: u32 = 32;
+    let (bw, bh) = if w >= h { (DRAWN, (DRAWN * h / w.max(1)).max(1)) } else { ((DRAWN * w / h.max(1)).max(1), DRAWN) };
+    let cell = sigwin_thumb::cover(&sigwin_thumb::blurhash(hash, bw, bh)?, w, h);
+    Some(Thumb { key: key.to_string(), width: cell.width(), height: cell.height(), rgba: cell.into_raw() })
+}
+
+fn make_video_thumb(key: &str, orig: &Path, thumb: &Path, no_frame: &Path, w: u32, h: u32) -> anyhow::Result<Thumb> {
+    let cached = if thumb.exists() { load_cached(thumb).ok() } else { None };
+    let frame = match cached {
+        Some(f) => f,
+        None => {
+            let Some(f) = crate::videoframe::first_frame(orig)? else {
+                let _ = std::fs::write(no_frame, []);
+                anyhow::bail!("not decodable here");
+            };
+            save_cached(thumb, sigwin_thumb::png_rgba(&f));
+            f
+        }
+    };
+    let cell = sigwin_thumb::cover(&frame, w, h);
+    Ok(Thumb { key: key.to_string(), width: cell.width(), height: cell.height(), rgba: cell.into_raw() })
 }
 
 fn make_shaped_thumb(key: &str, orig: &Path, thumb: &Path, shape: ThumbShape) -> anyhow::Result<Thumb> {

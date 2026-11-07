@@ -147,6 +147,16 @@ pub struct CellDto {
     pub h: u32,
     /// images not shown, covered by this cell's "+N"
     pub more: u32,
+    pub video: bool,
+}
+
+/// What a click on a message's image or grid cell landed on.
+#[derive(Debug, PartialEq)]
+pub enum ClickedMedia {
+    /// its place among the message's images, as the viewer counts them
+    Image(usize),
+    /// its place among the message's videos
+    Video(usize),
 }
 
 /// A link preview: on a message, or in the composer before sending.
@@ -194,6 +204,8 @@ pub struct MsgDto {
     pub link: Option<LinkCard>,
     /// several images: the grid drawn instead of `image_key`, which is its first cell's
     pub cells: Vec<CellDto>,
+    /// `image_key` is the picture of a video, not a grid
+    pub video: bool,
     pub deleted: bool,
     pub day_sep: String,
     pub system: bool,
@@ -227,6 +239,17 @@ pub struct MsgDto {
     pub readers: Vec<(String, String)>,
     /// the text is cut short: "더 읽기" shows more
     pub more: bool,
+}
+
+impl MsgDto {
+    /// What a click on its picture, or on cell `index` of its grid, landed on.
+    pub fn clicked_media(&self, index: usize) -> ClickedMedia {
+        if self.cells.is_empty() {
+            return if self.video { ClickedMedia::Video(0) } else { ClickedMedia::Image(index) };
+        }
+        let before = self.cells.iter().take(index).filter(|c| c.video).count();
+        if self.cells.get(index).is_some_and(|c| c.video) { ClickedMedia::Video(before) } else { ClickedMedia::Image(index - before) }
+    }
 }
 
 /// A pinned message of the open thread, for the bar above the message list.
@@ -443,6 +466,8 @@ pub enum Command {
     /// show image `index` of row `id` in the viewer, shrunk to fit in `fit` (physical px).
     /// `from_file`: the file line was clicked; a row with other files then opens them outside.
     ViewImage { id: String, index: usize, fit: (u32, u32), from_file: bool },
+    /// open video `index` of row `id` in the default app, downloading it first if needed
+    OpenVideo { id: String, index: usize },
     /// Square thumbnails of `px` physical px of all images of a message for the viewer, downloading
     /// the ones still missing: whoever opens an album usually goes through it.
     ViewerThumbs { id: String, px: u32 },
@@ -504,6 +529,18 @@ pub enum Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clicks_count_images_and_videos_apart() {
+        let cell = |video| CellDto { video, ..Default::default() };
+        let grid = MsgDto { cells: vec![cell(true), cell(false), cell(true), cell(false)], ..Default::default() };
+        assert_eq!(grid.clicked_media(0), ClickedMedia::Video(0));
+        assert_eq!(grid.clicked_media(1), ClickedMedia::Image(0));
+        assert_eq!(grid.clicked_media(2), ClickedMedia::Video(1));
+        assert_eq!(grid.clicked_media(3), ClickedMedia::Image(1));
+        assert_eq!(MsgDto { video: true, ..Default::default() }.clicked_media(0), ClickedMedia::Video(0));
+        assert_eq!(MsgDto::default().clicked_media(0), ClickedMedia::Image(0));
+    }
 
     #[test]
     fn mute_text_reads_on_off_and_always() {
