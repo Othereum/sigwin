@@ -10,13 +10,15 @@
 
 ## Publishing
 1. Bump `version` in `Cargo.toml` (and `Cargo.lock` via `cargo build`), commit, push `main`.
-2. Run `scripts\release.ps1` (in a terminal: it asks for the key password). It checks the tree is
+2. Write the release notes to `target\release-notes.md` (see below) and have the user check them.
+3. Run `scripts\release.ps1` (in a terminal: it asks for the key password). It refuses missing or
+   empty notes, checks the tree is
    clean and equals `origin/main` and the release is new, builds `--release`, signs `sigwin.exe`
    with minisign (trusted comment `sigwin <version>`), verifies the signature against
-   `PUBLIC_KEY`, asks for confirmation and creates tag `v<version>` plus the GitHub release with
-   `sigwin.exe`, `sigwin.exe.minisig` and `licenses.html`, then fetches the new tag. Needs `cargo-about`, `minisign` and
+   `PUBLIC_KEY`, shows the notes, asks for confirmation and creates tag `v<version>` plus the GitHub release with
+   `sigwin.exe`, `sigwin.exe.minisig` and `licenses.html`, removes the notes file, then fetches the new tag. Needs `cargo-about`, `minisign` and
    `gh` (logged in) in `PATH`; the key defaults to `~\.minisign\sigwin.key` (`-Key` to change).
-3. Installed apps check `releases/latest` after the first sync (at once on the login screen), then hourly (and when the window
+4. Installed apps check `releases/latest` after the first sync (at once on the login screen), then hourly (and when the window
    gains focus after an hour without a check), download and verify the exe, swap it in, and
    show "새 버전 … 준비됨 · 다시 시작" in the sidebar. Network failures retry after 5 min,
    backing off to an hour.
@@ -31,6 +33,20 @@ Only versions greater than the running one are installed, so a bad release is fi
 a higher version, never by re-tagging. A release the app rejects (signature mismatch, missing
 `sigwin.exe` or `.minisig`) is skipped until a newer tag appears; it is remembered only until the
 app restarts, so each running app downloads a broken release at most once per launch.
+
+## Release notes
+Written per release from `git log <last tag>..HEAD` and the actual changes, not kept in a file along
+the way: several commits often make one change for users, and a bug made and fixed between two
+releases was never seen by anyone. GitHub releases are the record; there is no changelog file.
+- In the app's languages, from the user's side: what they can now do or what no longer goes wrong.
+  No function names or internals.
+- `## 새 기능` and `## 수정`, leaving out an empty one. Only what differs from the last release.
+- A MINOR release (no going back to older versions) says so first.
+- No account data, and nothing about a conversation it was found in.
+- With more than one language, a `## <language>` section each, so the app could later show just its
+  own. Notes of past releases stay as they are.
+
+The notes aren't covered by the update signature: if the app ever shows them, as plain text only.
 
 ## License notices
 `scripts\release.ps1` generates third-party notices with `cargo about`
