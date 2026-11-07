@@ -54,10 +54,12 @@ Every hunk under `vendor/` has to be re-applied by hand on each Slint / presage 
 - Prefer patches that fix upstream bugs (they can go upstream and disappear) over app-specific hooks into dependency internals. Never use a patch only to save app code or for a cosmetic detail.
 - Keep each hunk small, marked `// sigwin patch: <why>`, and listed in `vendor/PATCHES.md` with its reason and files, so the next upgrade knows what to re-apply.
 - When a hunk becomes unnecessary (upstream fixed it, the feature went away), remove it from the source and from `vendor/PATCHES.md`.
+- After changing anything under `vendor/`, assess whether it's worth an upstream PR and suggest it to the user: app-specific or generic, upstream conventions and tests, existing issues or PRs, what must be verified first. Opening a PR is outward-facing: ask first.
 
 ## Conventions
 - **This file holds rules, not a description of the code.** A rule stays true when the implementation changes. Don't put current values (sizes, budgets, caps) or how a feature works today here: they go stale unnoticed. They belong in the code and its comments. The same goes for `docs/architecture.md`: it explains structure and design, not implementation details.
 - UI strings are Korean; code comments are short and English.
+- Korean hints that tell the user how to do something end in "~할 수 있습니다" ("대화별로 설정할 수 있습니다"): a plain "~합니다" reads like what the app does, not an option they have. Hints about what the app itself does ("…를 표시합니다") stay as they are.
 - **Commit subjects are short**: one line, imperative, about 50 characters or less (hard cap 72), no trailing period. Put details in the body (blank line, then wrapped lines) only when the why isn't obvious. Don't cram the whole change list into the subject.
 - **Keep `README.md` current**: when a user-visible feature lands or changes, update its 기능 / 사용법 / 미지원 sections in the same commit.
 - **Keep `README.md` concise**: always short. Don't describe detailed behavior there (that belongs in `docs/`).
