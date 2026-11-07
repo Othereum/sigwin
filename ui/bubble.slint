@@ -603,7 +603,7 @@ export component Bubble inherits VerticalLayout {
                             width: probe-w;
                             text: m.text;
                             wrap: word-wrap;
-                            font-size: 14px;
+                            font-size: m.big-emoji ? 40px : 14px;
                         }
                         probe-pad := Text {
                             visible: false;
