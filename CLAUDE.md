@@ -61,8 +61,8 @@ Every hunk under `vendor/` has to be re-applied by hand on each Slint / presage 
 - UI strings are Korean; code comments are short and English.
 - Korean hints that tell the user how to do something end in "~할 수 있습니다" ("대화별로 설정할 수 있습니다"): a plain "~합니다" reads like what the app does, not an option they have. Hints about what the app itself does ("…를 표시합니다") stay as they are.
 - **Commit subjects are short**: one line, imperative, about 50 characters or less (hard cap 72), no trailing period. Put details in the body (blank line, then wrapped lines) only when the why isn't obvious. Don't cram the whole change list into the subject.
-- **Keep `README.md` current**: when a user-visible feature lands or changes, update its 기능 / 사용법 / 미지원 sections in the same commit.
-- **Keep `README.md` concise**: always short. Don't describe detailed behavior there (that belongs in `docs/`).
+- **Keep `README.md` current**: when a user-visible feature lands or changes, update its 기능 / 미지원 sections in the same commit, if that changes what they say.
+- **Keep `README.md` concise**: always short. List only what a user would call a feature, in as few words as it takes to know what it is. No parenthetical lists, settings, how-to or detailed behavior; add to it only what someone choosing an app needs, such as what the app reveals to others.
 - **Demo, probe and child runs set `SIGWIN_DATA` to a scratch dir.** The instance lock is per data dir: without it a demo either brings the real window to the front and exits, or runs on the real data dir (writes its settings and drafts, rewrites the autostart entry to this exe, mixes logs). Headless enforces it in code.
 - Sending messages or installing packs (`install_sticker_pack` syncs to the phone) on a real account is outward-facing: never do it from tests or automation. Useful log filter: `RUST_LOG=info,spqr=warn,presage_store_sqlite=error,sigwin=debug`.
 - Prefer the Edit tool over perl/sed for multi-line or backslash-heavy edits: shell escaping has already corrupted files here (Windows paths, `\f`, `\r`).
