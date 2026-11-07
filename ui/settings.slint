@@ -1,6 +1,6 @@
 // Settings page.
 
-import { Button, Switch } from "std-widgets.slint";
+import { Button, ListView, Switch } from "std-widgets.slint";
 import { Links, Theme } from "theme.slint";
 import { Avatar, DangerButton, IconButton, Segmented } from "widgets.slint";
 
@@ -118,10 +118,11 @@ export component SettingsPage inherits Rectangle {
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
         }
-        Flickable {
+        // a ListView for its scrollbar (it takes a single `for`: one row holding everything)
+        ListView {
             vertical-stretch: 1;
-            max-width: 100000px;
-            content-height: body.preferred-height;
+            for _ in [0]: Rectangle {
+            height: body.preferred-height;
             HorizontalLayout {
                 width: parent.width;
                 alignment: center;
@@ -389,6 +390,7 @@ export component SettingsPage inherits Rectangle {
                     }
                     Rectangle { height: 16px; }
                 }
+            }
             }
         }
     }
