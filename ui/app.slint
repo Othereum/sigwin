@@ -376,7 +376,27 @@ export component AppWindow inherits Window {
                             photo: root.me-photo;
                             has-photo: root.me-has-photo;
                         }
-                        TouchArea {
+                        // the photo is the way into the settings: a gear over it on hover, a ring while open
+                        Rectangle {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 32px;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: me-ta.has-hover ? #000000a0 : transparent;
+                            border-width: 2px;
+                            border-color: root.settings-open && !me-ta.has-hover ? Theme.subtle : transparent;
+                            Text {
+                                visible: me-ta.has-hover;
+                                text: "⚙";
+                                color: white;
+                                font-family: "Segoe UI Symbol";
+                                font-size: 18px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        me-ta := TouchArea {
                             mouse-cursor: pointer;
                             clicked => {
                                 if (root.settings-open) {
@@ -391,16 +411,6 @@ export component AppWindow inherits Window {
                         placeholder-text: "검색";
                         text <=> root.search;
                         edited(t) => { root.search-changed(t); }
-                    }
-                    IconButton {
-                        label: "⚙";
-                        clicked => {
-                            if (root.settings-open) {
-                                root.settings-open = false;
-                            } else {
-                                root.open-settings();
-                            }
-                        }
                     }
                 }
                 if root.connection-text != "": Rectangle {
