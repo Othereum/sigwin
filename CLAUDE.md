@@ -35,7 +35,7 @@ This client holds private conversations; treat a leak as worse than a crash. Eve
 cargo build --profile fast     # day-to-day, compile checks too: optimized, no LTO, incremental -> target\fast\
 cargo build                    # debug (dev profile): only for a debugger; rebuilds slower than fast here -> target\debug\
 cargo build --release          # distribution only (~2.5 min, thin LTO)
-cargo test
+cargo test --profile fast      # day-to-day tests: shares the fast build cache; plain `cargo test` (debug) only when debug_assert / overflow checks matter
 ```
 - **A running `sigwin.exe` locks its exe and the build fails with "액세스가 거부되었습니다".** Stop it first, or build a different profile.
 - `protoc` comes from `PATH`. `.cargo/config.toml` defaults `LIBCLANG_PATH` (overridable by env) and pins dummy `OPENSSL_*` dirs. libsqlite3-sys uses `bundled-sqlcipher-custom-crypto` (pure-Rust crypto); its Windows build script still demands OpenSSL paths, hence `build-support/no-openssl`.
