@@ -840,13 +840,15 @@ fn demo_videos(emit: &backend::Emit) {
     for (i, (w, h)) in [(150, 300), (150, 150), (150, 150)].into_iter().enumerate() {
         thumb(format!("demo-video-grid-{i}"), blur(w, h));
     }
-    let label = |key: &str, text: &str| emit(Event::MediaLabel { key: key.into(), text: text.into() });
-    label("demo-video-0", "12MB");
-    label("demo-video-1", "245MB");
-    label("demo-video-2", "1.2GB");
-    label("demo-video-grid-0", "38MB");
-    label("demo-video-grid-1", "2.4MB");
-    label("demo-video-grid-2", "1:02:05");
+    let label = |key: &str, text: &str, undownloaded| {
+        emit(Event::MediaLabel { key: key.into(), label: types::MediaLabel { text: text.into(), undownloaded } });
+    };
+    label("demo-video-0", "12MB", true);
+    label("demo-video-1", "245MB", true);
+    label("demo-video-2", "1.2GB", true);
+    label("demo-video-grid-0", "38MB", true);
+    label("demo-video-grid-1", "2.4MB", true);
+    label("demo-video-grid-2", "1:02:05", false);
     // the first frame replaces the blurhash
     std::thread::sleep(std::time::Duration::from_millis(1500));
     let (w, h) = (types::physical_px(400), types::physical_px(225));
@@ -855,7 +857,7 @@ fn demo_videos(emit: &backend::Emit) {
         None => (image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([(x * 255 / w) as u8, (y * 255 / h) as u8, 120, 255])), 75),
     };
     thumb("demo-video-0".into(), frame);
-    label("demo-video-0", &view::length_text(seconds));
+    label("demo-video-0", &view::length_text(seconds), false);
 }
 
 /// A real video's frame, by the way real ones go: encrypted on disk, through the decoding child.

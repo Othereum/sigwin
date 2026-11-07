@@ -23,9 +23,8 @@ impl App {
             let mut labelled = false;
             if !thumb_path.exists() {
                 if !orig_path.exists() {
-                    let text = view::undownloaded_label(&ptr);
-                    labelled = !text.is_empty();
-                    emit(Event::MediaLabel { key: key.clone(), text });
+                    labelled = true;
+                    emit(Event::MediaLabel { key: key.clone(), label: view::undownloaded_label(&ptr) });
                     let Some(m) = manager else { return };
                     match m.get_attachment(&ptr).await {
                         Ok(data) => {
@@ -50,7 +49,7 @@ impl App {
             })
             .await;
             if labelled {
-                emit(Event::MediaLabel { key: key.clone(), text: String::new() });
+                emit(Event::MediaLabel { key: key.clone(), label: Default::default() });
             }
             match res {
                 Ok(Ok(t)) => emit(Event::Thumb(Arc::new(t))),
@@ -81,11 +80,13 @@ impl App {
                 if let Some(t) = ptr.blur_hash.as_deref().and_then(|b| blur_thumb(&key, b, w, h)) {
                     emit(Event::Thumb(Arc::new(t)));
                 }
+                if !orig_path.exists() {
+                    emit(Event::MediaLabel { key: key.clone(), label: view::undownloaded_label(&ptr) });
+                }
                 if no_frame.exists() {
                     return;
                 }
                 if !orig_path.exists() {
-                    emit(Event::MediaLabel { key: key.clone(), text: view::undownloaded_label(&ptr) });
                     if !view::auto_fetches_video(&ptr) {
                         return;
                     }
@@ -123,7 +124,9 @@ impl App {
                 // the picture doesn't wait for this: a thumbnail cached before lengths were kept
                 // has to read its video again
                 let text = view::length_text(video_length(&length_path, &orig_path));
-                emit_done(Event::MediaLabel { key: k, text });
+                // having the frame doesn't mean having the video
+                let undownloaded = !orig_path.exists();
+                emit_done(Event::MediaLabel { key: k, label: crate::types::MediaLabel { text, undownloaded } });
                 anyhow::Ok(())
             })
             .await;
@@ -132,7 +135,7 @@ impl App {
                 Ok(Err(e)) => {
                     warn!("video frame: {e:#}");
                     // it was downloaded, so its size no longer applies
-                    emit(Event::MediaLabel { key: key.clone(), text: String::new() });
+                    emit(Event::MediaLabel { key: key.clone(), label: Default::default() });
                     let _ = tx.send(Internal::ThumbFailed(key));
                 }
                 Err(_) => {

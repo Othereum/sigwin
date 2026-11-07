@@ -36,13 +36,14 @@ export component MsgMeta inherits HorizontalLayout {
     }
 }
 
-// marks a picture as a video
-component PlayMark inherits Rectangle {
+// marks a picture as a video: what a click does to it
+component VideoMark inherits Rectangle {
+    in property <bool> undownloaded;
     width: 40px;
     height: 40px;
     border-radius: 20px;
     background: #00000090;
-    Text {
+    if !undownloaded: Text {
         // the triangle's weight sits left of its box
         x: 14px;
         y: 0px;
@@ -51,6 +52,16 @@ component PlayMark inherits Rectangle {
         font-family: "Segoe UI Symbol";
         font-size: 16px;
         color: white;
+        vertical-alignment: center;
+    }
+    if undownloaded: Text {
+        width: 100%;
+        height: 100%;
+        text: "↓";
+        font-family: "Segoe UI Symbol";
+        font-size: 22px;
+        color: white;
+        horizontal-alignment: center;
         vertical-alignment: center;
     }
 }
@@ -117,7 +128,7 @@ export component MsgImage inherits Rectangle {
         background: #80808030;
         z: -1;
     }
-    if m.video: PlayMark { }
+    if m.video: VideoMark { undownloaded: m.undownloaded; }
     if m.media-label != "": MediaLabel {
         text: m.media-label;
         x: 6px;
@@ -146,7 +157,7 @@ export component MsgImage inherits Rectangle {
             // already resampled to this size
             image-fit: fill;
         }
-        if cell.video && cell.more == 0: PlayMark { }
+        if cell.video && cell.more == 0: VideoMark { undownloaded: cell.undownloaded; }
         if cell.label != "" && cell.more == 0: MediaLabel {
             text: cell.label;
             x: 6px;

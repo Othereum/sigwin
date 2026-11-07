@@ -29,6 +29,8 @@ export struct ImageCell {
     video: bool,
     // a video's length, or the size of what isn't downloaded yet
     label: string,
+    // a click on this video downloads it first
+    undownloaded: bool,
 }
 
 export struct ReactionItem {
@@ -78,6 +80,8 @@ export struct MsgItem {
     video: bool,
     // over `image`: a video's length, or the size of what isn't downloaded yet
     media-label: string,
+    // a click on this video downloads it first
+    undownloaded: bool,
     // animated sticker: frames and the current one's index in `frame[0]` (empty: show `image`)
     frames: [image],
     frame: [int],

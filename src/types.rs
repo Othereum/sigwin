@@ -305,6 +305,15 @@ pub struct Thumb {
     pub rgba: Vec<u8>,
 }
 
+/// What a picture says about its file.
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct MediaLabel {
+    /// a video's length, or the size of what isn't downloaded yet. Empty: none.
+    pub text: String,
+    /// a click downloads it first, which a video's mark shows
+    pub undownloaded: bool,
+}
+
 /// An image for the viewer window.
 pub struct ViewerImage {
     pub id: String,
@@ -417,9 +426,8 @@ pub enum Event {
     /// scroll the message list to row `id` (already in the last `Messages`) and flash it
     JumpTo(String),
     Thumb(Arc<Thumb>),
-    /// text over the picture known by `key`: a video's length, or the size of what isn't
-    /// downloaded yet. Empty: none.
-    MediaLabel { key: String, text: String },
+    /// what the picture known by `key` says about its file
+    MediaLabel { key: String, label: MediaLabel },
     /// answer to `ViewImage`
     ViewerImage(ViewerImage),
     /// one of the answers to `ViewerThumbs`: message id, image index, thumbnail

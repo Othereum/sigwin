@@ -40,7 +40,7 @@ pub(crate) struct Ui {
     /// thumbnails for the open thread only; cleared on thread switch to bound memory
     thumbs: HashMap<String, Image>,
     /// text over pictures, by the same keys
-    media_labels: HashMap<String, String>,
+    media_labels: HashMap<String, types::MediaLabel>,
     /// animated stickers' frames (message list, open thread; the hovered picker sticker)
     anims: anim::Anims,
     /// round photos by thread key, for the whole session (~6KB each at 40px)
@@ -384,13 +384,14 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             });
         }
         Event::MediaLabel { .. } if UI.with_borrow(|ui| ui.released) => {}
-        Event::MediaLabel { key, text } => {
+        Event::MediaLabel { key, label } => {
             UI.with_borrow_mut(|ui| {
-                let shown: SharedString = text.as_str().into();
-                if text.is_empty() {
+                let shown: SharedString = label.text.as_str().into();
+                let undownloaded = label.undownloaded;
+                if label == types::MediaLabel::default() {
                     ui.media_labels.remove(&key);
                 } else {
-                    ui.media_labels.insert(key.clone(), text);
+                    ui.media_labels.insert(key.clone(), label);
                 }
                 for (i, m) in ui.last.iter().enumerate() {
                     let cell = m.cells.iter().position(|c| c.key == key);
@@ -402,9 +403,11 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                         // a new model, as for `Thumb`
                         let mut cells: Vec<ImageCell> = slint::Model::iter(&row.cells).collect();
                         cells[n].label = shown.clone();
+                        cells[n].undownloaded = undownloaded;
                         row.cells = ModelRc::new(VecModel::from(cells));
                     } else {
                         row.media_label = shown.clone();
+                        row.undownloaded = undownloaded;
                     }
                     slint::Model::set_row_data(&*ui.messages, i, row);
                 }

@@ -302,9 +302,10 @@ pub fn size_text(b: u64) -> String {
     }
 }
 
-/// How a picture says the size of a file that isn't here yet.
-pub fn undownloaded_label(ptr: &AttachmentPointer) -> String {
-    ptr.size.filter(|s| *s > 0).map_or(String::new(), |s| size_text(s as u64))
+/// What the picture of a file that isn't here yet says.
+pub fn undownloaded_label(ptr: &AttachmentPointer) -> crate::types::MediaLabel {
+    let text = ptr.size.filter(|s| *s > 0).map_or(String::new(), |s| size_text(s as u64));
+    crate::types::MediaLabel { text, undownloaded: true }
 }
 
 /// The file line of a message: a name, how many more, and their size together. `bytes` is `None`
@@ -1362,9 +1363,10 @@ mod tests {
         assert_eq!(length_text(3600), "1:00:00");
         assert_eq!(length_text(3725), "1:02:05");
         let ptr = |size| AttachmentPointer { size, ..Default::default() };
-        assert_eq!(undownloaded_label(&ptr(None)), "");
-        assert_eq!(undownloaded_label(&ptr(Some(0))), "");
-        assert_eq!(undownloaded_label(&ptr(Some(45 * 1024 * 1024))), "45MB");
+        assert_eq!(undownloaded_label(&ptr(None)).text, "");
+        assert_eq!(undownloaded_label(&ptr(Some(0))).text, "");
+        assert_eq!(undownloaded_label(&ptr(Some(45 * 1024 * 1024))).text, "45MB");
+        assert!(undownloaded_label(&ptr(None)).undownloaded);
     }
 
     #[test]

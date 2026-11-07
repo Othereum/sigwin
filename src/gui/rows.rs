@@ -213,7 +213,7 @@ pub(crate) fn reader_items(m: &MsgDto, senders: &HashMap<String, Image>) -> Mode
 pub(crate) fn to_item(
     m: &MsgDto,
     thumbs: &HashMap<String, Image>,
-    labels: &HashMap<String, String>,
+    labels: &HashMap<String, types::MediaLabel>,
     anims: &super::anim::Anims,
     senders: &HashMap<String, Image>,
     revealed: &std::collections::HashSet<String>,
@@ -221,7 +221,8 @@ pub(crate) fn to_item(
 ) -> MsgItem {
     let image = thumbs.get(&m.image_key).cloned();
     let (frames, frame) = anims.models(&m.image_key);
-    let label_of = |key: &str| labels.get(key).map_or(SharedString::new(), |t| t.as_str().into());
+    let label_of = |key: &str| labels.get(key).map_or(SharedString::new(), |l| l.text.as_str().into());
+    let undownloaded = |key: &str| labels.get(key).is_some_and(|l| l.undownloaded);
     let cells: Vec<ImageCell> = m
         .cells
         .iter()
@@ -234,6 +235,7 @@ pub(crate) fn to_item(
             more: c.more as i32,
             video: c.video,
             label: label_of(&c.key),
+            undownloaded: undownloaded(&c.key),
         })
         .collect();
     let avatar = if m.show_avatar { senders.get(&m.sender_key).cloned() } else { None };
@@ -289,6 +291,7 @@ pub(crate) fn to_item(
         has_image: !m.image_key.is_empty(),
         video: m.video,
         media_label: if m.sticker || !m.cells.is_empty() { SharedString::new() } else { label_of(&m.image_key) },
+        undownloaded: undownloaded(&m.image_key),
         image: image.unwrap_or_default(),
         frames,
         frame,
