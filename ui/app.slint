@@ -620,8 +620,15 @@ export component AppWindow inherits Window {
                         clicked => { root.jump-to-bottom(); }
                     }
                     Text {
-                        text: "↓";
-                        font-family: "Segoe UI Symbol";
+                        // the chevron sits high in its glyph box
+                        x: 0px;
+                        y: 1px;
+                        width: 100%;
+                        height: 100%;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        text: "\u{E70D}";
+                        font-family: "Segoe MDL2 Assets";
                         font-size: 18px;
                         color: Theme.text;
                     }
