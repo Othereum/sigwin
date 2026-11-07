@@ -2237,7 +2237,11 @@ impl TextInput {
         window_adapter: &Rc<dyn WindowAdapter>,
         self_rc: &ItemRc,
     ) -> (usize, TextCursorAffinity) {
-        window_adapter.renderer().text_input_byte_offset_for_position(self, self_rc, pos)
+        let (offset, affinity) =
+            window_adapter.renderer().text_input_byte_offset_for_position(self, self_rc, pos);
+        // sigwin patch: a click or drag inside an emoji (skin tone, ZWJ, VS16) selected half of it
+        let text = self.text();
+        (safe_grapheme_boundary_offset(offset as i32, &text), affinity)
     }
 
     /// When pressing the mouse (or releasing the finger, on android) we should take the focus if we don't have it already.
