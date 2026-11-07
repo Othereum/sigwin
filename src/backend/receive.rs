@@ -85,6 +85,7 @@ impl App {
             loop {
                 match Box::pin(m.receive_messages()).await {
                     Ok(stream) => {
+                        info!("receiving");
                         backoff = 2;
                         let _ = tx.send(Internal::Reconnected);
                         pin_mut!(stream);
@@ -93,6 +94,7 @@ impl App {
                                 return;
                             }
                         }
+                        info!("receiving stopped");
                         let _ = tx.send(Internal::ReceiveStopped("연결이 끊어졌습니다. 다시 연결 중…".into()));
                     }
                     Err(e) => {
@@ -128,6 +130,11 @@ impl App {
     }
 
     pub(super) async fn content(&mut self, c: Content) {
+        if view::data_message(&c).is_some() {
+            // how long the sender took to get it to the server, then the server to get it here
+            let (sent, server) = (c.metadata.client_timestamp.timestamp_millis(), c.metadata.server_timestamp.timestamp_millis());
+            debug!(sent, sender_ms = server - sent, delivery_ms = now_ms() as i64 - server, "message arrived");
+        }
         // read on another device -> clear our badge for that thread
         if let ContentBody::SynchronizeMessage(SyncMessage { read, .. }) = &c.body {
             for r in read {
