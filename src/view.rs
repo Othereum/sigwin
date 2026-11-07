@@ -304,7 +304,23 @@ pub fn size_text(b: u64) -> String {
 
 /// How a picture says the size of a file that isn't here yet.
 pub fn undownloaded_label(ptr: &AttachmentPointer) -> String {
-    ptr.size.map_or(String::new(), |s| size_text(s as u64))
+    ptr.size.filter(|s| *s > 0).map_or(String::new(), |s| size_text(s as u64))
+}
+
+/// The file line of a message: a name, how many more, and their size together. `bytes` is `None`
+/// if a size isn't known: a total of some of them would be wrong.
+pub fn file_line(first: &str, more: usize, bytes: Option<u64>) -> String {
+    let names = if more > 0 { format!("{first} 외 {more}개") } else { first.to_string() };
+    match bytes {
+        Some(b) => format!("{names} · {}", size_text(b)),
+        None => names,
+    }
+}
+
+fn files_label(files: &[&AttachmentPointer]) -> String {
+    let Some(first) = files.first() else { return String::new() };
+    let bytes = files.iter().map(|a| a.size.filter(|s| *s > 0).map(|s| s as u64)).sum();
+    file_line(&attachment_label(first), files.len() - 1, bytes)
 }
 
 /// A video's length as players show it. Empty when it isn't known.
@@ -887,17 +903,16 @@ pub fn build(
                     m.quote_author = quote_author_name(q, me, name_of);
                     m.quote_id = q.id.map(|i| i.to_string()).unwrap_or_default();
                 }
-                let mut others = 0;
+                let mut files = Vec::new();
                 let mut photos = Vec::new();
                 for (i, a) in shown_attachments(dm) {
                     if !m.sticker && is_media(a) {
                         photos.push((i, a));
-                    } else if m.attachment.is_empty() {
-                        m.attachment = attachment_label(a);
                     } else {
-                        others += 1;
+                        files.push(a);
                     }
                 }
+                m.attachment = files_label(&files);
                 if let [(i, a)] = photos[..] {
                     let key = attachment_key(a, *ts, i);
                     let (w, h) = fit(a.width, a.height);
@@ -925,9 +940,6 @@ pub fn build(
                     for (cell, (_, a)) in m.cells.iter_mut().zip(&photos) {
                         cell.video = is_video(a);
                     }
-                }
-                if others > 0 {
-                    m.attachment = format!("{} 외 {}개", m.attachment, others);
                 }
                 // not next to attachments (Signal's clients don't send that), and it would give
                 // away what a spoiler in the text hides
@@ -1351,7 +1363,21 @@ mod tests {
         assert_eq!(length_text(3725), "1:02:05");
         let ptr = |size| AttachmentPointer { size, ..Default::default() };
         assert_eq!(undownloaded_label(&ptr(None)), "");
+        assert_eq!(undownloaded_label(&ptr(Some(0))), "");
         assert_eq!(undownloaded_label(&ptr(Some(45 * 1024 * 1024))), "45MB");
+    }
+
+    #[test]
+    fn file_lines_say_the_size_of_all_files_together() {
+        let file = |name: &str, size| AttachmentPointer { file_name: Some(name.into()), size, ..Default::default() };
+        let (a, b) = (file("a.pdf", Some(2 * 1024 * 1024)), file("b.pdf", Some(1024 * 1024)));
+        assert_eq!(files_label(&[]), "");
+        assert_eq!(files_label(&[&a]), "a.pdf · 2.0MB");
+        assert_eq!(files_label(&[&a, &b]), "a.pdf 외 1개 · 3.0MB");
+        // one size missing: no total
+        let unknown = file("c.pdf", None);
+        assert_eq!(files_label(&[&a, &unknown]), "a.pdf 외 1개");
+        assert_eq!(files_label(&[&file("d.pdf", Some(0))]), "d.pdf");
     }
 
     #[test]

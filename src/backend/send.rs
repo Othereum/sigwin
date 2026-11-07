@@ -49,11 +49,11 @@ impl App {
         // the message itself ends our typing indicator on the other side
         self.composing = None;
         let ts = self.next_send_ts();
-        let attachment = match files.as_slice() {
-            [] => String::new(),
-            [one] => file_label(one),
-            [first, rest @ ..] => format!("{} 외 {}개", file_label(first), rest.len()),
-        };
+        // the same line the stored row gets, so it doesn't change when the send ends
+        let attachment = files.first().map_or(String::new(), |first| {
+            let bytes = files.iter().map(|f| std::fs::metadata(f).ok().map(|m| m.len())).sum();
+            view::file_line(&file_label(first), files.len() - 1, bytes)
+        });
         self.pending.push(Pending {
             ts,
             thread_key: key,
