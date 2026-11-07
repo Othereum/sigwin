@@ -475,7 +475,10 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
 
 fn demo_link_image(key: &str, w: u32, h: u32) -> types::Thumb {
     let (pw, ph) = (types::physical_px(w), types::physical_px(h));
-    let img = image::RgbaImage::from_fn(pw, ph, |x, y| image::Rgba([(x * 255 / pw) as u8, 90, (y * 255 / ph) as u8, 255]));
+    // thin diagonal lines: any nearest-neighbor stretch of the card shows as jagged steps
+    let img = image::RgbaImage::from_fn(pw, ph, |x, y| {
+        if (x + y) % 24 == 0 { image::Rgba([255, 255, 255, 255]) } else { image::Rgba([(x * 255 / pw) as u8, 90, (y * 255 / ph) as u8, 255]) }
+    });
     types::Thumb { key: key.into(), width: pw, height: ph, rgba: img.into_raw() }
 }
 
@@ -493,7 +496,7 @@ fn demo_link_rows(items: &mut [types::MsgDto]) {
         })
     };
     let rows = [
-        ("https://youtube.com/demo 이거 봐봐", false, card("합성 데이터로 만든 영상 제목", "영상 설명이 이 자리에 나옵니다.", "youtube.com", "demo-link-wide", (300, 158))),
+        ("https://youtube.com/demo 이거 봐봐 창이 넓을 때 글이 길어서 말풍선이 카드보다 넓어지는 경우를 보려고 일부러 길게 쓴 메시지입니다 정말로 길게 씁니다 더 길게 씁니다 더 더 길게", false, card("합성 데이터로 만든 영상 제목인데 창이 넓을 때 카드가 늘어나는지 보려고 일부러 길게 쓴 제목입니다", "영상 설명이 이 자리에 나옵니다.", "youtube.com", "demo-link-wide", (300, 158))),
         ("https://www.example.kr/demo", true, card("내가 보낸 링크의 제목", "", "example.kr", "demo-link-wide", (300, 158))),
         ("https://news.example.kr/demo", false, card("아주 긴 뉴스 제목이 두 줄을 넘어가면 어떻게 잘리는지 확인하기 위해 일부러 길게 쓴 제목입니다 정말로 길게 썼습니다", "설명도 길게 씁니다. 두 줄을 넘는 설명은 끝에서 잘리고 말줄임표가 나와야 합니다. 그래서 충분히 길게 씁니다. 더 길게 씁니다.", "news.example.kr", "demo-link-small", (64, 64))),
         ("https://blog.example.kr/demo", false, card("이미지 없는 미리보기", "설명만 있습니다.", "blog.example.kr", "", (0, 0))),

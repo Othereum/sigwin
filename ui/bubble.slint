@@ -212,6 +212,8 @@ component LinkPreview inherits Rectangle {
     property <bool> wide: m.link-img-w > 100px;
     property <bool> small: m.link-img-w > 0px && !wide;
     preferred-width: 300px;
+    // a wide image is pre-resampled to exactly this width; stretching it would be nearest-neighbor
+    max-width: wide ? m.link-img-w : 100000px;
     border-radius: 8px;
     clip: true;
     background: m.outgoing ? (ta.has-hover ? #ffffff48 : #ffffff30) : Theme.dark ? (ta.has-hover ? #ffffff22 : #ffffff14) : (ta.has-hover ? #0000001c : #00000010);
