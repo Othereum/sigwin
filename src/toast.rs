@@ -252,7 +252,7 @@ pub fn register() {
 }
 
 #[cfg(windows)]
-mod win {
+pub(crate) mod win {
     use std::path::PathBuf;
 
     use anyhow::Context;
@@ -262,6 +262,18 @@ mod win {
     use windows::UI::Notifications::{ToastActivatedEventArgs, ToastNotification, ToastNotificationManager};
 
     const ICON: &[u8] = include_bytes!("../assets/icon.png");
+
+    /// Holds the MTA, and the DLLs COM loaded for it, for the whole test process. The install test's
+    /// STA thread exits holding COM objects, and the last one out unloads them under a WinRT call
+    /// on another test thread. The app always has its UI thread's STA, so it needs no such hold.
+    #[cfg(test)]
+    pub fn pin_mta() {
+        static PIN: std::sync::Once = std::sync::Once::new();
+        // SAFETY: no arguments; the cookie is dropped on purpose, the hold is never released
+        PIN.call_once(|| {
+            let _ = unsafe { windows::Win32::System::Com::CoIncrementMTAUsage() };
+        });
+    }
 
     pub fn show(xml: &str) -> windows::core::Result<()> {
         let doc = XmlDocument::new()?;
@@ -335,6 +347,7 @@ mod tests {
         use windows::core::HSTRING;
         use windows::Data::Xml::Dom::XmlDocument;
         use windows::UI::Notifications::ToastNotification;
+        win::pin_mta();
         for (pic, sound) in [(None, true), (Some(Path::new(r"C:\tmp\a b\toast-1.png")), false)] {
             let doc = XmlDocument::new().unwrap();
             doc.LoadXml(&HSTRING::from(toast_xml("김 & <철수>", "\"안녕\" 👍", pic, "1-2", sound))).unwrap();

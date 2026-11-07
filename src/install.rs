@@ -398,6 +398,7 @@ mod win {
             fs::write(&src, b"v1").unwrap();
             place(&lay, &src).unwrap();
             register(&lay).unwrap();
+            crate::toast::win::pin_mta();
             shortcut(&lay).unwrap();
             assert!(lay.shortcut.exists());
             assert_eq!(reg::get_str(&lay.uninstall_key(), "DisplayVersion").as_deref(), Some(VERSION));
