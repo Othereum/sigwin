@@ -312,6 +312,8 @@ pub struct MediaLabel {
     pub text: String,
     /// a click downloads it first, which a video's mark shows
     pub undownloaded: bool,
+    /// percent, while it is on its way and that's being followed
+    pub progress: Option<u8>,
 }
 
 /// An image for the viewer window.

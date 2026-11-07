@@ -210,6 +210,18 @@ pub(crate) fn reader_items(m: &MsgDto, senders: &HashMap<String, Image>) -> Mode
     ModelRc::new(VecModel::from(rows))
 }
 
+/// The percent a picture's mark shows; -1: none.
+pub(crate) fn progress_of(label: &types::MediaLabel) -> i32 {
+    label.progress.map_or(-1, i32::from)
+}
+
+/// The ring around a video's mark (`VideoMark`, 40px), at the size it's shown.
+pub(crate) fn ring_of(label: &types::MediaLabel) -> Image {
+    label.progress.map_or_else(Image::default, |percent| {
+        Image::from_rgba8(sigwin_thumb::progress_ring(types::physical_px(40), types::physical_px(3) as f32, percent))
+    })
+}
+
 pub(crate) fn to_item(
     m: &MsgDto,
     thumbs: &HashMap<String, Image>,
@@ -223,6 +235,8 @@ pub(crate) fn to_item(
     let (frames, frame) = anims.models(&m.image_key);
     let label_of = |key: &str| labels.get(key).map_or(SharedString::new(), |l| l.text.as_str().into());
     let undownloaded = |key: &str| labels.get(key).is_some_and(|l| l.undownloaded);
+    let progress = |key: &str| labels.get(key).map_or(-1, progress_of);
+    let ring = |key: &str| labels.get(key).map_or_else(Image::default, ring_of);
     let cells: Vec<ImageCell> = m
         .cells
         .iter()
@@ -236,6 +250,8 @@ pub(crate) fn to_item(
             video: c.video,
             label: label_of(&c.key),
             undownloaded: undownloaded(&c.key),
+            progress: progress(&c.key),
+            ring: ring(&c.key),
         })
         .collect();
     let avatar = if m.show_avatar { senders.get(&m.sender_key).cloned() } else { None };
@@ -292,6 +308,8 @@ pub(crate) fn to_item(
         video: m.video,
         media_label: if m.sticker || !m.cells.is_empty() { SharedString::new() } else { label_of(&m.image_key) },
         undownloaded: undownloaded(&m.image_key),
+        progress: progress(&m.image_key),
+        ring: ring(&m.image_key),
         image: image.unwrap_or_default(),
         frames,
         frame,

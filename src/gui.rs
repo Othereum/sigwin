@@ -388,6 +388,8 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             UI.with_borrow_mut(|ui| {
                 let shown: SharedString = label.text.as_str().into();
                 let undownloaded = label.undownloaded;
+                let progress = rows::progress_of(&label);
+                let ring = rows::ring_of(&label);
                 if label == types::MediaLabel::default() {
                     ui.media_labels.remove(&key);
                 } else {
@@ -404,10 +406,14 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                         let mut cells: Vec<ImageCell> = slint::Model::iter(&row.cells).collect();
                         cells[n].label = shown.clone();
                         cells[n].undownloaded = undownloaded;
+                        cells[n].progress = progress;
+                        cells[n].ring = ring.clone();
                         row.cells = ModelRc::new(VecModel::from(cells));
                     } else {
                         row.media_label = shown.clone();
                         row.undownloaded = undownloaded;
+                        row.progress = progress;
+                        row.ring = ring.clone();
                     }
                     slint::Model::set_row_data(&*ui.messages, i, row);
                 }

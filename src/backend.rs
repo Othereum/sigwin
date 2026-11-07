@@ -292,6 +292,7 @@ struct App {
     /// thumbnails and long texts asked for in the open thread
     /// (shared with the tasks: a video waiting for its turn is dropped once it's no longer in here)
     thumbs_requested: Rc<RefCell<HashSet<String>>>,
+    video_downloads: files::VideoDownloads,
     /// held while making a message's thumbnail
     thumb_gate: Arc<tokio::sync::Semaphore>,
     /// held while downloading a video nobody asked for
@@ -440,6 +441,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         current_dirty: false,
         threads_dirty: false,
         thumbs_requested: Default::default(),
+        video_downloads: Default::default(),
         thumb_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         video_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         long: Default::default(),

@@ -57,6 +57,10 @@ Sending: the same child reads the file being sent for its size and blurhash, so 
 
 Labels on pictures: a video's length comes from the child along with its frame, because a message doesn't carry it, so it can only show once the video is here. Until then the picture shows the size the message does carry. The length is kept encrypted next to the frame. A frame cached before lengths were kept reads its video once more, if that is still here.
 
+Download progress on videos: `Manager::get_attachment` reads the whole file before returning, so videos go through libsignal-service's public `PushService` with the same checks and the same user agent. A vendor patch to presage would have saved those few lines at the cost of a hunk on every upgrade. The client is made per download, since one kept around would add to idle memory. Photos and files still use presage: photos download by themselves in moments, and a file line has nowhere to show it.
+
+A click on an undownloaded video only downloads it, and another click plays it. Rejected: playing it when the download ends, which can come minutes later, over whatever the user is doing by then, taking the focus and making noise, with others perhaps looking at the screen. A video stopped by a click isn't downloaded by itself again until the app restarts; that is kept in memory only.
+
 ## Sticker and avatar resampling (measured 2026-11-06, synthetic images, heap peak without the source)
 `fit` moved from `image`'s resize in f32 to `fast_image_resize`:
 | job | `image`, f32 | fir |

@@ -31,6 +31,10 @@ export struct ImageCell {
     label: string,
     // a click on this video downloads it first
     undownloaded: bool,
+    // percent while it downloads; -1: none
+    progress: int,
+    // that percent, drawn
+    ring: image,
 }
 
 export struct ReactionItem {
@@ -82,6 +86,10 @@ export struct MsgItem {
     media-label: string,
     // a click on this video downloads it first
     undownloaded: bool,
+    // percent while it downloads; -1: none
+    progress: int,
+    // that percent, drawn
+    ring: image,
     // animated sticker: frames and the current one's index in `frame[0]` (empty: show `image`)
     frames: [image],
     frame: [int],

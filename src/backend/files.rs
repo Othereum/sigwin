@@ -1,5 +1,7 @@
 //! Attachment and thumbnail caches (encrypted on disk), opening attachments.
 
+use futures::future::{AbortHandle, Abortable};
+
 use super::*;
 
 /// How a message's thumbnail is drawn, in logical px.
@@ -75,6 +77,7 @@ impl App {
         let gate = self.thumb_gate.clone();
         let fetch_gate = self.video_gate.clone();
         let requested = self.thumbs_requested.clone();
+        let downloads = self.video_downloads.clone();
         tokio::task::spawn_local(async move {
             if !thumb_path.exists() {
                 if let Some(t) = ptr.blur_hash.as_deref().and_then(|b| blur_thumb(&key, b, w, h)) {
@@ -91,15 +94,20 @@ impl App {
                         return;
                     }
                     let _turn = fetch_gate.acquire_owned().await;
-                    if !requested.borrow().contains(&key) {
+                    // clicked meanwhile: that one is getting it, or it was stopped and stays so
+                    if !requested.borrow().contains(&key) || downloads.is_running(&file_key) || downloads.was_stopped(&file_key) {
                         return;
                     }
                     if !orig_path.exists() {
-                        let Some(m) = manager else { return };
-                        let data = match m.get_attachment(&ptr).await {
-                            Ok(data) => data,
+                        if manager.is_none() {
+                            return;
+                        }
+                        let shown = [key.clone()];
+                        let data = match downloads.run(&file_key, &ptr, &shown, &emit).await {
+                            Ok(Some(data)) => data,
+                            Ok(None) => return,
                             Err(e) => {
-                                warn!("download video: {e}");
+                                warn!("download video: {e:#}");
                                 let _ = tx.send(Internal::ThumbFailed(key));
                                 return;
                             }
@@ -126,7 +134,7 @@ impl App {
                 let text = view::length_text(video_length(&length_path, &orig_path));
                 // having the frame doesn't mean having the video
                 let undownloaded = !orig_path.exists();
-                emit_done(Event::MediaLabel { key: k, label: crate::types::MediaLabel { text, undownloaded } });
+                emit_done(Event::MediaLabel { key: k, label: crate::types::MediaLabel { text, undownloaded, progress: None } });
                 anyhow::Ok(())
             })
             .await;
@@ -145,24 +153,57 @@ impl App {
         });
     }
 
-    /// Video `index` of row `id`, in the default app. Once downloaded it can show its first frame.
+    /// A click on video `index` of row `id`: plays it in the default app if it's here, stops it if
+    /// it's on its way, and otherwise downloads it. It doesn't play by itself when that's done: the
+    /// user may be doing something else by then, and it would take the focus and start making noise.
     pub(super) fn open_video(&self, id: &str, index: usize) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let Some((i, a)) = view::shown_attachments(dm).filter(|(_, a)| view::is_video(a)).nth(index) else { return };
         let file_key = view::attachment_key(a, ts, i);
+        if self.video_downloads.stop(&file_key) {
+            return;
+        }
         let path = attachment_path(&self.paths.attachments, &file_key);
         let ptr = a.clone();
-        let manager = self.manager.clone();
+        let downloads = self.video_downloads.clone();
+        // the same video can be shown at another size; a row that isn't asking for it shows nothing
+        let shown: Vec<String> = self.thumbs_requested.borrow().iter().filter(|k| k.starts_with(&file_key)).cloned().collect();
+        let registered = self.manager.is_some();
+        let emit = self.emit.clone();
         let tx = self.tx.clone();
         let open_dir = self.paths.open.clone();
         tokio::task::spawn_local(async move {
-            let had = path.exists();
-            if fetch_attachment(&manager, &tx, &path, &ptr).await {
-                if !had {
-                    let _ = tx.send(Internal::VideoFetched(file_key));
-                }
+            if path.exists() {
                 open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
+                return;
             }
+            if !registered {
+                return;
+            }
+            if shown.is_empty() {
+                let _ = tx.send(Internal::Progress("첨부파일 다운로드 중…".into()));
+            }
+            let data = match downloads.run(&file_key, &ptr, &shown, &emit).await {
+                Ok(Some(data)) => data,
+                Ok(None) => {
+                    let _ = tx.send(Internal::ProgressDone);
+                    return;
+                }
+                Err(e) => {
+                    let _ = tx.send(Internal::Notice(format!("다운로드 실패: {e:#}")));
+                    return;
+                }
+            };
+            match tokio::task::spawn_blocking(move || sigwin_vault::write(&path, &data)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    let _ = tx.send(Internal::Notice(format!("저장 실패: {e}")));
+                    return;
+                }
+                Err(_) => return,
+            }
+            let _ = tx.send(Internal::ProgressDone);
+            let _ = tx.send(Internal::VideoFetched(file_key));
         });
     }
 
@@ -342,6 +383,109 @@ impl App {
 /// The peak is 7 bytes per pixel for photos, 8 with transparency; the viewer holds the original at 4
 /// until it closes.
 const VIEW_MAX_PIXELS: u64 = 100_000_000;
+
+/// What presage calls itself to the CDN: its own constant is private, and a download that says
+/// something else would stand out for no reason.
+const PRESAGE_USER_AGENT: &str = "presage-rs-0.8.0-dev";
+
+/// Videos on their way, by file key, so a click can stop them. One that was stopped isn't
+/// downloaded by itself again while the app runs, or it would start over when its row comes back.
+#[derive(Clone, Default)]
+pub(super) struct VideoDownloads {
+    running: Rc<RefCell<HashMap<String, AbortHandle>>>,
+    stopped: Rc<RefCell<HashSet<String>>>,
+}
+
+impl VideoDownloads {
+    fn is_running(&self, file_key: &str) -> bool {
+        self.running.borrow().contains_key(file_key)
+    }
+
+    fn was_stopped(&self, file_key: &str) -> bool {
+        self.stopped.borrow().contains(file_key)
+    }
+
+    /// False if it isn't on its way.
+    fn stop(&self, file_key: &str) -> bool {
+        let Some(handle) = self.running.borrow_mut().remove(file_key) else { return false };
+        handle.abort();
+        self.stopped.borrow_mut().insert(file_key.to_string());
+        true
+    }
+
+    /// Downloads a video as `Manager::get_attachment` does, which can't say how far along it is,
+    /// showing that on the pictures `shown`. `None`: it was stopped. When it doesn't finish they
+    /// go back to how they were.
+    async fn run(&self, file_key: &str, ptr: &AttachmentPointer, shown: &[String], emit: &Emit) -> anyhow::Result<Option<Vec<u8>>> {
+        let (handle, registration) = AbortHandle::new_pair();
+        self.running.borrow_mut().insert(file_key.to_string(), handle.clone());
+        self.stopped.borrow_mut().remove(file_key);
+        let show = |label: crate::types::MediaLabel| {
+            for key in shown {
+                emit(Event::MediaLabel { key: key.clone(), label: label.clone() });
+            }
+        };
+        show(view::downloading_label(ptr, 0, 0));
+        let res = Abortable::new(download(ptr, |got, percent| show(view::downloading_label(ptr, got, percent))), registration).await;
+        // a stopped one is already out of the list, and a new one may have taken its place
+        if !handle.is_aborted() {
+            self.running.borrow_mut().remove(file_key);
+        }
+        if !matches!(res, Ok(Ok(_))) {
+            show(view::undownloaded_label(ptr));
+        }
+        match res {
+            Ok(res) => res.map(Some),
+            Err(_) => Ok(None),
+        }
+    }
+}
+
+/// `progress` gets the bytes so far and their percent, each time that goes up.
+async fn download(ptr: &AttachmentPointer, mut progress: impl FnMut(u64, u8)) -> anyhow::Result<Vec<u8>> {
+    use futures::AsyncReadExt;
+    let digest = ptr.digest.clone().context("attachment without a digest")?;
+    let key: [u8; 64] = ptr.key().try_into().context("attachment key")?;
+    // no credentials: the CDN doesn't take any. Not kept: downloads are rare, and an idle client
+    // and its connections would stay in memory.
+    let mut service = presage::libsignal_service::push_service::PushService::new(SignalServers::Production, None, PRESAGE_USER_AGENT);
+    let mut download = service.get_attachment(ptr).await?;
+    let total = download.content_length.or(ptr.size.map(u64::from));
+    let mut data = Vec::with_capacity(total.unwrap_or(0) as usize);
+    let mut chunk = vec![0; 64 * 1024];
+    let mut last = 0;
+    loop {
+        let n = download.stream.read(&mut chunk).await.context("read attachment")?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&chunk[..n]);
+        let now = percent(data.len() as u64, total);
+        if now != last {
+            last = now;
+            progress(data.len() as u64, now);
+        }
+    }
+    let size = ptr.size.and_then(|s| usize::try_from(s).ok());
+    tokio::task::spawn_blocking(move || open_download(data, &digest, key, size)).await.context("decrypt attachment")?
+}
+
+/// How much of `total` bytes `got` is. An unknown total stays at 0.
+fn percent(got: u64, total: Option<u64>) -> u8 {
+    total.filter(|t| *t > 0).map_or(0, |t| (got.saturating_mul(100) / t).min(100) as u8)
+}
+
+/// Checks a downloaded attachment against its message and decrypts it.
+fn open_download(mut data: Vec<u8>, digest: &[u8], key: [u8; 64], size: Option<usize>) -> anyhow::Result<Vec<u8>> {
+    use sha2::Digest;
+    anyhow::ensure!(sha2::Sha256::digest(&data)[..] == *digest, "attachment digest doesn't match");
+    presage::libsignal_service::attachment_cipher::decrypt_in_place(key, &mut data)?;
+    // what's past the size is padding
+    if let Some(size) = size.filter(|s| *s < data.len()) {
+        data.truncate(size);
+    }
+    Ok(data)
+}
 
 /// Downloads an attachment unless it is cached; false (notice shown) if that failed.
 async fn fetch_attachment(manager: &Option<Mgr>, tx: &UnboundedSender<Internal>, path: &Path, ptr: &AttachmentPointer) -> bool {
@@ -641,6 +785,50 @@ pub(super) fn clear_dir(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn downloads_are_checked_decrypted_and_unpadded() {
+        use presage::libsignal_service::attachment_cipher::encrypt_in_place;
+        use sha2::Digest;
+        let key = [5; 64];
+        let mut cipher = b"hello video\0\0\0\0\0".to_vec();
+        encrypt_in_place([9; 16], key, &mut cipher);
+        let digest = sha2::Sha256::digest(&cipher).to_vec();
+
+        assert_eq!(open_download(cipher.clone(), &digest, key, Some(11)).unwrap(), b"hello video");
+        assert_eq!(open_download(cipher.clone(), &digest, key, None).unwrap().len(), 16);
+        // a size past the end doesn't pad
+        assert_eq!(open_download(cipher.clone(), &digest, key, Some(99)).unwrap().len(), 16);
+        assert!(open_download(cipher.clone(), &[0; 32], key, None).is_err());
+        assert!(open_download(cipher, &digest, [6; 64], None).is_err());
+    }
+
+    #[test]
+    fn stopping_a_video_is_remembered_until_it_is_asked_for_again() {
+        let d = VideoDownloads::default();
+        assert!(!d.stop("v"));
+        assert!(!d.was_stopped("v"));
+
+        let (handle, _registration) = AbortHandle::new_pair();
+        d.running.borrow_mut().insert("v".into(), handle.clone());
+        assert!(d.is_running("v"));
+        assert!(d.stop("v"));
+        assert!(handle.is_aborted());
+        assert!(!d.is_running("v") && d.was_stopped("v"));
+        // a second click isn't another stop: it downloads again
+        assert!(!d.stop("v"));
+    }
+
+    #[test]
+    fn progress_is_a_percentage_of_what_is_known() {
+        assert_eq!(percent(0, Some(100)), 0);
+        assert_eq!(percent(45, Some(100)), 45);
+        assert_eq!(percent(100, Some(100)), 100);
+        // more than was announced
+        assert_eq!(percent(150, Some(100)), 100);
+        assert_eq!(percent(50, None), 0);
+        assert_eq!(percent(50, Some(0)), 0);
+    }
 
     #[test]
     fn video_lengths_are_sealed_and_read_back() {

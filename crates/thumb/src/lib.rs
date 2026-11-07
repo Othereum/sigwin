@@ -7,6 +7,33 @@ pub use image::{DynamicImage, ImageResult, RgbaImage};
 /// Pixels ready for the UI. Filled here because their code is generic too.
 pub type Pixels = slint::SharedPixelBuffer<slint::Rgba8Pixel>;
 
+/// A ring as wide as `size`, its line `width` thick: white clockwise from the top for `percent` of
+/// the way, faint for the rest, smooth at the edges and clear inside and out. It's drawn here
+/// because the software renderer can't cut a gradient to a circle.
+pub fn progress_ring(size: u32, width: f32, percent: u8) -> Pixels {
+    use std::f32::consts::TAU;
+    const FAINT: f32 = 0.25;
+    let mut out = Pixels::new(size, size);
+    let outer = size as f32 / 2.0;
+    let inner = outer - width;
+    let done = percent.min(100) as f32 / 100.0 * TAU;
+    for (i, px) in out.make_mut_slice().iter_mut().enumerate() {
+        let (x, y) = ((i as u32 % size) as f32 + 0.5 - outer, (i as u32 / size) as f32 + 0.5 - outer);
+        let r = x.hypot(y);
+        let cover = (outer - r + 0.5).clamp(0.0, 1.0) * (r - inner + 0.5).clamp(0.0, 1.0);
+        // how far along the line this pixel is inside the done part, in pixels
+        let angle = x.atan2(-y).rem_euclid(TAU);
+        let along = match percent {
+            0 => 0.0,
+            100.. => 1.0,
+            _ => ((done - angle) * r + 0.5).clamp(0.0, 1.0),
+        };
+        let alpha = cover * (FAINT + (1.0 - FAINT) * along);
+        *px = slint::Rgba8Pixel { r: 255, g: 255, b: 255, a: (alpha * 255.0 + 0.5) as u8 };
+    }
+    out
+}
+
 /// Decodes, sniffing the format (file names and content types may lie).
 pub fn decode(bytes: &[u8]) -> ImageResult<DynamicImage> {
     image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.decode()
@@ -206,6 +233,30 @@ fn blurhash_draws_and_refuses_malformed() {
         assert!(blurhash(bad, 32, 32).is_none(), "{bad}");
     }
     assert!(blurhash("LEHV6nWB2yk8pyo0adR*.7kCMdnj", 0, 32).is_none());
+}
+
+#[test]
+fn progress_ring_fills_clockwise_from_the_top() {
+    let alpha = |percent, x: usize, y: usize| progress_ring(40, 3.0, percent).as_slice()[y * 40 + x].a;
+    // on the line: right, bottom and left of the center
+    let (right, bottom, left) = ((38, 20), (20, 38), (1, 20));
+    let at = |percent, (x, y)| alpha(percent, x, y);
+    assert_eq!(at(0, right), 64);
+    assert_eq!(at(0, left), 64);
+    assert_eq!(at(30, right), 255);
+    assert_eq!(at(30, bottom), 64);
+    assert_eq!(at(60, bottom), 255);
+    assert_eq!(at(60, left), 64);
+    assert_eq!(at(100, left), 255);
+    // clear in the corners and the middle, whatever the percent
+    for percent in [0, 50, 100] {
+        assert_eq!(alpha(percent, 0, 0), 0);
+        assert_eq!(alpha(percent, 39, 39), 0);
+        assert_eq!(alpha(percent, 20, 20), 0);
+    }
+    // nothing bright just left of the top at 0, and the start of the line isn't cut at 100
+    assert_eq!(alpha(0, 19, 1), 64);
+    assert_eq!(alpha(100, 19, 1), 255);
 }
 
 #[test]

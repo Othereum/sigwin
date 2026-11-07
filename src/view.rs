@@ -305,7 +305,18 @@ pub fn size_text(b: u64) -> String {
 /// What the picture of a file that isn't here yet says.
 pub fn undownloaded_label(ptr: &AttachmentPointer) -> crate::types::MediaLabel {
     let text = ptr.size.filter(|s| *s > 0).map_or(String::new(), |s| size_text(s as u64));
-    crate::types::MediaLabel { text, undownloaded: true }
+    crate::types::MediaLabel { text, undownloaded: true, progress: None }
+}
+
+/// What the picture of a file on its way says: `got` bytes of it, and `percent` for its ring.
+/// `got` counts what's on the wire, a little more than the file: it stops at the file's size.
+pub fn downloading_label(ptr: &AttachmentPointer, got: u64, percent: u8) -> crate::types::MediaLabel {
+    let size = ptr.size.filter(|s| *s > 0).map(u64::from);
+    let text = match size {
+        Some(size) => format!("{} / {}", size_text(got.min(size)), size_text(size)),
+        None => size_text(got),
+    };
+    crate::types::MediaLabel { text, undownloaded: true, progress: Some(percent) }
 }
 
 /// The file line of a message: a name, how many more, and their size together. `bytes` is `None`
@@ -1367,6 +1378,13 @@ mod tests {
         assert_eq!(undownloaded_label(&ptr(Some(0))).text, "");
         assert_eq!(undownloaded_label(&ptr(Some(45 * 1024 * 1024))).text, "45MB");
         assert!(undownloaded_label(&ptr(None)).undownloaded);
+        const MB: u64 = 1024 * 1024;
+        let big = ptr(Some(45 * 1024 * 1024));
+        assert_eq!(downloading_label(&big, 12 * MB, 26).text, "12MB / 45MB");
+        assert_eq!(downloading_label(&big, 12 * MB, 26).progress, Some(26));
+        // padding and the like: never past the file's own size
+        assert_eq!(downloading_label(&big, 46 * MB, 100).text, "45MB / 45MB");
+        assert_eq!(downloading_label(&ptr(None), 12 * MB, 0).text, "12MB");
     }
 
     #[test]

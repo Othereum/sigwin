@@ -841,14 +841,17 @@ fn demo_videos(emit: &backend::Emit) {
         thumb(format!("demo-video-grid-{i}"), blur(w, h));
     }
     let label = |key: &str, text: &str, undownloaded| {
-        emit(Event::MediaLabel { key: key.into(), label: types::MediaLabel { text: text.into(), undownloaded } });
+        emit(Event::MediaLabel { key: key.into(), label: types::MediaLabel { text: text.into(), undownloaded, progress: None } });
+    };
+    let downloading = |key: &str, text: &str, percent| {
+        emit(Event::MediaLabel { key: key.into(), label: types::MediaLabel { text: text.into(), undownloaded: true, progress: Some(percent) } });
     };
     label("demo-video-0", "12MB", true);
-    label("demo-video-1", "245MB", true);
+    downloading("demo-video-1", "90MB / 245MB", 37);
     label("demo-video-2", "1.2GB", true);
-    label("demo-video-grid-0", "38MB", true);
+    downloading("demo-video-grid-0", "38MB / 38MB", 100);
     label("demo-video-grid-1", "2.4MB", true);
-    label("demo-video-grid-2", "1:02:05", false);
+    downloading("demo-video-grid-2", "123MB / 1.2GB", 0);
     // the first frame replaces the blurhash
     std::thread::sleep(std::time::Duration::from_millis(1500));
     let (w, h) = (types::physical_px(400), types::physical_px(225));
