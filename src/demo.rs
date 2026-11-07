@@ -82,6 +82,10 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         // the "new version available" bar (automatic download off)
         app.set_update_available(v.into());
     }
+    if std::env::var_os("SIGWIN_DEMO_WHATSNEW").is_some() {
+        // the "updated, what's new" offer bar
+        app.set_whatsnew_offer(true);
+    }
     if std::env::var_os("SIGWIN_DEMO_SETTINGS").is_some() {
         let weak = app.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
