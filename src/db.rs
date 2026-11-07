@@ -613,6 +613,76 @@ impl Index {
         Ok(order_rows(rows))
     }
 
+    /// `(seq, ts)` of the messages displayed within `from..=to`, in display order.
+    pub async fn rows_between(&self, thread: &Thread, from: i64, to: i64) -> anyhow::Result<Vec<(i64, u64)>> {
+        let (gk, rid) = unzip(thread);
+        let rows = sqlx::query(
+            "SELECT seq, ts FROM ls_order
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND seq BETWEEN ? AND ?
+             ORDER BY seq ASC",
+        )
+        .bind(gk)
+        .bind(rid)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(order_rows(rows))
+    }
+
+    /// `(seq, ts)` of up to `limit` messages displayed right after `after`, in display order.
+    pub async fn page_newer(&self, thread: &Thread, after: i64, limit: u32) -> anyhow::Result<Vec<(i64, u64)>> {
+        let (gk, rid) = unzip(thread);
+        let rows = sqlx::query(
+            "SELECT seq, ts FROM ls_order
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND seq > ?
+             ORDER BY seq ASC LIMIT ?",
+        )
+        .bind(gk)
+        .bind(rid)
+        .bind(after)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(order_rows(rows))
+    }
+
+    /// How many messages are displayed within `from..to`.
+    pub async fn count_rows(&self, thread: &Thread, from: i64, to: i64) -> anyhow::Result<u64> {
+        let (gk, rid) = unzip(thread);
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ls_order
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND seq >= ? AND seq < ?",
+        )
+        .bind(gk)
+        .bind(rid)
+        .bind(from)
+        .bind(to)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(n as u64)
+    }
+
+    /// Display position of the first stored row sent at `ts` or later: where a message whose
+    /// own row has another timestamp (synced) must be.
+    pub async fn seq_from_ts(&self, thread: &Thread, ts: u64) -> anyhow::Result<Option<i64>> {
+        let (gk, rid) = unzip(thread);
+        Ok(sqlx::query_scalar(
+            "SELECT seq FROM ls_order
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND ts >= ?
+             ORDER BY ts ASC LIMIT 1",
+        )
+        .bind(gk)
+        .bind(rid)
+        .bind(ts as i64)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
     /// Display position of a stored message.
     pub async fn seq_of(&self, thread: &Thread, ts: u64) -> anyhow::Result<Option<i64>> {
         let (gk, rid) = unzip(thread);
@@ -830,6 +900,28 @@ mod tests {
         assert_eq!(index.reactions_for("t", &[1]).await.unwrap()[&1], [(b, "heart".to_string())]);
         index.forget_reactions("t", 1).await.unwrap();
         assert!(index.reactions_for("t", &[1]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_window_can_be_read_anywhere_in_the_thread() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        for ts in [10, 20, 30, 40, 50] {
+            db.save(ts, "x").await;
+        }
+        let seq = |ts| {
+            let (index, thread) = (index.clone(), thread());
+            async move { index.seq_of(&thread, ts).await.unwrap().unwrap() }
+        };
+        let (s20, s40) = (seq(20).await, seq(40).await);
+        let tss = |rows: Vec<(i64, u64)>| rows.into_iter().map(|r| r.1).collect::<Vec<_>>();
+        assert_eq!(tss(index.rows_between(&thread(), s20, s40).await.unwrap()), [20, 30, 40]);
+        assert_eq!(tss(index.page_newer(&thread(), s20, 2).await.unwrap()), [30, 40]);
+        assert_eq!(tss(index.page_newer(&thread(), s40, 2).await.unwrap()), [50]);
+        assert_eq!(index.count_rows(&thread(), s20, s40).await.unwrap(), 2);
+        assert_eq!(index.seq_from_ts(&thread(), 15).await.unwrap(), Some(s20));
+        assert_eq!(index.seq_from_ts(&thread(), 40).await.unwrap(), Some(s40));
+        assert_eq!(index.seq_from_ts(&thread(), 51).await.unwrap(), None);
     }
 
     #[tokio::test(flavor = "current_thread")]

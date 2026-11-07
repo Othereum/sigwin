@@ -18,7 +18,7 @@ pub(crate) struct State {
     /// ✕ pressed; forgotten when the composer empties or the thread changes
     dismissed: Vec<String>,
     /// thumbnails of what's shown
-    key: String,
+    pub(crate) key: String,
     timer: slint::Timer,
 }
 

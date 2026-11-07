@@ -690,6 +690,8 @@ pub struct Built {
     pub wanted_cells: Vec<WantedCell>,
     /// long-text attachments not in `LongTexts::full` yet: (key, pointer)
     pub wanted_texts: Vec<(String, AttachmentPointer)>,
+    /// every long-text attachment in the window, downloaded or not
+    pub long_keys: Vec<String>,
     /// earliest time a still-shown disappearing message expires
     pub next_expiry: Option<u64>,
 }
@@ -761,6 +763,7 @@ pub fn build(
     let mut wanted = Vec::new();
     let mut wanted_cells = Vec::new();
     let mut wanted_texts = Vec::new();
+    let mut long_keys = Vec::new();
     let mut prev_day = None;
 
     for (ts, c) in window {
@@ -788,6 +791,7 @@ pub fn build(
                 let mut text_dm = dm;
                 let mut text_missing = false;
                 if let Some((key, ptr)) = long_text(dm, *ts) {
+                    long_keys.push(key.clone());
                     match long.full.get(&key) {
                         Some(t) => {
                             full = DataMessage { body: Some(t.clone()), ..dm.clone() };
@@ -939,7 +943,7 @@ pub fn build(
         m.readers.retain(|(u, _)| seen.insert(u.clone()));
     }
     // runs (`mark_runs`) are marked by the caller once pins, pending ops and stub rows are in
-    Built { items, wanted_thumbs: wanted, wanted_cells, wanted_texts, next_expiry }
+    Built { items, wanted_thumbs: wanted, wanted_cells, long_keys, wanted_texts, next_expiry }
 }
 
 /// Texts of long messages in the open window, and how much of each is shown.

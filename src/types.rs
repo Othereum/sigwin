@@ -357,6 +357,14 @@ impl Frames {
     }
 }
 
+/// Which way the message list can load more rows.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Paging {
+    pub older: bool,
+    /// the rows stop short of the thread's newest message
+    pub newer: bool,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Scroll {
     Bottom,
@@ -378,7 +386,9 @@ pub enum Event {
     Header { name: String, sub: String },
     /// who can be @mentioned in the open thread: (uuid, name); empty outside groups
     Members(Vec<crate::mention::Member>),
-    Messages { key: String, items: Vec<MsgDto>, can_older: bool, scroll: Scroll },
+    Messages { key: String, items: Vec<MsgDto>, paging: Paging, scroll: Scroll },
+    /// an incoming message for the open thread, below the rows that are loaded
+    NewBelow,
     /// pinned messages of the open thread, newest first
     Pins(Vec<PinDto>),
     /// scroll the message list to row `id` (already in the last `Messages`) and flash it
@@ -420,6 +430,11 @@ pub enum Command {
     StartLink(String),
     OpenThread(String),
     LoadOlder,
+    LoadNewer,
+    /// back to the thread's newest messages
+    ToLatest,
+    /// the message list reached or left its bottom
+    AtBottom(bool),
     /// `mentions`: members picked in the composer, their "@name"s become mentions
     /// `link`: the url to preview on the message
     Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String> },

@@ -225,7 +225,10 @@ impl App {
                 if c.metadata.needs_receipt {
                     self.pending_receipts.entry(c.metadata.sender).or_default().push(c.timestamp());
                 }
-                if !(is_open && self.focused) {
+                if is_open && self.current.as_ref().is_some_and(|o| o.end_seq.is_some()) {
+                    (self.emit)(Event::NewBelow);
+                }
+                if !(is_open && self.focused && self.sees_latest()) {
                     *self.persist.unread.entry(key.clone()).or_default() += 1;
                     self.persist_dirty = true;
                 }

@@ -117,10 +117,12 @@ pub(crate) fn seek_row(app: &AppWindow, id: String, want: Option<f32>) {
 /// Puts a message list on screen. `rebuild` replaces the whole model (thread switch, anchored
 /// older page); otherwise only changed rows are touched, and rows inserted above the ones on
 /// screen keep the view where it is.
-pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, can_older: bool, scroll: Scroll, rebuild: bool) {
+pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, paging: Paging, scroll: Scroll, rebuild: bool) {
     let near_bottom = app.get_near_bottom();
     UI.with_borrow_mut(|ui| {
         ui.loading_older = false;
+        ui.loading_newer = false;
+        ui.detached = paging.newer;
         if rebuild {
             app.set_new_below(0);
         } else if !near_bottom {
@@ -139,21 +141,38 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, can_older: bool, sc
             update_rows(ui, &items, dark);
         }
         sync_typing(ui);
+        forget_unshown_thumbs(ui, &items);
         ui.last = items;
     });
-    app.set_can_load_older(can_older);
+    app.set_can_load_older(paging.older);
+    app.set_can_load_newer(paging.newer);
     if rebuild && scroll == Scroll::Bottom {
         // otherwise the first frames lay out from the old thread's position
         app.invoke_seek_end();
     }
     match scroll {
         Scroll::Bottom => stick_to_bottom(app),
-        Scroll::KeepIfNotAtBottom if near_bottom => stick_to_bottom(app),
+        Scroll::KeepIfNotAtBottom if near_bottom && !paging.newer => stick_to_bottom(app),
         Scroll::KeepIfNotAtBottom | Scroll::Keep | Scroll::Older => {}
     }
     if rebuild && scroll != Scroll::Older {
         app.invoke_focus_composer();
     }
+}
+
+/// Thumbnails of rows that left the list: the window moves through the whole thread, so keeping
+/// them would grow with how far the user scrolled. The backend sends them again if they return.
+fn forget_unshown_thumbs(ui: &mut Ui, items: &[MsgDto]) {
+    use crate::backend::linkpreview::COMPOSER_KEY;
+    let shown: std::collections::HashSet<&str> = items
+        .iter()
+        .flat_map(|m| {
+            let link = m.link.as_ref().map(|l| l.image_key.as_str());
+            std::iter::once(m.image_key.as_str()).chain(link).chain(m.cells.iter().map(|c| c.key.as_str()))
+        })
+        .collect();
+    let card = ui.link.key.clone();
+    ui.thumbs.retain(|k, _| shown.contains(k.as_str()) || k.ends_with(COMPOSER_KEY) || *k == card);
 }
 
 /// An older page arrived: keep the row that was on top (`anchor`, the oldest row so far) at
@@ -165,8 +184,8 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, can_older: bool, sc
 /// shifting by the height difference lands rows off. So: measure the anchor (one frame),
 /// replace the model, seek straight to the anchor's index with the ListView's own estimate
 /// (it then lays out from that row), and settle it at the measured spot like a pin jump.
-pub(crate) fn hold_older(app: &AppWindow, anchor: String, items: Vec<MsgDto>, can_older: bool) {
-    UI.with_borrow_mut(|ui| ui.older = Some((items, can_older)));
+pub(crate) fn hold_older(app: &AppWindow, anchor: String, items: Vec<MsgDto>, paging: Paging) {
+    UI.with_borrow_mut(|ui| ui.older = Some((items, paging)));
     TIMER.with(|t| t.stop());
     app.set_jump_id(anchor.as_str().into());
     app.set_jump_found(false);
@@ -176,7 +195,7 @@ pub(crate) fn hold_older(app: &AppWindow, anchor: String, items: Vec<MsgDto>, ca
         t.start(slint::TimerMode::SingleShot, std::time::Duration::from_millis(20), move || {
             let Some(app) = weak.upgrade() else { return };
             let ours = app.get_jump_id() == anchor.as_str();
-            let Some((items, can_older)) = UI.with_borrow_mut(|ui| ui.older.take()) else {
+            let Some((items, paging)) = UI.with_borrow_mut(|ui| ui.older.take()) else {
                 if ours {
                     app.set_jump_id(SharedString::new());
                 }
@@ -189,7 +208,7 @@ pub(crate) fn hold_older(app: &AppWindow, anchor: String, items: Vec<MsgDto>, ca
             let idx = items.iter().position(|m| m.id == anchor);
             let (Some(idx), true) = (idx, found) else {
                 tracing::debug!("older page: anchor not on screen, inserting above");
-                show_rows(&app, items, can_older, Scroll::Older, false);
+                show_rows(&app, items, paging, Scroll::Older, false);
                 // a short page may leave the top still near (content-y is current after a layout)
                 let weak = app.as_weak();
                 slint::Timer::single_shot(std::time::Duration::from_millis(50), move || {
@@ -203,7 +222,7 @@ pub(crate) fn hold_older(app: &AppWindow, anchor: String, items: Vec<MsgDto>, ca
             let n = slint::Model::row_count(&app.get_messages()).max(1) as f32;
             let avg = app.invoke_content_height() / n;
             tracing::debug!("older page: {idx} rows above the anchor, its bottom at {want:.1}px");
-            show_rows(&app, items, can_older, Scroll::Older, true);
+            show_rows(&app, items, paging, Scroll::Older, true);
             app.invoke_set_content_y_raw(-(idx as f32 + 0.5) * avg);
             seek_row(&app, anchor.clone(), Some(want));
         });

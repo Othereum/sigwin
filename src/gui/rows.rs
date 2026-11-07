@@ -34,7 +34,24 @@ pub(crate) fn update_rows(ui: &mut Ui, items: &[MsgDto], dark: bool) {
         }
         ui.typing_row = false;
     }
-    let old = &ui.last;
+    // the window moved: rows left one end and came in at the other, which the common prefix and
+    // suffix below don't describe. Line both lists up on the rows they share first
+    let (drop, add) = match (ui.last.first(), items.first()) {
+        (Some(old), Some(new)) if old.id != new.id => match items.iter().position(|m| m.id == old.id) {
+            Some(add) => (0, add),
+            None => (ui.last.iter().position(|m| m.id == new.id).unwrap_or(0), 0),
+        },
+        _ => (0, 0),
+    };
+    for _ in 0..drop {
+        ui.messages.remove(0);
+    }
+    for (k, m) in items[..add].iter().enumerate() {
+        ui.messages.insert(k, to_item(m, &ui.thumbs, &ui.anims, &ui.sender_avatars, &ui.revealed, dark));
+    }
+    let old = &ui.last[drop..];
+    let at = add;
+    let items = &items[add..];
     let max = old.len().min(items.len());
     let pre = old.iter().zip(items).take_while(|(a, b)| a.id == b.id).count();
     let suf = old.iter().rev().zip(items.iter().rev()).take(max - pre).take_while(|(a, b)| a.id == b.id).count();
@@ -42,14 +59,14 @@ pub(crate) fn update_rows(ui: &mut Ui, items: &[MsgDto], dark: bool) {
     for i in (0..pre).chain(old.len() - suf..old.len()) {
         let j = if i < pre { i } else { i + items.len() - old.len() };
         if old[i] != items[j] {
-            ui.messages.set_row_data(i, item(&items[j]));
+            ui.messages.set_row_data(at + i, item(&items[j]));
         }
     }
     for _ in pre..old.len() - suf {
-        ui.messages.remove(pre);
+        ui.messages.remove(at + pre);
     }
     for (k, m) in items[pre..items.len() - suf].iter().enumerate() {
-        ui.messages.insert(pre + k, item(m));
+        ui.messages.insert(at + pre + k, item(m));
     }
 }
 
@@ -77,6 +94,9 @@ pub(crate) fn sync_typing(ui: &mut Ui) {
             ui.messages.remove(n - 1);
         }
         ui.typing_row = false;
+    }
+    if ui.detached {
+        return;
     }
     let Some((uuid, name)) = ui.typing.first() else { return };
     let avatar = if ui.typing_group { ui.sender_avatars.get(uuid).cloned() } else { None };

@@ -27,13 +27,34 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let s = send.clone();
     app.on_open_thread(move |key| s(Command::OpenThread(key.to_string())));
 
+    let s = send.clone();
     let weak = app.as_weak();
     app.on_jump_to_bottom(move || {
         if let Some(app) = weak.upgrade() {
             app.set_new_below(0);
-            stick_to_bottom(&app);
+            if app.get_can_load_newer() {
+                s(Command::ToLatest);
+            } else {
+                stick_to_bottom(&app);
+            }
         }
     });
+
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.on_load_newer(move || {
+        // not while a jump or an older page is settling
+        if weak.upgrade().is_some_and(|a| !a.get_jump_id().is_empty()) {
+            return;
+        }
+        let go = UI.with_borrow_mut(|ui| !std::mem::replace(&mut ui.loading_newer, true));
+        if go {
+            s(Command::LoadNewer);
+        }
+    });
+
+    let s = send.clone();
+    app.on_at_bottom_changed(move |at| s(Command::AtBottom(at)));
 
     let s = send.clone();
     let weak = app.as_weak();

@@ -1,7 +1,7 @@
 //! Demo modes: a fake backend with synthetic data (`SIGWIN_DEMO`), and the memory self-test.
 
 use super::*;
-use crate::types::{MsgDto, Mute, MuteSet, Scroll, ThreadDto, ThreadPrefs, MUTE_ALWAYS};
+use crate::types::{MsgDto, Mute, MuteSet, Paging, Scroll, ThreadDto, ThreadPrefs, MUTE_ALWAYS};
 
 /// Demo mode: the fake backend plus the `SIGWIN_DEMO_*` / `SIGWIN_SELFTEST` extras.
 pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Command>) {
@@ -294,47 +294,66 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         }
     }
     if let Ok(v) = std::env::var("SIGWIN_DEMO_OLDER") {
-        // history paged in from the top like a real thread: 60 rows, then 60 more per LoadOlder,
-        // each after `v` ms (default 150)
+        // history paged in like a real thread: the newest 60 rows, then 60 more per LoadOlder or
+        // LoadNewer, each after `v` ms (default 150). `SIGWIN_DEMO_CAP=<rows>` bounds the window
+        // like `MAX_WINDOW`, so it moves through the rows
         let delay = std::time::Duration::from_millis(v.parse().unwrap_or(150));
-        let mut start = items.len() - 60;
+        let cap: usize = std::env::var("SIGWIN_DEMO_CAP").ok().and_then(|c| c.parse().ok()).unwrap_or(usize::MAX);
+        let total = items.len();
+        let (mut start, mut end) = (total - 60, total);
         // like view::build: the first row of the window always starts a day
         let all = items.clone();
-        let window = move |start: usize| {
-            let mut rows = all[start..].to_vec();
+        let rows = move |start: usize, end: usize| {
+            let mut rows = all[start..end].to_vec();
             if rows[0].day_sep.is_empty() {
                 rows[0].day_sep = "2026년 10월 31일 토요일".into();
             }
             view::mark_runs(&mut rows, true);
             rows
         };
-        emit(Event::Messages { key: "c:demo-1".into(), items: window(start), can_older: true, scroll: Scroll::Bottom });
+        let paging = move |start: usize, end: usize| Paging { older: start > 0, newer: end < total };
+        emit(Event::Messages { key: "c:demo-1".into(), items: rows(start, end), paging: paging(start, end), scroll: Scroll::Bottom });
         let emit = emit.clone();
         std::thread::spawn(move || {
             while let Some(c) = cmd_rx.blocking_recv() {
                 demo_frames(&emit, &c);
-                if matches!(c, Command::LoadOlder) && start > 0 {
-                    std::thread::sleep(delay);
-                    start = start.saturating_sub(60);
-                    emit(Event::Messages { key: "c:demo-1".into(), items: window(start), can_older: start > 0, scroll: Scroll::Older });
-                }
-                // like App::jump_to: page in older rows until the target is in the window,
-                // with a margin above it
-                if let Command::JumpTo(id) = &c {
-                    let Ok(target) = id.parse::<usize>() else { continue };
-                    if target < start + 30 && start > 0 {
-                        while target < start + 30 && start > 0 {
-                            std::thread::sleep(delay);
-                            start = start.saturating_sub(60);
-                        }
-                        emit(Event::Messages { key: "c:demo-1".into(), items: window(start), can_older: start > 0, scroll: Scroll::Keep });
+                let show = |start: usize, end: usize, scroll| {
+                    emit(Event::Messages { key: "c:demo-1".into(), items: rows(start, end), paging: paging(start, end), scroll });
+                };
+                match &c {
+                    Command::LoadOlder if start > 0 => {
+                        std::thread::sleep(delay);
+                        start = start.saturating_sub(60);
+                        end = end.min(start.saturating_add(cap));
+                        show(start, end, Scroll::Older);
                     }
-                    emit(Event::JumpTo(id.clone()));
+                    Command::LoadNewer if end < total => {
+                        std::thread::sleep(delay);
+                        end = (end + 60).min(total);
+                        start = start.max(end.saturating_sub(cap));
+                        show(start, end, Scroll::Keep);
+                    }
+                    Command::ToLatest => {
+                        (start, end) = (total - 60, total);
+                        show(start, end, Scroll::Bottom);
+                    }
+                    // like App::jump_to: move the window to the target, margin either side
+                    Command::JumpTo(id) => {
+                        let Ok(target) = id.parse::<usize>() else { continue };
+                        if target < start + 30 || target + 30 >= end.max(1) && end < total {
+                            std::thread::sleep(delay);
+                            start = target.saturating_sub(60);
+                            end = (target + 60).min(total);
+                            show(start, end, Scroll::Keep);
+                        }
+                        emit(Event::JumpTo(id.clone()));
+                    }
+                    _ => {}
                 }
             }
         });
     } else {
-        emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), can_older: false, scroll: Scroll::Bottom });
+        emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
         let notes = std::env::var("SIGWIN_DEMO_NOTIFY").ok().map(|v| demo_notify(emit.clone(), v.parse().unwrap_or(10)));
         // clicking another thread shows the same rows under its key (drafts follow the key)
         let (emit, items, all_pins) = (emit.clone(), items.clone(), pins.clone());
@@ -363,7 +382,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                     let items = if n == 1 { items.clone() } else { items[items.len() - (10 + n * 7).min(items.len())..].to_vec() };
                     // pins only in the first thread, sent after the rows like App::emit_messages
                     let pins = if key == "c:demo-1" { all_pins.clone() } else { Vec::new() };
-                    emit(Event::Messages { key, items, can_older: false, scroll: Scroll::Bottom });
+                    emit(Event::Messages { key, items, paging: Paging::default(), scroll: Scroll::Bottom });
                     emit(Event::Pins(pins));
                     if let Some(m) = msg {
                         emit(Event::JumpTo(m.to_string()));
@@ -384,7 +403,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             emit(Event::Messages {
                 key: "c:demo-1".into(),
                 items: items.clone(),
-                can_older: false,
+                paging: Paging::default(),
                 scroll: Scroll::KeepIfNotAtBottom,
             });
         });
@@ -877,13 +896,13 @@ fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiv
     emit(Event::Ready);
     emit(Event::Threads(threads));
     emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
-    emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), can_older: false, scroll: Scroll::Bottom });
+    emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
     emit(Event::Pins(Vec::new()));
     emit(Event::Account { name: "홍길동".into(), number: "+821012345678".into(), device: "Sigwin".into(), receipts: Some(true), typing: None });
     std::thread::spawn(move || {
         while let Some(c) = cmd_rx.blocking_recv() {
             if let Command::OpenThread(key) = c {
-                emit(Event::Messages { key, items: items.clone(), can_older: false, scroll: Scroll::Bottom });
+                emit(Event::Messages { key, items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
                 emit(Event::Pins(Vec::new()));
             }
         }

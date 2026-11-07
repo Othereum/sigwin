@@ -9,7 +9,7 @@ use i_slint_core::styled_text::{sigwin_clear_plain_styles, sigwin_set_plain_styl
 use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::types::{Command, Event, MsgDto, Scroll, ThreadDto};
+use crate::types::{Command, Event, MsgDto, Paging, Scroll, ThreadDto};
 use crate::*;
 
 pub(crate) mod anim;
@@ -54,8 +54,11 @@ pub(crate) struct Ui {
     pub(crate) paste_dir: PathBuf,
     open_key: String,
     loading_older: bool,
-    /// an older page waiting for its anchor to be measured (`hold_older`), with can_older
-    older: Option<(Vec<MsgDto>, bool)>,
+    loading_newer: bool,
+    /// the rows stop short of the thread's newest message: nothing happening now goes below them
+    detached: bool,
+    /// an older page waiting for its anchor to be measured (`hold_older`)
+    older: Option<(Vec<MsgDto>, Paging)>,
     picking: bool,
     pub(crate) packs: Rc<VecModel<PackItem>>,
     pack_dtos: Vec<types::PackDto>,
@@ -200,7 +203,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             app.set_current_sub(sub.into());
         }
         Event::Members(list) => UI.with_borrow_mut(|ui| ui.members = list),
-        Event::Messages { key, items, can_older, scroll } => {
+        Event::Messages { key, items, paging, scroll } => {
             let restored = UI.with_borrow_mut(|ui| {
                 let switched = ui.open_key != key;
                 let mut restored = None;
@@ -231,19 +234,27 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             app.set_current_key(key.into());
             if !switched && scroll != Scroll::Bottom && UI.with_borrow(|ui| ui.older.is_some()) {
                 // an older page is being anchored: show the newest rows when it lands
-                UI.with_borrow_mut(|ui| ui.older = Some((items, can_older)));
+                UI.with_borrow_mut(|ui| ui.older = Some((items, paging)));
                 return;
             }
             UI.with_borrow_mut(|ui| ui.older = None);
             let anchor = UI.with_borrow(|ui| ui.last.first().map(|m| m.id.clone()));
             match anchor {
                 Some(anchor) if scroll == Scroll::Older && !switched && app.get_jump_id().is_empty() => {
-                    hold_older(app, anchor, items, can_older)
+                    hold_older(app, anchor, items, paging)
                 }
-                _ => show_rows(app, items, can_older, scroll, switched),
+                _ => {
+                    // the window moved away from what's shown: nothing to keep in place
+                    let disjoint = UI.with_borrow(|ui| match (ui.last.first(), items.first()) {
+                        (Some(old), Some(new)) => !items.iter().any(|m| m.id == old.id) && !ui.last.iter().any(|m| m.id == new.id),
+                        _ => false,
+                    });
+                    show_rows(app, items, paging, scroll, switched || disjoint)
+                }
             }
             viewer::close_if_gone();
         }
+        Event::NewBelow => app.set_new_below(app.get_new_below() + 1),
         Event::Pins(list) => {
             let items: Vec<PinItem> = list
                 .iter()

@@ -31,19 +31,78 @@ impl App {
         Ok(rows.into_iter().filter_map(|(_, ts)| Some((ts, found.remove(&ts)?))).collect())
     }
 
-    pub(super) async fn open_thread(&mut self, key: &str) -> anyhow::Result<()> {
-        let thread = parse_thread_key(key).context("bad thread key")?;
-        let mut rows = self.index.page(&thread, i64::MAX, PAGE).await?;
-        let mut window = self.fetch_range(&thread, &rows).await?;
+    /// The thread's newest rows: (rows, display position of the first, whether older ones exist).
+    async fn latest_rows(&self, thread: &Thread) -> anyhow::Result<(Vec<(u64, Content)>, i64, bool)> {
+        let mut rows = self.index.page(thread, i64::MAX, PAGE).await?;
+        let mut window = self.fetch_range(thread, &rows).await?;
         let mut oldest_seq = rows.last().map_or(i64::MAX, |r| r.0);
         // receipts etc. take rows without producing bubbles: fetch more until the view can scroll
         while rows.len() as u32 == PAGE && window.len() < MAX_WINDOW && displayable(&window, self.me) < 30 {
-            rows = self.index.page(&thread, oldest_seq, PAGE).await?;
+            rows = self.index.page(thread, oldest_seq, PAGE).await?;
             oldest_seq = rows.last().map_or(oldest_seq, |r| r.0);
-            let mut older = self.fetch_range(&thread, &rows).await?;
+            let mut older = self.fetch_range(thread, &rows).await?;
             older.append(&mut window);
             window = older;
         }
+        Ok((window, oldest_seq, rows.len() as u32 == PAGE))
+    }
+
+    /// The user is looking at the thread's newest messages.
+    pub(super) fn sees_latest(&self) -> bool {
+        self.at_bottom && self.current.as_ref().is_some_and(|o| o.end_seq.is_none())
+    }
+
+    /// Marks the open thread read if the user can see its newest messages.
+    pub(super) fn read_if_seen(&mut self) {
+        if self.focused && self.sees_latest() {
+            if let Some(key) = self.current.as_ref().map(|o| o.key.clone()) {
+                self.mark_read(&key);
+            }
+        }
+    }
+
+    /// Back to the thread's newest messages.
+    async fn to_latest(&mut self) -> anyhow::Result<()> {
+        let Some(thread) = self.current.as_ref().map(|o| o.thread.clone()) else { return Ok(()) };
+        let (window, oldest_seq, has_more) = self.latest_rows(&thread).await?;
+        let Some(open) = self.current.as_mut() else { return Ok(()) };
+        open.window = window;
+        open.oldest_seq = oldest_seq;
+        open.has_more = has_more;
+        open.end_seq = None;
+        self.moved = true;
+        self.at_bottom = true;
+        self.read_if_seen();
+        Ok(())
+    }
+
+    /// Keeps the window within `MAX_WINDOW` by dropping its newest rows.
+    async fn trim_newest(&mut self) -> anyhow::Result<()> {
+        let Some(open) = self.current.as_mut().filter(|o| o.window.len() > MAX_WINDOW) else { return Ok(()) };
+        open.window.truncate(MAX_WINDOW);
+        let last = open.window[MAX_WINDOW - 1].0;
+        // gone since it was read: reloading then reaches the end, which is harmless
+        open.end_seq = Some(self.index.seq_of(&open.thread, last).await?.unwrap_or(i64::MAX));
+        self.moved = true;
+        Ok(())
+    }
+
+    /// Keeps the window within `MAX_WINDOW` by dropping its oldest rows.
+    async fn trim_oldest(&mut self) -> anyhow::Result<()> {
+        let Some(open) = self.current.as_mut().filter(|o| o.window.len() > MAX_WINDOW) else { return Ok(()) };
+        let extra = open.window.len() - MAX_WINDOW;
+        open.window.drain(..extra);
+        if let Some(seq) = self.index.seq_of(&open.thread, open.window[0].0).await? {
+            open.oldest_seq = seq;
+        }
+        open.has_more = true;
+        self.moved = true;
+        Ok(())
+    }
+
+    pub(super) async fn open_thread(&mut self, key: &str) -> anyhow::Result<()> {
+        let thread = parse_thread_key(key).context("bad thread key")?;
+        let (window, oldest_seq, has_more) = self.latest_rows(&thread).await?;
         let is_group = matches!(thread, Thread::Group(_));
         let members = self.emit_header(&thread).await;
         self.thumbs_requested.clear();
@@ -68,10 +127,12 @@ impl App {
             is_group,
             members,
             group_id,
-            has_more: rows.len() as u32 == PAGE,
+            has_more,
             window,
             oldest_seq,
+            end_seq: None,
         });
+        self.at_bottom = true;
         self.mark_read(key);
         self.emit_messages(Scroll::Bottom).await;
         Ok(())
@@ -84,10 +145,40 @@ impl App {
         Ok(())
     }
 
-    /// Prepends older rows to the open window; false when there is nothing more to load.
+    pub(super) async fn load_newer(&mut self) -> anyhow::Result<()> {
+        if self.extend_newer().await? {
+            self.emit_messages(Scroll::Keep).await;
+            self.read_if_seen();
+        }
+        Ok(())
+    }
+
+    /// Appends newer rows to the open window, dropping its oldest past `MAX_WINDOW`; false when
+    /// it already reaches the thread's newest message.
+    async fn extend_newer(&mut self) -> anyhow::Result<bool> {
+        let Some(open) = self.current.as_ref() else { return Ok(false) };
+        let Some(mut end) = open.end_seq else { return Ok(false) };
+        let thread = open.thread.clone();
+        let mut rows = self.index.page_newer(&thread, end, PAGE).await?;
+        end = rows.last().map_or(end, |r| r.0);
+        let mut newer = self.fetch_range(&thread, &rows).await?;
+        while rows.len() as u32 == PAGE && newer.len() < MAX_WINDOW / 2 && displayable(&newer, self.me) < 20 {
+            rows = self.index.page_newer(&thread, end, PAGE).await?;
+            end = rows.last().map_or(end, |r| r.0);
+            newer.append(&mut self.fetch_range(&thread, &rows).await?);
+        }
+        let Some(open) = self.current.as_mut() else { return Ok(false) };
+        open.end_seq = (rows.len() as u32 == PAGE).then_some(end);
+        open.window.append(&mut newer);
+        self.trim_oldest().await?;
+        Ok(true)
+    }
+
+    /// Prepends older rows to the open window, dropping its newest past `MAX_WINDOW`; false when
+    /// there is nothing more to load.
     pub(super) async fn extend_older(&mut self) -> anyhow::Result<bool> {
         let Some(open) = self.current.as_ref() else { return Ok(false) };
-        if !open.has_more || open.window.len() >= MAX_WINDOW {
+        if !open.has_more {
             return Ok(false);
         }
         let mut oldest_seq = open.oldest_seq;
@@ -108,29 +199,52 @@ impl App {
         let mut w = older;
         w.append(&mut open.window);
         open.window = w;
+        self.trim_newest().await?;
         Ok(true)
     }
 
-    /// Scrolls to the message with sent timestamp `id`, loading older rows until it is in the window.
+    /// Reads the rows around display position `seq` (either side a page), without touching the
+    /// window: (rows, display position of the first, whether older ones exist, `end_seq`).
+    async fn rows_around(&self, thread: &Thread, seq: i64) -> anyhow::Result<(Vec<(u64, Content)>, i64, bool, Option<i64>)> {
+        let older = self.index.page(thread, seq + 1, PAGE).await?;
+        let newer = self.index.page_newer(thread, seq, PAGE).await?;
+        let oldest_seq = older.last().map_or(seq, |r| r.0);
+        let end_seq = (newer.len() as u32 == PAGE).then(|| newer[newer.len() - 1].0);
+        let has_more = older.len() as u32 == PAGE;
+        let rows: Vec<(i64, u64)> = older.into_iter().chain(newer).collect();
+        Ok((self.fetch_range(thread, &rows).await?, oldest_seq, has_more, end_seq))
+    }
+
+    /// Scrolls to the message with sent timestamp `id`, moving the window to it if needed.
     ///
-    /// The target also gets `JUMP_MARGIN` rows above it when history allows. Landing near the
+    /// The target also gets `JUMP_MARGIN` rows either side when history allows. Landing near the
     /// window's first row would make the next scroll fetch an older page while that row is on
     /// screen, and anchoring it (`gui::scroll::hold_older`) fights the wheel: the view shakes.
-    /// With a margin, older pages come in through the usual prefetch, off screen.
+    /// With a margin, more pages come in through the usual prefetch, off screen.
     pub(super) async fn jump_to(&mut self, id: &str) -> anyhow::Result<()> {
         let target: u64 = id.parse()?;
+        let me = self.me;
+        // an edit has the target's sent timestamp, but no row of its own
+        let is_target = |c: &Content| c.timestamp() == target && !matches!(view::classify(c, me), Kind::Edit { .. });
         let mut loaded = false;
+        let mut searched = false;
+        // each side's page can trim what the other side loaded: a row-poor stretch mustn't loop
+        let mut margin_pages = 8;
         loop {
             let Some(open) = self.current.as_ref() else { return Ok(()) };
-            // an edit has the target's sent timestamp, but no row of its own
-            let me = self.me;
-            let is_target = |c: &Content| c.timestamp() == target && !matches!(view::classify(c, me), Kind::Edit { .. });
             if let Some(pos) = open.window.iter().position(|(_, c)| is_target(c)) {
-                if displayable(&open.window[..pos], self.me) < JUMP_MARGIN && self.extend_older().await? {
+                let above = displayable(&open.window[..pos], me);
+                let below = displayable(&open.window[pos + 1..], me);
+                margin_pages -= 1;
+                if margin_pages > 0 && above < JUMP_MARGIN && self.extend_older().await? {
                     loaded = true;
                     continue;
                 }
-                // nothing was prepended (no more history): `pos` still holds
+                if margin_pages > 0 && below < JUMP_MARGIN && self.extend_newer().await? {
+                    loaded = true;
+                    continue;
+                }
+                // nothing was added (no more history): `pos` still holds
                 let Some(open) = self.current.as_ref() else { return Ok(()) };
                 let row = open.window[pos].0.to_string();
                 if loaded {
@@ -139,20 +253,40 @@ impl App {
                 (self.emit)(Event::JumpTo(row));
                 return Ok(());
             }
+            let (thread, oldest_seq, len) = (open.thread.clone(), open.oldest_seq, open.window.len());
             // a synced message's row can have another timestamp than the one it's quoted by:
-            // not knowing the target doesn't rule it out unless the window is past it by time
-            let oldest_ts = open.window.first().map(|(t, _)| *t);
-            let passed = match self.index.seq_of(&open.thread, target).await? {
-                Some(seq) => seq >= open.oldest_seq,
-                None => oldest_ts.is_some_and(|t| t < target),
+            // it's then around the first row sent after that
+            let seq = match self.index.seq_of(&thread, target).await? {
+                Some(seq) => Some(seq),
+                None => self.index.seq_from_ts(&thread, target).await?,
             };
-            if passed || !self.extend_older().await? {
+            let Some(seq) = seq.filter(|_| !searched) else {
                 if loaded {
                     self.emit_messages(Scroll::Keep).await;
                 }
-                self.notice(if passed { "메시지를 찾을 수 없습니다" } else { "너무 오래된 메시지라 이동할 수 없습니다" });
+                self.notice("메시지를 찾을 수 없습니다");
                 return Ok(());
+            };
+            searched = true;
+            // just above the window and within its budget: keep what's loaded
+            let near = seq < oldest_seq && len + self.index.count_rows(&thread, seq, oldest_seq).await? as usize + 2 * PAGE as usize <= MAX_WINDOW;
+            if near {
+                while self.current.as_ref().is_some_and(|o| o.oldest_seq > seq) && self.extend_older().await? {}
+                loaded = true;
+                continue;
             }
+            // nothing changes for a message that isn't there
+            let (window, oldest_seq, has_more, end_seq) = self.rows_around(&thread, seq).await?;
+            if !window.iter().any(|(_, c)| is_target(c)) {
+                searched = true;
+                continue;
+            }
+            let Some(open) = self.current.as_mut() else { return Ok(()) };
+            open.window = window;
+            open.oldest_seq = oldest_seq;
+            open.has_more = has_more;
+            open.end_seq = end_seq;
+            self.moved = true;
             loaded = true;
         }
     }
@@ -162,6 +296,8 @@ impl App {
         let thread = open.thread.clone();
         let rows = if open.oldest_seq == i64::MAX {
             self.index.page(&thread, i64::MAX, PAGE).await?
+        } else if let Some(end) = open.end_seq {
+            self.index.rows_between(&thread, open.oldest_seq, end).await?
         } else {
             self.index.rows_from(&thread, open.oldest_seq).await?
         };
@@ -174,16 +310,27 @@ impl App {
             open.members = members;
             open.oldest_seq = oldest_seq.unwrap_or(open.oldest_seq).min(open.oldest_seq);
         }
-        if self.focused {
-            if let Some(key) = self.current.as_ref().map(|o| o.key.clone()) {
-                self.mark_read(&key);
+        // new messages grow it: past the budget (with some slack, to trim in batches) it lets go
+        // of the rows further from the view
+        if self.current.as_ref().is_some_and(|o| o.window.len() > MAX_WINDOW + PAGE as usize) {
+            if self.at_bottom {
+                self.trim_oldest().await?;
+            } else {
+                self.trim_newest().await?;
             }
         }
+        self.read_if_seen();
         self.emit_messages(Scroll::KeepIfNotAtBottom).await;
         Ok(())
     }
 
     pub(super) async fn emit_messages(&mut self, scroll: Scroll) {
+        // whatever puts the view at the bottom means the thread's real bottom
+        if scroll == Scroll::Bottom && self.current.as_ref().is_some_and(|o| o.end_seq.is_some()) {
+            if let Err(e) = self.to_latest().await {
+                warn!("to latest: {e:#}");
+            }
+        }
         let Some(open) = self.current.as_ref() else { return };
         let tss: Vec<u64> = open.window.iter().map(|(t, _)| *t).collect();
         let mut receipts: HashMap<u64, HashMap<Uuid, u8>> = HashMap::new();
@@ -241,7 +388,7 @@ impl App {
             names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())
         });
         let key = open.key.clone();
-        let can_older = open.has_more && open.window.len() < MAX_WINDOW;
+        let paging = Paging { older: open.has_more, newer: open.end_seq.is_some() };
         let next_expiry = built.next_expiry;
         let mut items = built.items;
         // rows by sent timestamp, for the pin marks
@@ -285,10 +432,11 @@ impl App {
             .collect();
         // failed rows stay where they failed, new messages go below them
         if stubs.iter().any(|p| p.after_seq.is_some()) {
-            let seqs: HashMap<u64, i64> = self
-                .index
-                .rows_from(&open.thread, open.oldest_seq)
-                .await
+            let rows = match open.end_seq {
+                Some(end) => self.index.rows_between(&open.thread, open.oldest_seq, end).await,
+                None => self.index.rows_from(&open.thread, open.oldest_seq).await,
+            };
+            let seqs: HashMap<u64, i64> = rows
                 .unwrap_or_default()
                 .into_iter()
                 .map(|(seq, ts)| (ts, seq))
@@ -299,6 +447,10 @@ impl App {
                 if after < open.oldest_seq && open.has_more {
                     continue;
                 }
+                // below what's loaded: the same
+                if open.end_seq.is_some_and(|end| after > end) {
+                    continue;
+                }
                 let i = failed_row_index(&items, &seqs, after);
                 let prev = i.checked_sub(1).map(|i| items[i].ts);
                 items.insert(i, pending_row(p, prev));
@@ -306,11 +458,24 @@ impl App {
         }
         // on their way: at the bottom
         let mut prev = items.last().map(|m| m.ts);
-        for p in stubs.iter().filter(|p| p.after_seq.is_none()) {
+        for p in stubs.iter().filter(|p| p.after_seq.is_none() && open.end_seq.is_none()) {
             items.push(pending_row(p, prev));
             prev = Some(p.ts);
         }
         view::mark_runs(&mut items, open.is_group);
+        // rows that left the window let go of what they asked for, so coming back asks again
+        if std::mem::take(&mut self.moved) {
+            let keep: HashSet<&str> = built
+                .wanted_thumbs
+                .iter()
+                .map(|t| t.0.as_str())
+                .chain(built.wanted_cells.iter().map(|c| c.key.as_str()))
+                .chain(built.long_keys.iter().map(String::as_str))
+                .collect();
+            self.thumbs_requested.retain(|k| keep.contains(k.as_str()));
+            self.long.full.retain(|k, _| keep.contains(k.as_str()));
+            self.long.shown.retain(|row, _| open.window.iter().any(|(t, _)| t == row));
+        }
         for (k, ptr, fit) in built.wanted_thumbs {
             if self.thumbs_requested.insert(k.clone()) {
                 self.request_thumb(k.clone(), k, ptr, ThumbShape::Fit(fit));
@@ -328,7 +493,7 @@ impl App {
         }
         self.next_expiry = next_expiry;
         self.load_sender_avatars(&items);
-        (self.emit)(Event::Messages { key, items, can_older, scroll });
+        (self.emit)(Event::Messages { key, items, paging, scroll });
         // right after the rows (same UI turn): sent earlier, a thread switch showed the new
         // thread's pin bar over the old rows for a frame
         (self.emit)(Event::Pins(pins));

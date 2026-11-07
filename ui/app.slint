@@ -72,6 +72,7 @@ export component AppWindow inherits Window {
     in property <string> current-sub;
     in property <[MsgItem]> messages;
     in property <bool> can-load-older;
+    in property <bool> can-load-newer;
     // incoming messages that arrived while scrolled up
     in-out property <int> new-below;
     callback jump-to-bottom();
@@ -99,6 +100,8 @@ export component AppWindow inherits Window {
     // the composer text changed: cut it to the message size limit; the new cursor offset, or -1 if it fit
     callback clamp-draft(string) -> int;
     callback load-older();
+    callback load-newer();
+    callback at-bottom-changed(bool);
     callback attach();
     callback clear-attachments();
     // the message and which of its images
@@ -291,6 +294,12 @@ export component AppWindow inherits Window {
             root.load-older();
         }
     }
+    // the same below, when the rows stop short of the thread's newest message
+    public function check-newer() {
+        if (msg-list.content-y <= 3 * msg-list.visible-height - msg-list.content-height && root.can-load-newer) {
+            root.load-newer();
+        }
+    }
     public function list-content-y() -> length {
         return msg-list.content-y;
     }
@@ -303,7 +312,11 @@ export component AppWindow inherits Window {
     }
     out property <bool> near-bottom: msg-list.content-y <= msg-list.visible-height - msg-list.content-height + 120px;
     changed near-bottom => {
-        if (near-bottom) { new-below = 0; }
+        if (near-bottom && !can-load-newer) { new-below = 0; }
+        at-bottom-changed(near-bottom);
+    }
+    changed can-load-newer => {
+        if (near-bottom && !can-load-newer) { new-below = 0; }
     }
 
     if page == "loading": Rectangle {
@@ -560,10 +573,12 @@ export component AppWindow inherits Window {
                     scrolled => {
                         self.user-scrolled = true;
                         root.check-older();
+                        root.check-newer();
                     }
                     changed content-y => {
                         if (self.user-scrolled) {
                             root.check-older();
+                            root.check-newer();
                         }
                     }
                     for m[idx] in root.messages: Bubble {
@@ -588,7 +603,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 // jump to the latest message
-                if !root.near-bottom: Rectangle {
+                if !root.near-bottom || root.can-load-newer: Rectangle {
                     x: parent.width - self.width - 20px;
                     y: parent.height - self.height - 14px;
                     width: 40px;

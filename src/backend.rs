@@ -32,7 +32,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::db::Index;
 use crate::types::{
-    parse_thread_key, thread_key, Command, Event, Frames, MsgDto, PackDto, PinDto, Scroll, StickerDto, Thumb, ThreadDto, ANIM_BUDGET,
+    parse_thread_key, thread_key, Command, Event, Frames, MsgDto, PackDto, Paging, PinDto, Scroll, StickerDto, Thumb, ThreadDto, ANIM_BUDGET,
     STICKER_THUMB_PREFIX,
 };
 use crate::view::{self, Kind, THUMB_MAX};
@@ -59,6 +59,7 @@ pub(crate) type Mgr = Manager<SqliteStore, Registered>;
 pub type Emit = Arc<dyn Fn(Event) + Send + Sync>;
 
 const PAGE: u32 = 60;
+/// rows kept loaded: the window moves through the thread, so this bounds memory, not history
 const MAX_WINDOW: usize = 600;
 /// shown rows kept above a jump target (`App::jump_to`): well past the older-page prefetch
 /// distance (two screens)
@@ -249,6 +250,9 @@ struct Open {
     /// display position of the window's first row, where older pages continue; `i64::MAX` when empty
     oldest_seq: i64,
     has_more: bool,
+    /// display position of the window's last row when it stops short of the thread's newest
+    /// message; None: the window reaches it, and new messages join it
+    end_seq: Option<i64>,
 }
 
 struct App {
@@ -289,6 +293,10 @@ struct App {
     pin_expiry: Option<u64>,
     sweeping: bool,
     focused: bool,
+    /// the window lost rows since the last `emit_messages`
+    moved: bool,
+    /// the message list is at its bottom (always, until the UI says otherwise)
+    at_bottom: bool,
     synced: bool,
     tx: UnboundedSender<Internal>,
     link_task: Option<JoinHandle<()>>,
@@ -422,6 +430,8 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         pin_expiry: None,
         sweeping: false,
         focused: true,
+        moved: false,
+        at_bottom: true,
         synced: false,
         tx,
         link_task: None,
@@ -548,6 +558,16 @@ impl App {
                     warn!("load_older: {e:#}");
                 }
             }
+            Command::LoadNewer => {
+                if let Err(e) = self.load_newer().await {
+                    warn!("load_newer: {e:#}");
+                }
+            }
+            Command::ToLatest => self.emit_messages(Scroll::Bottom).await,
+            Command::AtBottom(at) => {
+                self.at_bottom = at;
+                self.read_if_seen();
+            }
             Command::Send { text, files, quote, mentions, link } => self.send(text, files, quote, mentions, link).await,
             Command::ViewImage { id, index, fit, from_file } => self.view_image(&id, index, fit, from_file),
             Command::ViewerThumbs { id, px } => self.viewer_thumbs(&id, px),
@@ -567,9 +587,7 @@ impl App {
                 self.focused = f;
                 if f {
                     self.notes.clear();
-                    if let Some(key) = self.current.as_ref().map(|c| c.key.clone()) {
-                        self.mark_read(&key);
-                    }
+                    self.read_if_seen();
                 }
             }
             Command::Unlink => self.unlink().await,
