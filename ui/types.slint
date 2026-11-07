@@ -137,6 +137,12 @@ export struct MentionItem {
     tint: color,
 }
 
+// a line of the release notes: 0 = heading, 1 = bullet, 2 = text
+export struct NoteLine {
+    kind: int,
+    text: string,
+}
+
 export struct PackItem {
     id: string,
     title: string,

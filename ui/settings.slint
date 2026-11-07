@@ -82,6 +82,8 @@ export component SettingsPage inherits Rectangle {
     in property <string> account-phone;
     in property <string> storage;
     in property <string> version;
+    in property <bool> whatsnew-has;
+    callback open-whatsnew();
     callback changed();
     callback close();
     callback clear-thumbs();
@@ -321,6 +323,14 @@ export component SettingsPage inherits Rectangle {
                         SettingRow {
                             label: root.version;
                             hint: "Signal과 무관한 비공식 클라이언트입니다. \"Signal\"은 Signal Technology Foundation의 상표입니다.";
+                        }
+                        if root.whatsnew-has: SettingRow {
+                            label: "새로운 점";
+                            hint: "이 버전에서 달라진 점을 볼 수 있습니다.";
+                            Button {
+                                text: "보기";
+                                clicked => { root.open-whatsnew(); }
+                            }
                         }
                         SettingRow {
                             label: "소스 코드";

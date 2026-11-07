@@ -1,0 +1,75 @@
+// "What's new" page: this version's release notes (over the conversation pane, like settings).
+
+import { Theme } from "theme.slint";
+import { NoteLine } from "types.slint";
+import { IconButton } from "widgets.slint";
+
+export component WhatsNewPage inherits Rectangle {
+    in property <string> version;
+    in property <[NoteLine]> lines;
+    callback close();
+    background: Theme.pane;
+    // swallow clicks so nothing underneath reacts
+    TouchArea { }
+    VerticalLayout {
+        Rectangle {
+            height: 56px;
+            HorizontalLayout {
+                padding-left: 24px;
+                padding-right: 12px;
+                Text {
+                    text: "새로운 점";
+                    color: Theme.text;
+                    font-size: 17px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    label: "✕";
+                    clicked => { root.close(); }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+        }
+        Flickable {
+            vertical-stretch: 1;
+            max-width: 100000px;
+            content-height: body.preferred-height;
+            HorizontalLayout {
+                width: parent.width;
+                alignment: center;
+                body := VerticalLayout {
+                    width: min(560px, root.width - 48px);
+                    padding-top: 12px;
+                    padding-bottom: 24px;
+                    spacing: 6px;
+                    Text {
+                        text: root.version;
+                        color: Theme.subtle;
+                        font-size: 12px;
+                    }
+                    for line in root.lines: HorizontalLayout {
+                        spacing: 8px;
+                        padding-top: line.kind == 0 ? 12px : 0px;
+                        if line.kind == 1: Text {
+                            text: "•";
+                            color: Theme.subtle;
+                            font-size: 13.5px;
+                            vertical-alignment: top;
+                        }
+                        Text {
+                            text: line.text;
+                            color: line.kind == 0 ? Theme.accent : Theme.text;
+                            font-size: line.kind == 0 ? 12.5px : 13.5px;
+                            font-weight: line.kind == 0 ? 700 : 400;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

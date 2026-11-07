@@ -12,6 +12,7 @@ pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     wire_stickers(app, &send);
     wire_settings(app, &send);
     anim::wire(app);
+    whatsnew::wire(app);
     if !headless::active() {
         // no native window in headless; started when the window is first shown
         let send = send.clone();
@@ -642,6 +643,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             muted_replies: app.get_set_muted_replies(),
             badge_muted: app.get_set_badge_muted(),
             link_previews: app.get_set_link_previews(),
+            last_seen_version: UI.with_borrow(|ui| ui.settings.last_seen_version.clone()),
         };
         let (old, path) = UI.with_borrow_mut(|ui| (std::mem::replace(&mut ui.settings, new.clone()), ui.settings_path.clone()));
         if old == new {

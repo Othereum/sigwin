@@ -29,6 +29,17 @@ fn main() {
         .unwrap(),
     }
 
+    // this version's release notes for the "what's new" panel (`whatsnew.rs`); empty = none
+    println!("cargo:rerun-if-env-changed=SIGWIN_NOTES");
+    let out = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("release-notes.md");
+    match std::env::var("SIGWIN_NOTES") {
+        Ok(src) => {
+            println!("cargo:rerun-if-changed={src}");
+            std::fs::copy(&src, &out).expect("SIGWIN_NOTES");
+        }
+        Err(_) => std::fs::write(&out, "").unwrap(),
+    }
+
     #[cfg(windows)]
     {
         let mut res = winresource::WindowsResource::new();

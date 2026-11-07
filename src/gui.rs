@@ -19,6 +19,7 @@ pub(crate) mod notice;
 mod rows;
 mod scroll;
 pub(crate) mod viewer;
+pub(crate) mod whatsnew;
 mod window;
 mod wire;
 
@@ -185,6 +186,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             app.set_page("link".into());
             // no account, so no sync to wait for
             crate::update::start();
+            whatsnew::on_need_link();
         }
         Event::LinkQr(url) => {
             if let Some(img) = qr_image(&url) {
@@ -193,7 +195,10 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             }
         }
         Event::LinkStatus(s) => app.set_link_status(s.into()),
-        Event::Ready => app.set_page("main".into()),
+        Event::Ready => {
+            app.set_page("main".into());
+            whatsnew::on_ready(app);
+        }
         Event::Threads(list) => UI.with_borrow_mut(|ui| {
             ui.thread_dtos = list;
             show_total_unread(app, ui);

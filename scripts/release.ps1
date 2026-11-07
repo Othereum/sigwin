@@ -1,7 +1,8 @@
 # Build, sign and publish a release from this machine (see docs/release.md).
 #   .\scripts\release.ps1                       # key: ~\.minisign\sigwin.key
 #   .\scripts\release.ps1 -Key D:\keys\sigwin.key
-# Publishes target\release-notes.md as the release's notes, then removes it (-Notes to change).
+# Publishes target\release-notes.md as the release's notes and embeds it in the exe for the app's
+# "what's new" panel, then removes it (-Notes to change).
 # Needs: cargo, cargo-about, minisign, gh (logged in). minisign asks for the key password.
 param(
     [string]$Key = (Join-Path $env:USERPROFILE ".minisign\sigwin.key"),
@@ -24,6 +25,10 @@ if (-not (Test-Path $Notes)) { throw "release notes not found: $Notes" }
 $Notes = (Resolve-Path $Notes).Path
 $notesText = [IO.File]::ReadAllText($Notes, [Text.UTF8Encoding]::new($false))
 if (-not $notesText.Trim()) { throw "release notes are empty: $Notes" }
+# the app shows these in its "what's new" panel: headings and bullets (src/whatsnew.rs)
+if ($notesText -notmatch '(?m)^##? ' -or $notesText -notmatch '(?m)^[-*] ') {
+    throw "release notes need a '## ' heading and '- ' bullets: $Notes"
+}
 
 # release only what is on origin/main
 if ((git branch --show-current) -ne "main") { throw "not on main" }
@@ -47,6 +52,8 @@ $out = New-Item -ItemType Directory -Force target\release-dist
 $licenses = Join-Path $out "licenses.html"
 cargo about generate -c build-support/about.toml build-support/about.hbs -o $licenses; Run "cargo about"
 $env:SIGWIN_LICENSES = (Resolve-Path $licenses).Path
+# embedded in the exe for the "what's new" panel (build.rs, src/whatsnew.rs)
+$env:SIGWIN_NOTES = $Notes
 # leaves out everything that marks dev builds (build.rs `sigwin_dev`)
 $env:SIGWIN_RELEASE = "1"
 # keep this machine's paths (user name, repo dir) out of panic locations; the last match wins,

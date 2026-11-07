@@ -29,6 +29,7 @@ mod types;
 mod update;
 mod videoframe;
 mod view;
+mod whatsnew;
 mod winhook;
 
 use std::path::PathBuf;

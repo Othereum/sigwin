@@ -44,10 +44,25 @@ releases was never seen by anyone. GitHub releases are the record; there is no c
 - `## 새 기능` and `## 수정`, leaving out an empty one. Only what differs from the last release.
 - A MINOR release (no going back to older versions) says so first.
 - No account data, and nothing about a conversation it was found in.
-- With more than one language, a `## <language>` section each, so the app could later show just its
-  own. Notes of past releases stay as they are.
+- With more than one language, the app would need to pick its own (the current parser takes every
+  `##` as a section). Notes of past releases stay as they are.
 
-The notes aren't covered by the update signature: if the app ever shows them, as plain text only.
+### In the app
+`scripts\release.ps1` embeds the notes in the exe (`SIGWIN_NOTES` → `build.rs`), so the signed exe
+carries its own version's notes and nothing is fetched. After an update the sidebar offers them
+once as a "what's new" panel (`src/whatsnew.rs`, `gui/whatsnew.rs`); Settings > 정보 shows them
+again. The script refuses notes without a `## ` heading and `- ` bullets.
+- Format: `##` headings (any text) are sections, `- ` lines are bullets, anything else is plain
+  text; links, images and HTML are never rendered. The parser is lenient, so a new heading needs
+  no app change. Notes and parser are built together, so an older app never reads a newer format.
+- Shown when `last_seen_version` in `settings.json` is older than the running version. An app
+  from before the feature recorded nothing: no value but an existing account means it was updated
+  (show), no account means a fresh install (record, show nothing). It records when the panel is
+  opened or dismissed, never for a dev build without notes.
+- Only the running version's notes are in the exe: a user who skipped releases sees the last one's.
+  Write the notes for someone who didn't read the earlier ones if that matters for the change.
+- If notes from outside the exe are ever shown (GitHub's body, older releases), they are not
+  signed: plain text only, and give the format a version marker first (no marker = version 1).
 
 ## License notices
 `scripts\release.ps1` generates third-party notices with `cargo about`

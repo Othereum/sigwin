@@ -79,6 +79,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/instance.rs` | one process per data dir |
 | `src/install.rs` | self-install and uninstall |
 | `src/update.rs` | self-update from GitHub Releases (process: `docs/release.md`) |
+| `src/whatsnew.rs` | the release notes embedded in the exe, their parser, when to offer them (`gui/whatsnew.rs` shows) |
 | `src/autostart.rs` | start with Windows |
 | `src/logfile.rs` | log file and panic hook |
 | `src/notices.rs` | embedded third-party license notices |

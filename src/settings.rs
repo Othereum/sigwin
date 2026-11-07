@@ -37,6 +37,9 @@ pub struct Settings {
     pub badge_muted: bool,
     /// a link in the composer gets a preview, fetched from its site
     pub link_previews: bool,
+    /// the newest version whose "what's new" was seen or dismissed ("" = never recorded; not a
+    /// preference, kept here for lack of a better file)
+    pub last_seen_version: String,
 }
 
 impl Default for Settings {
@@ -56,6 +59,7 @@ impl Default for Settings {
             muted_replies: true,
             badge_muted: true,
             link_previews: true,
+            last_seen_version: String::new(),
         }
     }
 }

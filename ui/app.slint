@@ -1,11 +1,12 @@
 import { LineEdit, Button, ListView, Palette, Spinner } from "std-widgets.slint";
-import { ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
+import { ThreadItem, MsgItem, PinItem, MentionItem, NoteLine, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
 import { Avatar, IconButton, MenuRow, Notice, Segmented, TextButton } from "widgets.slint";
 import { Bubble } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
 import { SettingsPage } from "settings.slint";
+import { WhatsNewPage } from "whatsnew.slint";
 import { LinkPage } from "link.slint";
 
 // Structs and globals the Rust side uses.
@@ -146,6 +147,13 @@ export component AppWindow inherits Window {
     in-out property <string> update-available;
     in-out property <bool> update-installing;
     callback restart-for-update();
+    // "what's new": the notes exist, the sidebar offers them (until opened or dismissed), the page
+    in property <bool> whatsnew-has;
+    in-out property <bool> whatsnew-offer;
+    in-out property <bool> whatsnew-open;
+    in property <[NoteLine]> whatsnew-lines;
+    callback open-whatsnew();
+    callback dismiss-whatsnew();
     callback open-settings();
     callback settings-changed();
     callback clear-thumbs();
@@ -387,6 +395,40 @@ export component AppWindow inherits Window {
                             root.open-thread(t.key);
                         }
                         menu(x, y) => { root.open-thread-menu(t.key, x, y); }
+                    }
+                }
+                if root.whatsnew-offer: Rectangle {
+                    height: 38px;
+                    background: wn-ta.has-hover ? Theme.hover : Theme.sidebar;
+                    Rectangle { y: 0; height: 1px; background: Theme.border; }
+                    wn-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.open-whatsnew(); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 4px;
+                        spacing: 8px;
+                        Text {
+                            text: "업데이트되었습니다";
+                            color: Theme.text;
+                            font-size: 12.5px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: "새로운 점";
+                            color: Theme.accent;
+                            font-size: 12.5px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            label: "✕";
+                            clicked => { root.dismiss-whatsnew(); }
+                        }
                     }
                 }
                 if root.update-version == "" && root.update-available != "": Rectangle {
@@ -913,11 +955,22 @@ export component AppWindow inherits Window {
         account-phone: root.account-phone;
         storage: root.storage-text;
         version: root.version;
+        whatsnew-has: root.whatsnew-has;
+        open-whatsnew => { root.open-whatsnew(); }
         changed => { root.settings-changed(); }
         close => { root.settings-open = false; }
         clear-thumbs => { root.clear-thumbs(); }
         open-logs => { root.open-logs(); }
         unlink => { root.unlink(); }
+    }
+
+    if page == "main" && root.whatsnew-open: WhatsNewPage {
+        x: 300px;
+        width: root.width - 300px;
+        height: root.height;
+        version: root.version;
+        lines: root.whatsnew-lines;
+        close => { root.whatsnew-open = false; }
     }
 
     // @mention popup, just above the composer
