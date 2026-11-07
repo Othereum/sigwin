@@ -40,7 +40,10 @@ export struct ImageCell {
 export struct ReactionItem {
     emoji: string,
     count: int,
-
+    // our own reaction: the chip is highlighted
+    mine: bool,
+    // names of who reacted, joined by ", " ("나" for us)
+    who: string,
 }
 
 export struct ReaderItem {

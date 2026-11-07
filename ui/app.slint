@@ -259,6 +259,7 @@ export component AppWindow inherits Window {
     in-out property <string> pack-url;
     callback toggle-stickers();
     in-out property <string> info-text;
+    in-out property <string> info-title: "메시지 정보";
     callback pick-pack(string);
     callback send-sticker(string, int);
     callback install-pack(string);
@@ -681,7 +682,8 @@ export component AppWindow inherits Window {
                         file-clicked(id) => { root.file-clicked(id); }
                         quote-clicked(id) => { root.show-message(id); }
                         reply(id) => { root.reply(id); }
-                        show-info(t) => { root.info-text = t; }
+                        show-info(t) => { root.info-title = "메시지 정보"; root.info-text = t; }
+                        show-reactors(t) => { root.info-title = "반응"; root.info-text = t; }
                         menu(id, x, y) => { root.open-menu(id, x, y); }
                     }
                 }
@@ -1155,6 +1157,7 @@ export component AppWindow inherits Window {
                 if root.menu-info != "" && !root.menu-pin-step: MenuRow {
                     text: "정보";
                     clicked => {
+                        root.info-title = "메시지 정보";
                         root.info-text = root.menu-info;
                         root.menu-id = "";
                     }
@@ -1348,7 +1351,7 @@ export component AppWindow inherits Window {
             info-col := VerticalLayout {
                 padding: 18px;
                 spacing: 10px;
-                Text { text: "메시지 정보"; font-weight: 700; font-size: 15px; color: Theme.text; }
+                Text { text: root.info-title; font-weight: 700; font-size: 15px; color: Theme.text; }
                 Text { text: root.info-text; wrap: word-wrap; color: Theme.text; font-size: 13px; }
                 HorizontalLayout {
                     alignment: end;

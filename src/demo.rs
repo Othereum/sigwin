@@ -161,7 +161,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             // demo ids are row ids: quote a row some way up (the last rows: near the top of the
             // page that SIGWIN_DEMO_OLDER pages in for it)
             quote_id: if i >= 298 { (i - 175).to_string() } else if i % 11 == 0 { i.saturating_sub(40).to_string() } else { String::new() },
-            reactions: if i % 9 == 0 { vec![("❤️".into(), 2), ("👍".into(), 1), ("😂".into(), 3)] } else { Vec::new() },
+            reactions: if i % 9 == 0 { vec![("❤️".into(), 2, "이서연, 나".into()), ("👍".into(), 1, "박지훈".into()), ("😂".into(), 3, "이서연, 박지훈, 최민수".into())] } else { Vec::new() },
             attachment: if i % 13 == 0 { "보고서.pdf".into() } else { String::new() },
             day_sep: if i % 50 == 0 { "2026년 11월 1일 일요일".into() } else { String::new() },
             sticker: i == 298 || i == 297,
@@ -999,8 +999,8 @@ fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiv
             ..Default::default()
         })
         .collect();
-    items[3].reactions = vec![("❤️".into(), 1)];
-    items[10].reactions = vec![("😂".into(), 1)];
+    items[3].reactions = vec![("❤️".into(), 1, "이서연".into())];
+    items[10].reactions = vec![("😂".into(), 1, "박지훈".into())];
     for m in items.iter_mut() {
         m.big_emoji = emoji::only_emoji(&m.text, 5).is_some();
     }

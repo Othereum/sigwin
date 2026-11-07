@@ -191,8 +191,8 @@ pub struct MsgDto {
     pub quote_author: String,
     /// sent timestamp of the quoted message, for jumping to it
     pub quote_id: String,
-    /// (emoji, count)
-    pub reactions: Vec<(String, u32)>,
+    /// (emoji, count, who: names joined by ", ", "나" for us)
+    pub reactions: Vec<(String, u32, String)>,
     /// the message is only 1..=5 emoji: shown large, without a bubble
     pub big_emoji: bool,
     pub attachment: String,

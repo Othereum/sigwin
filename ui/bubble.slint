@@ -338,6 +338,8 @@ export component Bubble inherits VerticalLayout {
     callback quote-clicked(string);
     callback reply(string);
     callback show-info(string);
+    // click on a reaction chip: "emoji  names"
+    callback show-reactors(string);
     // right click: message menu at (x, y) in window coordinates
     callback menu(string, length, length);
     padding-left: 16px;
@@ -361,6 +363,8 @@ export component Bubble inherits VerticalLayout {
     // photo with text: the photo sits flush on top of the bubble, the text below it
     property <bool> flush: m.has-image && !m.sticker && m.text != "" && m.quote == "";
     property <bool> no-bubble: m.sticker || m.big-emoji || bare;
+    // outgoing bubble color behind the reaction chips (white-on-accent styling)
+    property <bool> on-accent: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted;
     // height of the day separator above the message itself (centering a jump on the bubble)
     out property <length> lead: m.day-sep != "" ? root.padding-top + 36px + root.spacing : 0px;
 
@@ -660,19 +664,38 @@ export component Bubble inherits VerticalLayout {
                     spacing: 4px;
                     if m.reactions.length > 0: HorizontalLayout {
                         horizontal-stretch: 1;
-                        spacing: 6px;
-                        for r in m.reactions: HorizontalLayout {
-                            spacing: 1px;
-                            Text {
-                                text: r.emoji;
-                                font-size: 15px;
-                                vertical-alignment: center;
+                        spacing: 4px;
+                        // pill chips; ours is outlined. A click shows who reacted.
+                        for r in m.reactions: Rectangle {
+                            border-radius: 11px;
+                            border-width: 1px;
+                            border-color: r.mine ? (on-accent ? white : Theme.accent) : transparent;
+                            background: on-accent
+                                ? (r.mine ? #ffffff50 : #ffffff30)
+                                : r.mine ? Theme.accent.with-alpha(0.22)
+                                : Theme.dark ? #ffffff1c : #00000014;
+                            HorizontalLayout {
+                                padding-left: 6px;
+                                padding-right: r.count > 1 ? 7px : 6px;
+                                padding-top: 1px;
+                                padding-bottom: 1px;
+                                spacing: 3px;
+                                Text {
+                                    text: r.emoji;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                }
+                                if r.count > 1: Text {
+                                    text: r.count;
+                                    font-size: 11px;
+                                    font-weight: r.mine ? 700 : 400;
+                                    color: on-accent ? white : Theme.text;
+                                    vertical-alignment: center;
+                                }
                             }
-                            if r.count > 1: Text {
-                                text: r.count;
-                                font-size: 11px;
-                                color: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? white : Theme.text;
-                                vertical-alignment: center;
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.show-reactors(r.emoji + "  " + r.who); }
                             }
                         }
                     }

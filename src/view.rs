@@ -962,11 +962,15 @@ pub fn build(
                     }
                 }
                 if let Some(r) = reactions.get(ts).filter(|r| !r.is_empty()) {
-                    let mut counts: Vec<(String, u32)> = Vec::new();
-                    for (_, e) in r {
-                        match counts.iter_mut().find(|(x, _)| x == e) {
-                            Some(c) => c.1 += 1,
-                            None => counts.push((e.clone(), 1)),
+                    let mut counts: Vec<(String, u32, String)> = Vec::new();
+                    for (who, e) in r {
+                        let name = if *who == me { "나".to_string() } else { name_of(who) };
+                        match counts.iter_mut().find(|(x, ..)| x == e) {
+                            Some(c) => {
+                                c.1 += 1;
+                                add_name(&mut c.2, &name);
+                            }
+                            None => counts.push((e.clone(), 1, name)),
                         }
                     }
                     m.reactions = counts;
@@ -1075,20 +1079,36 @@ fn cut_for_read_more(m: &mut MsgDto, limit: usize) -> bool {
 /// Optimistic update while our reaction is being sent: set (or with `None` take back) our reaction.
 pub fn set_my_reaction(m: &mut MsgDto, emoji: Option<&str>) {
     if !m.my_reaction.is_empty() {
-        if let Some(i) = m.reactions.iter().position(|(e, _)| *e == m.my_reaction) {
+        if let Some(i) = m.reactions.iter().position(|(e, ..)| *e == m.my_reaction) {
             m.reactions[i].1 -= 1;
             if m.reactions[i].1 == 0 {
                 m.reactions.remove(i);
+            } else {
+                let rest: Vec<&str> = m.reactions[i].2.split(", ").filter(|n| *n != "나").collect();
+                m.reactions[i].2 = rest.join(", ");
             }
         }
     }
     m.my_reaction = emoji.unwrap_or_default().to_string();
     if let Some(e) = emoji {
-        match m.reactions.iter_mut().find(|(x, _)| x == e) {
-            Some(r) => r.1 += 1,
-            None => m.reactions.push((e.to_string(), 1)),
+        match m.reactions.iter_mut().find(|(x, ..)| x == e) {
+            Some(r) => {
+                r.1 += 1;
+                add_name(&mut r.2, "나");
+            }
+            None => m.reactions.push((e.to_string(), 1, "나".to_string())),
         }
     }
+}
+
+fn add_name(names: &mut String, name: &str) {
+    if name.is_empty() {
+        return;
+    }
+    if !names.is_empty() {
+        names.push_str(", ");
+    }
+    names.push_str(name);
 }
 
 /// Optimistic update while an edit is being sent.
@@ -1497,7 +1517,7 @@ mod tests {
         let window = [(row, original)];
         let b = build(&window, Uuid::from_u128(1), &[], &indexed, &LongTexts::default(), &|_: &Uuid| String::new());
         assert_eq!(b.items[0].text, "after");
-        assert_eq!(b.items[0].reactions, [("up".to_string(), 2)]);
+        assert_eq!(b.items[0].reactions, [("up".to_string(), 2, "나".to_string())]);
         assert_eq!(b.items[0].my_reaction, "up");
     }
 
@@ -1565,14 +1585,15 @@ mod tests {
 
     #[test]
     fn my_reaction_is_replaced_and_taken_back() {
-        let mut m = MsgDto { reactions: vec![("👍".into(), 2)], my_reaction: "👍".into(), ..Default::default() };
+        let mut m = MsgDto { reactions: vec![("👍".into(), 2, "가, 나".into())], my_reaction: "👍".into(), ..Default::default() };
+        let (up, heart) = (("👍".to_string(), 1, "가".to_string()), ("❤️".to_string(), 1, "나".to_string()));
         set_my_reaction(&mut m, Some("❤️"));
-        assert_eq!(m.reactions, vec![("👍".to_string(), 1), ("❤️".to_string(), 1)]);
+        assert_eq!(m.reactions, vec![up.clone(), heart.clone()]);
         // idempotent: applying the same pending op twice changes nothing
         set_my_reaction(&mut m, Some("❤️"));
-        assert_eq!(m.reactions, vec![("👍".to_string(), 1), ("❤️".to_string(), 1)]);
+        assert_eq!(m.reactions, vec![up.clone(), heart]);
         set_my_reaction(&mut m, None);
-        assert_eq!(m.reactions, vec![("👍".to_string(), 1)]);
+        assert_eq!(m.reactions, vec![up]);
         assert!(m.my_reaction.is_empty());
     }
 }

@@ -258,7 +258,12 @@ pub(crate) fn to_item(
     let reactions: Vec<ReactionItem> = m
         .reactions
         .iter()
-        .map(|(e, n)| ReactionItem { emoji: e.as_str().into(), count: *n as i32 })
+        .map(|(e, n, who)| ReactionItem {
+            emoji: e.as_str().into(),
+            count: *n as i32,
+            mine: *e == m.my_reaction,
+            who: who.as_str().into(),
+        })
         .collect();
     let links = if m.deleted { Vec::new() } else { link::find(&m.text) };
     let fonts = if m.deleted { Vec::new() } else { font_spans(m) };
