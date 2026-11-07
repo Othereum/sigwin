@@ -206,6 +206,10 @@ impl App {
         let Ok(thread) = Thread::try_from(&c) else { return };
         let key = thread_key(&thread);
         let is_open = self.current.as_ref().is_some_and(|o| o.key == key);
+        // replaced in place, so the thread's last row doesn't say it changed
+        if let Some(target) = view::data_message(&c).and_then(|dm| dm.delete.as_ref()?.target_sent_timestamp) {
+            self.forget_snippet(&key, target);
+        }
         if let Err(e) = record_pin(&self.index, &key, &c, self.me).await {
             warn!("record pin: {e:#}");
         }

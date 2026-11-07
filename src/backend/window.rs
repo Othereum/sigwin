@@ -5,30 +5,7 @@ use super::*;
 impl App {
     /// The messages of `rows` (`(seq, ts)`, any order), in display order.
     pub(super) async fn fetch_range(&self, thread: &Thread, rows: &[(i64, u64)]) -> anyhow::Result<Vec<(u64, Content)>> {
-        let (Some(min), Some(max)) = (rows.iter().map(|r| r.1).min(), rows.iter().map(|r| r.1).max()) else {
-            return Ok(Vec::new());
-        };
-        let mut rows = rows.to_vec();
-        rows.sort_by_key(|r| r.0);
-        // the store only reads timestamp ranges, and one message from a wrong clock can stretch
-        // the range over the whole thread: then read the rows one by one
-        let mut found: HashMap<u64, Content> = if self.index.count_between(thread, min, max).await? <= rows.len() as u64 * 2 {
-            self.store
-                .messages(thread, min..=max)
-                .await?
-                .filter_map(Result::ok)
-                .map(|c| (c.metadata.client_timestamp.timestamp_millis() as u64, c))
-                .collect()
-        } else {
-            let mut m = HashMap::with_capacity(rows.len());
-            for (_, ts) in &rows {
-                if let Ok(Some(c)) = self.store.message(thread, *ts).await {
-                    m.insert(*ts, c);
-                }
-            }
-            m
-        };
-        Ok(rows.into_iter().filter_map(|(_, ts)| Some((ts, found.remove(&ts)?))).collect())
+        fetch_rows(&self.index, &self.store, thread, rows).await
     }
 
     /// The rows of `rows` that show in the list, in display order.
@@ -541,6 +518,34 @@ impl App {
     }
 
     // ---- typing indicators ----
+}
+
+/// The messages of `rows` (`(seq, ts)`, any order), in display order.
+pub(super) async fn fetch_rows(index: &Index, store: &SqliteStore, thread: &Thread, rows: &[(i64, u64)]) -> anyhow::Result<Vec<(u64, Content)>> {
+    let (Some(min), Some(max)) = (rows.iter().map(|r| r.1).min(), rows.iter().map(|r| r.1).max()) else {
+        return Ok(Vec::new());
+    };
+    let mut rows = rows.to_vec();
+    rows.sort_by_key(|r| r.0);
+    // the store only reads timestamp ranges, and one message from a wrong clock can stretch
+    // the range over the whole thread: then read the rows one by one
+    let mut found: HashMap<u64, Content> = if index.count_between(thread, min, max).await? <= rows.len() as u64 * 2 {
+        store
+            .messages(thread, min..=max)
+            .await?
+            .filter_map(Result::ok)
+            .map(|c| (c.metadata.client_timestamp.timestamp_millis() as u64, c))
+            .collect()
+    } else {
+        let mut m = HashMap::with_capacity(rows.len());
+        for (_, ts) in &rows {
+            if let Ok(Some(c)) = store.message(thread, *ts).await {
+                m.insert(*ts, c);
+            }
+        }
+        m
+    };
+    Ok(rows.into_iter().filter_map(|(_, ts)| Some((ts, found.remove(&ts)?))).collect())
 }
 
 impl Open {

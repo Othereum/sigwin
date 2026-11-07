@@ -135,9 +135,9 @@ struct Persist {
     /// layout of the attachment and thumbnail caches on disk (`CACHE_FORMAT` once converted)
     #[serde(default)]
     cache_format: u32,
-    /// `snippets` no longer holds misses from the old 20-row scan
+    /// `snippets` holds nothing from when only the newest rows were searched and edits were ignored
     #[serde(default)]
-    snippets_deep: bool,
+    snippets_whole: bool,
     /// thread key -> notifications off until (ms; 0 = on, `MUTE_ALWAYS`), picked in Sigwin
     #[serde(default)]
     mute_override: HashMap<String, u64>,
@@ -730,6 +730,10 @@ impl App {
             Internal::Sent(ts, Ok(())) => {
                 // presage stored the message before returning: swap the stub for the real row now
                 self.pending.retain(|p| p.ts != ts);
+                if let Some(PendingOp { op: Op::Delete(target), thread_key, .. }) = self.ops.iter().find(|o| o.ts == ts) {
+                    let (key, target) = (thread_key.clone(), *target);
+                    self.forget_snippet(&key, target);
+                }
                 match self.ops.iter().find(|o| o.ts == ts) {
                     Some(PendingOp { op: Op::Delete(target), .. }) => {
                         if let Err(e) = self.index.record_my_delete(*target).await {

@@ -491,16 +491,19 @@ fn body_text_spans(
     parts.join("\n")
 }
 
+/// The preview of a message, or of its edited text.
+pub fn message_snippet(dm: &DataMessage, outgoing: bool, name_of: &dyn Fn(&Uuid) -> String) -> String {
+    let t = one_line(dm, name_of);
+    if outgoing { format!("나: {t}") } else { t }
+}
+
 /// One-line preview used in the thread list and notifications.
 pub fn snippet(c: &Content, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> Option<String> {
     if expires_at(c).is_some_and(|t| t <= now_ms()) {
         return None;
     }
     let text = match classify(c, me) {
-        Kind::Msg { dm, outgoing } => {
-            let t = one_line(dm, name_of);
-            if outgoing { format!("나: {t}") } else { t }
-        }
+        Kind::Msg { dm, outgoing } => message_snippet(dm, outgoing, name_of),
         Kind::System(s) => s,
         Kind::Pin { .. } => pin_label(c, me, name_of),
         Kind::Deleted => "삭제된 메시지".into(),

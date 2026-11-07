@@ -1,5 +1,6 @@
 //! Thread list: names, snippets, unread counts, read receipts, avatars.
 
+use super::window::fetch_rows;
 use super::*;
 
 impl App {
@@ -55,10 +56,10 @@ impl App {
 
     pub(super) async fn rebuild_threads(&mut self) -> anyhow::Result<()> {
         let rows = self.index.threads().await?;
-        // empty snippets cached while only the last 20 rows were looked at
-        if !self.persist.snippets_deep {
-            self.persist.snippets.retain(|_, (_, _, s)| !s.is_empty());
-            self.persist.snippets_deep = true;
+        // cached while only the newest rows were searched, and before edits counted
+        if !self.persist.snippets_whole {
+            self.persist.snippets.clear();
+            self.persist.snippets_whole = true;
             self.persist_dirty = true;
         }
         let mut list: Vec<(i64, ThreadDto)> = Vec::with_capacity(rows.len());
@@ -70,7 +71,7 @@ impl App {
                 // cached before mentions were resolved: recompute
                 Some((last, ts, s)) if *last == row.tail_ts && !s.contains('\u{FFFC}') => (*ts, s.clone()),
                 _ => {
-                    let (ts, s) = self.compute_snippet(&row.thread, row.tail_ts).await;
+                    let (ts, s) = self.refresh_snippet(&key, &row.thread, row.tail_ts).await;
                     self.persist.snippets.insert(key.clone(), (row.tail_ts, ts, s.clone()));
                     self.persist_dirty = true;
                     (ts, s)
@@ -205,31 +206,72 @@ impl App {
         view::snippet(c, self.me, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()))
     }
 
-    /// Newest message that makes a snippet. 1:1 threads collect receipts (also for our group
-    /// messages), so look past them page by page, as far back as opening the thread would.
-    pub(super) async fn compute_snippet(&mut self, thread: &Thread, last_ts: u64) -> (u64, String) {
-        let mut before = i64::MAX;
-        let mut scanned = 0usize;
-        while scanned < MAX_WINDOW {
-            let Ok(page) = self.index.page(thread, before, PAGE).await else {
-                return (last_ts, String::new());
-            };
-            let Some(&(oldest, _)) = page.last() else { break };
-            let Ok(rows) = self.fetch_range(thread, &page).await else {
-                return (last_ts, String::new());
-            };
-            for (ts, c) in rows.iter().rev() {
-                if let Some(s) = self.snippet(c).await {
-                    return (*ts, s);
+    /// `snippet` with the author's newest edit of the message.
+    async fn edited_snippet(&mut self, key: &str, thread: &Thread, c: &Content) -> Option<String> {
+        let Kind::Msg { outgoing, .. } = view::classify(c, self.me) else { return self.snippet(c).await };
+        if view::snippet(c, self.me, &|_| String::new()).is_none() {
+            return None;
+        }
+        let Some(dm) = self.latest_edit(key, thread, c.timestamp(), c.metadata.sender.raw_uuid()).await else {
+            return self.snippet(c).await;
+        };
+        for u in view::mentioned(&dm) {
+            self.name(u).await;
+        }
+        let names = &self.names;
+        Some(view::message_snippet(&dm, outgoing, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())))
+    }
+
+    /// What the thread list shows for a thread whose last stored row is now `tail_ts`:
+    /// (sent timestamp, text). Receipts file under 1:1 threads and each one moves that row, so
+    /// this looks only at the rows since the last time. Without any it searches the whole thread,
+    /// once: a thread's last message can be thousands of receipts back.
+    pub(super) async fn refresh_snippet(&mut self, key: &str, thread: &Thread, tail_ts: u64) -> (u64, String) {
+        let cached = self.persist.snippets.get(key).filter(|(_, _, s)| !s.contains('\u{FFFC}')).cloned();
+        let after = match &cached {
+            Some((last, _, _)) => self.index.seq_of(thread, *last).await.ok().flatten(),
+            None => None,
+        };
+        let me = self.me;
+        let found = newest_shown(&self.index, &self.store, thread, me, after).await;
+        match found {
+            Err(_) => return cached.map_or((tail_ts, String::new()), |(_, ts, s)| (ts, s)),
+            Ok(Some((ts, c))) => {
+                let text = self.edited_snippet(key, thread, &c).await.unwrap_or_default();
+                return (ts, text);
+            }
+            Ok(None) => {}
+        }
+        let (Some(_), Some((_, ts, text))) = (after, cached) else { return (0, String::new()) };
+        if ts == 0 {
+            return (0, text);
+        }
+        // the same message, which the new rows may have edited
+        match self.store.message(thread, ts).await {
+            Err(_) => return (ts, text),
+            Ok(Some(c)) => {
+                if let Some(text) = self.edited_snippet(key, thread, &c).await {
+                    return (ts, text);
                 }
             }
-            if (page.len() as u32) < PAGE {
-                break;
-            }
-            scanned += page.len();
-            before = oldest;
+            Ok(None) => {}
         }
-        (0, String::new())
+        // it's gone
+        match newest_shown(&self.index, &self.store, thread, me, None).await {
+            Ok(Some((ts, c))) => {
+                let text = self.edited_snippet(key, thread, &c).await.unwrap_or_default();
+                (ts, text)
+            }
+            _ => (0, String::new()),
+        }
+    }
+
+    /// The message deleted for everyone may be the one the thread list shows.
+    pub(super) fn forget_snippet(&mut self, key: &str, target: u64) {
+        if self.persist.snippets.get(key).is_some_and(|(_, ts, _)| *ts == target) {
+            self.persist.snippets.remove(key);
+            self.persist_dirty = true;
+        }
     }
 
     pub(super) async fn emit_threads(&mut self) {
@@ -313,6 +355,30 @@ impl App {
     }
 }
 
+/// The newest row after display position `after` (None: anywhere) that makes a snippet.
+pub(super) async fn newest_shown(
+    index: &Index,
+    store: &SqliteStore,
+    thread: &Thread,
+    me: Uuid,
+    after: Option<i64>,
+) -> anyhow::Result<Option<(u64, Content)>> {
+    let mut before = i64::MAX;
+    loop {
+        let page = index.page(thread, before, PAGE).await?;
+        let Some(&(oldest, _)) = page.last() else { return Ok(None) };
+        let wanted: Vec<(i64, u64)> = page.iter().copied().filter(|r| after.is_none_or(|a| r.0 > a)).collect();
+        let mut rows = fetch_rows(index, store, thread, &wanted).await?;
+        if let Some(i) = rows.iter().rposition(|(_, c)| view::snippet(c, me, &|_| String::new()).is_some()) {
+            return Ok(Some(rows.swap_remove(i)));
+        }
+        if (page.len() as u32) < PAGE || after.is_some_and(|a| oldest <= a) {
+            return Ok(None);
+        }
+        before = oldest;
+    }
+}
+
 /// Profile display name like the official apps: CJK names are family first with no space
 /// ("홍길동"), everything else "given family".
 pub(super) fn combine_names(given: &str, family: &str) -> String {
@@ -338,6 +404,34 @@ pub(super) fn is_cjk(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// Far past anything a page or a window would look at.
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_newest_message_is_found_behind_any_number_of_receipts() {
+        use crate::db::tests::{thread, Db};
+        let db = Db::new().await;
+        let index = db.index().await;
+        let me = Uuid::from_u128(1);
+        let search = |after| {
+            let (index, store) = (index.clone(), db.store.clone());
+            async move { newest_shown(&index, &store, &thread(), me, after).await.unwrap().map(|r| r.0) }
+        };
+        assert_eq!(search(None).await, None);
+        db.save(100, "first").await;
+        db.save(200, "last").await;
+        for ts in 1000..1700 {
+            db.save_receipt(ts).await;
+        }
+        assert_eq!(search(None).await, Some(200));
+        // only what came after the given row counts
+        let seen = index.seq_of(&thread(), 1699).await.unwrap();
+        assert_eq!(search(seen).await, None);
+        let partway = index.seq_of(&thread(), 150 + 1000).await.unwrap();
+        assert_eq!(search(partway).await, None);
+        db.save(2000, "new").await;
+        db.save_receipt(2001).await;
+        assert_eq!(search(seen).await, Some(2000));
+    }
+
     use super::*;
 
     #[test]

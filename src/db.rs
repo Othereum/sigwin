@@ -721,7 +721,7 @@ fn order_rows(rows: Vec<sqlx::sqlite::SqliteRow>) -> Vec<(i64, u64)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use presage::libsignal_service::content::{Content, DataMessage, Metadata};
     use presage::libsignal_service::protocol::ServiceId;
@@ -730,14 +730,14 @@ mod tests {
     use uuid::Uuid;
 
     /// A real presage store on a scratch file, so the triggers meet its actual table and saves.
-    struct Db {
-        store: SqliteStore,
+    pub(crate) struct Db {
+        pub(crate) store: SqliteStore,
         options: SqliteConnectOptions,
         dir: std::path::PathBuf,
     }
 
     impl Db {
-        async fn new() -> Self {
+        pub(crate) async fn new() -> Self {
             static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let dir = std::env::temp_dir().join(format!("sigwin-db-test-{}-{n}", std::process::id()));
@@ -748,10 +748,29 @@ mod tests {
             let store = SqliteStore::open_with_options(options.clone(), OnNewIdentity::Trust).await.unwrap();
             Self { store, options, dir }
         }
-        async fn index(&self) -> Index {
+        pub(crate) async fn index(&self) -> Index {
             Index::open(self.options.clone()).await.unwrap()
         }
-        async fn save(&self, ts: u64, body: &str) {
+        /// A row that shows nothing: what most of a 1:1 thread is.
+        pub(crate) async fn save_receipt(&self, ts: u64) {
+            use presage::proto::ReceiptMessage;
+            let id = ServiceId::Aci(Uuid::from_u128(2).into());
+            let at = chrono::DateTime::from_timestamp_millis(ts as i64).unwrap();
+            let c = Content::from_body(ReceiptMessage { r#type: Some(1), timestamp: vec![1] }, Metadata {
+                sender: id,
+                destination: id,
+                sender_device: 1u32.try_into().unwrap(),
+                pni_verified: None,
+                client_timestamp: at,
+                server_timestamp: at,
+                needs_receipt: false,
+                unidentified_sender: false,
+                was_plaintext: false,
+                server_guid: None,
+            });
+            self.store.save_message(&thread(), c).await.unwrap();
+        }
+        pub(crate) async fn save(&self, ts: u64, body: &str) {
             let id = ServiceId::Aci(Uuid::from_u128(2).into());
             let dm = DataMessage { body: Some(body.into()), ..Default::default() };
             let at = chrono::DateTime::from_timestamp_millis(ts as i64).unwrap();
@@ -777,7 +796,7 @@ mod tests {
         }
     }
 
-    fn thread() -> Thread {
+    pub(crate) fn thread() -> Thread {
         Thread::Contact(ServiceId::Aci(Uuid::from_u128(2).into()))
     }
 

@@ -183,7 +183,7 @@ impl App {
     }
 
     /// The newest text `author` gave message `target`, if they edited it.
-    async fn latest_edit(&self, key: &str, thread: &Thread, target: u64, author: Uuid) -> Option<DataMessage> {
+    pub(super) async fn latest_edit(&self, key: &str, thread: &Thread, target: u64, author: Uuid) -> Option<DataMessage> {
         let at = match self.index.latest_edit(key, target, author).await {
             Ok(at) => at?,
             Err(e) => {
