@@ -59,7 +59,7 @@ pub(crate) type Mgr = Manager<SqliteStore, Registered>;
 pub type Emit = Arc<dyn Fn(Event) + Send + Sync>;
 
 const PAGE: u32 = 60;
-/// rows kept loaded: the window moves through the thread, so this bounds memory, not history
+/// shown rows kept loaded: the window moves through the thread, so this bounds memory, not history
 const MAX_WINDOW: usize = 600;
 /// shown rows kept above a jump target (`App::jump_to`): well past the older-page prefetch
 /// distance (two screens)
@@ -246,13 +246,26 @@ struct Open {
     members: Vec<Uuid>,
     /// group identifier (what typing messages carry), None for 1:1
     group_id: Option<[u8; 32]>,
+    /// Only rows that show. Receipts and the like are most of a 1:1 thread (and all of some
+    /// long stretches), so they would crowd the messages out of a window of any size.
     window: Vec<(u64, Content)>,
-    /// display position of the window's first row, where older pages continue; `i64::MAX` when empty
+    /// where older pages continue, at or above the window's first row; `i64::MAX` when empty
     oldest_seq: i64,
     has_more: bool,
     /// display position of the window's last row when it stops short of the thread's newest
     /// message; None: the window reaches it, and new messages join it
     end_seq: Option<i64>,
+    /// newest display position read, shown or not; rows after it are new
+    tail_seq: i64,
+}
+
+/// A stretch of a thread read into memory: what `Open` keeps about its window.
+struct Span {
+    window: Vec<(u64, Content)>,
+    oldest_seq: i64,
+    has_more: bool,
+    end_seq: Option<i64>,
+    tail_seq: i64,
 }
 
 struct App {

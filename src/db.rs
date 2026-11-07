@@ -613,19 +613,17 @@ impl Index {
         Ok(order_rows(rows))
     }
 
-    /// `(seq, ts)` of the messages displayed within `from..=to`, in display order.
-    pub async fn rows_between(&self, thread: &Thread, from: i64, to: i64) -> anyhow::Result<Vec<(i64, u64)>> {
+    /// `(seq, ts)` of the stored messages sent at `tss`.
+    pub async fn rows_at(&self, thread: &Thread, tss: &[u64]) -> anyhow::Result<Vec<(i64, u64)>> {
         let (gk, rid) = unzip(thread);
         let rows = sqlx::query(
             "SELECT seq, ts FROM ls_order
              WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
-               AND seq BETWEEN ? AND ?
-             ORDER BY seq ASC",
+               AND ts IN (SELECT value FROM json_each(?))",
         )
         .bind(gk)
         .bind(rid)
-        .bind(from)
-        .bind(to)
+        .bind(json_list(tss))
         .fetch_all(&self.pool)
         .await?;
         Ok(order_rows(rows))
@@ -915,7 +913,9 @@ mod tests {
         };
         let (s20, s40) = (seq(20).await, seq(40).await);
         let tss = |rows: Vec<(i64, u64)>| rows.into_iter().map(|r| r.1).collect::<Vec<_>>();
-        assert_eq!(tss(index.rows_between(&thread(), s20, s40).await.unwrap()), [20, 30, 40]);
+        let mut at = tss(index.rows_at(&thread(), &[40, 20, 99]).await.unwrap());
+        at.sort();
+        assert_eq!(at, [20, 40]);
         assert_eq!(tss(index.page_newer(&thread(), s20, 2).await.unwrap()), [30, 40]);
         assert_eq!(tss(index.page_newer(&thread(), s40, 2).await.unwrap()), [50]);
         assert_eq!(index.count_rows(&thread(), s20, s40).await.unwrap(), 2);

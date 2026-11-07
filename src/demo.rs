@@ -293,6 +293,16 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             (m.img_w, m.img_h) = if i % 2 == 0 { (400, 300) } else { (300, 400) };
         }
     }
+    // very long messages: `SIGWIN_DEMO_TALL=<row>:<chars>[,...]`
+    if let Ok(v) = std::env::var("SIGWIN_DEMO_TALL") {
+        for (row, chars) in v.split(',').filter_map(|p| p.split_once(':')) {
+            let (Ok(row), Ok(chars)) = (row.parse::<usize>(), chars.parse::<usize>()) else { continue };
+            // a line per 20 characters, so the row gets as tall as text can make it
+            let text: String = "긴 메시지의 내용입니다. 줄이 아주 많습니다
+".chars().cycle().take(chars).collect();
+            items[row].text = text;
+        }
+    }
     if let Ok(v) = std::env::var("SIGWIN_DEMO_OLDER") {
         // history paged in like a real thread: the newest 60 rows, then 60 more per LoadOlder or
         // LoadNewer, each after `v` ms (default 150). `SIGWIN_DEMO_CAP=<rows>` bounds the window

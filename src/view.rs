@@ -679,7 +679,7 @@ pub struct Indexed {
     pub my_deletes: std::collections::HashSet<u64>,
     /// target ts -> (who, emoji), oldest first
     pub reactions: HashMap<u64, Vec<(Uuid, String)>>,
-    /// stored edits of window rows that aren't in the window themselves: (stored ts, content)
+    /// stored edits of window rows: (stored ts, content)
     pub edits: Vec<(u64, Content)>,
 }
 
@@ -749,7 +749,7 @@ pub fn build(
     let now = now_ms();
     let mut next_expiry: Option<u64> = None;
 
-    for (ts, c) in outside.iter().chain(window) {
+    for (ts, c) in outside {
         if let Kind::Edit { target, dm } = classify(c, me) {
             let sender = c.metadata.sender.raw_uuid();
             let e = edits.entry(target).or_insert((*ts, dm, sender));
