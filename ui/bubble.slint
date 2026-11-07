@@ -349,7 +349,7 @@ export component Bubble inherits VerticalLayout {
     // the newest row gets extra room below so it doesn't touch the composer
     in property <bool> last;
     // the chips and the readers hang below the bubble: room for the part under its edge
-    padding-bottom: (m.typing ? 8px : (m.reactions.length > 0 ? (no-bubble ? 30px : 16px) : m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 12px) : m.collapse-below ? 1px : 6px)) + (last ? 10px : 0px);
+    padding-bottom: (m.typing ? 8px : (m.reactions.length > 0 ? (no-bubble ? 30px : 19px) : m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 15px) : m.collapse-below ? 1px : 6px)) + (last ? 10px : 0px);
     // bubble corners: 18px, 4px on the side that joins a neighbour of the same run
     out property <length> r-tl: !m.outgoing && m.collapse-above ? 4px : 18px;
     out property <length> r-tr: m.outgoing && m.collapse-above ? 4px : 18px;
@@ -676,7 +676,7 @@ export component Bubble inherits VerticalLayout {
             chips := Rectangle {
                 visible: m.reactions.length > 0;
                 x: 8px;
-                y: root.no-bubble ? parent.height + 2px : parent.height - 11px;
+                y: root.no-bubble ? parent.height + 2px : parent.height - 8px;
                 width: m.reactions.length > 0 ? chip-row.preferred-width : 0px;
                 height: m.reactions.length > 0 ? chip-row.preferred-height : 0px;
                 border-radius: 13px;
@@ -692,13 +692,15 @@ export component Bubble inherits VerticalLayout {
                         HorizontalLayout {
                             padding-left: 6px;
                             padding-right: r.count > 1 ? 7px : 6px;
-                            padding-top: 1px;
-                            padding-bottom: 1px;
                             spacing: 3px;
-                            Text {
-                                text: r.emoji;
-                                font-size: 14px;
-                                vertical-alignment: center;
+                            // the emoji sits 1px lower than the count (centered in 2px of extra top padding)
+                            VerticalLayout {
+                                padding-top: 2px;
+                                Text {
+                                    text: r.emoji;
+                                    font-size: 14px;
+                                    vertical-alignment: center;
+                                }
                             }
                             if r.count > 1: Text {
                                 text: r.count;
@@ -720,7 +722,7 @@ export component Bubble inherits VerticalLayout {
             if m.outgoing && m.readers.length > 0: Rectangle {
                 x: parent.width - self.width - 8px;
                 // no bubble (sticker, bare photo, big emoji): the time sits at the bottom edge, so go fully below it
-                y: root.no-bubble ? parent.height + 2px : parent.height - 9px;
+                y: root.no-bubble ? parent.height + 2px : parent.height - 6px;
                 width: 18px + (m.readers.length + (m.readers-more > 0 ? 1 : 0) - 1) * 11px;
                 height: 18px;
                 for r[i] in m.readers: Rectangle {
