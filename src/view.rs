@@ -142,7 +142,8 @@ pub fn expires_at(c: &Content) -> Option<u64> {
 
 /// `attachment_key` index of the picture in a reply's quote, and its size (logical px).
 const QUOTE_IMAGE_INDEX: usize = 97;
-const QUOTE_IMAGE: (u32, u32) = (52, 52);
+/// Logical size of the picture in a quote box; `ui/bubble.slint` `QuoteBox` draws it at the same size.
+pub(crate) const QUOTE_IMAGE: (u32, u32) = (54, 54);
 
 /// What a row shows but the window's rows may not say: kept apart from them, because what
 /// changes a message is stored later than the message and may be outside the window.

@@ -43,7 +43,8 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         let weak = app.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
             if let Some(app) = weak.upgrade() {
-                app.set_reply_preview("이서연: 답장 미리보기".into());
+                app.set_reply_author("이서연".into());
+                app.set_reply_preview("답장 미리보기".into());
                 app.set_info_text("읽음 (2)
 김민준, 이서연
 

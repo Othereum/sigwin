@@ -334,6 +334,76 @@ export component MsgTools inherits Rectangle {
     }
 }
 
+// the quoted message inside a reply bubble, and the reply preview above the composer
+export component QuoteBox inherits Rectangle {
+    in property <string> author;
+    in property <string> text;
+    in property <image> image;
+    in property <bool> has-image;
+    // inside one of our own bubbles (light-on-accent colors)
+    in property <bool> outgoing;
+    in property <bool> clickable;
+    callback clicked();
+    // right click, in window coordinates
+    callback menu(length, length);
+    border-radius: 6px;
+    clip: true;
+    background: outgoing ? (qta.has-hover ? #ffffff48 : #ffffff30) : Theme.dark ? (qta.has-hover ? #ffffff22 : #ffffff14) : (qta.has-hover ? #0000001c : #00000010);
+    qta := TouchArea {
+        enabled: root.clickable;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
+    HorizontalLayout {
+        Rectangle { width: 3px; background: root.outgoing ? white : Theme.accent; }
+        VerticalLayout {
+            padding: 6px;
+            spacing: 1px;
+            // don't stretch the rows into the space a taller picture leaves
+            alignment: start;
+            if root.author != "": Text {
+                text: root.author;
+                color: root.outgoing ? white : Theme.text;
+                font-size: 13px;
+                font-weight: 700;
+                overflow: elide;
+            }
+            // `max-height` on the Text alone doesn't cut it: the box is sized by the full text.
+            // This frame is as tall as the text, up to 2 lines, and the Text elides within it.
+            Rectangle {
+                height: min(body.preferred-height, 36px);
+                body := Text {
+                    width: 100%;
+                    height: 100%;
+                    text: root.text;
+                    color: root.outgoing ? #ffffffd0 : Theme.subtle;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                    overflow: elide;
+                }
+            }
+        }
+        // in a layout, so the box grows to hold it
+        // flush with the box's right edge (the box clips the corners)
+        if root.has-image: Rectangle {
+            width: 54px;
+            height: 54px;
+            background: #80808030;
+            Image {
+                width: 100%;
+                height: 100%;
+                source: root.image;
+                image-fit: cover;
+            }
+        }
+    }
+}
+
 export component Bubble inherits VerticalLayout {
     in property <MsgItem> m;
     in property <length> max-w;
@@ -539,55 +609,15 @@ export component Bubble inherits VerticalLayout {
                         font-weight: 700;
                     }
                 }
-                if m.quote != "": Rectangle {
-                    border-radius: 6px;
-                    clip: true;
-                    background: m.outgoing ? (qta.has-hover ? #ffffff48 : #ffffff30) : Theme.dark ? (qta.has-hover ? #ffffff22 : #ffffff14) : (qta.has-hover ? #0000001c : #00000010);
-                    qta := TouchArea {
-                        enabled: m.quote-id != "";
-                        mouse-cursor: self.enabled ? pointer : default;
-                        clicked => { root.quote-clicked(m.quote-id); }
-                        pointer-event(e) => {
-                            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
-                                root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
-                            }
-                        }
-                    }
-                    HorizontalLayout {
-                        Rectangle { width: 3px; background: m.outgoing ? white : Theme.accent; }
-                        VerticalLayout {
-                            padding: 6px;
-                            spacing: 1px;
-                            if m.quote-author != "": Text {
-                                text: m.quote-author;
-                                color: m.outgoing ? white : Theme.text;
-                                font-size: 12px;
-                                font-weight: 700;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: m.quote;
-                                color: m.outgoing ? #ffffffd0 : Theme.subtle;
-                                font-size: 12px;
-                                wrap: word-wrap;
-                                overflow: elide;
-                                max-height: 48px;
-                            }
-                        }
-                        // in a layout, so the box grows to hold it
-                        // flush with the box's right edge (the box clips the corners)
-                        if m.has-quote-image: Rectangle {
-                            width: 52px;
-                            height: 52px;
-                            background: #80808030;
-                            Image {
-                                width: 100%;
-                                height: 100%;
-                                source: m.quote-image;
-                                image-fit: cover;
-                            }
-                        }
-                    }
+                if m.quote != "": QuoteBox {
+                    author: m.quote-author;
+                    text: m.quote;
+                    image: m.quote-image;
+                    has-image: m.has-quote-image;
+                    outgoing: m.outgoing;
+                    clickable: m.quote-id != "";
+                    clicked => { root.quote-clicked(m.quote-id); }
+                    menu(x, y) => { root.menu(m.id, x, y); }
                 }
                 if m.has-image && !root.flush: MsgImage {
                     m: m;

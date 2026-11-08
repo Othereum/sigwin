@@ -21,6 +21,19 @@ pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     }
 }
 
+/// A square cut of a message's photo at the reply box's size (nearest-neighbor scaling is jagged,
+/// so it's resampled once here). None when the pixels can't be read.
+fn reply_thumb(src: &Image) -> Option<Image> {
+    let buf = src.to_rgba8()?;
+    let (w, h) = (buf.width(), buf.height());
+    let img = image::RgbaImage::from_raw(w, h, buf.as_bytes().to_vec())?;
+    let side = w.min(h);
+    let square = image::imageops::crop_imm(&img, (w - side) / 2, (h - side) / 2, side, side).to_image();
+    let size = types::physical_px(view::QUOTE_IMAGE.0);
+    let small = image::imageops::resize(&square, size, size, image::imageops::FilterType::Lanczos3);
+    Some(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(small.as_raw(), size, size)))
+}
+
 /// Linking, the thread list, search and paging.
 fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let s = send.clone();
@@ -388,14 +401,30 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             ui.reply_to = Some(m.id.clone());
             let who = if m.outgoing { "나".to_string() } else { m.sender.clone() };
             let body = if m.text.is_empty() {
-                if m.sticker { "스티커".to_string() } else { m.attachment.clone() }
+                if m.sticker {
+                    "스티커".to_string()
+                } else if !m.attachment.is_empty() {
+                    m.attachment.clone()
+                } else if m.video {
+                    "동영상".to_string()
+                } else if !m.image_key.is_empty() {
+                    "사진".to_string()
+                } else {
+                    "(첨부파일)".to_string()
+                }
             } else {
                 view::text::mask_spoilers(m.text.clone(), &m.styles).replace('\n', " ")
             };
-            Some(if who.is_empty() { body } else { format!("{who}: {body}") })
+            let key = if !m.image_key.is_empty() { Some(m.image_key.as_str()) } else { m.cells.first().map(|c| c.key.as_str()) };
+            let thumb = key.filter(|_| !m.sticker).and_then(|k| ui.thumbs.get(k)).and_then(reply_thumb);
+            Some((if who.is_empty() { body } else { format!("{who}\n{body}") }, thumb))
         });
-        if let Some(p) = preview {
-            app.set_reply_preview(p.into());
+        if let Some((p, thumb)) = preview {
+            drafts::set_reply(&app, &p);
+            if let Some(t) = thumb {
+                app.set_reply_image(t);
+                app.set_reply_has_image(true);
+            }
             app.invoke_focus_composer();
         }
     });
@@ -790,4 +819,17 @@ pub(crate) fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
     }
     attach::show(app, &all);
     app.invoke_focus_composer();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reply_thumb_is_a_square_of_the_box_size() {
+        let src = Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::new(120, 80));
+        let t = reply_thumb(&src).expect("pixels readable");
+        let side = types::physical_px(view::QUOTE_IMAGE.0);
+        assert_eq!((t.size().width, t.size().height), (side, side));
+    }
 }

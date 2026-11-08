@@ -2,7 +2,7 @@ import { LineEdit, Button, ListView, Palette, Spinner } from "std-widgets.slint"
 import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, NoteLine, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
 import { Avatar, IconButton, MenuRow, Notice, StickerIcon, TextButton } from "widgets.slint";
-import { Bubble } from "bubble.slint";
+import { Bubble, QuoteBox } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
 import { SettingsData, SettingsPage } from "settings.slint";
@@ -65,7 +65,12 @@ export component AppWindow inherits Window {
     callback notice-action-clicked();
     // what's going on with the connection, "" when all is well
     in property <string> connection-text;
+    // the message being replied to: its text (empty: no reply) and who wrote it
     in property <string> reply-preview;
+    in property <string> reply-author;
+    // a photo of that message, cut to the box
+    in property <image> reply-image;
+    in property <bool> reply-has-image;
     // the link preview above the composer (url empty: none)
     in property <string> compose-link-url;
     in property <string> compose-link-title;
@@ -728,13 +733,12 @@ export component AppWindow inherits Window {
                     padding: 8px;
                     padding-left: 16px;
                     spacing: 8px;
-                    Rectangle { width: 3px; background: Theme.accent; }
-                    Text {
-                        text: "답장: " + root.reply-preview;
-                        color: Theme.subtle;
-                        font-size: 12px;
-                        overflow: elide;
-                        vertical-alignment: center;
+                    // the same box a reply shows in the message list
+                    QuoteBox {
+                        author: root.reply-author;
+                        text: root.reply-preview;
+                        image: root.reply-image;
+                        has-image: root.reply-has-image;
                         horizontal-stretch: 1;
                     }
                     IconButton { label: "✕"; width: 28px; height: 28px; clicked => { root.cancel-reply(); } }

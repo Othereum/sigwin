@@ -38,7 +38,7 @@ impl Draft {
         if !self.files.is_empty() {
             "(첨부 파일)".into()
         } else if self.quote.is_some() {
-            "(인용)".into()
+            "(답장)".into()
         } else {
             "(임시 저장)".into()
         }
@@ -60,12 +60,27 @@ fn save(ui: &Ui) {
     }
 }
 
+/// The reply box as one string: author, a newline, the quoted text (no newline in the text).
+pub(crate) fn reply_text(app: &AppWindow) -> String {
+    let (who, body) = (app.get_reply_author(), app.get_reply_preview());
+    if who.is_empty() { body.to_string() } else { format!("{who}\n{body}") }
+}
+
+/// Shows the reply box from [`reply_text`]'s form; an empty string clears it.
+pub(crate) fn set_reply(app: &AppWindow, s: &str) {
+    let (who, body) = s.split_once('\n').unwrap_or(("", s));
+    app.set_reply_has_image(false);
+    app.set_reply_image(Image::default());
+    app.set_reply_author(who.into());
+    app.set_reply_preview(body.into());
+}
+
 /// What the composer holds right now, for thread `ui.open_key`. None while editing a message.
 fn capture(app: &AppWindow, ui: &Ui) -> Option<Draft> {
     if ui.editing.is_some() {
         return None;
     }
-    let preview = app.get_reply_preview().to_string();
+    let preview = reply_text(app);
     Some(Draft {
         text: app.get_draft().to_string(),
         mentions: ui.picked.clone(),
@@ -120,7 +135,7 @@ pub(crate) fn switch(app: &AppWindow, ui: &mut Ui, next: &str) -> Draft {
 pub(crate) fn restore(app: &AppWindow, d: Draft) {
     app.set_draft(d.text.into());
     linkcard::clear(app);
-    app.set_reply_preview(d.quote.map(|q| q.1).unwrap_or_default().into());
+    set_reply(app, &d.quote.map(|q| q.1).unwrap_or_default());
     app.set_edit_preview(SharedString::new());
     attach::show(app, &d.files);
     app.invoke_composer_to_end();
@@ -200,7 +215,7 @@ mod tests {
         let d = Draft { files: vec!["a.png".into()], ..Default::default() };
         assert_eq!(d.preview(), "(첨부 파일)");
         let d = Draft { quote: Some(("1".into(), "x".into())), ..Default::default() };
-        assert_eq!(d.preview(), "(인용)");
+        assert_eq!(d.preview(), "(답장)");
     }
 
     #[test]
