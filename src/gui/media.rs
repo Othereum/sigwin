@@ -23,28 +23,13 @@ pub(super) fn avatar_arrived(app: &AppWindow, t: Arc<types::Thumb>) {
         if let Some(uuid) = t.key.strip_prefix(avatar::READ_PREFIX) {
             let Some(img) = img else { return };
             ui.sender_avatars.insert(t.key.clone(), img);
-            for (i, m) in ui.last.iter().enumerate() {
-                if m.readers.iter().take(types::MAX_READER_PHOTOS).any(|(u, _)| u == uuid) {
-                    if let Some(mut row) = slint::Model::row_data(&*ui.messages, i) {
-                        row.readers = reader_items(m, &ui.sender_avatars);
-                        slint::Model::set_row_data(&*ui.messages, i, row);
-                    }
-                }
-            }
+            rows::redraw_rows(ui, |m| m.readers.iter().take(types::MAX_READER_PHOTOS).any(|(u, _)| u == uuid));
             return;
         }
         if let Some(uuid) = t.key.strip_prefix(avatar::MSG_PREFIX) {
             let Some(img) = img else { return };
-            ui.sender_avatars.insert(uuid.to_string(), img.clone());
-            for (i, m) in ui.last.iter().enumerate() {
-                if m.show_avatar && m.sender_key == uuid {
-                    if let Some(mut row) = slint::Model::row_data(&*ui.messages, i) {
-                        row.has_avatar = true;
-                        row.avatar = img.clone();
-                        slint::Model::set_row_data(&*ui.messages, i, row);
-                    }
-                }
-            }
+            ui.sender_avatars.insert(uuid.to_string(), img);
+            rows::redraw_rows(ui, |m| m.show_avatar && m.sender_key == uuid);
             if ui.typing.first().is_some_and(|(u, _)| u == uuid) {
                 sync_typing(ui);
             }
@@ -95,35 +80,9 @@ pub(super) fn thumb_arrived(t: Arc<types::Thumb>) {
     let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
     let img = Image::from_rgba8(buf);
     UI.with_borrow_mut(|ui| {
-        ui.thumbs.insert(t.key.clone(), img.clone());
-        for (i, m) in ui.last.iter().enumerate() {
-            // the same picture twice in a grid has one key for both cells
-            let cell = m.cells.iter().any(|c| c.key == t.key);
-            let link = m.link.as_ref().is_some_and(|l| l.image_key == t.key);
-            let quote = !m.quote_image_key.is_empty() && m.quote_image_key == t.key;
-            if !cell && !link && !quote && m.image_key != t.key {
-                continue;
-            }
-            let Some(mut row) = slint::Model::row_data(&*ui.messages, i) else { continue };
-            if quote {
-                row.quote_image = img.clone();
-            } else if link {
-                row.link_image = img.clone();
-            } else if cell {
-                // a new model, not a change inside the old one: a ListView row didn't
-                // show that until it was scrolled away and back
-                let mut cells: Vec<ImageCell> = slint::Model::iter(&row.cells).collect();
-                for (c, dto) in cells.iter_mut().zip(&m.cells) {
-                    if dto.key == t.key {
-                        c.image = img.clone();
-                    }
-                }
-                row.cells = ModelRc::new(VecModel::from(cells));
-            } else {
-                row.image = img.clone();
-            }
-            slint::Model::set_row_data(&*ui.messages, i, row);
-        }
+        ui.thumbs.insert(t.key.clone(), img);
+        // every place that shows it: the same picture twice in a grid has one key for both cells
+        rows::redraw_rows(ui, |m| rows::shows_key(m, &t.key));
     });
 }
 
@@ -132,40 +91,11 @@ pub(super) fn label_arrived(key: String, label: types::MediaLabel) {
         if ui.released {
             return;
         }
-        let shown: SharedString = label.text.as_str().into();
-        let undownloaded = label.undownloaded;
-        let progress = rows::progress_of(&label);
-        let ring = rows::ring_of(&label);
         if label == types::MediaLabel::default() {
             ui.media_labels.remove(&key);
         } else {
             ui.media_labels.insert(key.clone(), label);
         }
-        for (i, m) in ui.last.iter().enumerate() {
-            let cell = m.cells.iter().any(|c| c.key == key);
-            if !cell && (m.image_key != key || m.sticker) {
-                continue;
-            }
-            let Some(mut row) = slint::Model::row_data(&*ui.messages, i) else { continue };
-            if cell {
-                // a new model, as for `thumb_arrived`
-                let mut cells: Vec<ImageCell> = slint::Model::iter(&row.cells).collect();
-                for (c, dto) in cells.iter_mut().zip(&m.cells) {
-                    if dto.key == key {
-                        c.label = shown.clone();
-                        c.undownloaded = undownloaded;
-                        c.progress = progress;
-                        c.ring = ring.clone();
-                    }
-                }
-                row.cells = ModelRc::new(VecModel::from(cells));
-            } else {
-                row.media_label = shown.clone();
-                row.undownloaded = undownloaded;
-                row.progress = progress;
-                row.ring = ring.clone();
-            }
-            slint::Model::set_row_data(&*ui.messages, i, row);
-        }
+        rows::redraw_rows(ui, |m| rows::shows_key(m, &key));
     });
 }

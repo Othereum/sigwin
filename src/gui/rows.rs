@@ -70,6 +70,26 @@ pub(crate) fn update_rows(ui: &mut Ui, items: &[MsgDto], dark: bool) {
     }
 }
 
+/// Draws again the rows `uses` picks. What arrives late (a picture, a label, frames, an avatar)
+/// goes into the caches and through here, so a row is made by `to_item` alone, whether it was
+/// built from scratch or filled in afterwards: the two can't come to differ.
+pub(crate) fn redraw_rows(ui: &Ui, uses: impl Fn(&MsgDto) -> bool) {
+    use slint::Model;
+    for (i, m) in ui.last.iter().enumerate().filter(|(_, m)| uses(m)) {
+        if i < ui.messages.row_count() {
+            ui.messages.set_row_data(i, to_item(m, &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, ui.dark));
+        }
+    }
+}
+
+/// Whether the message shows the picture or label cached under `key`, anywhere.
+pub(crate) fn shows_key(m: &MsgDto, key: &str) -> bool {
+    m.image_key == key
+        || m.cells.iter().any(|c| c.key == key)
+        || m.link.as_ref().is_some_and(|l| l.image_key == key)
+        || (!m.quote_image_key.is_empty() && m.quote_image_key == key)
+}
+
 /// Re-derives the relative times of recent bubbles ("3분") as the minutes pass.
 pub(crate) fn refresh_times(ui: &Ui) {
     use slint::Model;
@@ -390,6 +410,7 @@ pub(crate) fn reveal_spoilers(app: &AppWindow, id: &str) {
 pub(crate) fn refresh_rows(app: &AppWindow) {
     let dark = app.global::<Theme>().get_dark();
     UI.with_borrow_mut(|ui| {
+        ui.dark = dark;
         let rows: Vec<MsgItem> = ui.last.iter().map(|m| to_item(m, &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, dark)).collect();
         ui.messages.set_vec(rows);
         ui.typing_row = false;

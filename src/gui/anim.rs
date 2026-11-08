@@ -341,16 +341,7 @@ fn playing(f: &Frames, used: u64) -> Playing {
 
 /// Puts a key's frames (or none) on its message rows.
 fn set_rows(ui: &Ui, key: &str) {
-    let (frames, frame) = ui.anims.models(key);
-    for (i, m) in ui.last.iter().enumerate() {
-        if m.image_key == key {
-            if let Some(mut row) = ui.messages.row_data(i) {
-                row.frames = frames.clone();
-                row.frame = frame.clone();
-                ui.messages.set_row_data(i, row);
-            }
-        }
-    }
+    super::rows::redraw_rows(ui, |m| m.image_key == key);
 }
 
 fn set_picker_row(ui: &Ui, key: &str, (frames, frame): (ModelRc<Image>, ModelRc<i32>)) {

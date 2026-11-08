@@ -57,6 +57,8 @@ pub(crate) struct Ui {
     /// photos next to group messages by sender uuid, open thread only
     sender_avatars: HashMap<String, Image>,
     last: Vec<MsgDto>,
+    /// the theme the rows were last drawn for: what arrives late draws its row the same way
+    dark: bool,
     /// the furthest row of the open thread reported seen (`ReadUpTo`), to send only what's new
     read_sent: Option<String>,
     /// the window is not the one the user is working in (no focus, or away): rows coming in

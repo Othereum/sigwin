@@ -197,6 +197,7 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, paging: Paging, scr
         ui.loading_newer = false;
         ui.detached = paging.newer;
         let dark = app.global::<Theme>().get_dark();
+        ui.dark = dark;
         if rebuild {
             ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, dark)).collect::<Vec<_>>());
             ui.typing_row = false;
