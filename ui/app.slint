@@ -157,6 +157,8 @@ export component AppWindow inherits Window {
     // active reports the rows on screen.
     in property <bool> inactive;
     in-out property <int> jump-probe;
+    // the message list moved: the hover is brought up to date for the cursor (gui::anim)
+    callback gif-scrolled();
     // flash the jumped-to row
     in-out property <string> flash-id;
     // message menu (right click); menu-id is "" when closed
@@ -603,8 +605,10 @@ export component AppWindow inherits Window {
                         self.user-scrolled = true;
                         root.check-older();
                         root.check-newer();
+                        root.gif-scrolled();
                     }
                     changed content-y => {
+                        root.gif-scrolled();
                         if (self.user-scrolled) {
                             root.check-older();
                             root.check-newer();

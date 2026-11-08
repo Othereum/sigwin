@@ -318,6 +318,7 @@ pub(crate) fn to_item(
         file_danger: m.file_danger,
         has_image: !m.image_key.is_empty(),
         video: m.video,
+        gif: m.gif,
         media_label: if m.sticker || !m.cells.is_empty() { SharedString::new() } else { label_of(&m.image_key) },
         undownloaded: undownloaded(&m.image_key),
         progress: progress(&m.image_key),

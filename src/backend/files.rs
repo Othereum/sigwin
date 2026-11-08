@@ -303,13 +303,13 @@ impl App {
     }
 
     /// Image `index` of row `id`: cache path and pointer.
-    fn viewed(&self, id: &str, index: usize) -> Option<(PathBuf, AttachmentPointer)> {
+    pub(super) fn viewed(&self, id: &str, index: usize) -> Option<(PathBuf, AttachmentPointer)> {
         let (ts, dm) = self.row_message(id)?;
         let (i, a) = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a)).nth(index)?;
         Some((attachment_path(&self.paths.attachments, &view::media::attachment_key(a, ts, i)), a.clone()))
     }
 
-    pub(super) fn view_image(&self, id: &str, index: usize, fit: (u32, u32)) {
+    pub(super) fn view_image(&mut self, id: &str, index: usize, fit: (u32, u32)) {
         let Some((_, dm)) = self.row_message(id) else { return };
         let count = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a)).count();
         if count == 0 {
@@ -322,30 +322,49 @@ impl App {
         let emit = self.emit.clone();
         let tx = self.tx.clone();
         let open_dir = self.paths.open.clone();
+        // what played before stops now; a GIF opened here plays until the next one replaces it
+        let stop = self.new_gif_stop();
         tokio::task::spawn_local(async move {
             if !fetch_attachment(&manager, &tx, &path, &ptr).await {
                 return;
             }
             let p = path.clone();
+            enum Decoded {
+                Still(crate::types::ViewerPixels),
+                Gif(Vec<u8>, crate::types::ViewerPixels),
+            }
             let decoded = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
                 let bytes = sigwin_vault::read(&p)?;
+                if sigwin_thumb::is_animated_gif(&bytes) {
+                    let Some(first) = super::gif::first_frame(&bytes, fit) else { return Ok(None) };
+                    return Ok(Some(Decoded::Gif(bytes, first)));
+                }
                 let Some(view) = sigwin_thumb::decode_view(&bytes, fit.0, fit.1, VIEW_MAX_PIXELS)? else {
                     return Ok(None);
                 };
                 drop(bytes);
-                Ok(Some(crate::types::ViewerPixels::from(view)))
+                Ok(Some(Decoded::Still(crate::types::ViewerPixels::from(view))))
             })
             .await;
             match decoded {
-                Ok(Ok(Some(pixels))) => {
+                Ok(Ok(Some(Decoded::Still(pixels)))) => {
                     let _ = tx.send(Internal::ProgressDone);
-                    emit(Event::ViewerImage(crate::types::ViewerImage { id, index, count, pixels }));
+                    emit(Event::ViewerImage(crate::types::ViewerImage { id, index, count, pixels, animated: false }));
+                }
+                Ok(Ok(Some(Decoded::Gif(bytes, pixels)))) => {
+                    let _ = tx.send(Internal::ProgressDone);
+                    let px = pixels.full().0.max(pixels.full().1);
+                    emit(Event::ViewerImage(crate::types::ViewerImage { id: id.clone(), index, count, pixels, animated: true }));
+                    if !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        let slot = Arc::new(crate::types::GifSlot::new(id, super::gif::next_gen(), crate::types::GifTarget::Viewer(index)));
+                        super::gif::stream(bytes, px, slot, stop, emit, None);
+                    }
                 }
                 other => {
                     if let Ok(Err(e)) = other {
                         warn!("view image: {e:#}");
                     }
-                    // animated, huge or undecodable: an outside app may do better
+                    // animated (not a GIF), huge or undecodable: an outside app may do better
                     open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
                 }
             }
@@ -543,7 +562,7 @@ fn open_download(mut data: Vec<u8>, digest: &[u8], key: [u8; 64], size: Option<u
 }
 
 /// Downloads an attachment unless it is cached; false (notice shown) if that failed.
-async fn fetch_attachment(manager: &Option<Mgr>, tx: &UnboundedSender<Internal>, path: &Path, ptr: &AttachmentPointer) -> bool {
+pub(super) async fn fetch_attachment(manager: &Option<Mgr>, tx: &UnboundedSender<Internal>, path: &Path, ptr: &AttachmentPointer) -> bool {
     if path.exists() {
         return true;
     }

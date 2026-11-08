@@ -506,6 +506,43 @@ pub fn animation(bytes: &[u8], px: u32, max_bytes: usize) -> ImageResult<Option<
     Ok(Some(anim))
 }
 
+/// Whether `bytes` are a GIF with more than one frame.
+pub fn is_animated_gif(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"GIF8") && is_animated(bytes)
+}
+
+/// A GIF's size, from its header.
+pub fn gif_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()
+}
+
+/// Decodes a GIF one frame at a time, each resampled to `px` (see `fit`) and handed to `on_frame`
+/// with its display time in µs, looping until it returns false or the GIF can't go on. Nothing
+/// is kept: playing costs one frame plus the decoder, however long the GIF is. The caller paces.
+/// Returns the frames of the first loop (a still, or a broken file, has fewer than 2 and stops).
+pub fn stream_gif(bytes: &[u8], px: u32, mut on_frame: impl FnMut(RgbaImage, u32) -> bool) -> ImageResult<usize> {
+    use image::AnimationDecoder;
+    use image::codecs::gif::GifDecoder;
+    let mut first_loop = 0;
+    loop {
+        let mut n = 0;
+        for f in GifDecoder::new(std::io::Cursor::new(bytes))?.into_frames() {
+            let f = f?;
+            let delay = delay_us(f.delay());
+            n += 1;
+            if !on_frame(fit(f.into_buffer(), px), delay) {
+                return Ok(first_loop.max(n));
+            }
+        }
+        if first_loop == 0 {
+            first_loop = n;
+        }
+        if n < 2 {
+            return Ok(n);
+        }
+    }
+}
+
 /// A frame's display time in µs. Like browsers, "as fast as possible" (<= 10ms) plays at 10 fps.
 fn delay_us(delay: image::Delay) -> u32 {
     let (n, d) = delay.numer_denom_ms();
@@ -546,6 +583,25 @@ mod tests {
     fn gif(frames: u32, delay_ms: u32) -> Vec<u8> {
         let fs = (0..frames).map(|i| RgbaImage::from_pixel(64, 64, image::Rgba([(i * 40) as u8, 0, 0, 255])));
         super::gif(fs.collect(), delay_ms).unwrap()
+    }
+
+    #[test]
+    fn streams_a_gif_in_loops_until_told_to_stop() {
+        let g = gif(3, 50);
+        assert!(is_animated_gif(&g) && !is_animated_gif(&gif(1, 50)));
+        assert_eq!(gif_size(&g), Some((64, 64)));
+        let mut seen = Vec::new();
+        let n = stream_gif(&g, 32, |f, d| {
+            assert_eq!((f.dimensions(), d), ((32, 32), 50_000));
+            seen.push(f.get_pixel(0, 0)[0]);
+            seen.len() < 7
+        })
+        .unwrap();
+        assert_eq!(n, 3);
+        // 3 frames, looped: the red value of the frame index
+        assert_eq!(seen, [0, 40, 80, 0, 40, 80, 0]);
+        // a still doesn't loop
+        assert_eq!(stream_gif(&gif(1, 50), 32, |_, _| true).unwrap(), 1);
     }
 
     #[test]

@@ -302,6 +302,7 @@ pub(super) fn set_attachments(
             // pre-resample to the on-screen size (nearest-neighbor scaling is jagged)
             wanted.push((key.clone(), a.clone(), w.max(h)));
             m.image_key = key;
+            m.gif = a.content_type.as_deref() == Some("image/gif");
         }
     } else {
         set_photo_grid(m, photos.len(), |n, w, h| {

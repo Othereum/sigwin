@@ -43,6 +43,7 @@ use crate::view::{self, Kind};
 pub(crate) mod files;
 pub(crate) mod fixture;
 pub(crate) mod linkpreview;
+mod gif;
 mod mute;
 pub(crate) mod notify;
 mod ops;
@@ -369,6 +370,8 @@ struct App {
     /// a thread's "notifications off" runs out then (the list shows it)
     mute_due: Option<u64>,
     mutes_syncing: bool,
+    /// stops the GIF that plays (`gif.rs`)
+    gif_stop: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 pub fn spawn(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit) -> std::thread::JoinHandle<()> {
@@ -513,6 +516,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         notes: Default::default(),
         mute_due: None,
         mutes_syncing: false,
+        gif_stop: None,
     };
     if sealed_now {
         app.save_persist();
@@ -659,6 +663,8 @@ impl App {
             Command::ViewImage { id, index, fit } => self.view_image(&id, index, fit),
             Command::SaveFiles { id, owner } => self.save_files(&id, owner),
             Command::OpenVideo { id, index } => self.open_video(&id, index),
+            Command::PlayGif { id, seq, px } => self.play_gif(&id, seq, px),
+            Command::StopGif => self.stop_gif(),
             Command::ViewerThumbs { id, px } => self.viewer_thumbs(&id, px),
             Command::OpenViewed { id, index } => self.open_viewed(&id, index),
             Command::SaveViewed { id, index, owner } => self.save_viewed(&id, index, owner),

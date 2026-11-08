@@ -37,7 +37,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/gui/media.rs` | thumbnails, their labels and photos arriving for rows already shown |
 | `src/gui/stickers.rs` | sticker panel: pack tabs, the open pack's grid |
 | `src/gui/scroll.rs` | message list scrolling and jumps |
-| `src/gui/anim.rs` | animated stickers: frames under a memory budget, the timer that flips them |
+| `src/gui/anim.rs` | animated stickers: frames under a memory budget, the timer that flips them; the one GIF playing in the message list |
 | `src/gui/drafts.rs` | per-thread composer drafts |
 | `src/gui/linkcard.rs` | the link preview above the composer |
 | `src/gui/viewer.rs` | image viewer window |
@@ -71,6 +71,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/backend/ops.rs` | reactions, edits, deletes, pins |
 | `src/backend/typing.rs` | typing indicators |
 | `src/backend/stickers.rs` | sticker packs: picker, sending, installing |
+| `src/backend/gif.rs` | a GIF playing in a message or the viewer: one frame at a time on its own thread, handed over through a slot |
 | `src/backend/files.rs` | attachment and thumbnail caches, opening and viewing attachments |
 | `src/videoframe.rs` | a video's first frame, decoded by Media Foundation in a child process |
 | `src/backend/mute.rs` | per-thread notification settings, the phone's values from the Storage Service |

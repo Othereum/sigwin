@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use slint::{ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
 use super::{Ui, UI};
-use crate::types::{Command, Frames, ANIM_BUDGET, STICKER_THUMB_PREFIX};
+use crate::types::{Command, Frames, GifSlot, GifTarget, ANIM_BUDGET, STICKER_THUMB_PREFIX};
 use crate::{Anim, AppWindow};
 
 struct Playing {
@@ -49,8 +49,21 @@ impl Playing {
     }
 }
 
+/// The GIF playing in the message list (one at a time): its frames come from the backend one by
+/// one into a single image, `frame[0]` stays 0.
+struct GifPlay {
+    id: String,
+    /// the row's `image_key`
+    key: String,
+    seq: u64,
+    frames: Rc<VecModel<Image>>,
+    frame: Rc<VecModel<i32>>,
+}
+
 #[derive(Default)]
 pub(crate) struct Anims {
+    gif: Option<GifPlay>,
+    gif_seq: u64,
     /// message-list stickers by thumbnail key, open thread only
     list: HashMap<String, Playing>,
     /// keys asked from the backend, answered or not (an evicted key leaves, so it can come back)
@@ -64,6 +77,9 @@ pub(crate) struct Anims {
 impl Anims {
     /// Frames and current-frame model for a message row (empty: show the still).
     pub(crate) fn models(&self, key: &str) -> (ModelRc<Image>, ModelRc<i32>) {
+        if let Some(g) = self.gif.as_ref().filter(|g| g.key == key && g.frames.row_count() > 0) {
+            return (ModelRc::from(g.frames.clone()), ModelRc::from(g.frame.clone()));
+        }
         self.list.get(key).map(Playing::models).unwrap_or_default()
     }
 
@@ -85,6 +101,8 @@ thread_local! {
     static TIMER: slint::Timer = slint::Timer::default();
     static APP: RefCell<Option<slint::Weak<AppWindow>>> = const { RefCell::new(None) };
     static PAUSED: Cell<bool> = const { Cell::new(false) };
+    /// a hover refresh is queued
+    static REFRESH_PENDING: Cell<bool> = const { Cell::new(false) };
 }
 
 pub(crate) fn wire(app: &AppWindow) {
@@ -94,6 +112,31 @@ pub(crate) fn wire(app: &AppWindow) {
     g.on_shown(|id| {
         let id = id.to_string();
         slint::Timer::single_shot(Duration::ZERO, move || shown(&id));
+    });
+    let weak = app.as_weak();
+    app.on_gif_scrolled(move || {
+        // Slint moves the hover only with the mouse: rows that scroll under a resting cursor
+        // never get it, and the one that left keeps it. Tell it where the cursor is, on the
+        // next turn (this runs while the list updates), once for any number of scroll steps.
+        if REFRESH_PENDING.replace(true) {
+            return;
+        }
+        let weak = weak.clone();
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            REFRESH_PENDING.set(false);
+            let Some(app) = weak.upgrade() else { return };
+            if app.get_inactive() {
+                return;
+            }
+            if let Some(position) = super::window::cursor_in_window(&app) {
+                app.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+            }
+        });
+    });
+    g.on_gif_hover(|id, on| {
+        let id = id.to_string();
+        // these run while Slint evaluates the row: act on the next turn of the event loop
+        slint::Timer::single_shot(Duration::ZERO, move || gif_hover(&id, on));
     });
     g.on_hover(|pack, id, on| {
         let pack = pack.to_string();
@@ -106,7 +149,90 @@ pub(crate) fn wire(app: &AppWindow) {
 pub(crate) fn pause(paused: bool) {
     PAUSED.set(paused);
     // called from the window procedure: don't touch UI state from inside it
-    slint::Timer::single_shot(Duration::ZERO, || UI.with_borrow(sync_timer));
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        if paused {
+            UI.with_borrow_mut(stop_gif);
+        }
+        UI.with_borrow(sync_timer)
+    });
+}
+
+/// The cursor came onto the picture of row `id` or left it. A GIF plays while the cursor is on
+/// it; clicking is for the viewer, as on any picture.
+fn gif_hover(id: &str, on: bool) {
+    if on {
+        start_gif(id);
+    } else {
+        // moving from one GIF to the next, the new one's "on" can come before the old one's
+        // "off": only the GIF that plays for this row stops
+        UI.with_borrow_mut(|ui| {
+            if ui.anims.gif.as_ref().is_some_and(|g| g.id == id) {
+                stop_gif(ui);
+            }
+        });
+    }
+}
+
+fn start_gif(id: &str) {
+    if PAUSED.get() || super::viewer::is_open() {
+        return;
+    }
+    UI.with_borrow_mut(|ui| {
+        let Some(m) = ui.last.iter().find(|m| m.id == id) else { return };
+        if !m.gif || !m.cells.is_empty() || ui.anims.gif.as_ref().is_some_and(|g| g.id == id) {
+            return;
+        }
+        let (key, px) = (m.image_key.clone(), crate::types::physical_px(m.img_w.max(m.img_h)));
+        stop_gif(ui);
+        ui.anims.gif_seq += 1;
+        let seq = ui.anims.gif_seq;
+        ui.anims.gif = Some(GifPlay {
+            id: id.to_string(),
+            key,
+            seq,
+            frames: Rc::new(VecModel::default()),
+            frame: Rc::new(VecModel::from(vec![0])),
+        });
+        if let Some(tx) = &ui.tx {
+            let _ = tx.send(Command::PlayGif { id: id.to_string(), seq, px });
+        }
+    });
+}
+
+/// The GIF in the message list stops and its row goes back to the still.
+pub(crate) fn stop_gif(ui: &mut Ui) {
+    let Some(g) = ui.anims.gif.take() else { return };
+    if let Some(tx) = &ui.tx {
+        let _ = tx.send(Command::StopGif);
+    }
+    set_rows(ui, &g.key);
+}
+
+/// A frame of the playing GIF, or its end.
+pub(crate) fn gif_arrived(slot: std::sync::Arc<GifSlot>) {
+    let (frame, done) = slot.take();
+    let img = frame.map(|t| Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height)));
+    match slot.target {
+        GifTarget::Viewer(index) => super::viewer::gif_frame(&slot.id, index, img, done),
+        GifTarget::List => UI.with_borrow_mut(|ui| {
+            let Some(g) = ui.anims.gif.as_ref().filter(|g| g.seq == slot.seq) else { return };
+            if let Some(img) = img {
+                if g.frames.row_count() == 0 {
+                    g.frames.push(img);
+                    let key = g.key.clone();
+                    set_rows(ui, &key);
+                } else {
+                    g.frames.set_row_data(0, img);
+                }
+            }
+            if done {
+                // it ended by itself: the backend has nothing to stop
+                if let Some(g) = ui.anims.gif.take() {
+                    set_rows(ui, &g.key);
+                }
+            }
+        }),
+    }
 }
 
 fn shown(id: &str) {

@@ -76,6 +76,26 @@ pub(crate) fn show_settings(app: &AppWindow, s: &settings::Settings) {
     d.set_badge_muted(s.badge_muted);
 }
 
+/// The cursor in the window's client area, logical px. `None` when it is outside the window.
+#[cfg(windows)]
+pub(crate) fn cursor_in_window(app: &AppWindow) -> Option<slint::LogicalPosition> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut p = POINT { x: 0, y: 0 };
+    // SAFETY: `p` is a local the calls only write to; the handle is our own window's
+    let ok = unsafe { GetCursorPos(&mut p) != 0 && ScreenToClient(hwnd(app) as _, &mut p) != 0 };
+    let size = app.window().size();
+    let inside = p.x >= 0 && p.y >= 0 && (p.x as u32) < size.width && (p.y as u32) < size.height;
+    let scale = app.window().scale_factor();
+    (ok && inside).then(|| slint::LogicalPosition::new(p.x as f32 / scale, p.y as f32 / scale))
+}
+
+#[cfg(not(windows))]
+pub(crate) fn cursor_in_window(_: &AppWindow) -> Option<slint::LogicalPosition> {
+    None
+}
+
 pub(crate) fn hwnd(app: &AppWindow) -> isize {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let wh = app.window().window_handle();
@@ -547,6 +567,7 @@ pub(crate) fn visibility(app: &AppWindow, shown: bool) {
                 stickers::close(&app);
             }
             UI.with_borrow_mut(|ui| {
+                anim::stop_gif(ui);
                 ui.anims.clear_list();
                 ui.thumbs.clear();
                 ui.media_labels.clear();

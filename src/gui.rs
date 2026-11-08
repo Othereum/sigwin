@@ -266,6 +266,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::ViewerImage(v) => viewer::arrived(app, v),
         Event::ViewerThumb(id, index, t) => viewer::thumb_arrived(&id, index, t),
         Event::Frames(f) => anim::frames_arrived(f),
+        Event::Gif(slot) => anim::gif_arrived(slot),
         Event::Notice(s) => notice::show(app, &s),
         Event::Saved(s, path) => notice::saved(app, &s, path),
         Event::Progress(s) => notice::progress(app, &s),
@@ -316,6 +317,7 @@ fn messages_arrived(app: &AppWindow, key: String, items: Vec<MsgDto>, paging: Pa
         if switched {
             ui.thumbs.clear();
             ui.media_labels.clear();
+            anim::stop_gif(ui);
             ui.anims.clear_list();
             ui.sender_avatars.clear();
             ui.revealed.clear();

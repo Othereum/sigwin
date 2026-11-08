@@ -71,6 +71,8 @@ struct Viewer {
     /// Pans and zooms only resample the visible part of `pixels.original`. Kept until the image or
     /// the window goes, and shared with `source` once that shows it, not a copy.
     pixels: ViewerPixels,
+    /// a GIF: its frames arrive one by one (`gif_frame`), and zooming is off
+    animated: Cell<bool>,
     /// the latest patch asked for; older ones are dropped when they finish
     patch_id: Cell<u64>,
     /// a patch is being resampled: only one at a time, the next one starts when it ends
@@ -88,8 +90,15 @@ thread_local! {
 
 pub(crate) fn open(app: &AppWindow, id: String, index: usize) {
     close();
+    UI.with_borrow_mut(super::anim::stop_gif);
     PENDING.with_borrow_mut(|p| *p = Some((id.clone(), cursor_pos())));
     send_cmd(Command::ViewImage { id, index, fit: screen_box(window::hwnd(app)) });
+}
+
+/// The viewer is open, or an image is on its way to it. A GIF in the message list stays still
+/// meanwhile: only one plays, and the viewer's comes first.
+pub(crate) fn is_open() -> bool {
+    VIEWER.with_borrow(Option::is_some) || PENDING.with_borrow(Option::is_some)
 }
 
 /// A main window notice also shows here: the viewer usually covers it.
@@ -106,6 +115,9 @@ pub(crate) fn set_notice(text: &SharedString, action: &SharedString) {
 pub(crate) fn close() {
     PENDING.with_borrow_mut(|p| *p = None);
     let Some(v) = VIEWER.with_borrow_mut(Option::take) else { return };
+    if v.animated.get() {
+        send_cmd(Command::StopGif);
+    }
     let _ = v.win.hide();
     slint::Timer::single_shot(Duration::ZERO, move || drop(v));
 }
@@ -143,6 +155,7 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
         }
         v.index = img.index;
         v.count = img.count;
+        v.animated.set(img.animated);
         show_details(&v.win, &img);
         v.pixels = img.pixels;
         clear_patch(v);
@@ -167,6 +180,17 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
     if let Some(p) = moved {
         place(p);
     }
+}
+
+/// A frame of the GIF on screen, or its end (the last frame stays).
+pub(crate) fn gif_frame(id: &str, index: usize, frame: Option<Image>, _done: bool) {
+    with_current(|v| {
+        if v.id == id && v.index == index && v.animated.get() {
+            if let Some(frame) = frame {
+                v.win.set_source(frame);
+            }
+        }
+    });
 }
 
 /// A thumbnail of the strip, unless the viewer went on to another message.
@@ -271,6 +295,7 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
             hide_strip: slint::Timer::default(),
             refit: slint::Timer::default(),
             pixels: img.pixels,
+            animated: Cell::new(img.animated),
             patch_id: Cell::new(0),
             patch_busy: Cell::new(false),
             press: Cell::new(None),
@@ -362,6 +387,10 @@ fn wheel_scale(scale: f64, notches: f32) -> f64 {
 fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
     let moved = VIEWER.with_borrow(|v| {
         let v = v.as_ref()?;
+        // frames come at one size
+        if v.animated.get() {
+            return None;
+        }
         // also at the limits and during the hold: it tells why nothing moves
         v.win.set_scale_on(true);
         v.hide_scale.start(slint::TimerMode::SingleShot, SCALE_SHOWN, || with_current(|v| v.win.set_scale_on(false)));
@@ -492,6 +521,9 @@ fn schedule_refit() {
 /// The view changed: smooth what's visible now, unless the image is drawn 1:1 or as bare pixels.
 fn refit() {
     with_current(|v| {
+        if v.animated.get() {
+            return;
+        }
         let client = client_size(v);
         let target = shown(v);
         let has = v.win.get_source().size();

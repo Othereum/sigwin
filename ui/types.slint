@@ -94,6 +94,8 @@ export struct MsgItem {
     image: image,
     // `image` is the picture of a video: drawn with a play mark, clicking opens the video
     video: bool,
+    // a GIF: clicking plays it in place (`frames` then hold its current frame)
+    gif: bool,
     // over `image`: a video's length, or the size of what isn't downloaded yet
     media-label: string,
     // a click on this video downloads it first

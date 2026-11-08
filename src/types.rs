@@ -210,6 +210,8 @@ pub struct MsgDto {
     pub cells: Vec<CellDto>,
     /// `image_key` is the picture of a video, not a grid
     pub video: bool,
+    /// `image_key` is a GIF that plays in place when clicked (`Command::PlayGif`)
+    pub gif: bool,
     pub deleted: bool,
     pub day_sep: String,
     /// the first message that was unread when the thread was opened (or when news came in
@@ -330,6 +332,8 @@ pub struct ViewerImage {
     /// images in the message
     pub count: usize,
     pub pixels: ViewerPixels,
+    /// a GIF: `pixels` is its first frame and the rest follow as `Event::Gif`
+    pub animated: bool,
 }
 
 /// A decoded image for the viewer window.
@@ -357,6 +361,45 @@ impl ViewerPixels {
     /// goes when that shows the original.
     pub fn take_first(&mut self) -> slint::SharedPixelBuffer<slint::Rgba8Pixel> {
         self.fitted.take().unwrap_or_else(|| self.original.clone())
+    }
+}
+
+/// Where a GIF's frames go.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GifTarget {
+    /// in the message list, row `id`
+    List,
+    /// the viewer's image `index` of row `id`
+    Viewer(usize),
+}
+
+/// The latest frame of a playing GIF. The decoding thread only announces it (`Event::Gif`) when
+/// the slot was empty, so a UI that falls behind skips frames instead of queueing them.
+pub struct GifSlot {
+    pub id: String,
+    pub seq: u64,
+    pub target: GifTarget,
+    state: std::sync::Mutex<(Option<Thumb>, bool)>,
+}
+
+impl GifSlot {
+    pub fn new(id: String, seq: u64, target: GifTarget) -> Self {
+        Self { id, seq, target, state: Default::default() }
+    }
+
+    /// Puts the newest frame in; true when the UI has to be told.
+    pub fn put(&self, frame: Thumb) -> bool {
+        self.state.lock().map(|mut s| s.0.replace(frame).is_none()).unwrap_or(false)
+    }
+
+    /// The playback is over (cut short or at its end); true when the UI has to be told.
+    pub fn finish(&self) -> bool {
+        self.state.lock().map(|mut s| !std::mem::replace(&mut s.1, true) && s.0.is_none()).unwrap_or(false)
+    }
+
+    /// The frame waiting, and whether the playback is over.
+    pub fn take(&self) -> (Option<Thumb>, bool) {
+        self.state.lock().map(|mut s| (s.0.take(), s.1)).unwrap_or((None, true))
     }
 }
 
@@ -448,6 +491,8 @@ pub enum Event {
     MediaLabel { key: String, label: MediaLabel },
     /// answer to `ViewImage`
     ViewerImage(ViewerImage),
+    /// a frame of the playing GIF is ready in the slot, or it ended
+    Gif(Arc<GifSlot>),
     /// one of the answers to `ViewerThumbs`: message id, image index, thumbnail
     ViewerThumb(String, usize, Thumb),
     /// answer to `StickerFrames` / `PickerFrames`
@@ -499,6 +544,11 @@ pub enum Command {
     Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String>, quality: sigwin_thumb::photo::Quality },
     /// the composer's link changed: fetch this one's preview (contacts its site), None cancels
     LinkPreview(Option<String>),
+    /// play the GIF of row `id` in its place at `px` physical px (long side) under the number
+    /// `seq`, which its frames carry; one GIF plays at a time, a new one replaces the old
+    PlayGif { id: String, seq: u64, px: u32 },
+    /// the playing GIF stops (list or viewer)
+    StopGif,
     /// show image `index` of row `id` in the viewer, shrunk to fit in `fit` (physical px).
     /// `from_file`: the file line was clicked; a row with other files then opens them outside.
     ViewImage { id: String, index: usize, fit: (u32, u32) },

@@ -643,6 +643,12 @@ mod tests {
         assert_eq!(b.wanted_cells[0].file_key, attachment_key(&video(1), 5, 0));
         assert!(b.wanted_thumbs.is_empty());
 
+        // a lone GIF plays in place when clicked; in a grid it is a still
+        let gif = AttachmentPointer { content_type: Some("image/gif".into()), ..photo(4) };
+        assert!(run(vec![gif.clone()]).items[0].gif);
+        assert!(!run(vec![photo(1)]).items[0].gif);
+        assert!(!run(vec![gif, photo(3)]).items[0].gif);
+
         // a grid knows which cells are videos, and a click finds the right one
         let b = run(vec![photo(1), video(2), photo(3)]);
         let m = &b.items[0];

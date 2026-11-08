@@ -154,9 +154,17 @@ export component MsgImage inherits Rectangle {
         x: 6px;
         y: parent.height - self.height - 6px;
     }
+    if m.gif && m.frames.length == 0 && m.media-label == "": MediaLabel {
+        text: "GIF";
+        x: 6px;
+        y: parent.height - self.height - 6px;
+    }
     if m.cells.length == 0: TouchArea {
         mouse-cursor: pointer;
         clicked => { root.attachment-clicked(m.id, 0); }
+        // the row id with it: a reused row instance keeps the hover while its message changes
+        property <string> gif-id: m.gif && self.has-hover ? m.id : "";
+        changed gif-id => { Anim.gif-hover(self.gif-id == "" ? m.id : self.gif-id, self.gif-id != ""); }
         pointer-event(e) => {
             if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
                 root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
