@@ -92,14 +92,31 @@ component VideoMark inherits Rectangle {
 // a video's length or a file's size, in a corner of its picture
 export component MediaLabel inherits Rectangle {
     in property <string> text;
-    width: label.preferred-width + 10px;
-    height: label.preferred-height + 2px;
+    // what it is, before the text: a glyph of Segoe MDL2 Assets
+    in property <string> icon;
+    width: row.preferred-width;
+    height: row.preferred-height;
     border-radius: 4px;
     background: #00000090;
-    label := Text {
-        text: root.text;
-        font-size: 11px;
-        color: white;
+    row := HorizontalLayout {
+        padding-left: 5px;
+        padding-right: 5px;
+        padding-top: 1px;
+        padding-bottom: 1px;
+        spacing: root.icon != "" && root.text != "" ? 4px : 0px;
+        if root.icon != "": Text {
+            text: root.icon;
+            font-family: "Segoe MDL2 Assets";
+            font-size: 11px;
+            color: white;
+            vertical-alignment: center;
+        }
+        if root.text != "": Text {
+            text: root.text;
+            font-size: 11px;
+            color: white;
+            vertical-alignment: center;
+        }
     }
 }
 
@@ -179,13 +196,12 @@ export component MsgImage inherits Rectangle {
             // the whole picture takes the click: the mark shows it
             hovered: cell-ta.has-hover;
         }
-        if cell.state[0].label != "" && cell.more == 0: MediaLabel {
-            text: cell.state[0].label;
-            x: 6px;
-            y: parent.height - self.height - 6px;
-        }
-        if cell.gif && cell.frames.length == 0 && cell.state[0].label == "" && cell.more == 0: MediaLabel {
-            text: "GIF";
+        // what it is (a video's mark, "GIF") and its size or length: the mark in the middle is
+        // only what a click does, the same for all of them while they aren't here
+        if cell.more == 0 && (cell.state[0].label != "" || cell.video || (cell.gif && cell.frames.length == 0)): MediaLabel {
+            // "Video" of Segoe MDL2 Assets
+            icon: cell.video ? "\u{E714}" : "";
+            text: !cell.gif ? cell.state[0].label : cell.state[0].label == "" ? "GIF" : "GIF · " + cell.state[0].label;
             x: 6px;
             y: parent.height - self.height - 6px;
         }

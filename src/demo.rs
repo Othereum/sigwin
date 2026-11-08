@@ -886,9 +886,11 @@ fn demo_video_rows(items: &mut [types::MsgDto]) {
         m.attachment.clear();
         m.text = if n == 1 { "동영상 설명이 함께 있는 메시지".into() } else { String::new() };
         if n == 3 {
-            view::media::set_photo_grid(m, 3, |i, _, _| format!("demo-video-grid-{i}"));
+            // a video, a picture, a video and a GIF, none of them here yet but one
+            view::media::set_photo_grid(m, 4, |i, _, _| format!("demo-video-grid-{i}"));
             m.cells[0].video = true;
             m.cells[2].video = true;
+            m.cells[3].gif = true;
         } else {
             view::media::set_single_photo(m, format!("demo-video-{n}"), if n == 1 { (300, 450) } else { (400, 225) });
             m.cells[0].video = true;
@@ -907,7 +909,7 @@ fn demo_videos(emit: &backend::Emit) {
     std::thread::sleep(std::time::Duration::from_millis(300));
     thumb("demo-video-0".into(), blur(400, 225));
     thumb("demo-video-1".into(), blur(300, 450));
-    for (i, (w, h)) in [(150, 300), (150, 150), (150, 150)].into_iter().enumerate() {
+    for (i, (w, h)) in [(150, 150); 4].into_iter().enumerate() {
         thumb(format!("demo-video-grid-{i}"), blur(w, h));
     }
     let label = |key: &str, text: &str, undownloaded| {
@@ -922,6 +924,7 @@ fn demo_videos(emit: &backend::Emit) {
     downloading("demo-video-grid-0", "38MB / 38MB", 100);
     label("demo-video-grid-1", "2.4MB", true);
     downloading("demo-video-grid-2", "123MB / 1.2GB", 0);
+    label("demo-video-grid-3", "3.1MB", true);
     // the first frame replaces the blurhash
     std::thread::sleep(std::time::Duration::from_millis(1500));
     let (w, h) = (types::physical_px(400), types::physical_px(225));

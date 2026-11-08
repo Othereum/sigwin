@@ -153,6 +153,9 @@ struct Persist {
     /// `snippets` of groups lead with the sender's name (cleared once when that began)
     #[serde(default)]
     snippets_named: bool,
+    /// `snippets` of a video show its own mark (cleared once when that began)
+    #[serde(default)]
+    snippets_video: bool,
     /// thread key -> notifications off until (ms; 0 = on, `MUTE_ALWAYS`), picked in Sigwin
     #[serde(default)]
     mute_override: HashMap<String, u64>,

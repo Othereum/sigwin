@@ -56,11 +56,13 @@ impl App {
 
     pub(super) async fn rebuild_threads(&mut self) -> anyhow::Result<()> {
         let rows = self.index.threads().await?;
-        // cached while only the newest rows were searched, and before edits counted
-        if !self.persist.snippets_namedle || !self.persist.snippets_named {
+        // cached while only the newest rows were searched, before edits counted, before videos
+        // had their mark
+        if !self.persist.snippets_namedle || !self.persist.snippets_named || !self.persist.snippets_video {
             self.persist.snippets.clear();
             self.persist.snippets_namedle = true;
             self.persist.snippets_named = true;
+            self.persist.snippets_video = true;
             self.persist_dirty = true;
         }
         let mut list: Vec<(i64, ThreadDto)> = Vec::with_capacity(rows.len());
