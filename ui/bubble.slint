@@ -357,7 +357,7 @@ export component Bubble inherits VerticalLayout {
     // the newest row gets extra room below so it doesn't touch the composer
     in property <bool> last;
     // the chips and the readers hang below the bubble: room for the part under its edge
-    padding-bottom: (m.typing ? 8px : (m.reactions.length > 0 ? (no-bubble ? 30px : 19px) : m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 15px) : m.collapse-below ? 1px : 6px)) + (last ? 10px : 0px);
+    padding-bottom: (m.typing ? 8px : (m.reactions.length > 0 ? (photo-only && !m.hide-time ? 10px : no-bubble ? 30px : 19px) : m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 15px) : m.collapse-below ? 1px : 6px)) + (last ? 10px : 0px);
     // bubble corners: 18px, 4px on the side that joins a neighbour of the same run
     out property <length> r-tl: !m.outgoing && m.collapse-above ? 4px : 18px;
     out property <length> r-tr: m.outgoing && m.collapse-above ? 4px : 18px;
@@ -372,6 +372,8 @@ export component Bubble inherits VerticalLayout {
     // photo with text: the photo sits flush on top of the bubble, the text below it
     property <bool> flush: m.has-image && !m.sticker && m.text != "" && m.quote == "";
     property <bool> no-bubble: m.sticker || m.big-emoji || bare;
+    // a bare photo: the time row sits under the picture, so the chips straddle the picture's edge, above that row
+    property <bool> photo-only: bare && !m.sticker && !m.big-emoji;
     // height of the day separator above the message itself (centering a jump on the bubble)
     out property <length> lead: m.day-sep != "" || m.unread-divider ? root.padding-top + (m.day-sep != "" ? 36px + root.spacing : 0px) + (m.unread-divider ? 28px + root.spacing : 0px) : 0px;
 
@@ -756,7 +758,7 @@ export component Bubble inherits VerticalLayout {
             chips := Rectangle {
                 visible: m.reactions.length > 0;
                 x: 8px;
-                y: root.no-bubble ? parent.height + 2px : parent.height - 8px;
+                y: root.photo-only && !m.hide-time ? parent.height - 25px : root.no-bubble ? parent.height + 2px : parent.height - 8px;
                 width: m.reactions.length > 0 ? chip-row.preferred-width : 0px;
                 height: m.reactions.length > 0 ? chip-row.preferred-height : 0px;
                 border-radius: 13px;
