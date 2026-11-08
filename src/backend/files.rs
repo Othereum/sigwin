@@ -41,25 +41,16 @@ impl App {
                     if downloads.was_stopped(&file_key) {
                         return;
                     }
-                    // the same picture shown at another size is getting it already
-                    if downloads.is_running(&file_key) {
-                        while downloads.is_running(&file_key) {
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        }
-                        // stopped (it has put its label back) or failed
-                        if !orig_path.exists() {
+                    // the same picture shown at another size may be getting it already: waited for
+                    let show = Show::Cells(if shown.is_empty() { vec![key.clone()] } else { shown });
+                    match downloads.ensure(&file_key, &ptr, &show, &emit, &orig_path).await {
+                        Ok(true) => {}
+                        // stopped (it has put its label back)
+                        Ok(false) => return,
+                        Err(e) => {
+                            warn!("download attachment: {e:#}");
+                            let _ = tx.send(Internal::ThumbFailed(key));
                             return;
-                        }
-                    } else {
-                        let shown = if shown.is_empty() { vec![key.clone()] } else { shown };
-                        match downloads.run(&file_key, &ptr, &shown, &emit, &orig_path).await {
-                            Ok(true) => {}
-                            Ok(false) => return,
-                            Err(e) => {
-                                warn!("download attachment: {e:#}");
-                                let _ = tx.send(Internal::ThumbFailed(key));
-                                return;
-                            }
                         }
                     }
                 }
@@ -112,20 +103,23 @@ impl App {
                     return;
                 }
                 if !orig_path.exists() {
-                    if !view::media::auto_fetches_video(&ptr) {
+                    // what a click asked for goes past the limits on what is fetched by itself
+                    let asked = downloads.is_allowed(&file_key);
+                    if !asked && !view::media::auto_fetches_video(&ptr) {
                         return;
                     }
-                    let _turn = fetch_gate.acquire_owned().await;
-                    // clicked meanwhile: that one is getting it, or it was stopped and stays so
-                    if !requested.borrow().contains(&key) || downloads.is_running(&file_key) || downloads.was_stopped(&file_key) {
+                    // by itself, videos take turns; a click doesn't wait for them
+                    let _turn = if asked { None } else { Some(fetch_gate.acquire_owned().await) };
+                    // it left the window meanwhile, or was stopped and stays so
+                    if !requested.borrow().contains(&key) || downloads.was_stopped(&file_key) {
                         return;
                     }
                     if !orig_path.exists() {
                         if manager.is_none() {
                             return;
                         }
-                        let shown = [key.clone()];
-                        match downloads.run(&file_key, &ptr, &shown, &emit, &orig_path).await {
+                        let show = Show::Cells(vec![key.clone()]);
+                        match downloads.ensure(&file_key, &ptr, &show, &emit, &orig_path).await {
                             Ok(true) => {}
                             Ok(false) => return,
                             Err(e) => {
@@ -168,68 +162,51 @@ impl App {
         });
     }
 
-    /// A click on video `index` of row `id`: plays it in the default app if it's here, stops it if
-    /// it's on its way, and otherwise downloads it. It doesn't play by itself when that's done: the
-    /// user may be doing something else by then, and it would take the focus and start making noise.
-    pub(super) fn open_video(&self, id: &str, index: usize) {
+    /// A click on video `index` of row `id`: plays it in the default app if it's here, and
+    /// otherwise stops it if it's on its way or gets it. It doesn't play by itself when that's
+    /// done: the user may be doing something else by then, and it would take the focus and start
+    /// making noise.
+    pub(super) async fn open_video(&mut self, id: &str, index: usize) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let Some((i, a)) = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_video(a)).nth(index) else { return };
         let file_key = view::media::attachment_key(a, ts, i);
-        if self.attachment_downloads.stop(&file_key) {
+        let path = attachment_path(&self.paths.attachments, &file_key);
+        if !path.exists() {
+            return self.toggle_download(&file_key).await;
+        }
+        let (tx, open_dir, name) = (self.tx.clone(), self.paths.open.clone(), attachment_name(a));
+        tokio::task::spawn_local(async move { open_outside(&tx, path, &open_dir, name).await });
+    }
+
+    /// A click on a picture or video that isn't here: stops its download if it's on its way, and
+    /// otherwise lets it download, past the limits on what is fetched by itself. The rows ask for
+    /// their pictures again, so that is where it happens: one place downloads, however it started.
+    async fn toggle_download(&mut self, file_key: &str) {
+        if self.attachment_downloads.stop(file_key) {
             return;
         }
-        let path = attachment_path(&self.paths.attachments, &file_key);
-        let ptr = a.clone();
-        let downloads = self.attachment_downloads.clone();
-        // the same video can be shown at another size; a row that isn't asking for it shows nothing
-        let shown: Vec<String> = self.thumbs_requested.borrow().iter().filter(|k| k.starts_with(&file_key)).cloned().collect();
-        let registered = self.manager.is_some();
-        let emit = self.emit.clone();
-        let tx = self.tx.clone();
-        let open_dir = self.paths.open.clone();
-        tokio::task::spawn_local(async move {
-            if path.exists() {
-                open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
-                return;
-            }
-            if !registered {
-                return;
-            }
-            if shown.is_empty() {
-                let _ = tx.send(Internal::Progress("첨부파일 다운로드 중…".into()));
-            }
-            match downloads.run(&file_key, &ptr, &shown, &emit, &path).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    let _ = tx.send(Internal::ProgressDone);
-                    return;
-                }
-                Err(e) => {
-                    let _ = tx.send(Internal::Notice(format!("다운로드 실패: {e:#}")));
-                    return;
-                }
-            }
-            let _ = tx.send(Internal::ProgressDone);
-            let _ = tx.send(Internal::VideoFetched(file_key));
-        });
+        self.attachment_downloads.allow(file_key);
+        self.thumbs_requested.borrow_mut().retain(|k| !k.starts_with(file_key));
+        self.emit_messages(Scroll::Keep).await;
     }
 
     /// Downloads (or reads from the cache) a long message's full text.
     pub(super) fn request_long_text(&self, key: String, ptr: AttachmentPointer) {
         let path = attachment_path(&self.paths.attachments, &key);
-        let manager = self.manager.clone();
-        let tx = self.tx.clone();
+        let (downloads, emit, tx) = (self.attachment_downloads.clone(), self.emit.clone(), self.tx.clone());
+        let online = self.manager.is_some();
         tokio::task::spawn_local(async move {
-            let data = match sigwin_vault::read(&path) {
-                Ok(d) => Ok(d),
-                Err(_) => match manager {
-                    Some(m) => m.get_attachment(&ptr).await.map_err(|e| e.to_string()).inspect(|d| {
-                        if let Err(e) = sigwin_vault::write(&path, d) {
-                            warn!("save long text: {e}");
-                        }
-                    }),
-                    None => Err("offline".into()),
-                },
+            let here = if path.exists() {
+                Ok(true)
+            } else if online {
+                downloads.ensure(&key, &ptr, &Show::Quiet, &emit, &path).await
+            } else {
+                Err(anyhow::anyhow!("offline"))
+            };
+            let data = match here {
+                Ok(true) => sigwin_vault::read(&path).map_err(anyhow::Error::from),
+                Ok(false) => Err(anyhow::anyhow!("stopped")),
+                Err(e) => Err(e),
             };
             match data {
                 Ok(d) => {
@@ -237,7 +214,7 @@ impl App {
                     let _ = tx.send(Internal::LongText(key, text));
                 }
                 Err(e) => {
-                    warn!("download long text: {e}");
+                    warn!("download long text: {e:#}");
                     let _ = tx.send(Internal::ThumbFailed(key));
                 }
             }
@@ -250,14 +227,17 @@ impl App {
     /// hover toolbar's save).
     pub(super) fn save_files(&self, id: &str, owner: isize, all: bool) {
         let Some((ts, dm)) = self.row_message(id) else { return };
-        let jobs: Vec<(PathBuf, AttachmentPointer)> = view::media::shown_attachments(dm)
+        let jobs: Vec<SaveJob> = view::media::shown_attachments(dm)
             .filter(|(_, a)| all || !view::media::is_media(a))
-            .map(|(i, a)| (attachment_path(&self.paths.attachments, &view::media::attachment_key(a, ts, i)), a.clone()))
+            .map(|(i, a)| {
+                let file_key = view::media::attachment_key(a, ts, i);
+                SaveJob { path: attachment_path(&self.paths.attachments, &file_key), file_key, ptr: a.clone() }
+            })
             .collect();
         let tx = self.tx.clone();
         match jobs.as_slice() {
             [] => {}
-            [(_, ptr)] => crate::picker::spawn_save(owner, attachment_name(ptr), move |dst| {
+            [SaveJob { ptr, .. }] => crate::picker::spawn_save(owner, attachment_name(ptr), move |dst| {
                 if let Some(dst) = dst {
                     let _ = tx.send(Internal::SaveFiles(jobs, SaveTo::File(dst)));
                 }
@@ -271,15 +251,31 @@ impl App {
     }
 
     /// Downloads what isn't here yet and writes the files where the user chose.
-    pub(super) fn save_files_to(&self, jobs: Vec<(PathBuf, AttachmentPointer)>, to: SaveTo) {
+    pub(super) fn save_files_to(&self, jobs: Vec<SaveJob>, to: SaveTo) {
         let downloads = self.attachment_downloads.clone();
-        let manager = self.manager.clone();
-        let tx = self.tx.clone();
+        let online = self.manager.is_some();
+        let (tx, emit) = (self.tx.clone(), self.emit.clone());
         tokio::task::spawn_local(async move {
             let mut saved = Vec::new();
-            for (path, ptr) in &jobs {
-                if !fetch_attachment(&downloads, &manager, &tx, path, ptr).await {
-                    continue;
+            for SaveJob { file_key, path, ptr } in &jobs {
+                if !path.exists() {
+                    if !online {
+                        return;
+                    }
+                    // a save is asked for: a download that was stopped starts over for it
+                    let mut got = downloads.ensure(file_key, ptr, &Show::Toast, &emit, path).await;
+                    if matches!(got, Ok(false)) {
+                        got = downloads.ensure(file_key, ptr, &Show::Toast, &emit, path).await;
+                    }
+                    let _ = tx.send(Internal::ProgressDone);
+                    match got {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(e) => {
+                            let _ = tx.send(Internal::Notice(format!("다운로드 실패: {e:#}")));
+                            continue;
+                        }
+                    }
                 }
                 let dst = match &to {
                     SaveTo::File(f) => f.clone(),
@@ -326,17 +322,13 @@ impl App {
         Some((key, path, a.clone()))
     }
 
-    /// A click on image `index` of row `id` that isn't here: stops its download if it's on its
-    /// way, otherwise gets it (the list asks for it again, which downloads and cuts the picture).
-    /// As for videos, a stopped one isn't downloaded by itself again while the app runs.
+    /// A click on image `index` of row `id` that isn't here: stops its download or starts it, as
+    /// for a video.
     pub(super) async fn toggle_image_download(&mut self, id: &str, index: usize) {
         let Some((file_key, path, _)) = self.viewed_key(id, index) else { return };
-        if path.exists() || self.attachment_downloads.stop(&file_key) {
-            return;
+        if !path.exists() {
+            self.toggle_download(&file_key).await;
         }
-        self.attachment_downloads.allow(&file_key);
-        self.thumbs_requested.borrow_mut().retain(|k| !k.starts_with(&file_key));
-        self.emit_messages(Scroll::Keep).await;
     }
 
     pub(super) fn view_image(&mut self, id: &str, index: usize, fit: (u32, u32)) {
@@ -457,6 +449,13 @@ impl App {
     }
 }
 
+/// A file to save: its key, where it is (or will be) cached, and what the message says of it.
+pub(super) struct SaveJob {
+    pub file_key: String,
+    pub path: PathBuf,
+    pub ptr: AttachmentPointer,
+}
+
 /// Where the user chose to save files: one file's whole path, or a folder for several.
 pub(super) enum SaveTo {
     File(PathBuf),
@@ -488,12 +487,30 @@ const VIEW_MAX_PIXELS: u64 = 100_000_000;
 /// something else would stand out for no reason.
 const PRESAGE_USER_AGENT: &str = "presage-rs-0.8.0-dev";
 
-/// Videos on their way, by file key, so a click can stop them. One that was stopped isn't
-/// downloaded by itself again while the app runs, or it would start over when its row comes back.
+/// Where a download shows how far it is.
+pub(super) enum Show {
+    /// on these pictures (their keys in the UI): a size and a ring, and what they were when it ends
+    Cells(Vec<String>),
+    /// in the notice at the bottom (a file being saved, which has no picture)
+    Toast,
+    /// nowhere
+    Quiet,
+}
+
+/// The only place attachments are downloaded: pictures, videos, files being saved and long texts
+/// all come through `ensure`, so one is never fetched twice, and a click on a picture can stop
+/// whichever of them is on its way.
+///
+/// One that was stopped isn't downloaded by itself again while the app runs, or it would start
+/// over when its row comes back; the user's next click on it (`allow`) lets it.
 #[derive(Clone, Default)]
 pub(super) struct AttachmentDownloads {
     running: Rc<RefCell<HashMap<String, AbortHandle>>>,
     stopped: Rc<RefCell<HashSet<String>>>,
+    /// asked for by a click: downloaded whatever the size or type that is fetched by itself
+    allowed: Rc<RefCell<HashSet<String>>>,
+    /// a download ended (done, failed or stopped)
+    ended: Rc<tokio::sync::Notify>,
 }
 
 impl AttachmentDownloads {
@@ -505,9 +522,15 @@ impl AttachmentDownloads {
         self.stopped.borrow().contains(file_key)
     }
 
-    /// Lets a stopped download start by itself again: the user asked for it.
+    /// Whether a click asked for it, so the limits on what is fetched by itself don't apply.
+    fn is_allowed(&self, file_key: &str) -> bool {
+        self.allowed.borrow().contains(file_key)
+    }
+
+    /// The user asked for it (a click): it may start again after a stop, and past the limits.
     fn allow(&self, file_key: &str) {
         self.stopped.borrow_mut().remove(file_key);
+        self.allowed.borrow_mut().insert(file_key.to_string());
     }
 
     /// False if it isn't on its way.
@@ -515,23 +538,49 @@ impl AttachmentDownloads {
         let Some(handle) = self.running.borrow_mut().remove(file_key) else { return false };
         handle.abort();
         self.stopped.borrow_mut().insert(file_key.to_string());
+        self.allowed.borrow_mut().remove(file_key);
+        self.ended.notify_waiters();
         true
     }
 
-    /// Downloads a video as `Manager::get_attachment` does, which can't say how far along it is,
-    /// showing that on the pictures `shown`. `None`: it was stopped. When it doesn't finish they
-    /// go back to how they were.
-    async fn run(&self, file_key: &str, ptr: &AttachmentPointer, shown: &[String], emit: &Emit, dest: &Path) -> anyhow::Result<bool> {
+    /// The attachment is at `dest` when this returns true. One that is on its way already is
+    /// waited for, not downloaded again; false: it was stopped or failed meanwhile, which is not
+    /// for this caller to start over. Nothing on its way and not here: downloaded now, `show`ing
+    /// how far it is; false when stopped.
+    pub(super) async fn ensure(&self, file_key: &str, ptr: &AttachmentPointer, show: &Show, emit: &Emit, dest: &Path) -> anyhow::Result<bool> {
+        if self.is_running(file_key) {
+            while self.is_running(file_key) {
+                self.ended.notified().await;
+            }
+            return Ok(dest.exists());
+        }
+        if dest.exists() {
+            return Ok(true);
+        }
+        self.run(file_key, ptr, show, emit, dest).await
+    }
+
+    /// Downloads and saves it, as `Manager::get_attachment` does, but saying how far along it is.
+    /// `false`: it was stopped. When it doesn't finish what shows it goes back to how it was.
+    async fn run(&self, file_key: &str, ptr: &AttachmentPointer, show: &Show, emit: &Emit, dest: &Path) -> anyhow::Result<bool> {
         let (handle, registration) = AbortHandle::new_pair();
         self.running.borrow_mut().insert(file_key.to_string(), handle.clone());
         self.stopped.borrow_mut().remove(file_key);
-        let show = |label: crate::types::MediaLabel| {
-            for key in shown {
-                emit(Event::MediaLabel { key: key.clone(), label: label.clone() });
+        let show_now = |label: crate::types::MediaLabel| match show {
+            Show::Cells(keys) => {
+                for key in keys {
+                    emit(Event::MediaLabel { key: key.clone(), label: label.clone() });
+                }
             }
+            Show::Toast => {
+                if let Some(percent) = label.progress {
+                    emit(Event::Progress(format!("첨부파일 다운로드 중… {percent}%")));
+                }
+            }
+            Show::Quiet => {}
         };
-        show(view::media::downloading_label(ptr, 0, 0));
-        let res = Abortable::new(download(ptr, |got, percent| show(view::media::downloading_label(ptr, got, percent))), registration).await;
+        show_now(view::media::downloading_label(ptr, 0, 0));
+        let res = Abortable::new(download(ptr, |got, percent| show_now(view::media::downloading_label(ptr, got, percent))), registration).await;
         // saved before it counts as done: whoever waits for it finds the file
         let res = match res {
             Ok(Ok(data)) => {
@@ -549,9 +598,10 @@ impl AttachmentDownloads {
         // a stopped one is already out of the list, and a new one may have taken its place
         if !handle.is_aborted() {
             self.running.borrow_mut().remove(file_key);
+            self.ended.notify_waiters();
         }
         if !matches!(res, Ok(Ok(()))) {
-            show(view::media::undownloaded_label(ptr));
+            show_now(view::media::undownloaded_label(ptr));
         }
         match res {
             Ok(res) => res.map(|()| true),
@@ -604,39 +654,6 @@ fn open_download(mut data: Vec<u8>, digest: &[u8], key: [u8; 64], size: Option<u
         data.truncate(size);
     }
     Ok(data)
-}
-
-/// Downloads an attachment unless it is cached; false (notice shown) if that failed. One that
-/// is on its way already (a picture or video of the list) is waited for, not downloaded twice.
-async fn fetch_attachment(
-    downloads: &AttachmentDownloads,
-    manager: &Option<Mgr>,
-    tx: &UnboundedSender<Internal>,
-    path: &Path,
-    ptr: &AttachmentPointer,
-) -> bool {
-    let file_key = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    while downloads.is_running(&file_key) {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    if path.exists() {
-        return true;
-    }
-    let Some(m) = manager.as_ref() else { return false };
-    let _ = tx.send(Internal::Progress("첨부파일 다운로드 중…".into()));
-    match m.get_attachment(ptr).await {
-        Ok(data) => match sigwin_vault::write(path, &data) {
-            Ok(()) => true,
-            Err(e) => {
-                let _ = tx.send(Internal::Notice(format!("저장 실패: {e}")));
-                false
-            }
-        },
-        Err(e) => {
-            let _ = tx.send(Internal::Notice(format!("다운로드 실패: {e}")));
-            false
-        }
-    }
 }
 
 /// Decrypts a cached attachment to `open/` and opens it with the default app.
@@ -969,6 +986,41 @@ mod tests {
         assert!(!d.is_running("v") && d.was_stopped("v"));
         // a second click isn't another stop: it downloads again
         assert!(!d.stop("v"));
+    }
+
+    #[test]
+    fn a_caller_waits_for_a_download_on_its_way() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        rt.block_on(tokio::task::LocalSet::new().run_until(async {
+            let d = AttachmentDownloads::default();
+            let dest = std::env::temp_dir().join(format!("sigwin-ensure-{}", std::process::id()));
+            let _ = std::fs::remove_file(&dest);
+            let emit: Emit = Arc::new(|_| {});
+            let wait = |d: &AttachmentDownloads| {
+                let (d, dest, emit) = (d.clone(), dest.clone(), emit.clone());
+                tokio::task::spawn_local(async move { d.ensure("k", &AttachmentPointer::default(), &Show::Quiet, &emit, &dest).await.unwrap() })
+            };
+
+            // it finishes: the waiter finds the file, and nothing was downloaded for it
+            let (handle, _registration) = AbortHandle::new_pair();
+            d.running.borrow_mut().insert("k".into(), handle);
+            let waiter = wait(&d);
+            tokio::task::yield_now().await;
+            assert!(!waiter.is_finished());
+            std::fs::write(&dest, b"x").unwrap();
+            d.running.borrow_mut().remove("k");
+            d.ended.notify_waiters();
+            assert!(waiter.await.unwrap());
+
+            // it is stopped: the waiter doesn't start it over
+            std::fs::remove_file(&dest).unwrap();
+            let (handle, _registration) = AbortHandle::new_pair();
+            d.running.borrow_mut().insert("k".into(), handle);
+            let waiter = wait(&d);
+            tokio::task::yield_now().await;
+            assert!(d.stop("k"));
+            assert!(!waiter.await.unwrap());
+        }));
     }
 
     #[test]

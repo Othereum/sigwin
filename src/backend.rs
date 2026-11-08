@@ -196,16 +196,13 @@ enum Internal {
     Sent(u64, Result<(), String>),
     LinkFetched(String, Option<Box<(Fetched, Vec<crate::types::Thumb>)>>),
     ThumbFailed(String),
-    /// a video the user opened has arrived, by its file key: it can show its frame now
-    VideoFetched(String),
     /// a long message's full text: (attachment key, text)
     LongText(String, String),
     Notice(String),
     /// the user chose where to save a message's files: download and write them
-    SaveFiles(Vec<(PathBuf, AttachmentPointer)>, files::SaveTo),
+    SaveFiles(Vec<files::SaveJob>, files::SaveTo),
     /// the files were saved (the last one's path)
     Saved(String, PathBuf),
-    Progress(String),
     ProgressDone,
     PackInstalled(Result<String, String>),
     ReceiptsIndexed,
@@ -682,7 +679,7 @@ impl App {
             Command::Send { text, files, quote, mentions, link, quality } => self.send(text, files, quote, mentions, link, quality).await,
             Command::ViewImage { id, index, fit } => self.view_image(&id, index, fit),
             Command::SaveFiles { id, owner, all } => self.save_files(&id, owner, all),
-            Command::OpenVideo { id, index } => self.open_video(&id, index),
+            Command::OpenVideo { id, index } => self.open_video(&id, index).await,
             Command::ToggleImageDownload { id, index } => self.toggle_image_download(&id, index).await,
             Command::PlayGif { id, index, seq, size } => self.play_gif(&id, index, seq, size),
             Command::StopGif => self.stop_gif(),
@@ -840,10 +837,6 @@ impl App {
                 // allow a retry next time the thread is opened
                 self.thumbs_requested.borrow_mut().remove(&key);
             }
-            Internal::VideoFetched(file_key) => {
-                self.thumbs_requested.borrow_mut().retain(|k| !k.starts_with(&file_key));
-                self.emit_messages(Scroll::Keep).await;
-            }
             Internal::LongText(key, text) => {
                 // still the thread it was asked for
                 if self.thumbs_requested.borrow().contains(&key) {
@@ -857,7 +850,6 @@ impl App {
                 (self.emit)(Event::ProgressDone);
                 (self.emit)(Event::Saved(text, path));
             }
-            Internal::Progress(s) => self.progress(s),
             Internal::ProgressDone => (self.emit)(Event::ProgressDone),
             Internal::PackInstalled(Ok(id)) => {
                 (self.emit)(Event::ProgressDone);

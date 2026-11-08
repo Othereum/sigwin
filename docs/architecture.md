@@ -72,7 +72,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/backend/typing.rs` | typing indicators |
 | `src/backend/stickers.rs` | sticker packs: picker, sending, installing |
 | `src/backend/gif.rs` | a GIF playing in a message or the viewer: one frame at a time on its own thread, handed over through a slot |
-| `src/backend/files.rs` | attachment and thumbnail caches, opening and viewing attachments |
+| `src/backend/files.rs` | attachment and thumbnail caches, opening and viewing attachments; `AttachmentDownloads::ensure` is the only place an attachment is downloaded |
 | `src/videoframe.rs` | a video's first frame, decoded by Media Foundation in a child process |
 | `src/backend/mute.rs` | per-thread notification settings, the phone's values from the Storage Service |
 | `src/backend/notify.rs` | when notifications show and go away, after Signal Desktop |
