@@ -9,7 +9,7 @@ description: Check Sigwin's message list scrolling headlessly and see a whole sc
 
 ## Run it
 
-Build with `--profile fast` first (the build rule in `CLAUDE.local.md` applies), then from the repo root:
+Build with `--profile fast` first (stop a running `sigwin.exe`: it locks the exe), then from the repo root:
 
 ```powershell
 .claude\skills\headless-scroll\scripts\run.ps1 -Out <scratchpad>\up -Up 30 -Down 45 -Notches 12 -Env @{ SIGWIN_DEMO_OLDER = "20"; SIGWIN_DEMO_CAP = "120" }

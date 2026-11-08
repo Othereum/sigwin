@@ -22,7 +22,7 @@ When in doubt whether a value identifies someone, print its length instead. A `{
 
 1. Copy `assets/db_probe.rs` (next to this file) to `examples/db_probe.rs`. It handles the key, the read-only connection and the protobuf field walking.
 2. Edit only `report()`, plus helpers it needs, to ask your question. `threads()` and `kinds_newest_first()` cover most of what comes up. Open question? Run it unedited first: the default overview often answers it.
-3. Stop the app and run it, following the build rule in `CLAUDE.local.md`. The app holds the DB in WAL mode, so reading alongside it works, but a build rule is a build rule.
+3. Stop the app and run it. The app holds the DB in WAL mode, so reading alongside it would work, but a running `sigwin.exe` can lock what the build writes (`CLAUDE.md`, Build & run).
    ```
    cargo run --profile fast --example db_probe
    ```
