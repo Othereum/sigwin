@@ -86,15 +86,9 @@ pub(super) fn open(app: &AppWindow, pack: String) {
     send_cmd(Command::StickerPanel);
 }
 
-pub(super) fn ask_install(msg_id: String) {
-    let ok = rfd::MessageDialog::new()
-        .set_title("스티커 팩")
-        .set_description("이 스티커가 들어 있는 팩을 추가할까요?")
-        .set_buttons(rfd::MessageButtons::YesNo)
-        .show();
-    if ok == rfd::MessageDialogResult::Yes {
-        send_cmd(Command::InstallPackFromMessage(msg_id));
-    }
+pub(super) fn ask_install(app: &AppWindow, msg_id: String) {
+    let text = "이 스티커가 들어 있는 팩을 추가할까요?".into();
+    super::window::ask(app, super::window::Ask::YesNo, "스티커 팩", text, move || send_cmd(Command::InstallPackFromMessage(msg_id)));
 }
 
 pub(super) fn grid_arrived(app: &AppWindow, pack: String, items: Vec<types::StickerDto>) {

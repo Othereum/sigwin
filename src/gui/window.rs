@@ -105,6 +105,37 @@ pub(crate) fn hwnd(app: &AppWindow) -> isize {
     }
 }
 
+/// What a message box asks: a yes/no question, or only something to read.
+pub(crate) enum Ask {
+    YesNo,
+    Warning,
+}
+
+/// A message box over the window, from a thread of its own; `yes` runs on the UI thread when it
+/// is answered so (a `Warning` has nothing to answer).
+///
+/// Never on the UI thread: a dialog there runs its own loop inside our callback, and Windows shows
+/// it only once that thread's queue is empty, which a running animation (a sticker, a GIF) never
+/// lets happen. It stayed hidden and the app hung waiting for it.
+pub(crate) fn ask(app: &AppWindow, kind: Ask, title: &str, text: String, yes: impl FnOnce() + Send + 'static) {
+    let owner = hwnd(app);
+    let title = title.to_string();
+    std::thread::spawn(move || {
+        let mut d = rfd::MessageDialog::new().set_title(title).set_description(text);
+        if owner != 0 {
+            d = d.set_parent(&picker::Owner(owner));
+        }
+        let answer = match kind {
+            Ask::YesNo => d.set_buttons(rfd::MessageButtons::YesNo).show(),
+            Ask::Warning => d.set_level(rfd::MessageLevel::Warning).show(),
+        };
+        picker::reenable(owner);
+        if matches!(kind, Ask::YesNo) && answer == rfd::MessageDialogResult::Yes {
+            let _ = slint::invoke_from_event_loop(yes);
+        }
+    });
+}
+
 #[cfg(windows)]
 pub(crate) fn is_foreground(app: &AppWindow) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsIconic};

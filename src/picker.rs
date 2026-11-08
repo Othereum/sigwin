@@ -104,7 +104,7 @@ pub fn spawn(owner: isize, done: impl FnOnce(Vec<PathBuf>) + Send + 'static) {
 }
 
 /// The child disables its owner while modal; make sure we are usable again even if it crashed.
-fn reenable(owner: isize) {
+pub(crate) fn reenable(owner: isize) {
     #[cfg(windows)]
     if owner != 0 {
         // SAFETY: EnableWindow on our own top-level window handle
@@ -114,7 +114,8 @@ fn reenable(owner: isize) {
     }
 }
 
-struct Owner(isize);
+/// An HWND to own a dialog.
+pub(crate) struct Owner(pub isize);
 
 impl raw_window_handle::HasWindowHandle for Owner {
     fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {

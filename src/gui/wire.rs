@@ -225,14 +225,8 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         // before anything is cleared: the text stays in the composer to shorten
         // (mentions and format markers only shrink it, so this never refuses what would fit)
         if text.len() > crate::view::text::MAX_LONG_TEXT_BYTES {
-            rfd::MessageDialog::new()
-                .set_level(rfd::MessageLevel::Warning)
-                .set_title("메시지가 너무 깁니다")
-                .set_description(format!(
-                    "한 메시지는 64KB까지 보낼 수 있습니다. 지금 {}KB입니다.\n나눠서 보내 주세요.",
-                    text.len().div_ceil(1024)
-                ))
-                .show();
+            let text = format!("한 메시지는 64KB까지 보낼 수 있습니다. 지금 {}KB입니다.\n나눠서 보내 주세요.", text.len().div_ceil(1024));
+            window::ask(&app, window::Ask::Warning, "메시지가 너무 깁니다", text, || {});
             return;
         }
         if let Some(id) = UI.with_borrow_mut(|ui| ui.editing.take()) {
@@ -600,16 +594,13 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         _ => s(Command::JumpToDay(day)),
     });
 
-    let s = send.clone();
+    let weak = app.as_weak();
     app.on_delete_message(move |id| {
-        let ok = rfd::MessageDialog::new()
-            .set_title("메시지 삭제")
-            .set_description("모든 사람에게서 이 메시지를 삭제할까요?")
-            .set_buttons(rfd::MessageButtons::YesNo)
-            .show();
-        if ok == rfd::MessageDialogResult::Yes {
-            s(Command::Delete(id.to_string()));
-        }
+        let Some(app) = weak.upgrade() else { return };
+        let id = id.to_string();
+        window::ask(&app, window::Ask::YesNo, "메시지 삭제", "모든 사람에게서 이 메시지를 삭제할까요?".into(), move || {
+            send_cmd(Command::Delete(id))
+        });
     });
 
     let s = send.clone();
@@ -648,17 +639,13 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             return;
         }
         let danger = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && m.file_danger));
+        let save = Command::SaveFiles { id: id.to_string(), owner: window::hwnd(&app), all };
         if danger {
-            let ok = rfd::MessageDialog::new()
-                .set_title("위험할 수 있는 파일")
-                .set_description("이런 종류의 파일은 컴퓨터에 해를 끼칠 수 있습니다. 보낸 사람을 믿을 수 있을 때만 저장하세요. 저장할까요?")
-                .set_buttons(rfd::MessageButtons::YesNo)
-                .show();
-            if ok != rfd::MessageDialogResult::Yes {
-                return;
-            }
+            let text = "이런 종류의 파일은 컴퓨터에 해를 끼칠 수 있습니다. 보낸 사람을 믿을 수 있을 때만 저장하세요. 저장할까요?";
+            window::ask(&app, window::Ask::YesNo, "위험할 수 있는 파일", text.into(), move || send_cmd(save));
+            return;
         }
-        send_cmd(Command::SaveFiles { id: id.to_string(), owner: window::hwnd(&app), all });
+        send_cmd(save);
     };
     app.on_file_clicked({
         let weak = weak.clone();
@@ -737,17 +724,11 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
 
 /// Settings page and unlinking.
 fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
-    let s = send.clone();
+    let weak = app.as_weak();
     app.on_unlink(move || {
-        let ok = rfd::MessageDialog::new()
-            .set_title("데이터 삭제")
-            .set_description("이 PC의 연결을 해제하고 로컬 데이터를 모두 삭제할까요?")
-            .set_buttons(rfd::MessageButtons::YesNo)
-            .set_level(rfd::MessageLevel::Warning)
-            .show();
-        if ok == rfd::MessageDialogResult::Yes {
-            s(Command::Unlink);
-        }
+        let Some(app) = weak.upgrade() else { return };
+        let text = "이 PC의 연결을 해제하고 로컬 데이터를 모두 삭제할까요?".into();
+        window::ask(&app, window::Ask::YesNo, "데이터 삭제", text, || send_cmd(Command::Unlink));
     });
 
     let s = send.clone();

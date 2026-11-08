@@ -309,7 +309,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         }
         Event::StickerPacks(list) => stickers::packs_arrived(app, list),
         Event::OpenStickerPanel(pack) => stickers::open(app, pack),
-        Event::AskInstallPack(msg_id) => stickers::ask_install(msg_id),
+        Event::AskInstallPack(msg_id) => stickers::ask_install(app, msg_id),
         Event::Account { name, number, device, receipts, typing } => {
             let state = |v: Option<bool>| if v == Some(false) { "꺼짐" } else { "켜짐" };
             let pending = if receipts.is_none() || typing.is_none() { " (아직 받지 못함)" } else { "" };
