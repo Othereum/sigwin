@@ -188,7 +188,8 @@ fn start_gif(id: &str, cell: usize) {
             return;
         }
         let Some(m) = ui.last.iter().find(|m| m.id == id) else { return };
-        let Some(c) = m.cells.get(cell).filter(|c| c.gif && c.more == 0) else { return };
+        // one that isn't here has nothing to play: the click is for getting it
+        let Some(c) = m.cells.get(cell).filter(|c| c.gif && c.more == 0 && !ui.media_labels.undownloaded(&c.key)) else { return };
         // which of the message's images it is, as the viewer counts them
         let crate::types::ClickedMedia::Image(index) = m.clicked_media(cell) else { return };
         let size = (crate::types::physical_px(c.w), crate::types::physical_px(c.h));
@@ -214,7 +215,11 @@ pub(crate) fn stop_gif(ui: &mut Ui) {
     if let Some(tx) = &ui.tx {
         let _ = tx.send(Command::StopGif);
     }
-    super::rows::redraw_rows(ui, |m| m.id == g.id);
+    // no frame shown, nothing to take back: drawing the row again would make its cells anew,
+    // which drops the hover and starts it all over (a GIF that can't play, again and again)
+    if g.frames.row_count() > 0 {
+        super::rows::redraw_rows(ui, |m| m.id == g.id);
+    }
 }
 
 /// A frame of the playing GIF, or its end.
@@ -237,9 +242,13 @@ pub(crate) fn gif_arrived(slot: std::sync::Arc<GifSlot>) {
                 }
             }
             if done {
-                // it ended by itself: the backend has nothing to stop
+                // it ended by itself: the backend has nothing to stop. Without a frame shown the
+                // row is as it was (see `stop_gif`)
+                let shown = g.frames.row_count() > 0;
                 ui.anims.gif = None;
-                super::rows::redraw_rows(ui, |m| m.id == id);
+                if shown {
+                    super::rows::redraw_rows(ui, |m| m.id == id);
+                }
             }
         }),
         // routed to the composer by the event dispatch

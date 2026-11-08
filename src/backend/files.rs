@@ -39,6 +39,7 @@ impl App {
                     }
                     // stopped by a click: it stays so until the next one; a big one waits for it
                     if downloads.was_stopped(&file_key) || (!downloads.is_allowed(&file_key) && !view::media::auto_fetches_image(&ptr)) {
+                        tracing::debug!(stopped = downloads.was_stopped(&file_key), "picture waits for a click");
                         return;
                     }
                     // the same picture shown at another size may be getting it already: waited for
@@ -183,8 +184,10 @@ impl App {
     /// their pictures again, so that is where it happens: one place downloads, however it started.
     async fn toggle_download(&mut self, file_key: &str) {
         if self.attachment_downloads.stop(file_key) {
+            info!("download stopped by a click");
             return;
         }
+        info!("download asked for by a click");
         self.attachment_downloads.allow(file_key);
         self.thumbs_requested.borrow_mut().retain(|k| !k.starts_with(file_key));
         self.emit_messages(Scroll::Keep).await;
@@ -527,6 +530,11 @@ impl AttachmentDownloads {
         self.allowed.borrow().contains(file_key)
     }
 
+    /// How many a click asked for (what a fixture checks).
+    pub(super) fn allowed_count(&self) -> usize {
+        self.allowed.borrow().len()
+    }
+
     /// The user asked for it (a click): it may start again after a stop, and past the limits.
     fn allow(&self, file_key: &str) {
         self.stopped.borrow_mut().remove(file_key);
@@ -580,6 +588,7 @@ impl AttachmentDownloads {
             Show::Quiet => {}
         };
         show_now(view::media::downloading_label(ptr, 0, 0));
+        let started = std::time::Instant::now();
         let res = Abortable::new(download(ptr, |got, percent| show_now(view::media::downloading_label(ptr, got, percent))), registration).await;
         // saved before it counts as done: whoever waits for it finds the file
         let res = match res {
@@ -603,6 +612,16 @@ impl AttachmentDownloads {
         if !matches!(res, Ok(Ok(()))) {
             show_now(view::media::undownloaded_label(ptr));
         }
+        info!(
+            result = match &res {
+                Ok(Ok(())) => "done",
+                Ok(Err(_)) => "failed",
+                Err(_) => "stopped",
+            },
+            kb = ptr.size.unwrap_or(0) / 1024,
+            ms = started.elapsed().as_millis() as u64,
+            "attachment download"
+        );
         match res {
             Ok(res) => res.map(|()| true),
             Err(_) => Ok(false),

@@ -42,10 +42,12 @@ component VideoMark inherits Rectangle {
     in property <bool> undownloaded;
     in property <int> progress: -1;
     in property <image> ring;
+    in property <bool> hovered;
     width: 40px;
     height: 40px;
     border-radius: 20px;
-    background: #00000090;
+    background: hovered ? #000000c8 : #00000090;
+    animate background { duration: 120ms; }
     if undownloaded && progress >= 0: Image {
         width: 100%;
         height: 100%;
@@ -170,7 +172,13 @@ export component MsgImage inherits Rectangle {
             image-fit: cover;
         }
         // a picture that isn't here has the same mark: a click gets it or stops it
-        if (cell.video || cell.state[0].undownloaded) && cell.more == 0: VideoMark { undownloaded: cell.state[0].undownloaded; progress: cell.state[0].progress; ring: cell.state[0].ring; }
+        if (cell.video || cell.state[0].undownloaded) && cell.more == 0: VideoMark {
+            undownloaded: cell.state[0].undownloaded;
+            progress: cell.state[0].progress;
+            ring: cell.state[0].ring;
+            // the whole picture takes the click: the mark shows it
+            hovered: cell-ta.has-hover;
+        }
         if cell.state[0].label != "" && cell.more == 0: MediaLabel {
             text: cell.state[0].label;
             x: 6px;
@@ -191,7 +199,7 @@ export component MsgImage inherits Rectangle {
                 vertical-alignment: center;
             }
         }
-        TouchArea {
+        cell-ta := TouchArea {
             mouse-cursor: pointer;
             clicked => { root.attachment-clicked(m.id, i); }
             // the row id with it: a reused row instance keeps the hover while its message changes

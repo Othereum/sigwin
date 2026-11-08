@@ -417,9 +417,14 @@ impl State {
             Step::Wait(ms) => self.idle(Duration::from_millis(ms), pump),
             Step::Move(x, y) => self.send(WindowEvent::PointerMoved { position: pos(x, y) }, pump),
             Step::Click(x, y, button, n) => {
+                // as a hand does it: the pointer rests a moment before pressing, and the button is
+                // down for a while. What the UI does meanwhile (a hover starting something, a row
+                // drawn anew) can lose a real click, and an instant one would hide that
                 self.send(WindowEvent::PointerMoved { position: pos(x, y) }, pump);
+                self.idle(Duration::from_millis(60), pump);
                 for _ in 0..n {
                     self.send(WindowEvent::PointerPressed { position: pos(x, y), button }, pump);
+                    self.idle(Duration::from_millis(40), pump);
                     self.send(WindowEvent::PointerReleased { position: pos(x, y), button }, pump);
                 }
                 self.idle(Duration::from_millis(30), pump);

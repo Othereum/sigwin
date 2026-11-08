@@ -35,6 +35,9 @@ pub(crate) enum FxOp {
     /// one new message from `who` with `n` GIFs, their files already in the cache (the picture is
     /// cut at once and arrives after the rows). `same`: one GIF `n` times, so they share a key.
     Gifs { who: u32, n: u32, same: bool },
+    /// one new message from `who` with a picture past the size that is downloaded by itself, not
+    /// cached. `gif`: a GIF, which a hover would play once it's here
+    Big { who: u32, gif: bool },
     /// the phone read `who`'s thread up to its newest message
     PhoneRead { who: u32 },
     /// a value to check: `unread`, `read_upto`, `sent`, `toasts`, `window`
@@ -48,10 +51,11 @@ impl FxOp {
         let cmd = words.next().ok_or_else(|| anyhow::anyhow!("empty fixture op"))?;
         let mut what = String::new();
         let (mut who, mut n, mut unread, mut name) = (1u32, 1u32, 0u32, String::new());
-        let mut same = false;
+        let (mut same, mut gif) = (false, false);
         for w in words {
             match w.split_once('=') {
                 Some(("same", v)) => same = v != "0",
+                Some(("gif", v)) => gif = v != "0",
                 Some(("who", v)) => who = v.parse()?,
                 Some(("n", v)) => n = v.parse()?,
                 Some(("unread", v)) => unread = v.parse()?,
@@ -64,6 +68,7 @@ impl FxOp {
             "seed" => Self::Seed { who, name, n, unread },
             "recv" => Self::Recv { who, n },
             "gifs" => Self::Gifs { who, n, same },
+            "big" => Self::Big { who, gif },
             "phone-read" => Self::PhoneRead { who },
             "query" => Self::Query { what, who },
             _ => anyhow::bail!("unknown fixture op: {cmd}"),
@@ -232,6 +237,22 @@ impl App {
                 self.store.save_message(&thread, c.clone()).await?;
                 self.content(c).await;
             }
+            FxOp::Big { who, gif } => {
+                let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));
+                let ts = self.fx_ts();
+                let ptr = AttachmentPointer {
+                    content_type: Some(if gif { "image/gif" } else { "image/jpeg" }.into()),
+                    digest: Some(vec![7; 32]),
+                    size: Some(20 * 1024 * 1024),
+                    width: Some(4000),
+                    height: Some(3000),
+                    blur_hash: Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj".into()),
+                    ..Default::default()
+                };
+                let c = incoming_dm(who, DataMessage { attachments: vec![ptr], timestamp: Some(ts), ..Default::default() }, me);
+                self.store.save_message(&thread, c.clone()).await?;
+                self.content(c).await;
+            }
             FxOp::PhoneRead { who } => {
                 let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));
                 let rows = self.index.page(&thread, i64::MAX, 1).await?;
@@ -260,6 +281,8 @@ impl App {
                 format!("delivery={delivery} read={read} sync={sync}")
             }
             "toasts" => crate::toast::shown().join(","),
+            // pictures a click asked for
+            "allowed" => self.attachment_downloads.allowed_count().to_string(),
             "window" => match &self.current {
                 None => "closed".into(),
                 Some(o) => {
