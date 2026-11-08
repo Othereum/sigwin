@@ -144,7 +144,10 @@ struct Persist {
     cache_format: u32,
     /// `snippets` holds nothing from when only the newest rows were searched and edits were ignored
     #[serde(default)]
-    snippets_whole: bool,
+    snippets_namedle: bool,
+    /// `snippets` of groups lead with the sender's name (cleared once when that began)
+    #[serde(default)]
+    snippets_named: bool,
     /// thread key -> notifications off until (ms; 0 = on, `MUTE_ALWAYS`), picked in Sigwin
     #[serde(default)]
     mute_override: HashMap<String, u64>,

@@ -57,9 +57,10 @@ impl App {
     pub(super) async fn rebuild_threads(&mut self) -> anyhow::Result<()> {
         let rows = self.index.threads().await?;
         // cached while only the newest rows were searched, and before edits counted
-        if !self.persist.snippets_whole {
+        if !self.persist.snippets_namedle || !self.persist.snippets_named {
             self.persist.snippets.clear();
-            self.persist.snippets_whole = true;
+            self.persist.snippets_namedle = true;
+            self.persist.snippets_named = true;
             self.persist_dirty = true;
         }
         let mut list: Vec<(i64, ThreadDto)> = Vec::with_capacity(rows.len());
@@ -280,19 +281,28 @@ impl App {
     }
 
     /// `snippet` with the author's newest edit of the message.
+    /// In a group, a received message is prefixed with its sender's name.
     async fn edited_snippet(&mut self, key: &str, thread: &Thread, c: &Content) -> Option<String> {
         let Kind::Msg { outgoing, .. } = view::classify(c, self.me) else { return self.snippet(c).await };
         if view::text::snippet(c, self.me, &|_| String::new()).is_none() {
             return None;
         }
-        let Some(dm) = self.latest_edit(key, thread, c.timestamp(), c.metadata.sender.raw_uuid()).await else {
-            return self.snippet(c).await;
+        let sender = c.metadata.sender.raw_uuid();
+        let text = match self.latest_edit(key, thread, c.timestamp(), sender).await {
+            None => self.snippet(c).await?,
+            Some(dm) => {
+                for u in view::text::mentioned(&dm) {
+                    self.name(u).await;
+                }
+                let names = &self.names;
+                view::text::message_snippet(&dm, outgoing, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()))
+            }
         };
-        for u in view::text::mentioned(&dm) {
-            self.name(u).await;
+        if outgoing || !matches!(thread, Thread::Group(_)) {
+            return Some(text);
         }
-        let names = &self.names;
-        Some(view::text::message_snippet(&dm, outgoing, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())))
+        let who = self.name(sender).await;
+        Some(format!("{who}: {text}"))
     }
 
     /// What the thread list shows for a thread whose last stored row is now `tail_ts`:
