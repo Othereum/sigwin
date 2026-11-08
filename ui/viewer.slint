@@ -247,43 +247,51 @@ export component ImageViewer inherits Window {
             height: 52px;
             border-radius: 8px;
             background: #000000c0;
-            // clicks between the thumbnails don't close the window
-            TouchArea {}
-            Flickable {
-                property <int> at: root.current;
-                function reveal() {
-                    // the current one in the middle, as far as the row goes
-                    self.content-x = -clamp(at * 48px - (self.width - 44px) / 2, 0px, max(0px, self.content-width - self.width));
+            // clicks between the thumbnails don't close the window. The wheel over the strip
+            // scrolls it instead of zooming: the horizontal Flickable rejects the wheel and it
+            // bubbles to this parent.
+            TouchArea {
+                scroll-event(e) => {
+                    strip.content-x = clamp(strip.content-x + (e.delta-y != 0px ? e.delta-y : e.delta-x),
+                        min(0px, strip.width - strip.content-width), 0px);
+                    accept
                 }
-                init => { self.reveal(); }
-                changed at => { self.reveal(); }
-                x: 4px;
-                y: 4px;
-                width: root.strip-w;
-                height: 44px;
-                content-width: root.thumbs.length * 48px - 4px;
-                for thumb[i] in root.thumbs: Rectangle {
-                    x: i * 48px;
-                    width: 44px;
+                strip := Flickable {
+                    property <int> at: root.current;
+                    function reveal() {
+                        // the current one in the middle, as far as the row goes
+                        self.content-x = -clamp(at * 48px - (self.width - 44px) / 2, 0px, max(0px, self.content-width - self.width));
+                    }
+                    init => { self.reveal(); }
+                    changed at => { self.reveal(); }
+                    x: 4px;
+                    y: 4px;
+                    width: root.strip-w;
                     height: 44px;
-                    border-radius: 4px;
-                    clip: true;
-                    background: #ffffff20;
-                    Image {
-                        source: thumb;
-                        width: 100%;
-                        height: 100%;
-                        image-fit: fill;
-                    }
-                    Rectangle {
-                        background: i == root.current || cell.has-hover ? transparent : #00000070;
+                    content-width: root.thumbs.length * 48px - 4px;
+                    for thumb[i] in root.thumbs: Rectangle {
+                        x: i * 48px;
+                        width: 44px;
+                        height: 44px;
                         border-radius: 4px;
-                        border-width: i == root.current ? 2px : 0px;
-                        border-color: white;
-                    }
-                    cell := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.go(i); }
+                        clip: true;
+                        background: #ffffff20;
+                        Image {
+                            source: thumb;
+                            width: 100%;
+                            height: 100%;
+                            image-fit: fill;
+                        }
+                        Rectangle {
+                            background: i == root.current || cell.has-hover ? transparent : #00000070;
+                            border-radius: 4px;
+                            border-width: i == root.current ? 2px : 0px;
+                            border-color: white;
+                        }
+                        cell := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.go(i); }
+                        }
                     }
                 }
             }

@@ -27,30 +27,39 @@ export component StickerPanel inherits Rectangle {
         padding: 8px;
         spacing: 6px;
         // pack tabs
-        Flickable {
+        // The wheel only scrolls vertically, which this Flickable can't: the parent TouchArea
+        // gets the event the Flickable rejects and turns it into a horizontal move.
+        TouchArea {
             height: 40px;
-            // a Flickable's max size defaults to its content: don't let that shrink the window
-            max-width: 100000px;
-            content-width: tabs.preferred-width;
-            tabs := HorizontalLayout {
-                spacing: 4px;
-                for p in root.packs: Rectangle {
-                    visible: p.installed;
-                    width: p.installed ? 40px : 0px;
-                    height: 40px;
-                    border-radius: 8px;
-                    background: p.id == root.current-pack ? Theme.selected : (pta.has-hover ? Theme.hover : transparent);
-                    Image { width: 32px; height: 32px; source: p.cover; image-fit: contain; }
-                    pta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.pick-pack(p.id); }
+            scroll-event(e) => {
+                tabs-flick.content-x = clamp(tabs-flick.content-x + (e.delta-y != 0px ? e.delta-y : e.delta-x),
+                    min(0px, tabs-flick.width - tabs-flick.content-width), 0px);
+                accept
+            }
+            tabs-flick := Flickable {
+                width: parent.width;
+                height: parent.height;
+                content-width: tabs.preferred-width;
+                tabs := HorizontalLayout {
+                    spacing: 4px;
+                    for p in root.packs: Rectangle {
+                        visible: p.installed;
+                        width: p.installed ? 40px : 0px;
+                        height: 40px;
+                        border-radius: 8px;
+                        background: p.id == root.current-pack ? Theme.selected : (pta.has-hover ? Theme.hover : transparent);
+                        Image { width: 32px; height: 32px; source: p.cover; image-fit: contain; }
+                        pta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.pick-pack(p.id); }
+                        }
                     }
-                }
-                TextButton {
-                    y: 6px;
-                    text: "＋ 팩 추가";
-                    active: root.suggest;
-                    clicked => { root.pick-pack("+"); }
+                    TextButton {
+                        y: 6px;
+                        text: "＋ 팩 추가";
+                        active: root.suggest;
+                        clicked => { root.pick-pack("+"); }
+                    }
                 }
             }
         }
