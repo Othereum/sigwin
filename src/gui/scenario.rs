@@ -94,6 +94,9 @@ fn probe(app: &AppWindow, name: &str) -> anyhow::Result<String> {
         "rows" => app.get_messages().row_count().to_string(),
         "current-key" => app.get_current_key().to_string(),
         "cells" => app.get_messages().iter().map(|m| m.cells.row_count()).sum::<usize>().to_string(),
+        // cells that play in place when the pointer is on them, and those playing now
+        "gif-cells" => app.get_messages().iter().flat_map(|m| m.cells.iter().collect::<Vec<_>>()).filter(|c| c.gif).count().to_string(),
+        "playing-cells" => app.get_messages().iter().flat_map(|m| m.cells.iter().collect::<Vec<_>>()).filter(|c| c.frames.row_count() > 0).count().to_string(),
         // cells of a photo grid that show nothing (yet)
         "blank-cells" => app.get_messages().iter().flat_map(|m| m.cells.iter().collect::<Vec<_>>()).filter(|c| c.image.size().width == 0).count().to_string(),
         // how far the newest row's end is below the list's visible bottom edge (0: at the bottom)

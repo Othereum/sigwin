@@ -52,9 +52,9 @@ impl Playing {
 /// The GIF playing in the message list (one at a time): its frames come from the backend one by
 /// one into a single image, `frame[0]` stays 0.
 struct GifPlay {
+    /// the row, and the cell of it that plays (the same picture twice in a grid is two cells)
     id: String,
-    /// the row's `image_key`
-    key: String,
+    cell: usize,
     seq: u64,
     frames: Rc<VecModel<Image>>,
     frame: Rc<VecModel<i32>>,
@@ -75,12 +75,17 @@ pub(crate) struct Anims {
 }
 
 impl Anims {
-    /// Frames and current-frame model for a message row (empty: show the still).
+    /// A sticker's frames and current-frame model for a message row (empty: show the still).
     pub(crate) fn models(&self, key: &str) -> (ModelRc<Image>, ModelRc<i32>) {
-        if let Some(g) = self.gif.as_ref().filter(|g| g.key == key && g.frames.row_count() > 0) {
-            return (ModelRc::from(g.frames.clone()), ModelRc::from(g.frame.clone()));
-        }
         self.list.get(key).map(Playing::models).unwrap_or_default()
+    }
+
+    /// The playing GIF's frames for cell `cell` of row `id` (empty: show the still).
+    pub(crate) fn gif_models(&self, id: &str, cell: usize) -> (ModelRc<Image>, ModelRc<i32>) {
+        match self.gif.as_ref().filter(|g| g.id == id && g.cell == cell && g.frames.row_count() > 0) {
+            Some(g) => (ModelRc::from(g.frames.clone()), ModelRc::from(g.frame.clone())),
+            None => Default::default(),
+        }
     }
 
     /// Thread switch: the old thread's frames go.
@@ -113,34 +118,35 @@ pub(crate) fn wire(app: &AppWindow) {
         let id = id.to_string();
         slint::Timer::single_shot(Duration::ZERO, move || shown(&id));
     });
-    let weak = app.as_weak();
-    app.on_gif_scrolled(move || {
-        // Slint moves the hover only with the mouse: rows that scroll under a resting cursor
-        // never get it, and the one that left keeps it. Tell it where the cursor is, on the
-        // next turn (this runs while the list updates), once for any number of scroll steps.
-        if REFRESH_PENDING.replace(true) {
-            return;
-        }
-        let weak = weak.clone();
-        slint::Timer::single_shot(Duration::ZERO, move || {
-            REFRESH_PENDING.set(false);
-            let Some(app) = weak.upgrade() else { return };
-            if app.get_inactive() {
-                return;
-            }
-            if let Some(position) = super::window::cursor_in_window(&app) {
-                app.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
-            }
-        });
-    });
-    g.on_gif_hover(|id, on| {
+    app.on_gif_scrolled(refresh_hover);
+    g.on_gif_hover(|id, cell, on| {
         let id = id.to_string();
         // these run while Slint evaluates the row: act on the next turn of the event loop
-        slint::Timer::single_shot(Duration::ZERO, move || gif_hover(&id, on));
+        slint::Timer::single_shot(Duration::ZERO, move || gif_hover(&id, cell.max(0) as usize, on));
     });
     g.on_hover(|pack, id, on| {
         let pack = pack.to_string();
         slint::Timer::single_shot(Duration::ZERO, move || hover(&pack, id as u32, on));
+    });
+}
+
+/// Slint moves the hover only with the mouse: rows that scroll under a resting cursor never get
+/// it, the one that left keeps it, and a cell drawn again (its row was) starts without it. Tell
+/// it where the cursor is, on the next turn (this can run while the list updates), once for any
+/// number of calls.
+pub(crate) fn refresh_hover() {
+    if REFRESH_PENDING.replace(true) {
+        return;
+    }
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        REFRESH_PENDING.set(false);
+        let Some(app) = APP.with_borrow(|a| a.as_ref().and_then(|w| w.upgrade())) else { return };
+        if app.get_inactive() {
+            return;
+        }
+        if let Some(position) = super::window::cursor_in_window(&app).or_else(crate::headless::pointer) {
+            app.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+        }
     });
 }
 
@@ -157,55 +163,58 @@ pub(crate) fn pause(paused: bool) {
     });
 }
 
-/// The cursor came onto the picture of row `id` or left it. A GIF plays while the cursor is on
+/// The cursor came onto cell `cell` of row `id` or left it. A GIF plays while the cursor is on
 /// it; clicking is for the viewer, as on any picture.
-fn gif_hover(id: &str, on: bool) {
+fn gif_hover(id: &str, cell: usize, on: bool) {
     if on {
-        start_gif(id);
+        start_gif(id, cell);
     } else {
         // moving from one GIF to the next, the new one's "on" can come before the old one's
-        // "off": only the GIF that plays for this row stops
+        // "off": only the GIF that plays in this cell stops
         UI.with_borrow_mut(|ui| {
-            if ui.anims.gif.as_ref().is_some_and(|g| g.id == id) {
+            if ui.anims.gif.as_ref().is_some_and(|g| g.id == id && g.cell == cell) {
                 stop_gif(ui);
             }
         });
     }
 }
 
-fn start_gif(id: &str) {
+fn start_gif(id: &str, cell: usize) {
     if PAUSED.get() || super::viewer::is_open() {
         return;
     }
     UI.with_borrow_mut(|ui| {
-        let Some(m) = ui.last.iter().find(|m| m.id == id) else { return };
-        if !m.gif || !m.cells.is_empty() || ui.anims.gif.as_ref().is_some_and(|g| g.id == id) {
+        if ui.anims.gif.as_ref().is_some_and(|g| g.id == id && g.cell == cell) {
             return;
         }
-        let (key, px) = (m.image_key.clone(), crate::types::physical_px(m.img_w.max(m.img_h)));
+        let Some(m) = ui.last.iter().find(|m| m.id == id) else { return };
+        let Some(c) = m.cells.get(cell).filter(|c| c.gif && c.more == 0) else { return };
+        // which of the message's images it is, as the viewer counts them
+        let crate::types::ClickedMedia::Image(index) = m.clicked_media(cell) else { return };
+        let size = (crate::types::physical_px(c.w), crate::types::physical_px(c.h));
         stop_gif(ui);
         ui.anims.gif_seq += 1;
         let seq = ui.anims.gif_seq;
         ui.anims.gif = Some(GifPlay {
             id: id.to_string(),
-            key,
+            cell,
             seq,
             frames: Rc::new(VecModel::default()),
             frame: Rc::new(VecModel::from(vec![0])),
         });
         if let Some(tx) = &ui.tx {
-            let _ = tx.send(Command::PlayGif { id: id.to_string(), seq, px });
+            let _ = tx.send(Command::PlayGif { id: id.to_string(), index, seq, size });
         }
     });
 }
 
-/// The GIF in the message list stops and its row goes back to the still.
+/// The GIF in the message list stops and its cell goes back to the still.
 pub(crate) fn stop_gif(ui: &mut Ui) {
     let Some(g) = ui.anims.gif.take() else { return };
     if let Some(tx) = &ui.tx {
         let _ = tx.send(Command::StopGif);
     }
-    set_rows(ui, &g.key);
+    super::rows::redraw_rows(ui, |m| m.id == g.id);
 }
 
 /// A frame of the playing GIF, or its end.
@@ -214,26 +223,27 @@ pub(crate) fn gif_arrived(slot: std::sync::Arc<GifSlot>) {
     let img = frame.map(|t| Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height)));
     match slot.target {
         GifTarget::Viewer(index) => super::viewer::gif_frame(&slot.id, index, img, done),
-        // routed to the composer by the event dispatch
-        GifTarget::Composer => {}
         GifTarget::List => UI.with_borrow_mut(|ui| {
             let Some(g) = ui.anims.gif.as_ref().filter(|g| g.seq == slot.seq) else { return };
+            let id = g.id.clone();
             if let Some(img) = img {
                 if g.frames.row_count() == 0 {
                     g.frames.push(img);
-                    let key = g.key.clone();
-                    set_rows(ui, &key);
+                    super::rows::redraw_rows(ui, |m| m.id == id);
+                    // its cells are new, and the pointer is still on one of them
+                    refresh_hover();
                 } else {
                     g.frames.set_row_data(0, img);
                 }
             }
             if done {
                 // it ended by itself: the backend has nothing to stop
-                if let Some(g) = ui.anims.gif.take() {
-                    set_rows(ui, &g.key);
-                }
+                ui.anims.gif = None;
+                super::rows::redraw_rows(ui, |m| m.id == id);
             }
         }),
+        // routed to the composer by the event dispatch
+        GifTarget::Composer => {}
     }
 }
 

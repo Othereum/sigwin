@@ -10,3 +10,4 @@ settle
 settle
 expect ui cells = 2
 expect ui blank-cells = 0
+expect ui gif-cells = 2

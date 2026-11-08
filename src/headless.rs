@@ -75,6 +75,16 @@ pub struct Driver {
 }
 
 thread_local! {
+    /// where the scripted pointer is: a headless window has no cursor of the system's to ask
+    static POINTER: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
+}
+
+/// The scripted pointer's place (headless runs only).
+pub(crate) fn pointer() -> Option<LogicalPosition> {
+    POINTER.get().map(|(x, y)| LogicalPosition::new(x, y))
+}
+
+thread_local! {
     static DRIVER: RefCell<Option<Driver>> = const { RefCell::new(None) };
 }
 
@@ -376,6 +386,9 @@ impl State {
     }
 
     fn send(&mut self, ev: WindowEvent, pump: &impl Fn()) {
+        if let WindowEvent::PointerMoved { position } | WindowEvent::PointerPressed { position, .. } | WindowEvent::PointerReleased { position, .. } = &ev {
+            POINTER.set(Some((position.x, position.y)));
+        }
         self.w.window().dispatch_event(ev);
         self.idle(Duration::ZERO, pump);
     }

@@ -255,6 +255,7 @@ pub(crate) fn to_item(
     revealed: &std::collections::HashSet<String>,
     dark: bool,
 ) -> MsgItem {
+    // stickers: the picture and its frames
     let image = thumbs.get(&m.image_key).cloned();
     let (frames, frame) = anims.models(&m.image_key);
     let label_of = |key: &str| labels.get(key).map_or(SharedString::new(), |l| l.text.as_str().into());
@@ -264,7 +265,8 @@ pub(crate) fn to_item(
     let cells: Vec<ImageCell> = m
         .cells
         .iter()
-        .map(|c| ImageCell {
+        .enumerate()
+        .map(|(n, c)| ImageCell {
             x: c.x as f32,
             y: c.y as f32,
             w: c.w as f32,
@@ -272,10 +274,13 @@ pub(crate) fn to_item(
             image: thumbs.get(&c.key).cloned().unwrap_or_default(),
             more: c.more as i32,
             video: c.video,
+            gif: c.gif,
             label: label_of(&c.key),
             undownloaded: undownloaded(&c.key),
             progress: progress(&c.key),
             ring: ring(&c.key),
+            frames: anims.gif_models(&m.id, n).0,
+            frame: anims.gif_models(&m.id, n).1,
         })
         .collect();
     let avatar = if m.show_avatar { senders.get(&m.sender_key).cloned() } else { None };
@@ -341,13 +346,7 @@ pub(crate) fn to_item(
         file_size: file.1.into(),
         file_ext: file.2.into(),
         file_danger: m.file_danger,
-        has_image: !m.image_key.is_empty(),
-        video: m.video,
-        gif: m.gif,
-        media_label: if m.sticker || !m.cells.is_empty() { SharedString::new() } else { label_of(&m.image_key) },
-        undownloaded: undownloaded(&m.image_key),
-        progress: progress(&m.image_key),
-        ring: ring(&m.image_key),
+        has_image: !m.image_key.is_empty() || !m.cells.is_empty(),
         image: image.unwrap_or_default(),
         frames,
         frame,

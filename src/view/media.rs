@@ -248,12 +248,24 @@ pub fn set_photo_grid(m: &mut MsgDto, count: usize, mut key: impl FnMut(usize, u
             h,
             more: if n + 1 == GRID_SHOWN { more } else { 0 },
             video: false,
+            gif: false,
         })
         .collect();
-    let Some(first) = m.cells.first() else { return };
-    m.image_key = first.key.clone();
     m.img_w = cells.iter().map(|c| c.0 + c.2).max().unwrap_or(0);
     m.img_h = cells.iter().map(|c| c.1 + c.3).max().unwrap_or(0);
+}
+
+/// Makes `m` show one picture as a grid of one cell, `size` big (logical px). Everything a
+/// picture does (marks, labels, playing, clicks) is the cell's, so a lone picture and a grid of
+/// them can't differ.
+pub fn set_single_photo(m: &mut MsgDto, key: String, size: (u32, u32)) {
+    m.cells = vec![crate::types::CellDto { key, x: 0, y: 0, w: size.0, h: size.1, more: 0, video: false, gif: false }];
+    (m.img_w, m.img_h) = size;
+}
+
+/// Whether the file may animate (the file says whether it does only once it's read).
+fn may_animate(ptr: &AttachmentPointer) -> bool {
+    matches!(ptr.content_type.as_deref(), Some("image/gif" | "image/apng" | "image/webp"))
 }
 
 /// Size a single photo of `w` x `h` is shown at (logical px).
@@ -274,7 +286,6 @@ pub(super) fn set_attachments(
     m: &mut MsgDto,
     dm: &DataMessage,
     ts: u64,
-    wanted: &mut Vec<(String, AttachmentPointer, u32)>,
     wanted_cells: &mut Vec<WantedCell>,
 ) {
     let mut files = Vec::new();
@@ -289,22 +300,13 @@ pub(super) fn set_attachments(
     m.attachment = files_label(&files);
     m.file_danger = files.iter().any(|a| is_dangerous_file(&attachment_label(a)));
     if let [(i, a)] = photos[..] {
-        let key = attachment_key(a, ts, i);
-        let (w, h) = fit(a.width, a.height);
-        m.img_w = w;
-        m.img_h = h;
-        if is_video(a) {
-            // the sender's size may be missing or wrong: cut to fill the box
-            m.video = true;
-            m.image_key = format!("{key}@{w}x{h}");
-            wanted_cells.push(WantedCell { key: m.image_key.clone(), file_key: key, ptr: a.clone(), size: (w, h) });
-        } else {
-            // pre-resample to the on-screen size (nearest-neighbor scaling is jagged)
-            wanted.push((key.clone(), a.clone(), w.max(h)));
-            m.image_key = key;
-            // may animate: the file says so only once it's read (a still one just doesn't play)
-            m.gif = matches!(a.content_type.as_deref(), Some("image/gif" | "image/apng" | "image/webp"));
-        }
+        let file_key = attachment_key(a, ts, i);
+        // the sender's size may be missing or wrong: the picture is cut to fill the box
+        let size = fit(a.width, a.height);
+        // the same image may also be shown in a cell of another size
+        let key = format!("{file_key}@{}x{}", size.0, size.1);
+        set_single_photo(m, key.clone(), size);
+        wanted_cells.push(WantedCell { key, file_key, ptr: a.clone(), size });
     } else {
         set_photo_grid(m, photos.len(), |n, w, h| {
             let (i, a) = photos[n];
@@ -314,9 +316,10 @@ pub(super) fn set_attachments(
             wanted_cells.push(WantedCell { key: key.clone(), file_key, ptr: a.clone(), size: (w, h) });
             key
         });
-        for (cell, (_, a)) in m.cells.iter_mut().zip(&photos) {
-            cell.video = is_video(a);
-        }
+    }
+    for (cell, (_, a)) in m.cells.iter_mut().zip(&photos) {
+        cell.video = is_video(a);
+        cell.gif = !cell.video && may_animate(a);
     }
 }
 

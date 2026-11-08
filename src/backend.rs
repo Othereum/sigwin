@@ -684,7 +684,7 @@ impl App {
             Command::SaveFiles { id, owner, all } => self.save_files(&id, owner, all),
             Command::OpenVideo { id, index } => self.open_video(&id, index),
             Command::ToggleImageDownload { id, index } => self.toggle_image_download(&id, index).await,
-            Command::PlayGif { id, seq, px } => self.play_gif(&id, seq, px),
+            Command::PlayGif { id, index, seq, size } => self.play_gif(&id, index, seq, size),
             Command::StopGif => self.stop_gif(),
             Command::PlayPendingGif { path, seq, tile } => self.play_pending_gif(path, seq, tile),
             Command::ViewerThumbs { id, px } => self.viewer_thumbs(&id, px),

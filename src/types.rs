@@ -152,6 +152,9 @@ pub struct CellDto {
     /// images not shown, covered by this cell's "+N"
     pub more: u32,
     pub video: bool,
+    /// may animate: it plays in place while the pointer is on it (`Command::PlayGif`). The file
+    /// says whether it does only once it's read; a still one just doesn't play.
+    pub gif: bool,
 }
 
 /// What a click on a message's image or grid cell landed on.
@@ -206,18 +209,15 @@ pub struct MsgDto {
     pub attachment: String,
     /// one of the files is a kind that can run or change the system
     pub file_danger: bool,
-    /// key into the UI thumbnail cache, empty when the message has no inline image
+    /// a sticker's key into the UI thumbnail cache, empty for anything else (pictures are `cells`)
     pub image_key: String,
     pub img_w: u32,
     pub img_h: u32,
     /// the preview of a link in the text, as the sender's app made it
     pub link: Option<LinkCard>,
-    /// several images: the grid drawn instead of `image_key`, which is its first cell's
+    /// the message's pictures and videos: a grid, or one cell for a single one. `image_key` is
+    /// for a sticker only.
     pub cells: Vec<CellDto>,
-    /// `image_key` is the picture of a video, not a grid
-    pub video: bool,
-    /// `image_key` is a GIF that plays in place when clicked (`Command::PlayGif`)
-    pub gif: bool,
     pub deleted: bool,
     pub day_sep: bool,
     /// the local day the message was sent on (`view::time::day_num`), for the date shown while scrolling
@@ -261,9 +261,6 @@ pub struct MsgDto {
 impl MsgDto {
     /// What a click on its picture, or on cell `index` of its grid, landed on.
     pub fn clicked_media(&self, index: usize) -> ClickedMedia {
-        if self.cells.is_empty() {
-            return if self.video { ClickedMedia::Video(0) } else { ClickedMedia::Image(index) };
-        }
         let before = self.cells.iter().take(index).filter(|c| c.video).count();
         if self.cells.get(index).is_some_and(|c| c.video) { ClickedMedia::Video(before) } else { ClickedMedia::Image(index - before) }
     }
@@ -574,9 +571,10 @@ pub enum Command {
     Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String>, quality: sigwin_thumb::photo::Quality },
     /// the composer's link changed: fetch this one's preview (contacts its site), None cancels
     LinkPreview(Option<String>),
-    /// play the GIF of row `id` in its place at `px` physical px (long side) under the number
-    /// `seq`, which its frames carry; one GIF plays at a time, a new one replaces the old
-    PlayGif { id: String, seq: u64, px: u32 },
+    /// play image `index` (among the row's images) of row `id` in its cell, `size` physical px big,
+    /// under the number `seq`, which its frames carry; one GIF plays at a time, a new one replaces
+    /// the old
+    PlayGif { id: String, index: usize, seq: u64, size: (u32, u32) },
     /// the playing GIF stops (list or viewer)
     StopGif,
     /// Plays a GIF waiting in the composer (a file of the user's, not a cached one) in a tile
@@ -671,8 +669,9 @@ mod tests {
         assert_eq!(grid.clicked_media(1), ClickedMedia::Image(0));
         assert_eq!(grid.clicked_media(2), ClickedMedia::Video(1));
         assert_eq!(grid.clicked_media(3), ClickedMedia::Image(1));
-        assert_eq!(MsgDto { video: true, ..Default::default() }.clicked_media(0), ClickedMedia::Video(0));
-        assert_eq!(MsgDto::default().clicked_media(0), ClickedMedia::Image(0));
+        // a lone video is a grid of one
+        assert_eq!(MsgDto { cells: vec![cell(true)], ..Default::default() }.clicked_media(0), ClickedMedia::Video(0));
+        assert_eq!(MsgDto { cells: vec![cell(false)], ..Default::default() }.clicked_media(0), ClickedMedia::Image(0));
     }
 
     #[test]

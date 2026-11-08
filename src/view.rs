@@ -311,10 +311,10 @@ pub fn build(
                 if let Some(q) = &dm.quote {
                     set_quote(&mut m, q, *ts, me, name_of, &mut wanted_cells);
                 }
-                set_attachments(&mut m, dm, *ts, &mut wanted, &mut wanted_cells);
+                set_attachments(&mut m, dm, *ts, &mut wanted_cells);
                 // not next to attachments (Signal's clients don't send that), and it would give
                 // away what a spoiler in the text hides
-                if !m.sticker && m.attachment.is_empty() && m.image_key.is_empty() && !m.styles.iter().any(|s| s.2 == STYLE_SPOILER) {
+                if !m.sticker && m.attachment.is_empty() && m.cells.is_empty() && !m.styles.iter().any(|s| s.2 == STYLE_SPOILER) {
                     if let Some((card, image)) = link_card(dm, *ts) {
                         m.link = Some(card);
                         wanted_cells.extend(image);
@@ -335,7 +335,7 @@ pub fn build(
                     && shown_attachments(dm).next().is_none()
                     && dm.sticker.is_none()
                     && dm.body.as_deref().is_some_and(|b| !b.is_empty());
-                if !m.sticker && m.attachment.is_empty() && m.image_key.is_empty() && m.quote.is_empty() {
+                if !m.sticker && m.attachment.is_empty() && m.cells.is_empty() && m.quote.is_empty() {
                     m.big_emoji = crate::emoji::only_emoji(&m.text, 5).is_some();
                 }
                 if outgoing {
@@ -645,22 +645,22 @@ mod tests {
 
         let b = run(vec![video(1)]);
         let m = &b.items[0];
-        assert!(m.video && m.attachment.is_empty() && m.cells.is_empty());
+        assert!(m.cells.len() == 1 && m.cells[0].video && m.attachment.is_empty());
         assert_eq!((m.img_w, m.img_h), (400, 225));
-        assert_eq!(b.wanted_cells[0].key, m.image_key);
+        assert_eq!(b.wanted_cells[0].key, m.cells[0].key);
         assert_eq!(b.wanted_cells[0].file_key, attachment_key(&video(1), 5, 0));
         assert!(b.wanted_thumbs.is_empty());
 
-        // a lone GIF plays in place when clicked; in a grid it is a still
+        // a GIF plays in place, alone or in a grid
         let gif = AttachmentPointer { content_type: Some("image/gif".into()), ..photo(4) };
-        assert!(run(vec![gif.clone()]).items[0].gif);
-        assert!(!run(vec![photo(1)]).items[0].gif);
-        assert!(!run(vec![gif, photo(3)]).items[0].gif);
+        assert!(run(vec![gif.clone()]).items[0].cells[0].gif);
+        assert!(!run(vec![photo(1)]).items[0].cells[0].gif);
+        let b = run(vec![gif, photo(3)]);
+        assert_eq!(b.items[0].cells.iter().map(|c| c.gif).collect::<Vec<_>>(), [true, false]);
 
         // a grid knows which cells are videos, and a click finds the right one
         let b = run(vec![photo(1), video(2), photo(3)]);
         let m = &b.items[0];
-        assert!(!m.video);
         assert_eq!(m.cells.iter().map(|c| c.video).collect::<Vec<_>>(), [false, true, false]);
         assert_eq!(m.clicked_media(1), crate::types::ClickedMedia::Video(0));
         assert_eq!(m.clicked_media(2), crate::types::ClickedMedia::Image(1));
@@ -686,7 +686,6 @@ mod tests {
         let m = &b.items[0];
         assert_eq!(m.attachment, "2.pdf 외 1개");
         assert_eq!((m.cells.len(), m.img_w, m.img_h), (3, 301, 201));
-        assert_eq!(m.image_key, m.cells[0].key);
         assert_eq!(b.wanted_cells.len(), 3);
         assert!(b.wanted_thumbs.is_empty());
         assert_eq!(b.wanted_cells[1].file_key, attachment_key(&photo(3), 5, 2));
@@ -699,10 +698,11 @@ mod tests {
         let more: Vec<u32> = b.items[0].cells.iter().map(|c| c.more).collect();
         assert_eq!(more, [0, 0, 0, 0, 3]);
 
-        // one photo stays as it was
+        // one photo is a grid of one cell
         let b = run(vec![photo(1)]);
-        assert!(b.items[0].cells.is_empty());
-        assert_eq!(b.wanted_thumbs.len(), 1);
+        assert_eq!(b.items[0].cells.len(), 1);
+        assert_eq!(b.wanted_cells.len(), 1);
+        assert!(b.wanted_thumbs.is_empty());
     }
 
     #[test]

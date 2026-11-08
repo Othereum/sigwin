@@ -39,6 +39,14 @@ pub(super) fn first_frame(bytes: &[u8], fit: (u32, u32)) -> Option<crate::types:
     Some(crate::types::ViewerPixels { original, fitted: None, opaque: false })
 }
 
+/// The long side to decode a GIF at so its frames cover a `w` x `h` box (never enlarged): the
+/// cell cuts off what overhangs.
+fn cover_px(bytes: &[u8], (w, h): (u32, u32)) -> Option<u32> {
+    let (fw, fh) = sigwin_thumb::gif_size(bytes)?;
+    let s = (f64::from(w) / f64::from(fw.max(1))).max(f64::from(h) / f64::from(fh.max(1))).min(1.0);
+    Some(((f64::from(fw.max(fh)) * s).round() as u32).max(1))
+}
+
 /// Plays `bytes` until `stop` is set or `limit` runs out, then reports the end.
 pub(super) fn stream(bytes: Vec<u8>, px: u32, slot: Arc<GifSlot>, stop: Arc<AtomicBool>, emit: Emit, limit: Option<Duration>) {
     let spawned = std::thread::Builder::new().name("gif".into()).spawn(move || {
@@ -110,9 +118,8 @@ impl App {
                 if !sigwin_thumb::is_animated_gif(&bytes) {
                     return None;
                 }
-                let (w, h) = sigwin_thumb::gif_size(&bytes)?;
-                let px = (u64::from(tile) * u64::from(w.max(h)) / u64::from(w.min(h).max(1))).clamp(u64::from(tile), u64::from(tile) * 4);
-                Some((bytes, px as u32))
+                let px = cover_px(&bytes, (tile, tile))?;
+                Some((bytes, px))
             })
             .await;
             match read {
@@ -126,9 +133,9 @@ impl App {
         });
     }
 
-    /// Plays the GIF of row `id` in the message list, at `px` physical px on its long side.
-    pub(super) fn play_gif(&mut self, id: &str, seq: u64, px: u32) {
-        let Some((path, _)) = self.viewed(id, 0) else { return };
+    /// Plays image `index` of row `id` in the message list, in a cell `size` physical px big.
+    pub(super) fn play_gif(&mut self, id: &str, index: usize, seq: u64, size: (u32, u32)) {
+        let Some((path, _)) = self.viewed(id, index) else { return };
         let stop = self.new_gif_stop();
         let emit = self.emit.clone();
         let slot = Arc::new(GifSlot::new(id.to_string(), seq, GifTarget::List));
@@ -144,6 +151,7 @@ impl App {
             let read = tokio::task::spawn_blocking(move || sigwin_vault::read(&path)).await;
             match read {
                 Ok(Ok(bytes)) if !stop.load(Ordering::Relaxed) && sigwin_thumb::is_animated_gif(&bytes) => {
+                    let px = cover_px(&bytes, size).unwrap_or(size.0.max(size.1));
                     stream(bytes, px, slot, stop, emit, Some(LIST_LIMIT));
                 }
                 other => {

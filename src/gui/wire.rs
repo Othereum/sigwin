@@ -422,9 +422,9 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
                     "스티커".to_string()
                 } else if !m.attachment.is_empty() {
                     m.attachment.clone()
-                } else if m.video {
+                } else if m.cells.iter().all(|c| c.video) && !m.cells.is_empty() {
                     "동영상".to_string()
-                } else if !m.image_key.is_empty() {
+                } else if !m.cells.is_empty() {
                     "사진".to_string()
                 } else {
                     "(첨부파일)".to_string()
@@ -432,7 +432,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             } else {
                 view::text::mask_spoilers(m.text.clone(), &m.styles).replace('\n', " ")
             };
-            let key = if !m.image_key.is_empty() { Some(m.image_key.as_str()) } else { m.cells.first().map(|c| c.key.as_str()) };
+            let key = m.cells.first().map(|c| c.key.as_str());
             let thumb = key.filter(|_| !m.sticker).and_then(|k| ui.thumbs.get(k)).and_then(reply_thumb);
             Some((if who.is_empty() { body } else { format!("{who}\n{body}") }, thumb))
         });
@@ -617,7 +617,7 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     app.on_attachment_clicked(move |id, index| {
         let row = UI.with_borrow(|ui| {
             ui.last.iter().find(|m| m.id == id.as_str()).map(|m| {
-                let key = if m.cells.is_empty() { m.image_key.as_str() } else { m.cells.get(index as usize).map_or("", |c| c.key.as_str()) };
+                let key = m.cells.get(index as usize).map_or("", |c| c.key.as_str());
                 // not here: the picture says so, and the viewer has nothing to show
                 let missing = ui.media_labels.get(key).is_some_and(|l| l.undownloaded);
                 (m.sticker, m.clicked_media(index as usize), missing)

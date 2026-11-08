@@ -138,34 +138,16 @@ export component MsgImage inherits Rectangle {
     changed still => {
         if m.sticker { Anim.shown(m.id); }
     }
+    // a sticker
     if m.cells.length == 0: Image {
         width: 100%;
         height: 100%;
         source: m.frames.length > 0 ? m.frames[m.frame[0]] : m.image;
-        image-fit: m.sticker ? contain : cover;
-    }
-    if m.video: Rectangle {
-        // until the picture arrives, or if there is none
-        background: #80808030;
-        z: -1;
-    }
-    if (m.video || m.undownloaded) && !m.sticker: VideoMark { undownloaded: m.undownloaded; progress: m.progress; ring: m.ring; }
-    if m.media-label != "": MediaLabel {
-        text: m.media-label;
-        x: 6px;
-        y: parent.height - self.height - 6px;
-    }
-    if m.gif && m.frames.length == 0 && m.media-label == "": MediaLabel {
-        text: "GIF";
-        x: 6px;
-        y: parent.height - self.height - 6px;
+        image-fit: contain;
     }
     if m.cells.length == 0: TouchArea {
         mouse-cursor: pointer;
         clicked => { root.attachment-clicked(m.id, 0); }
-        // the row id with it: a reused row instance keeps the hover while its message changes
-        property <string> gif-id: m.gif && self.has-hover ? m.id : "";
-        changed gif-id => { Anim.gif-hover(self.gif-id == "" ? m.id : self.gif-id, self.gif-id != ""); }
         pointer-event(e) => {
             if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
                 root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
@@ -175,21 +157,27 @@ export component MsgImage inherits Rectangle {
     for cell[i] in m.cells: Rectangle {
         x: cell.x;
         y: cell.y;
-        width: cell.w;
+        // a lone picture fills the bubble's width when that is wider (flush)
+        width: m.cells.length == 1 ? parent.width : cell.w;
         height: cell.h;
         // until the image arrives
         background: #80808030;
         Image {
             width: 100%;
             height: 100%;
-            source: cell.image;
-            // already resampled to this size
-            image-fit: fill;
+            source: cell.frames.length > 0 ? cell.frames[cell.frame[0]] : cell.image;
+            // a still is already resampled to this size; a GIF's frame is cut to fill it
+            image-fit: cover;
         }
         // a picture that isn't here has the same mark: a click gets it or stops it
         if (cell.video || cell.undownloaded) && cell.more == 0: VideoMark { undownloaded: cell.undownloaded; progress: cell.progress; ring: cell.ring; }
         if cell.label != "" && cell.more == 0: MediaLabel {
             text: cell.label;
+            x: 6px;
+            y: parent.height - self.height - 6px;
+        }
+        if cell.gif && cell.frames.length == 0 && cell.label == "" && cell.more == 0: MediaLabel {
+            text: "GIF";
             x: 6px;
             y: parent.height - self.height - 6px;
         }
@@ -206,6 +194,9 @@ export component MsgImage inherits Rectangle {
         TouchArea {
             mouse-cursor: pointer;
             clicked => { root.attachment-clicked(m.id, i); }
+            // the row id with it: a reused row instance keeps the hover while its message changes
+            property <string> gif-id: cell.gif && cell.more == 0 && self.has-hover ? m.id : "";
+            changed gif-id => { Anim.gif-hover(self.gif-id == "" ? m.id : self.gif-id, i, self.gif-id != ""); }
             pointer-event(e) => {
                 if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
                     root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);

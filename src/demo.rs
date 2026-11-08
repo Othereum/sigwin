@@ -310,8 +310,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     if std::env::var_os("SIGWIN_DEMO_VIEWER").is_some() {
         // the newest row, so a click reaches it without scrolling
         if let Some(m) = items.last_mut() {
-            m.image_key = "demo-photo".into();
-            (m.img_w, m.img_h) = (400, 300);
+            view::media::set_single_photo(m, "demo-photo".into(), (400, 300));
         }
     }
     if std::env::var_os("SIGWIN_DEMO_LINK").is_some() {
@@ -336,8 +335,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     if reload {
         // like a real account: photos make rows very uneven in height
         for (i, m) in items.iter_mut().enumerate().filter(|(i, _)| i % 9 == 4 && *i < 290) {
-            m.image_key = format!("demo-photo-{i}");
-            (m.img_w, m.img_h) = if i % 2 == 0 { (400, 300) } else { (300, 400) };
+            view::media::set_single_photo(m, format!("demo-photo-{i}"), if i % 2 == 0 { (400, 300) } else { (300, 400) });
         }
     }
     // very long messages: `SIGWIN_DEMO_TALL=<row>:<chars>[,...]`
@@ -892,9 +890,8 @@ fn demo_video_rows(items: &mut [types::MsgDto]) {
             m.cells[0].video = true;
             m.cells[2].video = true;
         } else {
-            m.video = true;
-            m.image_key = format!("demo-video-{n}");
-            (m.img_w, m.img_h) = if n == 1 { (300, 450) } else { (400, 225) };
+            view::media::set_single_photo(m, format!("demo-video-{n}"), if n == 1 { (300, 450) } else { (400, 225) });
+            m.cells[0].video = true;
         }
     }
 }

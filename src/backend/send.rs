@@ -123,13 +123,9 @@ impl App {
                 let Ok(img) = sigwin_thumb::decode_thumb(&bytes, view::media::PHOTO_THUMB_MAX) else { continue };
                 let rgba = sigwin_thumb::to_rgba(&img);
                 let key = pending_photo_key(ts, n, single);
-                let rgba = if single {
-                    let (w, h) = view::media::fit(Some(sizes[0].0), Some(sizes[0].1));
-                    sigwin_thumb::fit(rgba, crate::types::physical_px(w.max(h)))
-                } else {
-                    let (w, h) = view::media::grid_cell_size(paths.len(), n);
-                    sigwin_thumb::cover(&rgba, crate::types::physical_px(w), crate::types::physical_px(h))
-                };
+                // the cell it fills: one photo's own box, or its place in the grid
+                let (w, h) = if single { view::media::fit(Some(sizes[0].0), Some(sizes[0].1)) } else { view::media::grid_cell_size(paths.len(), n) };
+                let rgba = sigwin_thumb::cover(&rgba, crate::types::physical_px(w), crate::types::physical_px(h));
                 emit(Event::Thumb(Arc::new(Thumb { key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })));
             }
         });
@@ -550,10 +546,7 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     m.link = p.link.clone();
     match p.photos[..] {
         [] => {}
-        [(w, h)] => {
-            (m.img_w, m.img_h) = view::media::fit(Some(w), Some(h));
-            m.image_key = pending_photo_key(p.ts, 0, true);
-        }
+        [(w, h)] => view::media::set_single_photo(&mut m, pending_photo_key(p.ts, 0, true), view::media::fit(Some(w), Some(h))),
         _ => view::media::set_photo_grid(&mut m, p.photos.len(), |n, _, _| pending_photo_key(p.ts, n, false)),
     }
     if !p.image_key.is_empty() {

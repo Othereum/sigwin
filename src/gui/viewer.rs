@@ -131,7 +131,7 @@ pub(crate) fn close_if_gone() {
 }
 
 fn row_has_image(id: &str) -> bool {
-    UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && !m.image_key.is_empty()))
+    UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && !m.cells.is_empty()))
 }
 
 pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
