@@ -46,6 +46,11 @@ fn exec(app: &AppWindow, line: &str) -> anyhow::Result<()> {
             away::force(Some(on_off("away")?));
             window::refresh_active(app);
         }
+        // the window can be seen (not covered), whatever the headless one is
+        "shown" => {
+            away::force_on_screen(Some(on_off("shown")?));
+            window::refresh_active(app);
+        }
         "expect" => expect(app, rest)?,
         _ => anyhow::bail!("unknown scenario step: {line}"),
     }

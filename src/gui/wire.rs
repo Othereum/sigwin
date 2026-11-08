@@ -59,26 +59,13 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let s = send.clone();
     app.on_at_bottom_changed(move |at| s(Command::AtBottom(at)));
 
-    let s = send.clone();
     let weak = app.as_weak();
     app.on_row_seen(move |id| {
         // not while a jump is settling: the rows on the way were never looked at
         if weak.upgrade().is_none_or(|a| !a.get_jump_id().is_empty() || a.get_reading_hold()) {
             return;
         }
-        // each row only once, and nothing for rows above one already sent
-        let go = UI.with_borrow_mut(|ui| {
-            let pos = |ui: &Ui, id: &str| ui.last.iter().position(|m| m.id == id);
-            let Some(at) = pos(ui, &id) else { return false };
-            if ui.read_sent.as_deref().and_then(|s| pos(ui, s)).is_some_and(|sent| sent >= at) {
-                return false;
-            }
-            ui.read_sent = Some(id.to_string());
-            true
-        });
-        if go {
-            s(Command::ReadUpTo(id.to_string()));
-        }
+        window::row_seen(&id);
     });
 
     let s = send.clone();

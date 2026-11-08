@@ -335,6 +335,8 @@ struct App {
     pin_expiry: Option<u64>,
     sweeping: bool,
     focused: bool,
+    /// the window shows without the focus (`Command::WindowWatching`)
+    watching: bool,
     /// the window lost rows since the last `emit_messages`
     moved: bool,
     /// when a window that grew lets go again, while the user stays at the newest messages
@@ -487,6 +489,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         pin_expiry: None,
         sweeping: false,
         focused: true,
+        watching: false,
         moved: false,
         settle_at: None,
         at_bottom: true,
@@ -668,6 +671,7 @@ impl App {
                     self.read_if_seen();
                 }
             }
+            Command::WindowWatching(w) => self.watching = w,
             Command::Unlink => self.unlink().await,
             Command::StickerPanel => self.sticker_packs().await,
             Command::OpenPack(id) => self.open_pack(&id).await,

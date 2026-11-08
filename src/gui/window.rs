@@ -322,7 +322,13 @@ thread_local! {
     static FOCUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     /// what the list and the backend were last told
     static ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    static WATCHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// runs while rows wait out `WATCH_DWELL`
+    static DWELL: slint::Timer = slint::Timer::default();
 }
+
+/// A row shown in a window that is only watched counts as seen after this long on screen.
+const WATCH_DWELL: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The window gained or lost the focus.
 pub(crate) fn focus_changed(app: &AppWindow, focused: bool) {
@@ -330,23 +336,83 @@ pub(crate) fn focus_changed(app: &AppWindow, focused: bool) {
     refresh_active(app);
 }
 
-/// Whether the user is working in the window (focused, and not away): tells the list, which
-/// reads nothing and keeps its place while not, and the backend (notifications, read
-/// receipts). Called when the focus changes, the monitor turns off or on, and every few seconds
-/// for the input and lock checks.
+/// How the user stands to the window, told to the list and the backend (notifications, read
+/// receipts). Active: they work in it (focused, not away). Watching: it shows but isn't the one
+/// they work in (a second monitor next to a game), so what comes in is read after a while.
+/// Otherwise nothing is read and the list keeps its place. Called when the focus changes, the
+/// monitor turns off or on, and every few seconds for the input, lock and cover checks.
 pub(crate) fn refresh_active(app: &AppWindow) {
-    let active = FOCUSED.get() && !crate::away::is_away();
-    if ACTIVE.replace(active) == active {
+    let away = crate::away::is_away();
+    let active = FOCUSED.get() && !away;
+    let watching = !active && !away && crate::away::on_screen(hwnd(app));
+    let was_active = ACTIVE.replace(active);
+    let was_watching = WATCHING.replace(watching);
+    if was_active == active && was_watching == watching {
         return;
     }
+    let reading = active || watching;
     UI.with_borrow_mut(|ui| {
-        ui.inactive = !active;
+        ui.inactive = !reading;
         // coming back: the rows on screen are reported again
-        ui.read_sent = None;
+        if reading != (was_active || was_watching) || active != was_active {
+            ui.read_sent = None;
+        }
     });
-    tracing::info!(active, "user active");
-    app.set_inactive(!active);
+    tracing::info!(active, watching, "user presence");
+    app.set_inactive(!reading);
+    if active {
+        // the user is here now: what waited for its time was in front of them
+        flush_dwell(true);
+    } else if !watching {
+        UI.with_borrow_mut(|ui| ui.dwell.clear());
+    }
+    send_cmd(Command::WindowWatching(watching));
     send_cmd(Command::WindowFocus(active));
+}
+
+/// The user saw row `id` fully on screen: read now when they work in the window, after
+/// `WATCH_DWELL` when it is only watched.
+pub(crate) fn row_seen(id: &str) {
+    if ACTIVE.get() {
+        send_read(id);
+        return;
+    }
+    UI.with_borrow_mut(|ui| ui.dwell.push((id.to_string(), std::time::Instant::now())));
+    DWELL.with(|t| {
+        if !t.running() {
+            t.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), || flush_dwell(false));
+        }
+    });
+}
+
+/// Reports the rows that stayed long enough (all of them with `all`).
+fn flush_dwell(all: bool) {
+    let due: Vec<String> = UI.with_borrow_mut(|ui| {
+        let n = ui.dwell.iter().rposition(|(_, at)| all || at.elapsed() >= WATCH_DWELL).map_or(0, |i| i + 1);
+        ui.dwell.drain(..n).map(|(id, _)| id).collect()
+    });
+    for id in due {
+        send_read(&id);
+    }
+    if UI.with_borrow(|ui| ui.dwell.is_empty()) {
+        DWELL.with(|t| t.stop());
+    }
+}
+
+/// `ReadUpTo` for a row: each row only once, and nothing for rows above one already sent.
+fn send_read(id: &str) {
+    let go = UI.with_borrow_mut(|ui| {
+        let pos = |ui: &Ui, id: &str| ui.last.iter().position(|m| m.id == id);
+        let Some(at) = pos(ui, id) else { return false };
+        if ui.read_sent.as_deref().and_then(|s| pos(ui, s)).is_some_and(|sent| sent >= at) {
+            return false;
+        }
+        ui.read_sent = Some(id.to_string());
+        true
+    });
+    if go {
+        send_cmd(Command::ReadUpTo(id.to_string()));
+    }
 }
 
 /// Slint exposes neither focus nor minimize/restore: hook the window procedure once the

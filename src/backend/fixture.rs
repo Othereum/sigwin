@@ -306,6 +306,11 @@ pub(crate) mod harness {
             self.cmd(Command::WindowFocus(on)).await;
         }
 
+        /// The window shows without the focus, as the UI reports it.
+        pub(crate) async fn watch(&mut self, on: bool) {
+            self.cmd(Command::WindowWatching(on)).await;
+        }
+
         /// Everything emitted since the last call.
         pub(crate) fn take_events(&self) -> Vec<Event> {
             std::mem::take(&mut *self.events.lock().unwrap())

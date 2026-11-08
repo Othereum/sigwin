@@ -36,6 +36,12 @@ impl App {
         self.at_bottom && self.current.as_ref().is_some_and(|o| o.end_seq.is_none())
     }
 
+    /// What the user sees counts as read: they work in the window, or watch it (the UI then
+    /// reports a row only after it stayed on screen for a while).
+    pub(super) fn reads(&self) -> bool {
+        self.focused || self.watching
+    }
+
     /// Marks the open thread read if the user can see its newest messages.
     pub(super) fn read_if_seen(&mut self) {
         if self.focused && self.sees_latest() {
@@ -404,7 +410,7 @@ impl App {
             }
         }
         self.read_if_seen();
-        let news = !self.focused && self.current.as_ref().is_some_and(|o| self.persist.unread.contains_key(&o.key));
+        let news = !self.reads() && self.current.as_ref().is_some_and(|o| self.persist.unread.contains_key(&o.key));
         self.emit_messages(if news { Scroll::News } else { Scroll::KeepIfNotAtBottom }).await;
         Ok(())
     }

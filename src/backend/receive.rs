@@ -239,7 +239,7 @@ impl App {
                 if !(is_open && self.focused && self.sees_latest()) {
                     let n = self.persist.unread.entry(key.clone()).or_default();
                     // the first news since everything was read: the open list marks where it starts
-                    if *n == 0 {
+                    if *n == 0 && !self.watching {
                         if let Some(open) = self.current.as_mut().filter(|o| o.key == key) {
                             open.divider_due = true;
                         }
@@ -247,7 +247,10 @@ impl App {
                     *n += 1;
                     self.persist_dirty = true;
                 }
-                self.notify_message(&thread, &key, &c).await;
+                // watched: it is on screen already
+                if !(is_open && self.watching && !self.focused) {
+                    self.notify_message(&thread, &key, &c).await;
+                }
             }
             Kind::Msg { outgoing: true, .. } => {
                 // we replied from another device: consider the thread read

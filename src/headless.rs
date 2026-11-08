@@ -20,6 +20,7 @@
 //!   jump             the jump-to-latest button
 //!   focus on|off     the window gains or loses the focus
 //!   away on|off      the user goes away / comes back
+//!   shown on|off     the window can / can't be seen (not covered); headless starts as can't
 //!   settle           wait until the UI and the backend have stopped talking
 //!   expect backend WHAT [who=N] OP VALUE   (`unread`, `read_upto`, `sent`, `toasts`, `window`)
 //!   expect ui NAME OP VALUE                (`open-unread`, `near-bottom`, `bottom-gap`, `divider-top`, ...)
@@ -62,7 +63,7 @@ enum Step {
 }
 
 /// Scenario steps the driver runs.
-const SCENARIO_STEPS: [&str; 7] = ["fx", "open", "jump", "focus", "away", "expect", "settle"];
+const SCENARIO_STEPS: [&str; 8] = ["fx", "open", "jump", "focus", "away", "shown", "expect", "settle"];
 
 /// What runs scenario steps: it knows the window and the backend.
 pub struct Driver {

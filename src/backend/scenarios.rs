@@ -169,6 +169,48 @@ fn news_in_the_background_is_shown_from_the_line() {
 }
 
 #[test]
+fn news_while_watching_stays_at_the_bottom_and_is_read_by_the_ui() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=20").await;
+        h.open(1).await;
+        h.focus(false).await;
+        h.watch(true).await;
+        h.take_events();
+        h.op("recv who=1 n=2").await;
+        let ev = h.take_events();
+        let (items, scroll) = last_list(&ev).expect("a list");
+        assert_ne!(scroll, Scroll::News, "the list stays at the bottom");
+        assert!(divider(items).is_none(), "no line: the user is looking");
+        assert_eq!(h.query("unread", 1), "2", "read once the UI says the rows stayed on screen");
+        assert_eq!(h.query("toasts", 1), "", "the open thread doesn't toast");
+        // the last row stayed on screen: read, with receipts
+        h.cmd(Command::ReadUpTo(h.row(21))).await;
+        assert_eq!(h.query("unread", 1), "0");
+        assert_eq!(h.query("sent", 1), "delivery=2 read=2 sync=2");
+    });
+}
+
+#[test]
+fn watching_stops_when_the_window_is_covered() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=20").await;
+        h.open(1).await;
+        h.focus(false).await;
+        h.watch(true).await;
+        h.watch(false).await;
+        h.take_events();
+        h.op("recv who=1 n=2").await;
+        let ev = h.take_events();
+        let (_, scroll) = last_list(&ev).expect("a list");
+        assert_eq!(scroll, Scroll::News);
+        h.cmd(Command::ReadUpTo(h.row(21))).await;
+        assert_eq!(h.query("unread", 1), "2", "nothing is read from a covered window");
+    });
+}
+
+#[test]
 fn news_in_another_thread_is_counted() {
     scenario(|| async {
         let mut h = Harness::new().await;

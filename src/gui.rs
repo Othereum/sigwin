@@ -55,6 +55,8 @@ pub(crate) struct Ui {
     /// the window is not the one the user is working in (no focus, or away): rows coming in
     /// don't scroll the list
     inactive: bool,
+    /// rows seen in a window that is only watched, with when: they count as read after a while
+    dwell: Vec<(String, std::time::Instant)>,
     files: Vec<PathBuf>,
     reply_to: Option<String>,
     /// id of our message being edited in the composer
@@ -248,6 +250,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                     restored = Some(drafts::switch(app, ui, &key));
                     ui.open_key = key.clone();
                     ui.read_sent = None;
+                    ui.dwell.clear();
                     show_open_unread(app, ui);
                     ui.mention_rows.clear();
                     ui.typing.clear();

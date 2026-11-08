@@ -511,6 +511,9 @@ pub enum Command {
     /// the user is working in the window: it has the focus and they are not away. Otherwise
     /// notifications show and nothing is read.
     WindowFocus(bool),
+    /// the window isn't the one worked in but shows (not covered, user not away): its news is
+    /// read after a while, with no toast for the open thread, and the list stays at the bottom
+    WindowWatching(bool),
     Unlink,
     /// sticker panel opened: (re)load the pack list
     StickerPanel,

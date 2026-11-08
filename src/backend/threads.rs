@@ -324,7 +324,7 @@ impl App {
             self.persist_dirty = true;
             self.threads_dirty = true;
         }
-        if self.focused {
+        if self.reads() {
             self.queue_reads(key, unread.unwrap_or(0));
         }
     }
@@ -363,7 +363,7 @@ impl App {
     /// there (receipts, read sync, the counts) and no more. Seeing the window's last row, when
     /// it is the thread's newest, reads it all.
     pub(super) fn read_through(&mut self, row: u64) {
-        if !self.focused {
+        if !self.reads() {
             return;
         }
         let Some(open) = self.current.as_mut() else { return };
