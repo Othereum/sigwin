@@ -16,8 +16,8 @@ pub(super) fn avatar_arrived(app: &AppWindow, t: Arc<types::Thumb>) {
             return;
         }
         if t.key == avatar::ME_CARD {
-            app.set_account_has_photo(img.is_some());
-            app.set_account_photo(img.unwrap_or_default());
+            app.global::<SettingsData>().set_account_has_photo(img.is_some());
+            app.global::<SettingsData>().set_account_photo(img.unwrap_or_default());
             return;
         }
         if let Some(uuid) = t.key.strip_prefix(avatar::READ_PREFIX) {

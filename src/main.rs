@@ -136,7 +136,7 @@ fn load_ui_state(app: &AppWindow, cmd_tx: UnboundedSender<Command>) {
         autostart::apply(true, prefs.start_hidden, false);
     }
     show_settings(app, &prefs);
-    app.set_version(version_label().into());
+    app.global::<SettingsData>().set_version(version_label().into());
     // dev builds: commit hash in the title (the icon: `gui::window::set_dev_icon`, tray)
     #[cfg(sigwin_dev)]
     app.set_dev_tag(match env!("SIGWIN_GIT_HASH") {
@@ -232,7 +232,7 @@ fn main() -> anyhow::Result<()> {
             start_updates(&app, exe);
         }
     }
-    app.on_open_logs(|| {
+    app.global::<SettingsData>().on_open_logs(|| {
         let dir = logfile::dir(&data_dir());
         if let Err(e) = std::process::Command::new("explorer").arg(&dir).spawn() {
             tracing::warn!("open logs: {e}");

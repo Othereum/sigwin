@@ -56,26 +56,38 @@ export component SettingGroup inherits VerticalLayout {
     }
 }
 
-export component SettingsPage inherits Rectangle {
-    in-out property <bool> notify;
+// What the settings page shows and edits. Rust fills it (`gui::window::show_settings`) and
+// reads it back on `changed`; the sidebar's update bar uses the update state too.
+export global SettingsData {
+    in-out property <bool> notify: true;
     in-out property <int> preview;
-    in-out property <bool> sound;
-    in-out property <int> badge-count;
+    in-out property <bool> sound: true;
+    in-out property <int> badge-count: 0;
     in-out property <int> theme;
-    in-out property <int> zoom;
-    in-out property <bool> enter-sends;
-    in-out property <bool> link-previews;
+    // index into the zoom steps (see settings::ZOOMS)
+    in-out property <int> zoom: 1;
+    in-out property <bool> enter-sends: true;
+    in-out property <bool> link-previews: true;
     in-out property <bool> autostart;
-    in-out property <bool> start-hidden;
-    in-out property <bool> auto-update;
-    in-out property <bool> muted-mentions;
-    in-out property <bool> muted-replies;
-    in-out property <bool> badge-muted;
-    in property <string> update-status;
-    in property <bool> update-checking;
-    in property <bool> update-ready;
-    in property <string> update-available;
+    in-out property <bool> start-hidden: true;
+    in-out property <bool> auto-update: true;
+    in-out property <bool> muted-mentions: true;
+    in-out property <bool> muted-replies: true;
+    in-out property <bool> badge-muted: true;
+    // a value above changed on the page
+    callback changed();
+    // result of the last manual update check; checking = waiting for it
+    in-out property <string> update-status;
+    in-out property <bool> update-checking;
+    // a newer version replaced the exe; restart to use it
+    in property <string> update-version;
+    // a newer release that is not downloaded yet ("automatic download" off)
+    in-out property <string> update-available;
+    in-out property <bool> update-installing;
     callback check-update();
+    callback install-update();
+    callback restart-for-update();
+    // the account card (the sidebar's own photo is `AppWindow.me-photo`)
     in property <image> account-photo;
     in property <bool> account-has-photo;
     in property <string> account-initial;
@@ -86,12 +98,14 @@ export component SettingsPage inherits Rectangle {
     in property <string> account-phone;
     in property <string> storage;
     in property <string> version;
-    in property <bool> whatsnew-has;
-    callback open-whatsnew();
-    callback changed();
-    callback close();
     callback clear-thumbs();
     callback open-logs();
+}
+
+export component SettingsPage inherits Rectangle {
+    in property <bool> whatsnew-has;
+    callback open-whatsnew();
+    callback close();
     callback unlink();
     background: Theme.pane;
     // swallow clicks so nothing underneath reacts
@@ -136,24 +150,24 @@ export component SettingsPage inherits Rectangle {
                         Avatar {
                             size: 64px;
                             y: 0px;
-                            initial: root.account-initial;
-                            tint: root.account-tint;
-                            photo: root.account-photo;
-                            has-photo: root.account-has-photo;
+                            initial: SettingsData.account-initial;
+                            tint: SettingsData.account-tint;
+                            photo: SettingsData.account-photo;
+                            has-photo: SettingsData.account-has-photo;
                         }
                         VerticalLayout {
                             alignment: center;
                             spacing: 2px;
                             Text {
-                                text: root.account-name != "" ? root.account-name : "내 계정";
+                                text: SettingsData.account-name != "" ? SettingsData.account-name : "내 계정";
                                 color: Theme.text;
                                 font-size: 17px;
                                 font-weight: 700;
                                 overflow: elide;
                             }
-                            Text { text: root.account-number; color: Theme.subtle; font-size: 12.5px; overflow: elide; }
-                            if root.account-device != "": Text {
-                                text: "이 기기: " + root.account-device;
+                            Text { text: SettingsData.account-number; color: Theme.subtle; font-size: 12.5px; overflow: elide; }
+                            if SettingsData.account-device != "": Text {
+                                text: "이 기기: " + SettingsData.account-device;
                                 color: Theme.subtle;
                                 font-size: 12.5px;
                                 overflow: elide;
@@ -166,25 +180,25 @@ export component SettingsPage inherits Rectangle {
                             label: "새 메시지 알림";
                             hint: "Sigwin 창을 보고 있을 때는 알리지 않습니다";
                             Switch {
-                                checked <=> root.notify;
-                                toggled => { root.changed(); }
+                                checked <=> SettingsData.notify;
+                                toggled => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
                             label: "알림에 표시할 내용";
                             Segmented {
-                                enabled: root.notify;
+                                enabled: SettingsData.notify;
                                 options: ["이름과 내용", "이름만", "숨김"];
-                                current <=> root.preview;
-                                changed => { root.changed(); }
+                                current <=> SettingsData.preview;
+                                changed => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
                             label: "알림 소리";
                             Switch {
-                                enabled: root.notify;
-                                checked <=> root.sound;
-                                toggled => { root.changed(); }
+                                enabled: SettingsData.notify;
+                                checked <=> SettingsData.sound;
+                                toggled => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
@@ -192,8 +206,8 @@ export component SettingsPage inherits Rectangle {
                             hint: "작업 표시줄과 알림 영역 아이콘에 표시합니다";
                             Segmented {
                                 options: ["읽지 않은 메시지", "읽지 않은 대화"];
-                                current <=> root.badge-count;
-                                changed => { root.changed(); }
+                                current <=> SettingsData.badge-count;
+                                changed => { SettingsData.changed(); }
                             }
                         }
                         SettingGroup {
@@ -202,24 +216,24 @@ export component SettingsPage inherits Rectangle {
                             SettingRow {
                                 label: "나를 멘션하면 알림";
                                 Switch {
-                                    enabled: root.notify;
-                                    checked <=> root.muted-mentions;
-                                    toggled => { root.changed(); }
+                                    enabled: SettingsData.notify;
+                                    checked <=> SettingsData.muted-mentions;
+                                    toggled => { SettingsData.changed(); }
                                 }
                             }
                             SettingRow {
                                 label: "내 메시지에 답장하면 알림";
                                 Switch {
-                                    enabled: root.notify;
-                                    checked <=> root.muted-replies;
-                                    toggled => { root.changed(); }
+                                    enabled: SettingsData.notify;
+                                    checked <=> SettingsData.muted-replies;
+                                    toggled => { SettingsData.changed(); }
                                 }
                             }
                             SettingRow {
                                 label: "배지에 포함";
                                 Switch {
-                                    checked <=> root.badge-muted;
-                                    toggled => { root.changed(); }
+                                    checked <=> SettingsData.badge-muted;
+                                    toggled => { SettingsData.changed(); }
                                 }
                             }
                         }
@@ -230,17 +244,17 @@ export component SettingsPage inherits Rectangle {
                             label: "컴퓨터 로그인 시 열기";
                             hint: "Windows에 로그인하면 Sigwin을 자동으로 실행합니다";
                             Switch {
-                                checked <=> root.autostart;
-                                toggled => { root.changed(); }
+                                checked <=> SettingsData.autostart;
+                                toggled => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
                             label: "시스템 트레이로 최소화된 상태로 열기";
                             hint: "자동 실행할 때 창을 띄우지 않고 트레이에 둡니다";
                             Switch {
-                                enabled: root.autostart;
-                                checked <=> root.start-hidden;
-                                toggled => { root.changed(); }
+                                enabled: SettingsData.autostart;
+                                checked <=> SettingsData.start-hidden;
+                                toggled => { SettingsData.changed(); }
                             }
                         }
                     }
@@ -250,8 +264,8 @@ export component SettingsPage inherits Rectangle {
                             label: "테마";
                             Segmented {
                                 options: ["시스템", "밝게", "어둡게"];
-                                current <=> root.theme;
-                                changed => { root.changed(); }
+                                current <=> SettingsData.theme;
+                                changed => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
@@ -259,8 +273,8 @@ export component SettingsPage inherits Rectangle {
                             hint: "Windows 배율에 곱해서 적용합니다";
                             Segmented {
                                 options: ["90%", "100%", "110%", "125%", "150%"];
-                                current <=> root.zoom;
-                                changed => { root.changed(); }
+                                current <=> SettingsData.zoom;
+                                changed => { SettingsData.changed(); }
                             }
                         }
                     }
@@ -268,13 +282,13 @@ export component SettingsPage inherits Rectangle {
                         title: "입력";
                         SettingRow {
                             label: "메시지 보내기";
-                            hint: root.enter-sends ? "Shift+Enter로 줄을 바꿉니다" : "Enter로 줄을 바꿉니다";
+                            hint: SettingsData.enter-sends ? "Shift+Enter로 줄을 바꿉니다" : "Enter로 줄을 바꿉니다";
                             Segmented {
                                 options: ["Enter", "Ctrl+Enter"];
-                                current: root.enter-sends ? 0 : 1;
+                                current: SettingsData.enter-sends ? 0 : 1;
                                 changed(i) => {
-                                    root.enter-sends = i == 0;
-                                    root.changed();
+                                    SettingsData.enter-sends = i == 0;
+                                    SettingsData.changed();
                                 }
                             }
                         }
@@ -282,8 +296,8 @@ export component SettingsPage inherits Rectangle {
                             label: "링크 미리보기 만들기";
                             hint: "보내는 메시지에 링크의 제목과 이미지를 붙입니다. 이를 위해 그 사이트에 접속하므로 사이트에 내 IP 주소가 보입니다.";
                             Switch {
-                                checked <=> root.link-previews;
-                                toggled => { root.changed(); }
+                                checked <=> SettingsData.link-previews;
+                                toggled => { SettingsData.changed(); }
                             }
                         }
                     }
@@ -291,7 +305,7 @@ export component SettingsPage inherits Rectangle {
                         title: "계정";
                         SettingRow {
                             label: "읽음 확인 · 입력 중 표시";
-                            hint: root.account-phone;
+                            hint: SettingsData.account-phone;
                         }
                         SettingRow {
                             label: "데이터 삭제";
@@ -306,14 +320,14 @@ export component SettingsPage inherits Rectangle {
                         title: "저장 공간";
                         SettingRow {
                             label: "사용 중";
-                            hint: root.storage;
+                            hint: SettingsData.storage;
                         }
                         SettingRow {
                             label: "썸네일 캐시 비우기";
                             hint: "이미지 미리보기와 프로필 사진 캐시를 지웁니다. 필요할 때 다시 만듭니다.";
                             Button {
                                 text: "비우기";
-                                clicked => { root.clear-thumbs(); }
+                                clicked => { SettingsData.clear-thumbs(); }
                             }
                         }
                     }
@@ -324,7 +338,7 @@ export component SettingsPage inherits Rectangle {
                             hint: "문제를 알릴 때 이 폴더의 파일을 함께 보내 주세요. 메시지 내용은 기록하지 않습니다.";
                             Button {
                                 text: "열기";
-                                clicked => { root.open-logs(); }
+                                clicked => { SettingsData.open-logs(); }
                             }
                         }
                     }
@@ -334,26 +348,26 @@ export component SettingsPage inherits Rectangle {
                             label: "자동으로 업데이트 다운로드";
                             hint: "새 버전을 백그라운드에서 내려받아 설치합니다. 다음에 시작할 때 적용됩니다.";
                             Switch {
-                                checked <=> root.auto-update;
-                                toggled => { root.changed(); }
+                                checked <=> SettingsData.auto-update;
+                                toggled => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
                             label: "업데이트 확인";
-                            hint: root.version + (root.update-ready ? "  ·  새 버전이 준비되었습니다. 왼쪽 아래에서 다시 시작하세요."
-                                : root.update-available != "" ? "  ·  새 버전 " + root.update-available + "이(가) 있습니다. 왼쪽 아래에서 업데이트하세요."
-                                : root.update-status != "" ? "  ·  " + root.update-status : "");
+                            hint: SettingsData.version + (SettingsData.update-version != "" ? "  ·  새 버전이 준비되었습니다. 왼쪽 아래에서 다시 시작하세요."
+                                : SettingsData.update-available != "" ? "  ·  새 버전 " + SettingsData.update-available + "이(가) 있습니다. 왼쪽 아래에서 업데이트하세요."
+                                : SettingsData.update-status != "" ? "  ·  " + SettingsData.update-status : "");
                             Button {
-                                text: root.update-checking ? "확인 중…" : "지금 확인";
-                                enabled: !root.update-checking && !root.update-ready && root.update-available == "";
-                                clicked => { root.check-update(); }
+                                text: SettingsData.update-checking ? "확인 중…" : "지금 확인";
+                                enabled: !SettingsData.update-checking && SettingsData.update-version == "" && SettingsData.update-available == "";
+                                clicked => { SettingsData.check-update(); }
                             }
                         }
                     }
                     SettingSection {
                         title: "정보";
                         SettingRow {
-                            label: root.version;
+                            label: SettingsData.version;
                             hint: "Signal과 무관한 비공식 클라이언트입니다. \"Signal\"은 Signal Technology Foundation의 상표입니다.";
                         }
                         if root.whatsnew-has: SettingRow {

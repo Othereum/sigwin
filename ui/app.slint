@@ -5,7 +5,7 @@ import { Avatar, IconButton, MenuRow, Notice, Segmented, StickerIcon, TextButton
 import { Bubble } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
-import { SettingsPage } from "settings.slint";
+import { SettingsData, SettingsPage } from "settings.slint";
 import { EmojiPicker, PickerLayout, ReactionCell } from "reactions.slint";
 import { WhatsNewPage } from "whatsnew.slint";
 import { LinkPage } from "link.slint";
@@ -14,6 +14,7 @@ import { LinkPage } from "link.slint";
 export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 export { Anim, Links, Theme } from "theme.slint";
 export { ImageViewer } from "viewer.slint";
+export { SettingsData } from "settings.slint";
 
 // a row of the chat notification settings dialog: label + the default, choices on the right
 component PrefRow inherits HorizontalLayout {
@@ -118,45 +119,9 @@ export component AppWindow inherits Window {
 
     // settings page (over the conversation pane)
     in-out property <bool> settings-open;
-    in-out property <bool> set-notify: true;
-    in-out property <int> set-preview;
-    in-out property <bool> set-sound: true;
-    in-out property <int> set-badge-count: 0;
-    in-out property <int> set-theme;
-    // index into the zoom steps (see settings::ZOOMS)
-    in-out property <int> set-zoom: 1;
-    in-out property <bool> enter-sends: true;
-    in-out property <bool> set-link-previews: true;
-    in-out property <bool> set-autostart;
-    in-out property <bool> set-start-hidden: true;
-    in-out property <bool> set-auto-update: true;
-    in-out property <bool> set-muted-mentions: true;
-    in-out property <bool> set-muted-replies: true;
-    in-out property <bool> set-badge-muted: true;
-    // result of the last manual update check; checking = waiting for it
-    in-out property <string> update-status;
-    in-out property <bool> update-checking;
-    callback check-update();
-    callback install-update();
     // our own photo in the sidebar header (the card on the settings page has its own)
     in property <image> me-photo;
     in property <bool> me-has-photo;
-    in property <image> account-photo;
-    in property <bool> account-has-photo;
-    in property <string> account-initial;
-    in property <color> account-tint;
-    in property <string> account-name;
-    in property <string> account-number;
-    in property <string> account-device;
-    in property <string> account-phone;
-    in property <string> storage-text;
-    in property <string> version;
-    // a newer version replaced the exe; restart to use it
-    in property <string> update-version;
-    // a newer release that is not downloaded yet ("automatic download" off)
-    in-out property <string> update-available;
-    in-out property <bool> update-installing;
-    callback restart-for-update();
     // "what's new": the notes exist, the sidebar offers them (until opened or dismissed), the page
     in property <bool> whatsnew-has;
     in-out property <bool> whatsnew-offer;
@@ -165,9 +130,6 @@ export component AppWindow inherits Window {
     callback open-whatsnew();
     callback dismiss-whatsnew();
     callback open-settings();
-    callback settings-changed();
-    callback clear-thumbs();
-    callback open-logs();
 
     // the message being edited (banner above the composer)
     in property <string> edit-preview;
@@ -400,8 +362,8 @@ export component AppWindow inherits Window {
                         Avatar {
                             y: (parent.height - self.height) / 2;
                             size: 32px;
-                            initial: root.account-initial;
-                            tint: root.account-tint;
+                            initial: SettingsData.account-initial;
+                            tint: SettingsData.account-tint;
                             photo: root.me-photo;
                             has-photo: root.me-has-photo;
                         }
@@ -500,16 +462,16 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                if root.update-version == "" && root.update-available != "": Rectangle {
+                if SettingsData.update-version == "" && SettingsData.update-available != "": Rectangle {
                     height: 38px;
-                    background: avail-ta.has-hover && !root.update-installing ? Theme.hover : Theme.sidebar;
+                    background: avail-ta.has-hover && !SettingsData.update-installing ? Theme.hover : Theme.sidebar;
                     Rectangle { y: 0; height: 1px; background: Theme.border; }
                     avail-ta := TouchArea {
-                        mouse-cursor: root.update-installing ? default : pointer;
+                        mouse-cursor: SettingsData.update-installing ? default : pointer;
                         clicked => {
-                            if !root.update-installing {
-                                root.update-installing = true;
-                                root.install-update();
+                            if !SettingsData.update-installing {
+                                SettingsData.update-installing = true;
+                                SettingsData.install-update();
                             }
                         }
                     }
@@ -518,7 +480,7 @@ export component AppWindow inherits Window {
                         padding-right: 12px;
                         spacing: 8px;
                         Text {
-                            text: "새 버전 " + root.update-available + " 있음";
+                            text: "새 버전 " + SettingsData.update-available + " 있음";
                             color: Theme.text;
                             font-size: 12.5px;
                             vertical-alignment: center;
@@ -526,28 +488,28 @@ export component AppWindow inherits Window {
                             overflow: elide;
                         }
                         Text {
-                            text: root.update-installing ? "받는 중…" : "업데이트";
-                            color: root.update-installing ? Theme.subtle : Theme.accent;
+                            text: SettingsData.update-installing ? "받는 중…" : "업데이트";
+                            color: SettingsData.update-installing ? Theme.subtle : Theme.accent;
                             font-size: 12.5px;
                             font-weight: 600;
                             vertical-alignment: center;
                         }
                     }
                 }
-                if root.update-version != "": Rectangle {
+                if SettingsData.update-version != "": Rectangle {
                     height: 38px;
                     background: upd-ta.has-hover ? Theme.hover : Theme.sidebar;
                     Rectangle { y: 0; height: 1px; background: Theme.border; }
                     upd-ta := TouchArea {
                         mouse-cursor: pointer;
-                        clicked => { root.restart-for-update(); }
+                        clicked => { SettingsData.restart-for-update(); }
                     }
                     HorizontalLayout {
                         padding-left: 12px;
                         padding-right: 12px;
                         spacing: 8px;
                         Text {
-                            text: "새 버전 " + root.update-version + " 준비됨";
+                            text: "새 버전 " + SettingsData.update-version + " 준비됨";
                             color: Theme.text;
                             font-size: 12.5px;
                             vertical-alignment: center;
@@ -936,7 +898,7 @@ export component AppWindow inherits Window {
                                         && root.draft == "" && composer.preedit-text == "" && root.edit-last()) {
                                         return accept;
                                     }
-                                    if (event.text == Key.Return && !event.modifiers.shift && root.enter-sends != event.modifiers.control) {
+                                    if (event.text == Key.Return && !event.modifiers.shift && SettingsData.enter-sends != event.modifiers.control) {
                                         root.send(composer.text);
                                         return accept;
                                     }
@@ -1018,41 +980,9 @@ export component AppWindow inherits Window {
         x: 300px;
         width: root.width - 300px;
         height: root.height;
-        notify <=> root.set-notify;
-        preview <=> root.set-preview;
-        sound <=> root.set-sound;
-        badge-count <=> root.set-badge-count;
-        theme <=> root.set-theme;
-        zoom <=> root.set-zoom;
-        enter-sends <=> root.enter-sends;
-        link-previews <=> root.set-link-previews;
-        autostart <=> root.set-autostart;
-        start-hidden <=> root.set-start-hidden;
-        auto-update <=> root.set-auto-update;
-        muted-mentions <=> root.set-muted-mentions;
-        muted-replies <=> root.set-muted-replies;
-        badge-muted <=> root.set-badge-muted;
-        update-status: root.update-status;
-        update-checking: root.update-checking;
-        update-ready: root.update-version != "";
-        update-available: root.update-available;
-        check-update => { root.check-update(); }
-        account-photo: root.account-photo;
-        account-has-photo: root.account-has-photo;
-        account-initial: root.account-initial;
-        account-tint: root.account-tint;
-        account-name: root.account-name;
-        account-number: root.account-number;
-        account-device: root.account-device;
-        account-phone: root.account-phone;
-        storage: root.storage-text;
-        version: root.version;
         whatsnew-has: root.whatsnew-has;
         open-whatsnew => { root.open-whatsnew(); }
-        changed => { root.settings-changed(); }
         close => { root.settings-open = false; }
-        clear-thumbs => { root.clear-thumbs(); }
-        open-logs => { root.open-logs(); }
         unlink => { root.unlink(); }
     }
 

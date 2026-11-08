@@ -77,11 +77,11 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
     }
     if let Ok(v) = std::env::var("SIGWIN_DEMO_UPDATE") {
         // the "new version ready" bar; clicking it restarts the demo for real
-        app.set_update_version(v.into());
+        app.global::<SettingsData>().set_update_version(v.into());
     }
     if let Ok(v) = std::env::var("SIGWIN_DEMO_UPDATE_AVAILABLE") {
         // the "new version available" bar (automatic download off)
-        app.set_update_available(v.into());
+        app.global::<SettingsData>().set_update_available(v.into());
     }
     if std::env::var_os("SIGWIN_DEMO_WHATSNEW").is_some() {
         // the "updated, what's new" offer bar

@@ -108,4 +108,5 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `ui/reactions.slint` | reaction buttons and the emoji picker of the message menu |
 | `ui/viewer.slint` | image viewer window |
 | `ui/widgets.slint` | small shared widgets |
-| `ui/thread_row.slint`, `ui/stickers.slint`, `ui/settings.slint`, `ui/link.slint` | thread list row, sticker panel, settings page, linking page |
+| `ui/thread_row.slint`, `ui/stickers.slint`, `ui/link.slint` | thread list row, sticker panel, linking page |
+| `ui/settings.slint` | settings page, and `SettingsData`: what it shows and edits (Rust: `app.global::<SettingsData>()`) |

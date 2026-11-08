@@ -58,20 +58,21 @@ pub(crate) fn monitor_scale(_: isize) -> f32 {
 
 /// Settings -> the page's controls.
 pub(crate) fn show_settings(app: &AppWindow, s: &settings::Settings) {
-    app.set_set_notify(s.notify);
-    app.set_set_preview(s.preview as i32);
-    app.set_set_sound(s.sound);
-    app.set_set_badge_count(s.badge_count as i32);
-    app.set_set_theme(s.theme as i32);
-    app.set_set_zoom(settings::ZOOMS.iter().position(|&z| z == s.zoom).unwrap_or(1) as i32);
-    app.set_enter_sends(s.enter_sends);
-    app.set_set_link_previews(s.link_previews);
-    app.set_set_autostart(s.autostart);
-    app.set_set_start_hidden(s.start_hidden);
-    app.set_set_auto_update(s.auto_update);
-    app.set_set_muted_mentions(s.muted_mentions);
-    app.set_set_muted_replies(s.muted_replies);
-    app.set_set_badge_muted(s.badge_muted);
+    let d = app.global::<SettingsData>();
+    d.set_notify(s.notify);
+    d.set_preview(s.preview as i32);
+    d.set_sound(s.sound);
+    d.set_badge_count(s.badge_count as i32);
+    d.set_theme(s.theme as i32);
+    d.set_zoom(settings::ZOOMS.iter().position(|&z| z == s.zoom).unwrap_or(1) as i32);
+    d.set_enter_sends(s.enter_sends);
+    d.set_link_previews(s.link_previews);
+    d.set_autostart(s.autostart);
+    d.set_start_hidden(s.start_hidden);
+    d.set_auto_update(s.auto_update);
+    d.set_muted_mentions(s.muted_mentions);
+    d.set_muted_replies(s.muted_replies);
+    d.set_badge_muted(s.badge_muted);
 }
 
 pub(crate) fn hwnd(app: &AppWindow) -> isize {

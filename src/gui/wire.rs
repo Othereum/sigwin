@@ -657,23 +657,24 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let weak = app.as_weak();
-    app.on_settings_changed(move || {
+    app.global::<SettingsData>().on_changed(move || {
         let Some(app) = weak.upgrade() else { return };
+        let d = app.global::<SettingsData>();
         let new = settings::Settings {
-            notify: app.get_set_notify(),
-            preview: app.get_set_preview().clamp(0, 2) as u8,
-            sound: app.get_set_sound(),
-            badge_count: app.get_set_badge_count().clamp(0, 1) as u8,
-            theme: app.get_set_theme().clamp(0, 2) as u8,
-            zoom: settings::ZOOMS.get(app.get_set_zoom().max(0) as usize).copied().unwrap_or(100),
-            enter_sends: app.get_enter_sends(),
-            autostart: app.get_set_autostart(),
-            start_hidden: app.get_set_start_hidden(),
-            auto_update: app.get_set_auto_update(),
-            muted_mentions: app.get_set_muted_mentions(),
-            muted_replies: app.get_set_muted_replies(),
-            badge_muted: app.get_set_badge_muted(),
-            link_previews: app.get_set_link_previews(),
+            notify: d.get_notify(),
+            preview: d.get_preview().clamp(0, 2) as u8,
+            sound: d.get_sound(),
+            badge_count: d.get_badge_count().clamp(0, 1) as u8,
+            theme: d.get_theme().clamp(0, 2) as u8,
+            zoom: settings::ZOOMS.get(d.get_zoom().max(0) as usize).copied().unwrap_or(100),
+            enter_sends: d.get_enter_sends(),
+            autostart: d.get_autostart(),
+            start_hidden: d.get_start_hidden(),
+            auto_update: d.get_auto_update(),
+            muted_mentions: d.get_muted_mentions(),
+            muted_replies: d.get_muted_replies(),
+            badge_muted: d.get_badge_muted(),
+            link_previews: d.get_link_previews(),
             last_seen_version: UI.with_borrow(|ui| ui.settings.last_seen_version.clone()),
             window: UI.with_borrow(|ui| ui.settings.window),
         };
@@ -702,27 +703,27 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let s = send.clone();
-    app.on_clear_thumbs(move || s(Command::ClearThumbs));
+    app.global::<SettingsData>().on_clear_thumbs(move || s(Command::ClearThumbs));
 }
 
 /// The update buttons on the settings page.
 fn wire_update(app: &AppWindow) {
-    app.on_restart_for_update(update::restart);
+    app.global::<SettingsData>().on_restart_for_update(update::restart);
     let weak = app.as_weak();
-    app.on_install_update(move || {
+    app.global::<SettingsData>().on_install_update(move || {
         let Some(app) = weak.upgrade() else { return };
         if !update::install() {
-            app.set_update_installing(false);
+            app.global::<SettingsData>().set_update_installing(false);
         }
     });
     let weak = app.as_weak();
-    app.on_check_update(move || {
+    app.global::<SettingsData>().on_check_update(move || {
         let Some(app) = weak.upgrade() else { return };
         if update::check_now() {
-            app.set_update_status(SharedString::new());
-            app.set_update_checking(true);
+            app.global::<SettingsData>().set_update_status(SharedString::new());
+            app.global::<SettingsData>().set_update_checking(true);
         } else {
-            app.set_update_status("설치된 Sigwin에서만 업데이트할 수 있습니다.".into());
+            app.global::<SettingsData>().set_update_status("설치된 Sigwin에서만 업데이트할 수 있습니다.".into());
         }
     });
 }
@@ -732,20 +733,21 @@ pub(crate) fn start_updates(app: &AppWindow, exe: PathBuf) {
     let weak = app.as_weak();
     update::spawn(exe, move |st| {
         let _ = weak.upgrade_in_event_loop(move |app| {
-            app.set_update_checking(false);
-            app.set_update_installing(false);
+            let d = app.global::<SettingsData>();
+            d.set_update_checking(false);
+            d.set_update_installing(false);
             match st {
                 update::Status::Ready(v) => {
-                    app.set_update_available(SharedString::new());
-                    app.set_update_version(v.into());
+                    d.set_update_available(SharedString::new());
+                    d.set_update_version(v.into());
                 }
-                update::Status::Available(v) => app.set_update_available(v.into()),
+                update::Status::Available(v) => d.set_update_available(v.into()),
                 update::Status::UpToDate => {
-                    app.set_update_available(SharedString::new());
-                    app.set_update_status("최신 버전입니다.".into());
+                    d.set_update_available(SharedString::new());
+                    d.set_update_status("최신 버전입니다.".into());
                 }
                 update::Status::Failed => {
-                    app.set_update_status("확인하지 못했습니다. 네트워크를 확인하고 다시 시도하세요.".into())
+                    d.set_update_status("확인하지 못했습니다. 네트워크를 확인하고 다시 시도하세요.".into())
                 }
             }
         });

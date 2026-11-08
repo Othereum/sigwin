@@ -12,7 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::types::{ClickedMedia, Command, Event, MsgDto, Paging, Scroll, ThreadDto};
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
-    AppWindow, ImageCell, ImageViewer, Links, MentionItem, MsgItem, NoteLine, PackItem, PinItem, ReactionItem, ReaderItem,
+    AppWindow, ImageCell, ImageViewer, Links, MentionItem, MsgItem, NoteLine, PackItem, PinItem, ReactionItem, ReaderItem, SettingsData,
     StickerItem, Theme, ThreadItem,
 };
 
@@ -287,15 +287,16 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             let phone = format!("{} · {} — 휴대폰 Signal 앱의 설정을 따릅니다{pending}", state(receipts), state(typing));
             // the placeholder when there is no photo: the profile name's first letter
             let letter = if name.is_empty() { "나".to_string() } else { initial(&name) };
-            app.set_account_initial(letter.into());
-            app.set_account_tint(tint("me"));
-            app.set_account_name(name.into());
-            app.set_account_number(number.into());
-            app.set_account_device(device.into());
-            app.set_account_phone(phone.into());
+            let d = app.global::<SettingsData>();
+            d.set_account_initial(letter.into());
+            d.set_account_tint(tint("me"));
+            d.set_account_name(name.into());
+            d.set_account_number(number.into());
+            d.set_account_device(device.into());
+            d.set_account_phone(phone.into());
         }
         Event::Storage { db, attachments, thumbs } => {
-            app.set_storage_text(
+            app.global::<SettingsData>().set_storage(
                 format!("메시지 DB {}  ·  첨부파일 {}  ·  썸네일 캐시 {}", view::size_text(db), view::size_text(attachments), view::size_text(thumbs)).into(),
             );
         }
