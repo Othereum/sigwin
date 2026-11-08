@@ -17,6 +17,7 @@ pub(crate) mod drafts;
 pub(crate) mod linkcard;
 pub(crate) mod notice;
 mod rows;
+mod scenario;
 mod scroll;
 pub(crate) mod viewer;
 pub(crate) mod whatsnew;
@@ -96,7 +97,13 @@ pub(crate) struct Ui {
     pub(crate) link: linkcard::State,
 }
 
+/// Scenario steps (headless with `SIGWIN_FIXTURE`) need the window.
+pub(crate) fn scenario_install(app: &AppWindow) {
+    scenario::install(app);
+}
+
 pub(crate) fn send_cmd(c: Command) {
+    headless::bump();
     UI.with_borrow(|ui| {
         if let Some(tx) = &ui.tx {
             let _ = tx.send(c);

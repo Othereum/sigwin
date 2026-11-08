@@ -40,11 +40,14 @@ use crate::types::{
 use crate::view::{self, Kind, THUMB_MAX};
 
 pub(crate) mod files;
+pub(crate) mod fixture;
 pub(crate) mod linkpreview;
 mod mute;
 pub(crate) mod notify;
 mod ops;
 mod receive;
+#[cfg(test)]
+mod scenarios;
 mod send;
 mod stickers;
 mod threads;
@@ -196,6 +199,8 @@ enum Internal {
     Swept { sweep: HashMap<String, SweepState>, changed: Vec<String> },
     Avatars(crate::avatar::Done),
     PhoneMutes(Result<Option<mute::PhoneMutes>, String>),
+    /// a fixture operation (`fixture.rs`); the sender hears back once it and the flush after it are done
+    Fixture(fixture::FxOp, std::sync::mpsc::Sender<String>),
 }
 
 /// A reaction, edit or delete we sent that presage has not stored yet. Shown optimistically.
@@ -287,6 +292,8 @@ struct Span {
 }
 
 struct App {
+    /// set in fixtures only: no `manager`, and what would go out is kept here instead
+    offline: Option<fixture::Offline>,
     emit: Emit,
     paths: Paths,
     store: SqliteStore,
@@ -356,6 +363,15 @@ struct App {
 }
 
 pub fn spawn(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit) -> std::thread::JoinHandle<()> {
+    spawn_with(dir, cmd_rx, emit, false)
+}
+
+/// A backend with no account and no network, on a scratch data dir (`fixture.rs`).
+pub fn spawn_offline(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit) -> std::thread::JoinHandle<()> {
+    spawn_with(dir, cmd_rx, emit, true)
+}
+
+fn spawn_with(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit, offline: bool) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("backend".into())
         // libsignal + presage futures are deep; give them room
@@ -369,7 +385,7 @@ pub fn spawn(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit) -> st
             let local = tokio::task::LocalSet::new();
             let emit2 = emit.clone();
             local.block_on(&rt, async move {
-                if let Err(e) = Box::pin(run(dir, cmd_rx, emit)).await {
+                if let Err(e) = Box::pin(run(dir, cmd_rx, emit, offline)).await {
                     error!("backend failed: {e:#}");
                     emit2(Event::Loading(format!("오류: {e:#}")));
                 }
@@ -388,9 +404,10 @@ pub fn unlock(dir: &Path) -> anyhow::Result<String> {
     Ok(pass)
 }
 
-async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -> anyhow::Result<()> {
-    std::fs::create_dir_all(&dir)?;
-    let paths = Paths::new(&dir);
+/// Opens the data dir (store, index, state) and builds the `App`, not yet registered or online.
+async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedReceiver<Internal>)> {
+    std::fs::create_dir_all(dir)?;
+    let paths = Paths::new(dir);
     std::fs::create_dir_all(&paths.attachments)?;
     std::fs::create_dir_all(&paths.thumbs)?;
     // PNG cache of the former DirectWrite emoji path; emoji are plain text now
@@ -398,7 +415,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
     remove_legacy_sticker_thumbs(&paths.thumbs);
     emit(Event::Loading("저장소 여는 중…".into()));
 
-    let pass = unlock(&dir)?;
+    let pass = unlock(dir)?;
     clear_dir(&paths.open);
     let options = SqliteConnectOptions::new()
         .filename(&paths.db)
@@ -436,8 +453,9 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
         persist.cache_format = CACHE_FORMAT;
     }
 
-    let (tx, mut rx) = unbounded_channel();
-    let mut app = App {
+    let (tx, rx) = unbounded_channel();
+    let app = App {
+        offline: None,
         emit,
         paths,
         store,
@@ -489,8 +507,16 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit) -
     if sealed_now {
         app.save_persist();
     }
+    Ok((app, rx))
+}
 
-    if app.store.is_registered().await {
+/// `offline`: no account and no network, for fixtures (`fixture.rs`).
+async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit, offline: bool) -> anyhow::Result<()> {
+    let (mut app, mut rx) = open_app(&dir, emit).await?;
+
+    if offline {
+        app.start_offline().await?;
+    } else if app.store.is_registered().await {
         match Manager::load_registered(app.store.clone()).await {
             Ok(m) => app.on_registered(m, false).await,
             Err(e) => {
@@ -884,6 +910,12 @@ impl App {
                 self.run_avatars();
             }
             Internal::PhoneMutes(res) => self.phone_mutes(res),
+            Internal::Fixture(op, ack) => {
+                let out = self.fixture_op(op).await;
+                // what the op queued goes out now, so the ack means "done and shown"
+                self.flush().await;
+                let _ = ack.send(out);
+            }
             Internal::Swept { sweep, changed } => {
                 self.sweeping = false;
                 self.persist.sweep = sweep;

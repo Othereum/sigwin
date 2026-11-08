@@ -36,4 +36,17 @@ Steps: `size W H` (logical, default 1000x680), `scale S`, `wait MS`, `move/click
 
 Theme follows the system (`SIGWIN_HEADLESS_THEME=dark|light`). Coordinates are window-client logical px; read them off a previous shot. Headless ignores theme and zoom settings.
 
+## Scenarios (real backend, no account)
+Demo data can't show behavior: reading, unread counts, focus, the list moving as news arrives. `SIGWIN_FIXTURE=1` (with `SIGWIN_DATA`, and `SIGWIN_HEADLESS` for the window) runs the **real backend with no account and no network** (`src/backend/fixture.rs`): messages are seeded or received through the real receive path, and the receipts and toasts that would go out are kept for checks instead. A data dir that holds an account is refused. Headless also pins "away" to "present" (the PC's real idle and lock state must not decide a run); `away on|off` sets it.
+
+Scenario steps, besides the ones above (`@file`: `#` lines are comments, one step per line):
+- `fx seed who=1 name=철수 n=100 unread=30` (older messages from contact 1, stored and synced, the newest 30 unread), `fx recv who=1 n=2` (new ones through the receive path), `fx phone-read who=1`
+- `open N`, `jump` (the jump button), `focus on|off`, `away on|off`, plus the input steps (`wheel`, `click`, ...)
+- `settle`: waits until the UI and the backend have stopped talking. Use it, never a `wait`, between a cause and its check.
+- `expect backend WHAT [who=N] OP VALUE`: `unread`, `read_upto`, `sent` (delivery, read receipts and read-sync entries), `toasts`, `window` (rows, where the line is)
+- `expect ui NAME OP VALUE`: `open-unread`, `inactive`, `reading-hold`, `near-bottom`, `rows`, `current-key`, `bottom-gap` (0 = the newest row is whole at the bottom), `divider-top` (the "unread" line's row, from the list's top; only while that row is instantiated)
+- OP is `=` `!=` `<` `<=` `>` `>=`. A failed `expect` is printed and the run exits with 1.
+
+Files in `tests/scenarios/*.sc` run under `cargo test --profile fast` (`tests/scenarios.rs`; `SIGWIN_SCENARIO=<name>` runs one, `SIGWIN_SCENARIO_SHOTS=<dir>` saves a shot at the end of each). Scenarios on the backend alone, without a window, are `src/backend/scenarios.rs` (the `Harness` drives the real `App` step by step; faster, no rendering). Prefer those when the window isn't part of the question. When a scenario protects a fix, break the fix once and see it fail.
+
 Not covered (needs a real window, ask the user first): minimize/restore repaint (`winhook.rs`), file dialog, notifications (headless stays "focused", so `SIGWIN_DEMO_NOTIFY` only logs), clipboard, IME composition.

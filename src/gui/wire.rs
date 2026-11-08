@@ -4,6 +4,7 @@ use super::*;
 
 pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     let send = move |c: Command| {
+        headless::bump();
         let _ = tx.send(c);
     };
     wire_threads(app, &send);

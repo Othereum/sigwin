@@ -24,7 +24,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/main.rs` | startup: logging, data dir, settings, backend or demo, event loop |
 | `src/types.rs` | `Command` / `Event` / DTOs crossing threads, thread keys |
 | `src/demo.rs` | demo modes: fake backend with synthetic data, self-test |
-| `src/headless.rs` | offscreen test platform: scripted input, PNG shots |
+| `src/headless.rs` | offscreen test platform: scripted input, PNG shots, scenario steps |
 | `src/alloc.rs` | counting global allocator, private memory |
 
 ### UI
@@ -57,7 +57,11 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | File | Role |
 |---|---|
 | `src/backend.rs` | `App` state, connection and receive loop, command dispatch, sweep of expired messages, unlink |
-| `src/backend/receive.rs` | incoming content, receipts, index backfills |
+| `src/backend/receive.rs` | incoming content, receipts (`Outgoing`: what goes out is decided apart from sending it), index backfills |
+| `src/backend/fixture.rs` | backend without an account or network, for scenarios: seeded and received messages, what would go out kept for checks; the in-process `Harness` |
+| `src/backend/scenarios.rs` | backend scenarios (`cargo test`) on the `Harness` |
+| `src/gui/scenario.rs` | scenario steps of the headless mode: drive the window, check its values |
+| `tests/scenarios/*.sc`, `tests/scenarios.rs` | UI + backend scenarios: headless window on the offline backend, one run per file |
 | `src/backend/threads.rs` | thread list: names, snippets, unread, read receipts queue |
 | `src/backend/window.rs` | the open thread's window: paging, jumps, header |
 | `src/backend/send.rs` | sending text and attachments, pending rows |

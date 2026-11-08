@@ -44,6 +44,8 @@ cargo test --profile fast      # day-to-day tests: shares the fast build cache; 
 ## Verifying UI without an account
 Layout and glyph bugs only show up visually; a successful compile proves nothing about them. The demo modes (`SIGWIN_DEMO=1`, synthetic data, no backend) can run **headless**, without popping up a window, taking focus or moving the real mouse: `SIGWIN_HEADLESS="<steps>"` renders offscreen and writes PNG shots (`shot PATH`). Step syntax, demo variants and what headless can't cover: `docs/headless.md`.
 
+**Behavior** (reading, unread counts, focus, scrolling with news coming in) needs the real backend, which demo data can't give: write it as a scenario (`tests/scenarios/*.sc`, headless window on an account-less backend, `SIGWIN_FIXTURE`) or a backend scenario (`src/backend/scenarios.rs`, `cargo test`). Both run with `cargo test --profile fast`; how: `docs/headless.md`.
+
 ## Architecture in brief
 UI thread (Slint) sends `Command`s to a backend thread (tokio current_thread + `LocalSet`) that owns the `!Send` presage `Manager`; results come back as `Event`s via `upgrade_in_event_loop`. `gui/` = UI wiring and rows, `backend/` = Signal logic, `view.rs` = message rows, `db.rs` = own SQL, `types.rs` = cross-thread types, `ui/` = Slint UI (`app.slint` is the window). Full file table: `docs/architecture.md`.
 

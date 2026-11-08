@@ -325,7 +325,7 @@ thread_local! {
 }
 
 /// The window gained or lost the focus.
-fn focus_changed(app: &AppWindow, focused: bool) {
+pub(crate) fn focus_changed(app: &AppWindow, focused: bool) {
     FOCUSED.set(focused);
     refresh_active(app);
 }

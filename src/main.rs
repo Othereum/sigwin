@@ -113,7 +113,10 @@ fn main() -> anyhow::Result<()> {
     update::wait_for_previous();
     headless::install_if_requested()?;
     let demo =std::env::var_os("SIGWIN_DEMO").is_some();
-    if !headless::active() && !demo && !install::run(&data_dir()) {
+    // a backend with no account and no network, fed by scenario steps
+    let fixture = std::env::var_os("SIGWIN_FIXTURE").is_some();
+    anyhow::ensure!(!fixture || std::env::var_os("SIGWIN_DATA").is_some(), "SIGWIN_FIXTURE requires SIGWIN_DATA (a scratch dir)");
+    if !headless::active() && !demo && !fixture && !install::run(&data_dir()) {
         return Ok(());
     }
     // headless runs are offscreen checks: they never hand off to a running app
@@ -168,6 +171,7 @@ fn main() -> anyhow::Result<()> {
     let (cmd_tx, cmd_rx) = unbounded_channel::<Command>();
     let weak = app.as_weak();
     let emit: backend::Emit = Arc::new(move |ev: Event| {
+        headless::bump();
         let _ = weak.upgrade_in_event_loop(move |app| apply(&app, ev));
     });
     if let Some(instance) = instance {
@@ -192,6 +196,9 @@ fn main() -> anyhow::Result<()> {
     }
     if demo {
         demo::start(&app, emit, cmd_rx);
+    } else if fixture {
+        let _backend = backend::spawn_offline(data_dir(), cmd_rx, emit);
+        gui::scenario_install(&app);
     } else {
         let _backend = backend::spawn(data_dir(), cmd_rx, emit);
         if let Some(exe) = install::installed_self() {
@@ -298,6 +305,10 @@ fn main() -> anyhow::Result<()> {
         toast::clear_now();
     }
     drafts::save_on_exit(&app);
+    if headless::failed() {
+        // a scenario check failed: say so to whoever ran it
+        std::process::exit(1);
+    }
     // plain copies of opened attachments; the backend also empties this on start (crashes,
     // files another app still held)
     backend::files::clear_open(&data_dir());

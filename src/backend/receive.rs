@@ -302,7 +302,7 @@ impl App {
         if let Err(e) = self.settle_window().await {
             warn!("settle window: {e:#}");
         }
-        if self.threads_dirty && self.manager.is_some() {
+        if self.threads_dirty && self.online() {
             self.threads_dirty = false;
             if let Err(e) = self.rebuild_threads().await {
                 warn!("rebuild threads: {e:#}");
@@ -313,71 +313,98 @@ impl App {
             self.save_persist();
         }
         if !self.pending_receipts.is_empty() || !self.pending_reads.is_empty() {
-            if let Some(m) = self.manager.clone() {
+            if self.online() {
                 let delivered = std::mem::take(&mut self.pending_receipts);
                 let read = std::mem::take(&mut self.pending_reads);
-                let receipts = self.persist.read_receipts != Some(false);
-                tokio::task::spawn_local(send_receipts(m, delivered, read, receipts, self.me));
+                let out = receipts_to_send(delivered, read, self.persist.read_receipts != Some(false));
+                match (self.manager.clone(), self.offline.as_mut()) {
+                    (Some(m), _) => {
+                        tokio::task::spawn_local(send_outgoing(m, out, self.me));
+                    }
+                    (None, Some(o)) => o.sent.extend(out),
+                    (None, None) => {}
+                }
             }
         }
     }
+
+    /// There is somewhere to send to: an account, or a fixture standing in for one.
+    pub(super) fn online(&self) -> bool {
+        self.manager.is_some() || self.offline.is_some()
+    }
+}
+
+/// What goes to the network after a flush.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Outgoing {
+    /// delivery receipt for these sent timestamps
+    Delivery { to: ServiceId, timestamps: Vec<u64> },
+    /// read receipt for these sent timestamps
+    Read { to: ServiceId, timestamps: Vec<u64> },
+    /// one sync to our other devices that these were read
+    ReadSync(Vec<(ServiceId, u64)>),
 }
 
 /// Delivery receipts, then read receipts (unless turned off on the phone) and one read sync
 /// to our other devices so they clear their unread state too.
-pub(super) async fn send_receipts(
-    mut m: Mgr,
+pub(crate) fn receipts_to_send(
     delivered: HashMap<ServiceId, Vec<u64>>,
     read: Vec<(ServiceId, u64)>,
     read_receipts: bool,
-    me: Uuid,
-) {
-    let now = || {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
-    };
-    for (to, timestamps) in delivered {
-        let receipt = ReceiptMessage {
-            r#type: Some(receipt_message::Type::Delivery as i32),
-            timestamp: timestamps,
-        };
-        if let Err(e) = Box::pin(m.send_message(to, receipt, now())).await {
-            debug!("delivery receipt to {}: {e}", to.service_id_string());
-        }
-    }
+) -> Vec<Outgoing> {
+    let mut out: Vec<Outgoing> = delivered.into_iter().map(|(to, timestamps)| Outgoing::Delivery { to, timestamps }).collect();
     if read.is_empty() {
-        return;
+        return out;
     }
     if read_receipts {
         let mut by_sender: HashMap<ServiceId, Vec<u64>> = HashMap::new();
         for (to, ts) in &read {
             by_sender.entry(*to).or_default().push(*ts);
         }
-        for (to, timestamps) in by_sender {
-            debug!("read receipt to {} for {timestamps:?}", to.service_id_string());
-            let receipt = ReceiptMessage {
-                r#type: Some(receipt_message::Type::Read as i32),
-                timestamp: timestamps,
-            };
-            if let Err(e) = Box::pin(m.send_message(to, receipt, now())).await {
-                debug!("read receipt to {}: {e}", to.service_id_string());
+        out.extend(by_sender.into_iter().map(|(to, timestamps)| Outgoing::Read { to, timestamps }));
+    }
+    out.push(Outgoing::ReadSync(read));
+    out
+}
+
+pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid) {
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    };
+    for o in out {
+        match o {
+            Outgoing::Delivery { to, timestamps } => {
+                let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Delivery as i32), timestamp: timestamps };
+                if let Err(e) = Box::pin(m.send_message(to, receipt, now())).await {
+                    debug!("delivery receipt to {}: {e}", to.service_id_string());
+                }
+            }
+            Outgoing::Read { to, timestamps } => {
+                debug!("read receipt to {} for {timestamps:?}", to.service_id_string());
+                let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Read as i32), timestamp: timestamps };
+                if let Err(e) = Box::pin(m.send_message(to, receipt, now())).await {
+                    debug!("read receipt to {}: {e}", to.service_id_string());
+                }
+            }
+            Outgoing::ReadSync(read) => {
+                let sync = SyncMessage {
+                    read: read
+                        .iter()
+                        .map(|(sender, ts)| presage::proto::sync_message::Read {
+                            sender_aci: Some(sender.service_id_string()),
+                            timestamp: Some(*ts),
+                            sender_aci_binary: Some(sender.raw_uuid().as_bytes().to_vec()),
+                        })
+                        .collect(),
+                    ..Default::default()
+                };
+                if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, now())).await {
+                    debug!("read sync: {e}");
+                }
             }
         }
-    }
-    let sync = SyncMessage {
-        read: read
-            .iter()
-            .map(|(sender, ts)| presage::proto::sync_message::Read {
-                sender_aci: Some(sender.service_id_string()),
-                timestamp: Some(*ts),
-                sender_aci_binary: Some(sender.raw_uuid().as_bytes().to_vec()),
-            })
-            .collect(),
-        ..Default::default()
-    };
-    if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, now())).await {
-        debug!("read sync: {e}");
     }
 }

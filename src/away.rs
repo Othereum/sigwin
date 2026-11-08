@@ -11,6 +11,20 @@ use std::time::Duration;
 /// Without input this long, the user is away.
 const AWAY_AFTER: Duration = Duration::from_secs(180);
 
+/// 0: the real state; 1: always present; 2: always away. Scenarios pin it, so a run doesn't
+/// depend on whether the person at the PC happens to be idle or has locked it.
+static FORCED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Pins the answer of `is_away` (`None`: the real state again).
+pub fn force(away: Option<bool>) {
+    let v = match away {
+        None => 0,
+        Some(false) => 1,
+        Some(true) => 2,
+    };
+    FORCED.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
 thread_local! {
     static DISPLAY_OFF: Cell<bool> = const { Cell::new(false) };
 }
@@ -22,6 +36,11 @@ pub fn set_display_off(off: bool) {
 
 /// The user isn't at the PC.
 pub fn is_away() -> bool {
+    match FORCED.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => return false,
+        2 => return true,
+        _ => {}
+    }
     DISPLAY_OFF.get() || locked() || idle_for() >= AWAY_AFTER
 }
 
@@ -73,6 +92,15 @@ fn locked() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forced_answer_wins_over_the_real_state() {
+        force(Some(true));
+        assert!(is_away());
+        force(Some(false));
+        assert!(!is_away());
+        force(None);
+    }
 
     #[test]
     fn ticks_wrap_around() {

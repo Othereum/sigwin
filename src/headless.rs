@@ -13,6 +13,17 @@
 //!   key NAME         Enter Esc Tab Up Down Left Right Backspace Delete Home End PageUp PageDown,
 //!                    optionally with modifiers: ctrl+shift+Enter
 //!   shot PATH        save the window as PNG
+//! With SIGWIN_FIXTURE (a backend without an account, `backend/fixture.rs`) there are scenario steps:
+//!   fx OP            an op for the backend: `seed who=1 name=철수 n=100 unread=30`, `recv who=1 n=2`,
+//!                    `phone-read who=1`; returns when it and the flush after it are done
+//!   open N           open fixture contact N's thread, as a click on it does
+//!   jump             the jump-to-latest button
+//!   focus on|off     the window gains or loses the focus
+//!   away on|off      the user goes away / comes back
+//!   settle           wait until the UI and the backend have stopped talking
+//!   expect backend WHAT [who=N] OP VALUE   (`unread`, `read_upto`, `sent`, `toasts`, `window`)
+//!   expect ui NAME OP VALUE                (`open-unread`, `near-bottom`, `bottom-gap`, `divider-top`, ...)
+//!                    OP is = != < <= > >=; a failed expect is reported at the end and exits with 1
 //! Theme: SIGWIN_HEADLESS_THEME=dark|light, default follows the system.
 //! The loop exits after the last step. Requires SIGWIN_DATA (never touch the real account).
 
@@ -44,13 +55,58 @@ enum Step {
     Record(String),
     /// later steps act on window 1 (main) or 2 (the latest other one, the image viewer)
     Window(u32),
+    /// a scenario step, run by the driver (`gui/scenario.rs`)
+    Scenario(String),
+    /// wait until nothing moves between the UI and the backend
+    Settle,
+}
+
+/// Scenario steps the driver runs.
+const SCENARIO_STEPS: [&str; 7] = ["fx", "open", "jump", "focus", "away", "expect", "settle"];
+
+/// What runs scenario steps: it knows the window and the backend.
+pub struct Driver {
+    pub exec: Box<dyn Fn(&str) -> anyhow::Result<()>>,
+    /// a round trip to the backend, so what it queued has been sent
+    pub sync: Box<dyn Fn()>,
+    /// the UI is still seeking or holding back
+    pub busy: Box<dyn Fn() -> bool>,
+}
+
+thread_local! {
+    static DRIVER: RefCell<Option<Driver>> = const { RefCell::new(None) };
+}
+
+pub fn set_driver(d: Driver) {
+    DRIVER.with_borrow_mut(|s| *s = Some(d));
+}
+
+/// Commands and events crossing between the UI and the backend: `settle` waits for it to stop.
+static ACTIVITY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FAILED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub fn bump() {
+    ACTIVITY.fetch_add(1, Ordering::Relaxed);
+}
+
+/// A check failed: reported now, and the run exits with 1.
+pub fn fail(msg: &str) {
+    eprintln!("FAILED: {msg}");
+    tracing::error!("scenario check failed: {msg}");
+    FAILED.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn failed() -> bool {
+    FAILED.load(Ordering::Relaxed) > 0
 }
 
 fn parse(script: &str) -> anyhow::Result<Vec<Step>> {
     let mut out = Vec::new();
-    for raw in script.split(['\n', ';']) {
+    // a `#` line is a comment whole, even with a `;` in it
+    let parts = script.lines().filter(|l| !l.trim_start().starts_with('#')).flat_map(|l| l.split(';'));
+    for raw in parts {
         let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
+        if line.is_empty() {
             continue;
         }
         let (cmd, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
@@ -92,6 +148,8 @@ fn parse(script: &str) -> anyhow::Result<Vec<Step>> {
             "shot" => Step::Shot(rest.to_string()),
             "record" => Step::Record(rest.to_string()),
             "window" => Step::Window(rest.trim().parse()?),
+            "settle" => Step::Settle,
+            c if SCENARIO_STEPS.contains(&c) => Step::Scenario(line.to_string()),
             _ => anyhow::bail!("unknown step: {line}"),
         });
     }
@@ -213,6 +271,8 @@ pub fn install_if_requested() -> anyhow::Result<()> {
     let p = Headless { steps: RefCell::new(steps), window: RefCell::new(None), queue: Arc::default() };
     slint::platform::set_platform(Box::new(p)).map_err(|e| anyhow::anyhow!("{e:?}"))?;
     ACTIVE.store(true, Ordering::Relaxed);
+    // the real idle and lock state of the PC must not decide a run
+    crate::away::force(Some(false));
     Ok(())
 }
 
@@ -400,6 +460,25 @@ impl State {
                 };
                 self.size = PhysicalSize::new(0, 0);
                 self.idle(Duration::ZERO, pump);
+            }
+            Step::Scenario(line) => {
+                DRIVER.with_borrow(|d| match d {
+                    Some(d) => (d.exec)(&line),
+                    None => Err(anyhow::anyhow!("{line}: scenario steps need SIGWIN_FIXTURE")),
+                })?;
+                self.idle(Duration::ZERO, pump);
+            }
+            Step::Settle => {
+                let mut quiet = 0;
+                let started = Instant::now();
+                while quiet < 3 {
+                    anyhow::ensure!(started.elapsed() < Duration::from_secs(20), "settle: the UI and the backend never stopped");
+                    let before = ACTIVITY.load(Ordering::Relaxed);
+                    DRIVER.with_borrow(|d| d.as_ref().map(|d| (d.sync)()));
+                    self.idle(Duration::from_millis(100), pump);
+                    let busy = DRIVER.with_borrow(|d| d.as_ref().is_some_and(|d| (d.busy)()));
+                    quiet = if ACTIVITY.load(Ordering::Relaxed) == before && !busy { quiet + 1 } else { 0 };
+                }
             }
             Step::Record(dir) => {
                 if !dir.is_empty() {

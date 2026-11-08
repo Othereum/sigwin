@@ -62,8 +62,34 @@ pub fn init(dir: PathBuf, on_click: impl Fn(Option<Click>) + Send + Sync + 'stat
     let _ = ON_CLICK.set(Box::new(on_click));
 }
 
+/// What fixtures see instead of the screen: `Some` while capturing (`capture`).
+static CAPTURED: Mutex<Option<Vec<String>>> = Mutex::new(None);
+
+/// From now on no toast reaches the screen (fixtures and tests); `shown` lists what would have.
+pub fn capture() {
+    *CAPTURED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Vec::new());
+}
+
+fn captured(line: impl FnOnce() -> String) -> bool {
+    match CAPTURED.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        Some(v) => {
+            v.push(line());
+            true
+        }
+        None => false,
+    }
+}
+
+/// The toasts and clears captured so far, oldest first ("show <chat key>" / "clear").
+pub fn shown() -> Vec<String> {
+    CAPTURED.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default()
+}
+
 /// Replaces whatever toast is up with this one.
 pub fn show(t: Toast) {
+    if captured(|| format!("show {}", t.key)) {
+        return;
+    }
     let token = format!("{}-{}", std::process::id(), NEXT_TOKEN.fetch_add(1, Ordering::Relaxed));
     *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((token.clone(), Click { key: t.key.clone(), msg: t.msg }));
     send(Op::Show(t, token));
@@ -71,12 +97,18 @@ pub fn show(t: Toast) {
 
 /// Removes our toasts from the screen and the notification center.
 pub fn clear() {
+    if captured(|| "clear".into()) {
+        return;
+    }
     LAST.lock().unwrap_or_else(|e| e.into_inner()).take();
     send(Op::Clear);
 }
 
 /// `clear` right now, on this thread: for exit, when the worker may not get to run.
 pub fn clear_now() {
+    if captured(|| "clear".into()) {
+        return;
+    }
     LAST.lock().unwrap_or_else(|e| e.into_inner()).take();
     #[cfg(windows)]
     if let Err(e) = win::clear() {
