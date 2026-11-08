@@ -237,6 +237,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         app.set_mention_items(ModelRc::default());
         app.set_draft(SharedString::new());
         app.set_pending_files(ModelRc::default());
+        app.set_pending_has_photo(false);
         UI.with_borrow_mut(|ui| ui.pending_thumbs.clear());
         app.set_reply_preview(SharedString::new());
         drafts::drop_if_empty(&app);
