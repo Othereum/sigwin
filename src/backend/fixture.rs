@@ -32,6 +32,9 @@ pub(crate) enum FxOp {
     Seed { who: u32, name: String, n: u32, unread: u32 },
     /// `n` new messages from `who` arriving now (the receive path)
     Recv { who: u32, n: u32 },
+    /// one new message from `who` with `n` GIFs, their files already in the cache (the picture is
+    /// cut at once and arrives after the rows). `same`: one GIF `n` times, so they share a key.
+    Gifs { who: u32, n: u32, same: bool },
     /// the phone read `who`'s thread up to its newest message
     PhoneRead { who: u32 },
     /// a value to check: `unread`, `read_upto`, `sent`, `toasts`, `window`
@@ -45,8 +48,10 @@ impl FxOp {
         let cmd = words.next().ok_or_else(|| anyhow::anyhow!("empty fixture op"))?;
         let mut what = String::new();
         let (mut who, mut n, mut unread, mut name) = (1u32, 1u32, 0u32, String::new());
+        let mut same = false;
         for w in words {
             match w.split_once('=') {
+                Some(("same", v)) => same = v != "0",
                 Some(("who", v)) => who = v.parse()?,
                 Some(("n", v)) => n = v.parse()?,
                 Some(("unread", v)) => unread = v.parse()?,
@@ -58,6 +63,7 @@ impl FxOp {
         Ok(match cmd {
             "seed" => Self::Seed { who, name, n, unread },
             "recv" => Self::Recv { who, n },
+            "gifs" => Self::Gifs { who, n, same },
             "phone-read" => Self::PhoneRead { who },
             "query" => Self::Query { what, who },
             _ => anyhow::bail!("unknown fixture op: {cmd}"),
@@ -65,11 +71,32 @@ impl FxOp {
     }
 }
 
-/// A message from `who` to us.
+/// A text message from `who` to us.
 fn incoming(who: u32, ts: u64, body: &str, me: Uuid) -> Content {
+    incoming_dm(who, DataMessage { body: Some(body.into()), timestamp: Some(ts), ..Default::default() }, me)
+}
+
+/// A GIF of two frames, `tag` making the bytes (and so the attachment's key) differ.
+fn fixture_gif(tag: u8) -> Vec<u8> {
+    use image::codecs::gif::GifEncoder;
+    use image::{Delay, Frame, Rgba, RgbaImage};
+    let mut out = Vec::new();
+    {
+        let mut enc = GifEncoder::new(&mut out);
+        for k in 0..2u8 {
+            let px = Rgba([tag.wrapping_mul(70).wrapping_add(k * 120), 80, 200u8.wrapping_sub(tag * 40), 255]);
+            let frame = Frame::from_parts(RgbaImage::from_pixel(120, 90, px), 0, 0, Delay::from_numer_denom_ms(100, 1));
+            enc.encode_frame(frame).expect("encode a fixture gif");
+        }
+    }
+    out
+}
+
+/// A message from `who` to us.
+fn incoming_dm(who: u32, dm: DataMessage, me: Uuid) -> Content {
     let sender = ServiceId::Aci(contact(who).into());
+    let ts = dm.timestamp.unwrap_or_default();
     let at = chrono::DateTime::from_timestamp_millis(ts as i64).unwrap_or_default();
-    let dm = DataMessage { body: Some(body.into()), timestamp: Some(ts), ..Default::default() };
     Content::from_body(
         dm,
         presage::libsignal_service::content::Metadata {
@@ -181,6 +208,29 @@ impl App {
                     self.store.save_message(&thread, c.clone()).await?;
                     self.content(c).await;
                 }
+            }
+            FxOp::Gifs { who, n, same } => {
+                use sha2::Digest;
+                let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));
+                let ts = self.fx_ts();
+                let mut attachments = Vec::new();
+                for i in 0..n {
+                    let bytes = fixture_gif(if same { 0 } else { i as u8 });
+                    let ptr = AttachmentPointer {
+                        content_type: Some("image/gif".into()),
+                        digest: Some(sha2::Sha256::digest(&bytes).to_vec()),
+                        size: Some(bytes.len() as u32),
+                        width: Some(120),
+                        height: Some(90),
+                        ..Default::default()
+                    };
+                    let key = view::media::attachment_key(&ptr, ts, i as usize);
+                    sigwin_vault::write(&files::attachment_path(&self.paths.attachments, &key), &bytes)?;
+                    attachments.push(ptr);
+                }
+                let c = incoming_dm(who, DataMessage { attachments, timestamp: Some(ts), ..Default::default() }, me);
+                self.store.save_message(&thread, c.clone()).await?;
+                self.content(c).await;
             }
             FxOp::PhoneRead { who } => {
                 let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));

@@ -93,6 +93,9 @@ fn probe(app: &AppWindow, name: &str) -> anyhow::Result<String> {
         "near-bottom" => app.get_near_bottom().to_string(),
         "rows" => app.get_messages().row_count().to_string(),
         "current-key" => app.get_current_key().to_string(),
+        "cells" => app.get_messages().iter().map(|m| m.cells.row_count()).sum::<usize>().to_string(),
+        // cells of a photo grid that show nothing (yet)
+        "blank-cells" => app.get_messages().iter().flat_map(|m| m.cells.iter().collect::<Vec<_>>()).filter(|c| c.image.size().width == 0).count().to_string(),
         // how far the newest row's end is below the list's visible bottom edge (0: at the bottom)
         "bottom-gap" => (app.invoke_content_height() + app.invoke_list_content_y() - app.invoke_list_visible_height()).round().to_string(),
         // where the "unread" line's row starts, from the top of the visible list

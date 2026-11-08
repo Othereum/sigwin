@@ -97,10 +97,11 @@ pub(super) fn thumb_arrived(t: Arc<types::Thumb>) {
     UI.with_borrow_mut(|ui| {
         ui.thumbs.insert(t.key.clone(), img.clone());
         for (i, m) in ui.last.iter().enumerate() {
-            let cell = m.cells.iter().position(|c| c.key == t.key);
+            // the same picture twice in a grid has one key for both cells
+            let cell = m.cells.iter().any(|c| c.key == t.key);
             let link = m.link.as_ref().is_some_and(|l| l.image_key == t.key);
             let quote = !m.quote_image_key.is_empty() && m.quote_image_key == t.key;
-            if cell.is_none() && !link && !quote && m.image_key != t.key {
+            if !cell && !link && !quote && m.image_key != t.key {
                 continue;
             }
             let Some(mut row) = slint::Model::row_data(&*ui.messages, i) else { continue };
@@ -108,11 +109,15 @@ pub(super) fn thumb_arrived(t: Arc<types::Thumb>) {
                 row.quote_image = img.clone();
             } else if link {
                 row.link_image = img.clone();
-            } else if let Some(n) = cell {
+            } else if cell {
                 // a new model, not a change inside the old one: a ListView row didn't
                 // show that until it was scrolled away and back
                 let mut cells: Vec<ImageCell> = slint::Model::iter(&row.cells).collect();
-                cells[n].image = img.clone();
+                for (c, dto) in cells.iter_mut().zip(&m.cells) {
+                    if dto.key == t.key {
+                        c.image = img.clone();
+                    }
+                }
                 row.cells = ModelRc::new(VecModel::from(cells));
             } else {
                 row.image = img.clone();
@@ -137,18 +142,22 @@ pub(super) fn label_arrived(key: String, label: types::MediaLabel) {
             ui.media_labels.insert(key.clone(), label);
         }
         for (i, m) in ui.last.iter().enumerate() {
-            let cell = m.cells.iter().position(|c| c.key == key);
-            if cell.is_none() && (m.image_key != key || m.sticker) {
+            let cell = m.cells.iter().any(|c| c.key == key);
+            if !cell && (m.image_key != key || m.sticker) {
                 continue;
             }
             let Some(mut row) = slint::Model::row_data(&*ui.messages, i) else { continue };
-            if let Some(n) = cell {
+            if cell {
                 // a new model, as for `thumb_arrived`
                 let mut cells: Vec<ImageCell> = slint::Model::iter(&row.cells).collect();
-                cells[n].label = shown.clone();
-                cells[n].undownloaded = undownloaded;
-                cells[n].progress = progress;
-                cells[n].ring = ring.clone();
+                for (c, dto) in cells.iter_mut().zip(&m.cells) {
+                    if dto.key == key {
+                        c.label = shown.clone();
+                        c.undownloaded = undownloaded;
+                        c.progress = progress;
+                        c.ring = ring.clone();
+                    }
+                }
                 row.cells = ModelRc::new(VecModel::from(cells));
             } else {
                 row.media_label = shown.clone();
