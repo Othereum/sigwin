@@ -74,7 +74,17 @@ pub fn is_image(ptr: &AttachmentPointer) -> bool {
     matches!(
         ptr.content_type.as_deref(),
         Some("image/jpeg" | "image/png" | "image/apng" | "image/gif" | "image/webp")
-    ) && ptr.size.unwrap_or(0) < 15 * 1024 * 1024
+    )
+}
+
+/// Largest picture downloaded just to show it: `get_attachment` holds the whole file in memory
+/// while it arrives, and nobody asked for this one. A bigger one shows its blurhash and size
+/// until it is clicked, which is asking.
+const IMAGE_AUTO_MAX: u32 = 15 * 1024 * 1024;
+
+/// Whether a picture is downloaded without being asked for.
+pub fn auto_fetches_image(ptr: &AttachmentPointer) -> bool {
+    ptr.size.is_none_or(|s| s < IMAGE_AUTO_MAX)
 }
 
 pub fn is_video(ptr: &AttachmentPointer) -> bool {
@@ -399,6 +409,16 @@ mod tests {
         // padding and the like: never past the file's own size
         assert_eq!(downloading_label(&big, 46 * MB, 100).text, "45MB / 45MB");
         assert_eq!(downloading_label(&ptr(None), 12 * MB, 0).text, "12MB");
+    }
+
+    #[test]
+    fn a_big_picture_is_a_picture_that_waits_to_be_asked_for() {
+        let photo = |size| AttachmentPointer { content_type: Some("image/jpeg".into()), size, ..Default::default() };
+        let big = photo(Some(IMAGE_AUTO_MAX + 1));
+        assert!(is_image(&big) && is_media(&big));
+        assert!(!auto_fetches_image(&big));
+        assert!(auto_fetches_image(&photo(Some(IMAGE_AUTO_MAX - 1))));
+        assert!(auto_fetches_image(&photo(None)));
     }
 
     #[test]

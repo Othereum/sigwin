@@ -37,8 +37,8 @@ impl App {
                     if manager.is_none() {
                         return;
                     }
-                    // stopped by a click: it stays so until the next one
-                    if downloads.was_stopped(&file_key) {
+                    // stopped by a click: it stays so until the next one; a big one waits for it
+                    if downloads.was_stopped(&file_key) || (!downloads.is_allowed(&file_key) && !view::media::auto_fetches_image(&ptr)) {
                         return;
                     }
                     // the same picture shown at another size may be getting it already: waited for
