@@ -174,7 +174,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             // page that SIGWIN_DEMO_OLDER pages in for it)
             quote_id: if i >= 298 { (i - 175).to_string() } else if i % 11 == 0 { i.saturating_sub(40).to_string() } else { String::new() },
             reactions: if i % 9 == 0 { vec![("❤️".into(), 2, "이서연, 나".into()), ("👍".into(), 1, "박지훈".into()), ("😂".into(), 3, "이서연, 박지훈, 최민수".into())] } else { Vec::new() },
-            attachment: if i % 13 == 0 { "보고서.pdf".into() } else { String::new() },
+            attachment: if i % 13 == 0 { "보고서.pdf · 2.4MB".into() } else { String::new() },
             day_sep: if i % 50 == 0 { "2026년 11월 1일 일요일".into() } else { String::new() },
             sticker: i == 298 || i == 297,
             image_key: if i == 298 || i == 297 { format!("demo-st-{}", i % 2) } else { String::new() },
@@ -315,7 +315,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             m.sticker = false;
             m.quote.clear();
             m.quote_author.clear();
-            m.attachment = if count == 5 { "보고서.pdf".into() } else { String::new() };
+            m.attachment = if count == 5 { "보고서.pdf · 2.4MB".into() } else { String::new() };
             m.text = if count == 3 { "사진 설명이 함께 있는 메시지".into() } else { String::new() };
             view::media::set_photo_grid(m, count, |n, _, _| format!("demo-grid-{count}-{n}"));
         }

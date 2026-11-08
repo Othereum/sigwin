@@ -134,6 +134,28 @@ pub fn file_line(first: &str, more: usize, bytes: Option<u64>) -> String {
     }
 }
 
+/// What a message's file card shows, taken from its [`file_line`]: the name (with "외 N개"), its
+/// size, and the extension of the first file for the badge.
+pub fn file_card(line: &str) -> (String, String, String) {
+    let sized = |s: &str| {
+        let n = s.strip_suffix("KB").or_else(|| s.strip_suffix("MB")).or_else(|| s.strip_suffix("GB"));
+        n.is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == '.'))
+    };
+    let (names, size) = match line.rsplit_once(" · ") {
+        Some((n, s)) if sized(s) => (n, s),
+        _ => (line, ""),
+    };
+    let first = match names.rsplit_once(" 외 ") {
+        Some((f, n)) if n.strip_suffix('개').is_some_and(|d| d.parse::<u32>().is_ok()) => f,
+        _ => names,
+    };
+    let ext = std::path::Path::new(first)
+        .extension()
+        .map(|e| e.to_string_lossy().to_uppercase().chars().take(4).collect())
+        .unwrap_or_default();
+    (names.to_string(), size.to_string(), ext)
+}
+
 fn files_label(files: &[&AttachmentPointer]) -> String {
     let Some(first) = files.first() else { return String::new() };
     let bytes = files.iter().map(|a| a.size.filter(|s| *s > 0).map(|s| s as u64)).sum();
@@ -279,6 +301,16 @@ pub(super) fn set_attachments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_card_takes_its_line_apart() {
+        let card = |l: &str| file_card(l);
+        assert_eq!(card("보고서.pdf · 2.4MB"), ("보고서.pdf".into(), "2.4MB".into(), "PDF".into()));
+        assert_eq!(card("a.zip 외 2개 · 13MB"), ("a.zip 외 2개".into(), "13MB".into(), "ZIP".into()));
+        // no size known; a " · " in the name isn't a size
+        assert_eq!(card("a · b.txt"), ("a · b.txt".into(), String::new(), "TXT".into()));
+        assert_eq!(card("파일"), ("파일".into(), String::new(), String::new()));
+    }
 
     #[test]
     fn photo_size_caps() {

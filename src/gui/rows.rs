@@ -273,6 +273,7 @@ pub(crate) fn to_item(
     }
     let spoilers = hidden_spoilers(m, revealed);
     let has_rich = !m.mentions.is_empty() || !links.is_empty() || !spoilers.is_empty();
+    let file = crate::view::media::file_card(&m.attachment);
     let card = m.link.as_ref();
     let text_of = |f: fn(&types::LinkCard) -> &String| card.map(f).map_or(SharedString::new(), |s| s.as_str().into());
     MsgItem {
@@ -311,6 +312,9 @@ pub(crate) fn to_item(
         has_quote_image: !m.quote_image_key.is_empty(),
         quote_image: thumbs.get(&m.quote_image_key).cloned().unwrap_or_default(),
         attachment: m.attachment.as_str().into(),
+        file_name: file.0.into(),
+        file_size: file.1.into(),
+        file_ext: file.2.into(),
         has_image: !m.image_key.is_empty(),
         video: m.video,
         media_label: if m.sticker || !m.cells.is_empty() { SharedString::new() } else { label_of(&m.image_key) },

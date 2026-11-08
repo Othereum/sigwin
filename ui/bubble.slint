@@ -600,14 +600,38 @@ export component Bubble inherits VerticalLayout {
                         }
                     }
                     HorizontalLayout {
-                        spacing: 6px;
-                        padding: 2px;
-                        Text { text: "📎"; font-size: 14px; }
-                        Text {
-                            text: m.attachment;
-                            color: m.outgoing ? white : Theme.text;
-                            font-size: 13px;
-                            wrap: word-wrap;
+                        spacing: 10px;
+                        padding: 4px;
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            y: 0px;
+                            border-radius: 6px;
+                            background: m.outgoing ? #ffffff40 : Theme.accent;
+                            Text {
+                                text: m.file-ext != "" ? m.file-ext : "FILE";
+                                color: #ffffff;
+                                font-size: 11px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 1px;
+                            max-width: 220px;
+                            Text {
+                                text: m.file-name;
+                                color: m.outgoing ? white : Theme.text;
+                                font-size: 14px;
+                                overflow: elide;
+                            }
+                            if m.file-size != "": Text {
+                                text: m.file-size;
+                                color: m.outgoing ? #ffffffc0 : Theme.subtle;
+                                font-size: 12px;
+                            }
                         }
                     }
                 }

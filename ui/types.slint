@@ -84,6 +84,10 @@ export struct MsgItem {
     reactions: [ReactionItem],
     big-emoji: bool,
     attachment: string,
+    // the file card: name, size and the badge text
+    file-name: string,
+    file-size: string,
+    file-ext: string,
     has-image: bool,
     image: image,
     // `image` is the picture of a video: drawn with a play mark, clicking opens the video
