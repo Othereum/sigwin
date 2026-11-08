@@ -275,3 +275,37 @@ fn more_unread_than_the_window_holds_starts_at_its_oldest_message() {
         assert!(items.len() <= MAX_WINDOW);
     });
 }
+
+/// What one of our ops changed is indexed once presage stores it, and taken back when it fails.
+#[test]
+fn ops_are_indexed_when_stored_and_undone_when_they_fail() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=5").await;
+        h.open(1).await;
+        let key = h.app.current.as_ref().unwrap().key.clone();
+        let (row, target, ..) = h.app.target(&h.row(4)).unwrap();
+        let me = h.app.me;
+
+        // a reaction we sent was stored: it's in the index and no longer pending
+        let op = Op::React { emoji: Some("👍".into()), target };
+        h.app.ops.push(PendingOp { ts: 9_001, thread_key: key.clone(), row, op });
+        Box::pin(h.app.internal(Internal::Sent(9_001, Ok(())))).await;
+        h.settle().await;
+        assert!(h.app.ops.is_empty());
+        let reactions = h.app.index.reactions_for(&key, &[target]).await.unwrap();
+        assert_eq!(reactions.get(&target), Some(&vec![(me, "👍".to_string())]));
+
+        // a pin is written before sending: a failed send takes it out again and says so
+        h.app.index.pin(&key, target, me, 9_002, 0).await.unwrap();
+        h.app.ops.push(PendingOp { ts: 9_002, thread_key: key.clone(), row, op: Op::Pin { target } });
+        h.take_events();
+        Box::pin(h.app.internal(Internal::Sent(9_002, Err("offline".into())))).await;
+        h.settle().await;
+        assert!(h.app.ops.is_empty());
+        assert!(h.app.index.pins(&key).await.unwrap().is_empty());
+        let ev = h.take_events();
+        assert!(ev.iter().any(|e| matches!(e, Event::Notice(s) if s == "고정 실패: offline")));
+        assert!(last_list(&ev).is_some(), "the row is shown again without the change");
+    });
+}

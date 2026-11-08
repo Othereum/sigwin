@@ -73,6 +73,41 @@ impl App {
     }
 
     /// Queues the send of the pending row `ts`.
+    /// presage stored what was sent as `ts` (a message or an op).
+    pub(super) async fn sent(&mut self, ts: u64) {
+        // presage stored the message before returning: swap the stub for the real row now
+        self.pending.retain(|p| p.ts != ts);
+        self.op_sent(ts).await;
+        if let Err(e) = self.reload_window().await {
+            warn!("reload window: {e:#}");
+        }
+        self.threads_dirty = true;
+    }
+
+    /// Sending `ts` failed: an op is taken back, a message stays as a failed row to retry.
+    pub(super) async fn send_failed(&mut self, ts: u64, e: String) {
+        warn!("send {ts} failed: {e}");
+        if self.op_failed(ts, &e).await {
+            self.emit_messages(Scroll::KeepIfNotAtBottom).await;
+            return;
+        }
+        // the open thread shows it on the row
+        let open = self.current.as_ref().map(|c| c.key.as_str());
+        if self.pending.iter().any(|p| p.ts == ts && Some(p.thread_key.as_str()) != open) {
+            self.notice("다른 대화로 보낸 메시지를 전송하지 못했습니다");
+        }
+        let thread = self.pending.iter().find(|p| p.ts == ts).and_then(|p| parse_thread_key(&p.thread_key));
+        let after_seq = match thread {
+            Some(t) => self.index.page(&t, i64::MAX, 1).await.ok().and_then(|r| r.first().map(|r| r.0)),
+            None => None,
+        };
+        if let Some(p) = self.pending.iter_mut().find(|p| p.ts == ts) {
+            p.error = Some(e);
+            p.after_seq = Some(after_seq.unwrap_or(0));
+        }
+        self.emit_messages(Scroll::KeepIfNotAtBottom).await;
+    }
+
     pub(super) async fn start_send(&mut self, ts: u64) {
         let Some(manager) = self.manager.clone() else { return };
         let Some(p) = self.pending.iter().find(|p| p.ts == ts) else { return };

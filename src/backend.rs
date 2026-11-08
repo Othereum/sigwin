@@ -791,80 +791,8 @@ impl App {
                 self.synced = false;
                 self.connection(msg, false);
             }
-            Internal::Sent(ts, Ok(())) => {
-                // presage stored the message before returning: swap the stub for the real row now
-                self.pending.retain(|p| p.ts != ts);
-                if let Some(PendingOp { op: Op::Delete(target), thread_key, .. }) = self.ops.iter().find(|o| o.ts == ts) {
-                    let (key, target) = (thread_key.clone(), *target);
-                    self.forget_snippet(&key, target);
-                }
-                match self.ops.iter().find(|o| o.ts == ts) {
-                    Some(PendingOp { op: Op::Delete(target), .. }) => {
-                        if let Err(e) = self.index.record_my_delete(*target).await {
-                            warn!("record delete: {e:#}");
-                        }
-                    }
-                    Some(PendingOp { op: Op::Edit { target, .. }, thread_key, .. }) => {
-                        if let Err(e) = self.index.record_edit(thread_key, *target, self.me, ts).await {
-                            warn!("record edit: {e:#}");
-                        }
-                    }
-                    Some(PendingOp { op: Op::React { emoji, target }, thread_key, .. }) => {
-                        let emoji = emoji.as_deref().unwrap_or_default();
-                        if let Err(e) = self.index.record_reaction(thread_key, *target, self.me, emoji, ts).await {
-                            warn!("record reaction: {e:#}");
-                        }
-                    }
-                    _ => {}
-                }
-                self.ops.retain(|o| o.ts != ts);
-                if let Err(e) = self.reload_window().await {
-                    warn!("reload window: {e:#}");
-                }
-                self.threads_dirty = true;
-            }
-            Internal::Sent(ts, Err(e)) => {
-                warn!("send {ts} failed: {e}");
-                if let Some(i) = self.ops.iter().position(|o| o.ts == ts) {
-                    // nothing to retry from: drop the optimistic change
-                    let op = self.ops.remove(i);
-                    let what = match op.op {
-                        Op::React { .. } => "반응",
-                        Op::Edit { .. } => "수정",
-                        Op::Delete(_) => "삭제",
-                        Op::Pin { target } => {
-                            if let Err(e) = self.index.unpin(&op.thread_key, target, ts).await {
-                                warn!("undo pin: {e:#}");
-                            }
-                            "고정"
-                        }
-                        Op::Unpin { target, author, at, expires } => {
-                            if let Err(e) = self.index.pin(&op.thread_key, target, author, at, expires).await {
-                                warn!("undo unpin: {e:#}");
-                            }
-                            "고정 해제"
-                        }
-                    };
-                    self.notice(format!("{what} 실패: {e}"));
-                    self.emit_messages(Scroll::KeepIfNotAtBottom).await;
-                    return;
-                }
-                // the open thread shows it on the row
-                let open = self.current.as_ref().map(|c| c.key.as_str());
-                if self.pending.iter().any(|p| p.ts == ts && Some(p.thread_key.as_str()) != open) {
-                    self.notice("다른 대화로 보낸 메시지를 전송하지 못했습니다");
-                }
-                let thread = self.pending.iter().find(|p| p.ts == ts).and_then(|p| parse_thread_key(&p.thread_key));
-                let after_seq = match thread {
-                    Some(t) => self.index.page(&t, i64::MAX, 1).await.ok().and_then(|r| r.first().map(|r| r.0)),
-                    None => None,
-                };
-                if let Some(p) = self.pending.iter_mut().find(|p| p.ts == ts) {
-                    p.error = Some(e);
-                    p.after_seq = Some(after_seq.unwrap_or(0));
-                }
-                self.emit_messages(Scroll::KeepIfNotAtBottom).await;
-            }
+            Internal::Sent(ts, Ok(())) => self.sent(ts).await,
+            Internal::Sent(ts, Err(e)) => self.send_failed(ts, e).await,
             Internal::LinkFetched(url, res) => self.link_fetched(url, res),
             Internal::ThumbFailed(key) => {
                 // allow a retry next time the thread is opened

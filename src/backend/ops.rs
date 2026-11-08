@@ -203,6 +203,61 @@ impl App {
         }
     }
 
+    /// If `ts` is our op, presage stored it: what it changed goes into our indexes.
+    pub(super) async fn op_sent(&mut self, ts: u64) {
+        if let Some(PendingOp { op: Op::Delete(target), thread_key, .. }) = self.ops.iter().find(|o| o.ts == ts) {
+            let (key, target) = (thread_key.clone(), *target);
+            self.forget_snippet(&key, target);
+        }
+        match self.ops.iter().find(|o| o.ts == ts) {
+            Some(PendingOp { op: Op::Delete(target), .. }) => {
+                if let Err(e) = self.index.record_my_delete(*target).await {
+                    warn!("record delete: {e:#}");
+                }
+            }
+            Some(PendingOp { op: Op::Edit { target, .. }, thread_key, .. }) => {
+                if let Err(e) = self.index.record_edit(thread_key, *target, self.me, ts).await {
+                    warn!("record edit: {e:#}");
+                }
+            }
+            Some(PendingOp { op: Op::React { emoji, target }, thread_key, .. }) => {
+                let emoji = emoji.as_deref().unwrap_or_default();
+                if let Err(e) = self.index.record_reaction(thread_key, *target, self.me, emoji, ts).await {
+                    warn!("record reaction: {e:#}");
+                }
+            }
+            _ => {}
+        }
+        self.ops.retain(|o| o.ts != ts);
+    }
+
+    /// If `ts` is our op, sending it failed: takes back its optimistic change and says so.
+    /// False if `ts` is no op.
+    pub(super) async fn op_failed(&mut self, ts: u64, e: &str) -> bool {
+        let Some(i) = self.ops.iter().position(|o| o.ts == ts) else { return false };
+        // nothing to retry from: drop the optimistic change
+        let op = self.ops.remove(i);
+        let what = match op.op {
+            Op::React { .. } => "반응",
+            Op::Edit { .. } => "수정",
+            Op::Delete(_) => "삭제",
+            Op::Pin { target } => {
+                if let Err(e) = self.index.unpin(&op.thread_key, target, ts).await {
+                    warn!("undo pin: {e:#}");
+                }
+                "고정"
+            }
+            Op::Unpin { target, author, at, expires } => {
+                if let Err(e) = self.index.pin(&op.thread_key, target, author, at, expires).await {
+                    warn!("undo unpin: {e:#}");
+                }
+                "고정 해제"
+            }
+        };
+        self.notice(format!("{what} 실패: {e}"));
+        true
+    }
+
     pub(super) async fn send_op(&mut self, row: u64, op: Op, mut body: ContentBody) {
         let Some(manager) = self.manager.clone() else { return };
         let Some(open) = self.current.as_ref() else { return };
