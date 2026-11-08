@@ -29,6 +29,35 @@ component ViewerButton inherits Rectangle {
     }
 }
 
+// round previous / next button with a drawn chevron (no font glyph involved)
+component NavButton inherits Rectangle {
+    in property <bool> forward;
+    callback clicked();
+    width: 48px;
+    height: 48px;
+    border-radius: 24px;
+    background: ta.has-hover ? #000000e0 : #000000a0;
+    border-width: 1px;
+    border-color: ta.has-hover ? #ffffff60 : #ffffff28;
+    Path {
+        width: 12px;
+        height: 20px;
+        x: (parent.width - self.width) / 2 + (root.forward ? 1px : -1px);
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 12;
+        viewbox-height: 20;
+        commands: root.forward ? "M 2 2 L 10 10 L 2 18" : "M 10 2 L 2 10 L 10 18";
+        stroke: white;
+        stroke-width: 2.5px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 export component ImageViewer inherits Window {
     in property <image> source;
     // of the images in the message, empty for a single image; blank until each one arrives
@@ -222,24 +251,15 @@ export component ImageViewer inherits Window {
             background: self.hovered ? #c42b1c : #00000090;
             clicked => { root.dismiss(); }
         }
-        if root.near-side && hover.mouse-x < 100px: ViewerButton {
+        if root.near-side && hover.mouse-x < 100px: NavButton {
             x: 12px;
             y: (root.height - self.height) / 2;
-            width: 44px;
-            height: 64px;
-            text: "‹";
-            font-size: 28px;
-            background: self.hovered ? #000000d0 : #00000090;
             clicked => { root.prev(); }
         }
-        if root.near-side && hover.mouse-x > root.width - 100px: ViewerButton {
+        if root.near-side && hover.mouse-x > root.width - 100px: NavButton {
+            forward: true;
             x: root.width - self.width - 12px;
             y: (root.height - self.height) / 2;
-            width: 44px;
-            height: 64px;
-            text: "›";
-            font-size: 28px;
-            background: self.hovered ? #000000d0 : #00000090;
             clicked => { root.next(); }
         }
         if root.strip-shown: Rectangle {
