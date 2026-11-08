@@ -474,8 +474,8 @@ export component Bubble inherits VerticalLayout {
             border-bottom-left-radius: root.r-bl;
             border-bottom-right-radius: root.r-br;
             background: m.deleted || m.sticker || m.big-emoji || root.bare ? transparent : (m.outgoing ? Theme.bubble-out : Theme.bubble-in);
-            border-width: root.flash ? 3px : m.deleted ? 1px : 0px;
-            border-color: root.flash ? #f5b400 : Theme.border;
+            border-width: m.deleted ? 1px : 0px;
+            border-color: Theme.border;
             if !m.pending && !m.deleted: tools := MsgTools {
                 x: m.outgoing ? -self.width : parent.width;
                 y: (parent.height - self.height) / 2;
@@ -514,11 +514,17 @@ export component Bubble inherits VerticalLayout {
                 padding-left: root.bare ? 0px : 12px;
                 padding-right: root.bare ? 0px : 12px;
                 spacing: 4px;
-                if m.show-sender && !m.outgoing: Text {
-                    text: m.sender;
-                    color: m.sender-color;
-                    font-size: 12px;
-                    font-weight: 700;
+                if m.show-sender && !m.outgoing: HorizontalLayout {
+                    // a bare photo has no padding of its own: keep the name off the bubble's edge (and the flash border)
+                    padding-left: root.bare ? 8px : 0px;
+                    padding-top: root.bare ? 5px : 0px;
+                    padding-bottom: root.bare ? 3px : 0px;
+                    Text {
+                        text: m.sender;
+                        color: m.sender-color;
+                        font-size: 12px;
+                        font-weight: 700;
+                    }
                 }
                 if m.quote != "": Rectangle {
                     border-radius: 6px;
@@ -702,6 +708,15 @@ export component Bubble inherits VerticalLayout {
                 }
             }
             }
+            }
+            // jump flash: drawn over the content, since a photo would cover a border on the bubble itself
+            if root.flash: Rectangle {
+                border-top-left-radius: root.r-tl;
+                border-top-right-radius: root.r-tr;
+                border-bottom-left-radius: root.r-bl;
+                border-bottom-right-radius: root.r-br;
+                border-width: 3px;
+                border-color: #f5b400;
             }
             // reactions: pill chips straddling the bubble's bottom edge, ringed in the pane color like the
             // readers; `Bubble.padding-bottom` makes room. Always present (hidden when empty) so the bubble
