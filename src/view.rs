@@ -170,6 +170,9 @@ pub const LINK_IMAGE_INDEX: usize = 98;
 /// Size of that image on the card (logical px): a wide one on top, others beside the text.
 const LINK_IMAGE_WIDE: (u32, u32) = (300, 158);
 const LINK_IMAGE_SMALL: (u32, u32) = (64, 64);
+/// `attachment_key` index of the picture in a reply's quote, and its size (logical px).
+const QUOTE_IMAGE_INDEX: usize = 97;
+const QUOTE_IMAGE: (u32, u32) = (52, 52);
 /// Cut-offs for what a preview can say (characters).
 pub const LINK_TITLE_MAX: usize = 200;
 pub const LINK_DESC_MAX: usize = 300;
@@ -915,6 +918,12 @@ pub fn build(
                         .unwrap_or_else(|| "(첨부파일)".into());
                     m.quote_author = quote_author_name(q, me, name_of);
                     m.quote_id = q.id.map(|i| i.to_string()).unwrap_or_default();
+                    // the quoted message's picture, as the sender's app cut it
+                    if let Some(a) = q.attachments.iter().find_map(|a| a.thumbnail.as_ref()) {
+                        let file_key = attachment_key(a, *ts, QUOTE_IMAGE_INDEX);
+                        m.quote_image_key = format!("{file_key}@{}x{}", QUOTE_IMAGE.0, QUOTE_IMAGE.1);
+                        wanted_cells.push(WantedCell { key: m.quote_image_key.clone(), file_key, ptr: a.clone(), size: QUOTE_IMAGE });
+                    }
                 }
                 let mut files = Vec::new();
                 let mut photos = Vec::new();

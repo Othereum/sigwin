@@ -78,6 +78,9 @@ export struct MsgItem {
     quote-author: string,
     // sent timestamp of the quoted message (empty: not clickable)
     quote-id: string,
+    // a picture of the quoted message, shown at the quote's right
+    has-quote-image: bool,
+    quote-image: image,
     reactions: [ReactionItem],
     big-emoji: bool,
     attachment: string,

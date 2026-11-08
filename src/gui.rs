@@ -407,11 +407,14 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 for (i, m) in ui.last.iter().enumerate() {
                     let cell = m.cells.iter().position(|c| c.key == t.key);
                     let link = m.link.as_ref().is_some_and(|l| l.image_key == t.key);
-                    if cell.is_none() && !link && m.image_key != t.key {
+                    let quote = !m.quote_image_key.is_empty() && m.quote_image_key == t.key;
+                    if cell.is_none() && !link && !quote && m.image_key != t.key {
                         continue;
                     }
                     let Some(mut row) = slint::Model::row_data(&*ui.messages, i) else { continue };
-                    if link {
+                    if quote {
+                        row.quote_image = img.clone();
+                    } else if link {
                         row.link_image = img.clone();
                     } else if let Some(n) = cell {
                         // a new model, not a change inside the old one: a ListView row didn't

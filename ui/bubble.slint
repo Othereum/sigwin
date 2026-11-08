@@ -522,6 +522,7 @@ export component Bubble inherits VerticalLayout {
                 }
                 if m.quote != "": Rectangle {
                     border-radius: 6px;
+                    clip: true;
                     background: m.outgoing ? (qta.has-hover ? #ffffff48 : #ffffff30) : Theme.dark ? (qta.has-hover ? #ffffff22 : #ffffff14) : (qta.has-hover ? #0000001c : #00000010);
                     qta := TouchArea {
                         enabled: m.quote-id != "";
@@ -552,6 +553,19 @@ export component Bubble inherits VerticalLayout {
                                 wrap: word-wrap;
                                 overflow: elide;
                                 max-height: 48px;
+                            }
+                        }
+                        // in a layout, so the box grows to hold it
+                        // flush with the box's right edge (the box clips the corners)
+                        if m.has-quote-image: Rectangle {
+                            width: 52px;
+                            height: 52px;
+                            background: #80808030;
+                            Image {
+                                width: 100%;
+                                height: 100%;
+                                source: m.quote-image;
+                                image-fit: cover;
                             }
                         }
                     }

@@ -273,6 +273,20 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     for i in [150usize, 290] {
         items[i].pinned = true;
     }
+    // some quotes show the quoted photo
+    for (n, m) in items.iter_mut().filter(|m| !m.quote.is_empty()).enumerate() {
+        if n % 2 == 0 {
+            m.quote_image_key = "demo-quote-photo".into();
+        }
+    }
+    {
+        // after the rows, as downloads do
+        let emit = emit.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            emit(Event::Thumb(Arc::new(demo_link_image("demo-quote-photo", 52, 52))));
+        });
+    }
     view::mark_runs(&mut items, true);
     let pins: Vec<types::PinDto> = [(290usize, "이서연"), (150, "나")]
         .iter()

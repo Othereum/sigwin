@@ -308,6 +308,8 @@ pub(crate) fn to_item(
         quote: m.quote.as_str().into(),
         quote_author: m.quote_author.as_str().into(),
         quote_id: m.quote_id.as_str().into(),
+        has_quote_image: !m.quote_image_key.is_empty(),
+        quote_image: thumbs.get(&m.quote_image_key).cloned().unwrap_or_default(),
         attachment: m.attachment.as_str().into(),
         has_image: !m.image_key.is_empty(),
         video: m.video,

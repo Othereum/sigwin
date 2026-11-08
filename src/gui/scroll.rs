@@ -209,7 +209,10 @@ fn forget_unshown_thumbs(ui: &mut Ui, items: &[MsgDto]) {
         .iter()
         .flat_map(|m| {
             let link = m.link.as_ref().map(|l| l.image_key.as_str());
-            std::iter::once(m.image_key.as_str()).chain(link).chain(m.cells.iter().map(|c| c.key.as_str()))
+            std::iter::once(m.image_key.as_str())
+                .chain(std::iter::once(m.quote_image_key.as_str()))
+                .chain(link)
+                .chain(m.cells.iter().map(|c| c.key.as_str()))
         })
         .collect();
     let card = ui.link.key.clone();
