@@ -356,6 +356,8 @@ export component AppWindow inherits Window {
         msg-list.content-y = max(msg-list.visible-height - msg-list.content-height, min(0px, msg-list.content-y - d));
     }
     out property <bool> near-bottom: msg-list.content-y <= msg-list.visible-height - msg-list.content-height + 120px;
+    // the jump button wants a much tighter margin than following news: even one message up shows it
+    out property <bool> off-bottom: msg-list.content-y > msg-list.visible-height - msg-list.content-height + 16px;
     changed near-bottom => {
         if (!reading-hold) {
             at-bottom-changed(near-bottom);
@@ -727,7 +729,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 // jump to the latest message
-                if !root.near-bottom || root.can-load-newer: Rectangle {
+                if root.off-bottom || root.can-load-newer: Rectangle {
                     x: parent.width - self.width - 20px;
                     y: parent.height - self.height - 14px;
                     width: 40px;
