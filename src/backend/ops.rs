@@ -41,12 +41,12 @@ impl App {
             self.notice("이 메시지는 수정할 수 없습니다");
             return;
         };
-        if view::now_ms().saturating_sub(row) >= view::EDIT_WINDOW_MS {
+        if view::time::now_ms().saturating_sub(row) >= view::EDIT_WINDOW_MS {
             self.notice("보낸 지 24시간이 지난 메시지는 수정할 수 없습니다");
             return;
         }
         let (mut body, body_ranges) = crate::mention::encode(&text, mentions);
-        if body.len() > view::MAX_LONG_TEXT_BYTES {
+        if body.len() > view::text::MAX_LONG_TEXT_BYTES {
             self.notice("메시지가 너무 깁니다 (최대 64KB)");
             return;
         }
@@ -73,7 +73,7 @@ impl App {
 
     pub(super) async fn delete(&mut self, id: &str) {
         let Some((row, target, _, true, _)) = self.target(id) else { return };
-        if view::now_ms().saturating_sub(row) >= view::EDIT_WINDOW_MS {
+        if view::time::now_ms().saturating_sub(row) >= view::EDIT_WINDOW_MS {
             self.notice("보낸 지 24시간이 지난 메시지는 모두에게서 삭제할 수 없습니다");
             return;
         }
@@ -148,7 +148,7 @@ impl App {
                 return Vec::new();
             }
         };
-        let now = view::now_ms();
+        let now = view::time::now_ms();
         let mut out = Vec::new();
         let mut kept = 0;
         for (target, author, at, expires) in rows {
@@ -176,12 +176,12 @@ impl App {
                 continue;
             };
             let dm = self.latest_edit(&key, &thread, target, by).await.unwrap_or(dm);
-            for u in view::mentioned(&dm) {
+            for u in view::text::mentioned(&dm) {
                 self.name(u).await;
             }
             let sender = if author == self.me { "나".to_string() } else { self.name(author).await };
             let names = &self.names;
-            let text = view::one_line(&dm, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()));
+            let text = view::text::one_line(&dm, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()));
             out.push(PinDto { id: target.to_string(), sender, text });
         }
         out

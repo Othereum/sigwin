@@ -21,7 +21,7 @@ impl App {
             return;
         }
         // presage can't send "online only": stale indicators arrive when a device reconnects
-        let fresh = t.timestamp.is_none_or(|ts| view::now_ms().saturating_sub(ts) < TYPING_TIMEOUT.as_millis() as u64);
+        let fresh = t.timestamp.is_none_or(|ts| view::time::now_ms().saturating_sub(ts) < TYPING_TIMEOUT.as_millis() as u64);
         if t.action == Some(typing_message::Action::Started as i32) && fresh {
             self.typing.insert(who, Instant::now());
         } else {
@@ -82,7 +82,7 @@ impl App {
 
     pub(super) fn send_typing(&self, thread: Thread, started: bool) {
         let Some(mut m) = self.manager.clone() else { return };
-        let ts = view::now_ms();
+        let ts = view::time::now_ms();
         let action = if started { typing_message::Action::Started } else { typing_message::Action::Stopped };
         let group_id = match &thread {
             Thread::Group(k) => Some(group_identifier(k).to_vec()),

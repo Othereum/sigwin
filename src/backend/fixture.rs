@@ -89,7 +89,7 @@ fn incoming(who: u32, ts: u64, body: &str, me: Uuid) -> Content {
 
 /// Our phone telling us it read `who`'s message `ts` (a read sync).
 fn read_sync(who: u32, ts: u64, me: Uuid) -> Content {
-    let at = chrono::DateTime::from_timestamp_millis(view::now_ms() as i64).unwrap_or_default();
+    let at = chrono::DateTime::from_timestamp_millis(view::time::now_ms() as i64).unwrap_or_default();
     let sync = SyncMessage {
         read: vec![presage::proto::sync_message::Read {
             sender_aci: Some(contact(who).to_string()),
@@ -128,7 +128,7 @@ impl App {
         self.persist.pins_indexed = true;
         self.persist.edits_indexed = true;
         self.persist.reactions_indexed = true;
-        self.offline = Some(Offline { sent: Vec::new(), next_ts: view::now_ms() - 2 * 86_400_000 });
+        self.offline = Some(Offline { sent: Vec::new(), next_ts: view::time::now_ms() - 2 * 86_400_000 });
         (self.emit)(Event::Ready);
         self.threads_dirty = true;
         Ok(())

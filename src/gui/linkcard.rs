@@ -29,7 +29,7 @@ fn candidate(ui: &Ui, text: &str) -> Option<String> {
     }
     let (plain, styles) = format::parse(text);
     // the preview would give away what's behind the spoiler
-    if styles.iter().any(|s| s.2 == view::STYLE_SPOILER) {
+    if styles.iter().any(|s| s.2 == view::text::STYLE_SPOILER) {
         return None;
     }
     link::preview_urls(&plain).into_iter().find(|u| !ui.link.dismissed.contains(u))

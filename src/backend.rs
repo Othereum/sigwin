@@ -37,7 +37,8 @@ use crate::types::{
     parse_thread_key, thread_key, Command, Event, Frames, MsgDto, PackDto, Paging, PinDto, Scroll, StickerDto, Thumb, ThreadDto, ANIM_BUDGET,
     STICKER_THUMB_PREFIX,
 };
-use crate::view::{self, Kind, THUMB_MAX};
+use crate::view::media::THUMB_MAX;
+use crate::view::{self, Kind};
 
 pub(crate) mod files;
 pub(crate) mod fixture;
@@ -316,7 +317,7 @@ struct App {
     thumb_gate: Arc<tokio::sync::Semaphore>,
     /// held while downloading a video nobody asked for
     video_gate: Arc<tokio::sync::Semaphore>,
-    long: view::LongTexts,
+    long: view::text::LongTexts,
     pending: Vec<Pending>,
     /// the composer's link preview
     link_draft: Option<LinkDraft>,
@@ -564,7 +565,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit, o
             _ = agetick.tick() => {
                 let mut changed = false;
                 for t in app.threads.iter_mut().filter(|t| t.ts != 0) {
-                    let s = view::time_short(t.ts);
+                    let s = view::time::time_short(t.ts);
                     if s != t.time {
                         t.time = s;
                         changed = true;
@@ -656,7 +657,7 @@ impl App {
             Command::SaveViewed { id, index, owner } => self.save_viewed(&id, index, owner),
             Command::ReadMore(id) => {
                 if let Ok(row) = id.parse::<u64>() {
-                    *self.long.shown.entry(row).or_insert(view::READ_MORE_AT) += view::READ_MORE_STEP;
+                    *self.long.shown.entry(row).or_insert(view::text::READ_MORE_AT) += view::text::READ_MORE_STEP;
                     self.emit_messages(Scroll::Keep).await;
                 }
             }
@@ -884,7 +885,7 @@ impl App {
         let mut state = self.persist.sweep.clone();
         let (att_dir, thumb_dir) = (self.paths.attachments.clone(), self.paths.thumbs.clone());
         tokio::task::spawn_local(async move {
-            let now = view::now_ms();
+            let now = view::time::now_ms();
             let mut changed = Vec::new();
             let threads = index.threads().await.unwrap_or_default();
             for row in threads {

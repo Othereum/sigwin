@@ -86,7 +86,7 @@ impl App {
                     mute: self.mute(&key),
                     prefs: self.prefs(&key),
                     phone_mentions: self.phone_mentions(&key),
-                    time: view::time_short(display_ts),
+                    time: view::time::time_short(display_ts),
                     ts: display_ts,
                     key,
                     name,
@@ -202,29 +202,29 @@ impl App {
         });
     }
 
-    /// `view::snippet` with @mention names resolved.
+    /// `view::text::snippet` with @mention names resolved.
     pub(super) async fn snippet(&mut self, c: &Content) -> Option<String> {
-        for u in view::data_message(c).map(view::mentioned).unwrap_or_default() {
+        for u in view::data_message(c).map(view::text::mentioned).unwrap_or_default() {
             self.name(u).await;
         }
         let names = &self.names;
-        view::snippet(c, self.me, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()))
+        view::text::snippet(c, self.me, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()))
     }
 
     /// `snippet` with the author's newest edit of the message.
     async fn edited_snippet(&mut self, key: &str, thread: &Thread, c: &Content) -> Option<String> {
         let Kind::Msg { outgoing, .. } = view::classify(c, self.me) else { return self.snippet(c).await };
-        if view::snippet(c, self.me, &|_| String::new()).is_none() {
+        if view::text::snippet(c, self.me, &|_| String::new()).is_none() {
             return None;
         }
         let Some(dm) = self.latest_edit(key, thread, c.timestamp(), c.metadata.sender.raw_uuid()).await else {
             return self.snippet(c).await;
         };
-        for u in view::mentioned(&dm) {
+        for u in view::text::mentioned(&dm) {
             self.name(u).await;
         }
         let names = &self.names;
-        Some(view::message_snippet(&dm, outgoing, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())))
+        Some(view::text::message_snippet(&dm, outgoing, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())))
     }
 
     /// What the thread list shows for a thread whose last stored row is now `tail_ts`:
@@ -407,7 +407,7 @@ pub(super) async fn newest_shown(
         let Some(&(oldest, _)) = page.last() else { return Ok(None) };
         let wanted: Vec<(i64, u64)> = page.iter().copied().filter(|r| after.is_none_or(|a| r.0 > a)).collect();
         let mut rows = fetch_rows(index, store, thread, &wanted).await?;
-        if let Some(i) = rows.iter().rposition(|(_, c)| view::snippet(c, me, &|_| String::new()).is_some()) {
+        if let Some(i) = rows.iter().rposition(|(_, c)| view::text::snippet(c, me, &|_| String::new()).is_some()) {
             return Ok(Some(rows.swap_remove(i)));
         }
         if (page.len() as u32) < PAGE || after.is_some_and(|a| oldest <= a) {

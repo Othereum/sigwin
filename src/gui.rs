@@ -141,7 +141,7 @@ thread_local! {
 
 /// The open thread's photo (or initial) in the conversation header, from its thread list row.
 pub(crate) fn header_avatar(app: &AppWindow, ui: &Ui) {
-    let muted = ui.thread_dtos.iter().find(|t| t.key == ui.open_key).is_some_and(|t| t.mute.active(view::now_ms()));
+    let muted = ui.thread_dtos.iter().find(|t| t.key == ui.open_key).is_some_and(|t| t.mute.active(view::time::now_ms()));
     app.set_current_muted(muted);
     let row = (0..slint::Model::row_count(&*ui.threads))
         .filter_map(|i| slint::Model::row_data(&*ui.threads, i))
@@ -169,7 +169,7 @@ pub(crate) fn show_open_unread(app: &AppWindow, ui: &Ui) {
 /// Unread count for the taskbar and tray badges and the window title; chats with notifications off
 /// count only when the setting says so.
 pub(crate) fn show_total_unread(app: &AppWindow, ui: &Ui) {
-    let now = view::now_ms();
+    let now = view::time::now_ms();
     let all = ui.settings.badge_muted;
     let counts = |t: &&ThreadDto| !t.mute.active(now) || t.prefs.badge.unwrap_or(all);
     let counted = ui.thread_dtos.iter().filter(counts);
@@ -297,7 +297,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         }
         Event::Storage { db, attachments, thumbs } => {
             app.global::<SettingsData>().set_storage(
-                format!("메시지 DB {}  ·  첨부파일 {}  ·  썸네일 캐시 {}", view::size_text(db), view::size_text(attachments), view::size_text(thumbs)).into(),
+                format!("메시지 DB {}  ·  첨부파일 {}  ·  썸네일 캐시 {}", view::media::size_text(db), view::media::size_text(attachments), view::media::size_text(thumbs)).into(),
             );
         }
         Event::StickerGrid { pack, items } => stickers::grid_arrived(app, pack, items),

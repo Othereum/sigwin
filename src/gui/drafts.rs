@@ -33,7 +33,7 @@ impl Draft {
     fn preview(&self) -> String {
         if !self.text.trim().is_empty() {
             let (plain, styles) = format::parse(&self.text);
-            return view::mask_spoilers(plain, &styles).trim().replace(['\r', '\n'], " ");
+            return view::text::mask_spoilers(plain, &styles).trim().replace(['\r', '\n'], " ");
         }
         if !self.files.is_empty() {
             "(첨부 파일)".into()
@@ -87,7 +87,7 @@ fn put(ui: &mut Ui, key: &str, mut d: Draft) -> bool {
     match ui.drafts.get(key) {
         Some(old) if old.same_content(&d) => false,
         _ => {
-            d.ts = view::now_ms();
+            d.ts = view::time::now_ms();
             ui.drafts.insert(key.to_string(), d);
             true
         }
@@ -163,7 +163,7 @@ pub(crate) fn show_threads(ui: &Ui) {
                 ts = d.ts;
                 item.draft = true;
                 item.snippet = d.preview().into();
-                item.time = view::time_short(d.ts).into();
+                item.time = view::time::time_short(d.ts).into();
             }
             (ts, item)
         })
@@ -181,7 +181,7 @@ pub(crate) fn refresh_draft_times(ui: &Ui) {
     for i in 0..ui.threads.row_count() {
         let Some(mut row) = ui.threads.row_data(i) else { continue };
         let Some(d) = ui.drafts.get(row.key.as_str()).filter(|_| row.draft) else { continue };
-        let t = view::time_short(d.ts);
+        let t = view::time::time_short(d.ts);
         if row.time.as_str() != t {
             row.time = t.into();
             ui.threads.set_row_data(i, row);

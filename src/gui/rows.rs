@@ -75,7 +75,7 @@ pub(crate) fn refresh_times(ui: &Ui) {
     use slint::Model;
     for (i, m) in ui.last.iter().enumerate().rev().take(100) {
         let Ok(ts) = m.id.parse::<u64>() else { continue };
-        let t = view::bubble_time(ts, &m.time);
+        let t = view::time::bubble_time(ts, &m.time);
         let t = if m.pinned { format!("📌 {t}") } else { t };
         if let Some(mut row) = ui.messages.row_data(i) {
             if row.time.as_str() != t {
@@ -137,10 +137,10 @@ pub(crate) fn font_spans(m: &MsgDto) -> Vec<(std::ops::Range<usize>, SigwinStyle
         .iter()
         .filter_map(|&(s, e, k)| {
             let style = match k {
-                view::STYLE_BOLD => SigwinStyle::Bold,
-                view::STYLE_ITALIC => SigwinStyle::Italic,
-                view::STYLE_STRIKE => SigwinStyle::Strike,
-                view::STYLE_MONO => SigwinStyle::Mono,
+                view::text::STYLE_BOLD => SigwinStyle::Bold,
+                view::text::STYLE_ITALIC => SigwinStyle::Italic,
+                view::text::STYLE_STRIKE => SigwinStyle::Strike,
+                view::text::STYLE_MONO => SigwinStyle::Mono,
                 _ => return None,
             };
             Some((s..e, style))
@@ -153,7 +153,7 @@ pub(crate) fn hidden_spoilers(m: &MsgDto, revealed: &std::collections::HashSet<S
     if m.deleted || revealed.contains(&m.id) {
         return Vec::new();
     }
-    m.styles.iter().filter(|s| s.2 == view::STYLE_SPOILER).map(|&(s, e, _)| (s, e)).collect()
+    m.styles.iter().filter(|s| s.2 == view::text::STYLE_SPOILER).map(|&(s, e, _)| (s, e)).collect()
 }
 
 /// Message text with the @mentions colored, links underlined and spoilers covered. The styled
@@ -292,7 +292,7 @@ pub(crate) fn to_item(
         has_rich,
         rich: if has_rich { rich_text(m, &links, &spoilers, dark) } else { Default::default() },
         time: {
-            let t = m.id.parse::<u64>().map_or(m.time.clone(), |ts| view::bubble_time(ts, &m.time));
+            let t = m.id.parse::<u64>().map_or(m.time.clone(), |ts| view::time::bubble_time(ts, &m.time));
             if m.pinned { format!("📌 {t}").into() } else { t.into() }
         },
         outgoing: m.outgoing,
@@ -353,7 +353,7 @@ pub(crate) fn thread_item(t: &ThreadDto, avatars: &HashMap<String, Image>) -> Th
         color: tint(&t.key),
         is_group: t.is_group,
         draft: false,
-        muted: t.mute.active(view::now_ms()),
+        muted: t.mute.active(view::time::now_ms()),
     }
 }
 

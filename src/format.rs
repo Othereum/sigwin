@@ -8,7 +8,7 @@
 //! parsed inside `` ` ``. A backslash before a marker that would open a span keeps it literal.
 //! Unmatched markers stay as typed.
 
-use crate::view::{STYLE_BOLD, STYLE_ITALIC, STYLE_MONO, STYLE_SPOILER, STYLE_STRIKE};
+use crate::view::text::{STYLE_BOLD, STYLE_ITALIC, STYLE_MONO, STYLE_SPOILER, STYLE_STRIKE};
 
 /// Marker of each style, longest first where they share a prefix.
 const MARKERS: [(&str, u8); 5] =

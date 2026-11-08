@@ -91,7 +91,7 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let Some(mute) = UI.with_borrow(|ui| ui.thread_dtos.iter().find(|t| t.key == key.as_str()).map(|t| t.mute)) else {
             return;
         };
-        let now = view::now_ms();
+        let now = view::time::now_ms();
         let d = app.global::<ThreadMenuData>();
         d.set_status(if mute.active(now) { types::mute_text(mute.until, now).into() } else { SharedString::new() });
         d.set_overridden(mute.overridden);
@@ -170,7 +170,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     app.on_clamp_draft(move |text| {
         let mut prev = prev.borrow_mut();
-        let Some((fit, cursor)) = crate::view::fit_edit(&prev, &text, crate::view::MAX_LONG_TEXT_BYTES) else {
+        let Some((fit, cursor)) = crate::view::text::fit_edit(&prev, &text, crate::view::text::MAX_LONG_TEXT_BYTES) else {
             *prev = text.to_string();
             return -1;
         };
@@ -202,7 +202,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let Some(app) = weak.upgrade() else { return };
         // before anything is cleared: the text stays in the composer to shorten
         // (mentions and format markers only shrink it, so this never refuses what would fit)
-        if text.len() > crate::view::MAX_LONG_TEXT_BYTES {
+        if text.len() > crate::view::text::MAX_LONG_TEXT_BYTES {
             rfd::MessageDialog::new()
                 .set_level(rfd::MessageLevel::Warning)
                 .set_title("메시지가 너무 깁니다")
@@ -389,7 +389,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             let body = if m.text.is_empty() {
                 m.attachment.clone()
             } else {
-                view::mask_spoilers(m.text.clone(), &m.styles).replace('\n', " ")
+                view::text::mask_spoilers(m.text.clone(), &m.styles).replace('\n', " ")
             };
             Some(if who.is_empty() { body } else { format!("{who}: {body}") })
         });

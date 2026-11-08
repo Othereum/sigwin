@@ -273,16 +273,16 @@ impl App {
     /// Periodic work: coalesces bursts of incoming messages into one UI update.
     pub(super) async fn flush(&mut self) {
         self.notes.tick(self.focused);
-        if self.next_expiry.is_some_and(|t| t <= view::now_ms()) {
+        if self.next_expiry.is_some_and(|t| t <= view::time::now_ms()) {
             self.next_expiry = None;
             self.current_dirty = true;
             self.sweep();
         }
-        if self.pin_expiry.is_some_and(|t| t <= view::now_ms()) {
+        if self.pin_expiry.is_some_and(|t| t <= view::time::now_ms()) {
             self.pin_expiry = None;
             self.current_dirty = true;
         }
-        if self.mute_due.is_some_and(|t| t <= view::now_ms()) {
+        if self.mute_due.is_some_and(|t| t <= view::time::now_ms()) {
             self.mute_due = None;
             self.expire_mutes();
         }

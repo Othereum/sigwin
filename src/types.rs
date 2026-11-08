@@ -129,7 +129,7 @@ pub fn mute_text(until: u64, now: u64) -> String {
     } else if until >= i64::MAX as u64 || until - now > 100 * 365 * 86_400_000 {
         "알림 꺼짐".into()
     } else {
-        format!("{}까지 알림 꺼짐", crate::view::time_until(until))
+        format!("{}까지 알림 꺼짐", crate::view::time::time_until(until))
     }
 }
 
@@ -228,7 +228,7 @@ pub struct MsgDto {
     pub can_delete: bool,
     /// "@name" byte ranges in `text` (drawn highlighted) and who they mention (ACI uuid)
     pub mentions: Vec<(usize, usize, String)>,
-    /// text style byte ranges in `text`: (start, end, `view::STYLE_*`)
+    /// text style byte ranges in `text`: (start, end, `view::text::STYLE_*`)
     pub styles: Vec<(usize, usize, u8)>,
     /// pinned in this thread (a pin marker next to the time)
     pub pinned: bool,

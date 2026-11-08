@@ -3,6 +3,7 @@ paths:
   - src/backend.rs
   - src/backend/**
   - src/view.rs
+  - src/view/**
   - src/db.rs
   - src/types.rs
   - src/avatar.rs

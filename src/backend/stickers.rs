@@ -135,7 +135,7 @@ impl App {
         tokio::task::spawn_blocking(move || {
             let started = std::time::Instant::now();
             let f = match sigwin_vault::read(&path) {
-                Ok(bytes) => Frames::decode(key, &bytes, view::STICKER_SIZE, ANIM_BUDGET / 2),
+                Ok(bytes) => Frames::decode(key, &bytes, view::media::STICKER_SIZE, ANIM_BUDGET / 2),
                 Err(_) => Frames::still(key),
             };
             debug!(ms = started.elapsed().as_millis() as u64, frames = f.frames.len(), "sticker frames");
@@ -234,7 +234,7 @@ impl App {
         let emit = self.emit.clone();
         tokio::task::spawn_blocking(move || {
             let img = sigwin_thumb::decode(&bytes).map(|i| {
-                sigwin_thumb::fit(sigwin_thumb::to_rgba(&i), crate::types::physical_px(view::STICKER_SIZE))
+                sigwin_thumb::fit(sigwin_thumb::to_rgba(&i), crate::types::physical_px(view::media::STICKER_SIZE))
             });
             if let Ok(rgba) = img {
                 let t = Thumb { key: image_key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() };
@@ -318,7 +318,7 @@ pub(super) async fn send_sticker_task(
         .pop()
         .context("upload returned nothing")??;
     // keep a local copy so our own sticker renders without downloading it back
-    let path = attachment_path(&attachments_dir, &view::attachment_key(&ptr, ts, 99));
+    let path = attachment_path(&attachments_dir, &view::media::attachment_key(&ptr, ts, 99));
     if let Err(e) = sigwin_vault::write(&path, &s.bytes) {
         warn!("save sticker: {e}");
     }

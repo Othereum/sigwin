@@ -110,8 +110,8 @@ async fn fetch(url: String, key: String) -> Option<(Fetched, Vec<Thumb>)> {
     let res = tokio::time::timeout(FETCH_TIMEOUT, previews::generate_preview_from_url(url.as_str(), &client)).await;
     debug!(ms = started.elapsed().as_millis() as u64, ok = matches!(res, Ok(Ok(_))), "link preview fetched");
     let mut content = res.ok()?.ok()?;
-    let title = content.title.as_deref().map(|t| link::clean_preview_text(t, view::LINK_TITLE_MAX)).filter(|t| !t.is_empty())?;
-    let description = content.description.as_deref().map(|d| link::clean_preview_text(d, view::LINK_DESC_MAX)).unwrap_or_default();
+    let title = content.title.as_deref().map(|t| link::clean_preview_text(t, view::media::LINK_TITLE_MAX)).filter(|t| !t.is_empty())?;
+    let description = content.description.as_deref().map(|d| link::clean_preview_text(d, view::media::LINK_DESC_MAX)).unwrap_or_default();
     content.title = Some(title.clone());
     content.description = (!description.is_empty()).then(|| description.clone());
 
@@ -145,9 +145,9 @@ async fn fetch(url: String, key: String) -> Option<(Fetched, Vec<Thumb>)> {
 /// The image's size, its size on the card, and thumbnails for the card and the composer.
 fn card_images(bytes: &[u8], key: &str) -> Option<((u32, u32), (u32, u32), Vec<Thumb>)> {
     let dims = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
-    let img = sigwin_thumb::decode_thumb(bytes, view::PHOTO_THUMB_MAX).ok()?;
+    let img = sigwin_thumb::decode_thumb(bytes, view::media::PHOTO_THUMB_MAX).ok()?;
     let rgba = sigwin_thumb::to_rgba(&img);
-    let size = view::link_image_size(Some(dims.0), Some(dims.1));
+    let size = view::media::link_image_size(Some(dims.0), Some(dims.1));
     let small = crate::types::physical_px(COMPOSER_IMAGE);
     let thumb = |key: String, w, h| {
         let cell = sigwin_thumb::cover(&rgba, w, h);
@@ -199,7 +199,7 @@ async fn upload_image(m: &Mgr, f: &Fetched, ts: u64, attachments_dir: &Path) -> 
             return None;
         }
     };
-    let key = view::attachment_key(&ptr, ts, view::LINK_IMAGE_INDEX);
+    let key = view::media::attachment_key(&ptr, ts, view::media::LINK_IMAGE_INDEX);
     if let Err(e) = sigwin_vault::write(&attachment_path(attachments_dir, &key), &data) {
         warn!("cache link preview image: {e}");
     }
@@ -215,6 +215,6 @@ mod tests {
         let p = no_preview();
         assert_eq!(p.url.as_deref(), Some(""));
         let dm = DataMessage { body: Some("https://www.youtube.com/watch?v=x".into()), preview: vec![p], ..Default::default() };
-        assert!(view::link_card(&dm, 1).is_none());
+        assert!(view::media::link_card(&dm, 1).is_none());
     }
 }

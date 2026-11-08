@@ -26,7 +26,7 @@ impl App {
             if !thumb_path.exists() {
                 if !orig_path.exists() {
                     labelled = true;
-                    emit(Event::MediaLabel { key: key.clone(), label: view::undownloaded_label(&ptr) });
+                    emit(Event::MediaLabel { key: key.clone(), label: view::media::undownloaded_label(&ptr) });
                     let Some(m) = manager else { return };
                     match m.get_attachment(&ptr).await {
                         Ok(data) => {
@@ -84,13 +84,13 @@ impl App {
                     emit(Event::Thumb(Arc::new(t)));
                 }
                 if !orig_path.exists() {
-                    emit(Event::MediaLabel { key: key.clone(), label: view::undownloaded_label(&ptr) });
+                    emit(Event::MediaLabel { key: key.clone(), label: view::media::undownloaded_label(&ptr) });
                 }
                 if no_frame.exists() {
                     return;
                 }
                 if !orig_path.exists() {
-                    if !view::auto_fetches_video(&ptr) {
+                    if !view::media::auto_fetches_video(&ptr) {
                         return;
                     }
                     let _turn = fetch_gate.acquire_owned().await;
@@ -131,7 +131,7 @@ impl App {
                 emit_done(Event::Thumb(Arc::new(t)));
                 // the picture doesn't wait for this: a thumbnail cached before lengths were kept
                 // has to read its video again
-                let text = view::length_text(video_length(&length_path, &orig_path));
+                let text = view::media::length_text(video_length(&length_path, &orig_path));
                 // having the frame doesn't mean having the video
                 let undownloaded = !orig_path.exists();
                 emit_done(Event::MediaLabel { key: k, label: crate::types::MediaLabel { text, undownloaded, progress: None } });
@@ -158,8 +158,8 @@ impl App {
     /// user may be doing something else by then, and it would take the focus and start making noise.
     pub(super) fn open_video(&self, id: &str, index: usize) {
         let Some((ts, dm)) = self.row_message(id) else { return };
-        let Some((i, a)) = view::shown_attachments(dm).filter(|(_, a)| view::is_video(a)).nth(index) else { return };
-        let file_key = view::attachment_key(a, ts, i);
+        let Some((i, a)) = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_video(a)).nth(index) else { return };
+        let file_key = view::media::attachment_key(a, ts, i);
         if self.video_downloads.stop(&file_key) {
             return;
         }
@@ -226,7 +226,7 @@ impl App {
             };
             match data {
                 Ok(d) => {
-                    let text = view::trim_body(&String::from_utf8_lossy(&d), view::MAX_LONG_TEXT_BYTES).to_string();
+                    let text = view::text::trim_body(&String::from_utf8_lossy(&d), view::text::MAX_LONG_TEXT_BYTES).to_string();
                     let _ = tx.send(Internal::LongText(key, text));
                 }
                 Err(e) => {
@@ -240,9 +240,9 @@ impl App {
     /// The message's file line: its images have their own place, in the row and the viewer.
     pub(super) fn open_attachment(&self, id: &str) {
         let Some((ts, dm)) = self.row_message(id) else { return };
-        let jobs: Vec<(PathBuf, AttachmentPointer)> = view::shown_attachments(dm)
-            .filter(|(_, a)| !view::is_media(a))
-            .map(|(i, a)| (attachment_path(&self.paths.attachments, &view::attachment_key(a, ts, i)), a.clone()))
+        let jobs: Vec<(PathBuf, AttachmentPointer)> = view::media::shown_attachments(dm)
+            .filter(|(_, a)| !view::media::is_media(a))
+            .map(|(i, a)| (attachment_path(&self.paths.attachments, &view::media::attachment_key(a, ts, i)), a.clone()))
             .collect();
         let manager = self.manager.clone();
         let tx = self.tx.clone();
@@ -270,14 +270,14 @@ impl App {
     /// Image `index` of row `id`: cache path and pointer.
     fn viewed(&self, id: &str, index: usize) -> Option<(PathBuf, AttachmentPointer)> {
         let (ts, dm) = self.row_message(id)?;
-        let (i, a) = view::shown_attachments(dm).filter(|(_, a)| view::is_image(a)).nth(index)?;
-        Some((attachment_path(&self.paths.attachments, &view::attachment_key(a, ts, i)), a.clone()))
+        let (i, a) = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a)).nth(index)?;
+        Some((attachment_path(&self.paths.attachments, &view::media::attachment_key(a, ts, i)), a.clone()))
     }
 
     pub(super) fn view_image(&self, id: &str, index: usize, fit: (u32, u32), from_file: bool) {
         let Some((_, dm)) = self.row_message(id) else { return };
-        let shown = view::shown_attachments(dm).count();
-        let count = view::shown_attachments(dm).filter(|(_, a)| view::is_image(a)).count();
+        let shown = view::media::shown_attachments(dm).count();
+        let count = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a)).count();
         if count == 0 || (from_file && count != shown) {
             return self.open_attachment(id);
         }
@@ -322,8 +322,8 @@ impl App {
     /// viewed.
     pub(super) fn viewer_thumbs(&self, id: &str, px: u32) {
         let Some((ts, dm)) = self.row_message(id) else { return };
-        let images = view::shown_attachments(dm).filter(|(_, a)| view::is_image(a));
-        let jobs: Vec<(String, AttachmentPointer)> = images.map(|(i, a)| (view::attachment_key(a, ts, i), a.clone())).collect();
+        let images = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a));
+        let jobs: Vec<(String, AttachmentPointer)> = images.map(|(i, a)| (view::media::attachment_key(a, ts, i), a.clone())).collect();
         let id = id.to_string();
         let manager = self.manager.clone();
         let emit = self.emit.clone();
@@ -425,14 +425,14 @@ impl VideoDownloads {
                 emit(Event::MediaLabel { key: key.clone(), label: label.clone() });
             }
         };
-        show(view::downloading_label(ptr, 0, 0));
-        let res = Abortable::new(download(ptr, |got, percent| show(view::downloading_label(ptr, got, percent))), registration).await;
+        show(view::media::downloading_label(ptr, 0, 0));
+        let res = Abortable::new(download(ptr, |got, percent| show(view::media::downloading_label(ptr, got, percent))), registration).await;
         // a stopped one is already out of the list, and a new one may have taken its place
         if !handle.is_aborted() {
             self.running.borrow_mut().remove(file_key);
         }
         if !matches!(res, Ok(Ok(_))) {
-            show(view::undownloaded_label(ptr));
+            show(view::media::undownloaded_label(ptr));
         }
         match res {
             Ok(res) => res.map(Some),
@@ -527,11 +527,11 @@ async fn open_outside(tx: &UnboundedSender<Internal>, path: PathBuf, open_dir: &
 /// Downloaded attachments and thumbnails of an expired message.
 pub(super) fn remove_files(c: &Content, ts: u64, attachments: &Path, thumbs: &Path) {
     let Some(dm) = view::data_message(c) else { return };
-    let mut keys: Vec<String> = dm.attachments.iter().enumerate().map(|(i, a)| view::attachment_key(a, ts, i)).collect();
+    let mut keys: Vec<String> = dm.attachments.iter().enumerate().map(|(i, a)| view::media::attachment_key(a, ts, i)).collect();
     if let Some(data) = dm.sticker.as_ref().and_then(|s| s.data.as_ref()) {
-        keys.push(view::attachment_key(data, ts, 99));
+        keys.push(view::media::attachment_key(data, ts, 99));
     }
-    keys.extend(dm.preview.iter().filter_map(|p| p.image.as_ref()).map(|a| view::attachment_key(a, ts, view::LINK_IMAGE_INDEX)));
+    keys.extend(dm.preview.iter().filter_map(|p| p.image.as_ref()).map(|a| view::media::attachment_key(a, ts, view::media::LINK_IMAGE_INDEX)));
     for k in keys {
         let _ = std::fs::remove_file(attachment_path(attachments, &k));
         let _ = std::fs::remove_file(thumbs.join(format!("{k}.enc")));
@@ -619,7 +619,7 @@ fn make_shaped_thumb(key: &str, orig: &Path, thumb: &Path, shape: ThumbShape) ->
 }
 
 pub(super) fn make_thumb(key: &str, orig: &Path, thumb: &Path, fit: u32) -> anyhow::Result<Thumb> {
-    make_thumb_from(key, || Ok(sigwin_vault::read(orig)?), view::PHOTO_THUMB_MAX, thumb, fit)
+    make_thumb_from(key, || Ok(sigwin_vault::read(orig)?), view::media::PHOTO_THUMB_MAX, thumb, fit)
 }
 
 /// A cached (encrypted) PNG.

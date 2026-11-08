@@ -126,7 +126,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             // off on the phone (forever / for a while), and off in Sigwin only
             mute: match i {
                 3 => Mute { until: i64::MAX as u64, overridden: false, phone: i64::MAX as u64 },
-                5 => Mute { until: view::now_ms() + 2 * 3_600_000, overridden: false, phone: view::now_ms() + 2 * 3_600_000 },
+                5 => Mute { until: view::time::now_ms() + 2 * 3_600_000, overridden: false, phone: view::time::now_ms() + 2 * 3_600_000 },
                 10 => Mute { until: MUTE_ALWAYS, overridden: true, phone: 0 },
                 _ => Mute::default(),
             },
@@ -234,11 +234,11 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             let (s, e) = at(w);
             m.styles.push((s, e, k));
         };
-        st("굵게", view::STYLE_BOLD);
-        st("기울임", view::STYLE_ITALIC);
-        st("취소선", view::STYLE_STRIKE);
-        st("스포일러 내용", view::STYLE_SPOILER);
-        st("mono(iiWW)", view::STYLE_MONO);
+        st("굵게", view::text::STYLE_BOLD);
+        st("기울임", view::text::STYLE_ITALIC);
+        st("취소선", view::text::STYLE_STRIKE);
+        st("스포일러 내용", view::text::STYLE_SPOILER);
+        st("mono(iiWW)", view::text::STYLE_MONO);
     }
     emit(Event::Ready);
     emit(Event::Threads(threads.clone()));
@@ -317,7 +317,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             m.quote_author.clear();
             m.attachment = if count == 5 { "보고서.pdf".into() } else { String::new() };
             m.text = if count == 3 { "사진 설명이 함께 있는 메시지".into() } else { String::new() };
-            view::set_photo_grid(m, count, |n, _, _| format!("demo-grid-{count}-{n}"));
+            view::media::set_photo_grid(m, count, |n, _, _| format!("demo-grid-{count}-{n}"));
         }
     }
     if reload {
@@ -583,7 +583,7 @@ fn demo_link_fetch(emit: &backend::Emit, url: &str) {
 /// `App::set_mute` on the demo list.
 fn demo_mute(threads: &mut [ThreadDto], key: &str, set: MuteSet) {
     let Some(t) = threads.iter_mut().find(|t| t.key == key) else { return };
-    let now = view::now_ms();
+    let now = view::time::now_ms();
     let phone = t.mute.phone;
     let own = match set {
         MuteSet::Phone => None,
@@ -827,7 +827,7 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
         return;
     }
     let (key, fit) = match c {
-        Command::StickerFrames(k) => (k.clone(), view::STICKER_SIZE),
+        Command::StickerFrames(k) => (k.clone(), view::media::STICKER_SIZE),
         Command::PickerFrames { pack, id } => (format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX), 72),
         _ => return,
     };
@@ -865,7 +865,7 @@ fn demo_video_rows(items: &mut [types::MsgDto]) {
         m.attachment.clear();
         m.text = if n == 1 { "동영상 설명이 함께 있는 메시지".into() } else { String::new() };
         if n == 3 {
-            view::set_photo_grid(m, 3, |i, _, _| format!("demo-video-grid-{i}"));
+            view::media::set_photo_grid(m, 3, |i, _, _| format!("demo-video-grid-{i}"));
             m.cells[0].video = true;
             m.cells[2].video = true;
         } else {
@@ -910,7 +910,7 @@ fn demo_videos(emit: &backend::Emit) {
         None => (image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([(x * 255 / w) as u8, (y * 255 / h) as u8, 120, 255])), 75),
     };
     thumb("demo-video-0".into(), frame);
-    label("demo-video-0", &view::length_text(seconds), false);
+    label("demo-video-0", &view::media::length_text(seconds), false);
 }
 
 /// A real video's frame, by the way real ones go: encrypted on disk, through the decoding child.
@@ -941,7 +941,7 @@ fn demo_grids(emit: &backend::Emit) {
     for count in DEMO_GRIDS {
         let mut row = types::MsgDto::default();
         let mut cells = Vec::new();
-        view::set_photo_grid(&mut row, count, |n, w, h| {
+        view::media::set_photo_grid(&mut row, count, |n, w, h| {
             cells.push((n, w, h));
             format!("demo-grid-{count}-{n}")
         });

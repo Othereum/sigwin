@@ -57,7 +57,7 @@ impl App {
         let p = self.prefs(key);
         let (mentions, replies) = crate::settings::muted_exceptions();
         Notify {
-            muted: self.mute(key).active(view::now_ms()),
+            muted: self.mute(key).active(view::time::now_ms()),
             preview: crate::settings::preview().map(|global| p.preview.unwrap_or(global)),
             sound: p.sound.unwrap_or_else(crate::settings::sound),
             mentions: p.mentions.or(self.phone_mentions(key)).unwrap_or(mentions),
@@ -88,7 +88,7 @@ impl App {
     }
 
     pub(super) fn set_mute(&mut self, key: &str, set: MuteSet) {
-        let now = view::now_ms();
+        let now = view::time::now_ms();
         let phone_on = self.persist.mute_phone.get(key).is_none_or(|&u| u <= now);
         let until = match set {
             MuteSet::Phone => None,
@@ -109,7 +109,7 @@ impl App {
 
     /// Sigwin's choices that ran out go back to the phone's; called when one is due.
     pub(super) fn expire_mutes(&mut self) {
-        let now = view::now_ms();
+        let now = view::time::now_ms();
         let before = self.persist.mute_override.len();
         self.persist.mute_override.retain(|_, u| *u == 0 || *u > now);
         if self.persist.mute_override.len() != before {
@@ -120,7 +120,7 @@ impl App {
 
     /// The next moment a listed thread's state changes by itself.
     pub(super) fn next_mute_change(&self) -> Option<u64> {
-        let now = view::now_ms();
+        let now = view::time::now_ms();
         let phone = self.persist.mute_phone.values();
         let own = self.persist.mute_override.values();
         phone.chain(own).copied().filter(|&u| u > now && u < i64::MAX as u64).min()
@@ -224,8 +224,8 @@ async fn read_phone_mutes(store: &SqliteStore, reg: &RegistrationData, known: u6
 /// Whether a message gets through to a thread with notifications off: @mentions of us and
 /// replies to our messages do, if the thread's settings say so (Signal's defaults: both).
 pub(super) fn breaks_mute(dm: &DataMessage, me: Uuid, mentions: bool, replies: bool) -> bool {
-    let mentioned = || dm.body_ranges.iter().filter_map(view::mention_uuid).any(|u| u == me);
-    let replied = || dm.quote.as_ref().and_then(view::quote_author) == Some(me);
+    let mentioned = || dm.body_ranges.iter().filter_map(view::text::mention_uuid).any(|u| u == me);
+    let replied = || dm.quote.as_ref().and_then(view::text::quote_author) == Some(me);
     (mentions && mentioned()) || (replies && replied())
 }
 

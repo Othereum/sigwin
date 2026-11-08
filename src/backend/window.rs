@@ -460,7 +460,7 @@ impl App {
         senders.extend(open.members.iter().copied());
         senders.extend(indexed.status.values().flat_map(|m| m.keys().copied()));
         let mentioned: Vec<Uuid> =
-            open.window.iter().filter_map(|(_, c)| view::data_message(c)).flat_map(view::mentioned).collect();
+            open.window.iter().filter_map(|(_, c)| view::data_message(c)).flat_map(view::text::mentioned).collect();
         senders.sort();
         senders.dedup();
         for s in mentioned {
@@ -571,7 +571,7 @@ impl App {
         // newest first: videos take turns, and the newest are the ones on screen
         for c in built.wanted_cells.into_iter().rev() {
             if self.thumbs_requested.borrow_mut().insert(c.key.clone()) {
-                if view::is_video(&c.ptr) {
+                if view::media::is_video(&c.ptr) {
                     self.request_video_thumb(c.key, c.file_key, c.ptr, c.size);
                 } else {
                     self.request_thumb(c.key, c.file_key, c.ptr, ThumbShape::Cover(c.size.0, c.size.1));
@@ -611,7 +611,7 @@ impl App {
         }
         if let Ok(Some((t, _))) = self.store.expire_timer(thread).await {
             if t > 0 {
-                parts.push(format!("사라지는 메시지 {}", view::timer_label(t)));
+                parts.push(format!("사라지는 메시지 {}", view::time::timer_label(t)));
             }
         }
         (self.emit)(Event::Header { name, sub: parts.join(" · ") });

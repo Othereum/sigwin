@@ -75,7 +75,10 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/videoframe.rs` | a video's first frame, decoded by Media Foundation in a child process |
 | `src/backend/mute.rs` | per-thread notification settings, the phone's values from the Storage Service |
 | `src/backend/notify.rs` | when notifications show and go away, after Signal Desktop |
-| `src/view.rs` | stored content → message rows: reactions, edits, receipts, day separators, snippets |
+| `src/view.rs` | stored content → message rows: what a content is, folding reactions, edits and receipts in, day separators, optimistic row changes |
+| `src/view/text.rs` | message text: long messages, mentions and styles, "더 읽기", snippets |
+| `src/view/media.rs` | attachments, stickers and link previews on a row: labels, photo grid, sizes on screen |
+| `src/view/time.rs` | times and durations as the UI says them |
 | `src/db.rs` | own SQL on presage's DB: thread list, paging in display order, `ls_*` tables and migrations |
 | `src/avatar.rs` | profile and group photos: fetch, crop round, cache |
 | `src/secret.rs` | the DB key, DPAPI-protected |

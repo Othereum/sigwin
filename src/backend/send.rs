@@ -36,13 +36,13 @@ impl App {
                     .text
                     .as_deref()
                     .filter(|t| !t.is_empty())
-                    .map(|t| view::with_mentions(t, &q.body_ranges, &name_of))
+                    .map(|t| view::text::with_mentions(t, &q.body_ranges, &name_of))
                     .unwrap_or_else(|| "(첨부파일)".into());
-                (label, view::quote_author_name(q, self.me, &name_of))
+                (label, view::text::quote_author_name(q, self.me, &name_of))
             })
             .unwrap_or_default();
         let (body, body_ranges) = crate::mention::encode(&text, &mentions);
-        if body.len() > view::MAX_LONG_TEXT_BYTES {
+        if body.len() > view::text::MAX_LONG_TEXT_BYTES {
             self.notice("메시지가 너무 깁니다 (최대 64KB)");
             return;
         }
@@ -52,7 +52,7 @@ impl App {
         // the same line the stored row gets, so it doesn't change when the send ends
         let attachment = files.first().map_or(String::new(), |first| {
             let bytes = files.iter().map(|f| std::fs::metadata(f).ok().map(|m| m.len())).sum();
-            view::file_line(&file_label(first), files.len() - 1, bytes)
+            view::media::file_line(&file_label(first), files.len() - 1, bytes)
         });
         self.pending.push(Pending {
             ts,
@@ -310,12 +310,12 @@ async fn read_facts(path: &Path, read: fn(&Path) -> anyhow::Result<Facts>) -> Fa
 /// `text/x-signal-plain` attachment (first in the list, as Signal Desktop sends it). The text is
 /// cached right away, so our own copy shows in full without downloading it back.
 pub(super) async fn long_body(m: &mut Mgr, body: &mut String, attachments_dir: &Path) -> anyhow::Result<Option<AttachmentPointer>> {
-    if body.len() <= view::MAX_BODY_BYTES {
+    if body.len() <= view::text::MAX_BODY_BYTES {
         return Ok(None);
     }
     let data = body.as_bytes().to_vec();
     let spec = AttachmentSpec {
-        content_type: view::LONG_TEXT.into(),
+        content_type: view::text::LONG_TEXT.into(),
         length: data.len(),
         file_name: None,
         preview: None,
@@ -327,11 +327,11 @@ pub(super) async fn long_body(m: &mut Mgr, body: &mut String, attachments_dir: &
         blur_hash: None,
     };
     let ptr = m.upload_attachments(vec![(spec, data.clone())]).await?.into_iter().next().context("no upload result")??;
-    let path = super::files::attachment_path(attachments_dir, &view::attachment_key(&ptr, 0, 0));
+    let path = super::files::attachment_path(attachments_dir, &view::media::attachment_key(&ptr, 0, 0));
     if let Err(e) = sigwin_vault::write(&path, &data) {
         warn!("cache long text: {e}");
     }
-    *body = view::trim_body(body, view::MAX_BODY_BYTES).to_string();
+    *body = view::text::trim_body(body, view::text::MAX_BODY_BYTES).to_string();
     Ok(Some(ptr))
 }
 
@@ -349,8 +349,8 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     m.link = p.link.clone();
     if !p.image_key.is_empty() {
         m.image_key = p.image_key.clone();
-        m.img_w = view::STICKER_SIZE;
-        m.img_h = view::STICKER_SIZE;
+        m.img_w = view::media::STICKER_SIZE;
+        m.img_h = view::media::STICKER_SIZE;
         m.sticker = true;
     }
     m.big_emoji = !m.sticker

@@ -93,7 +93,7 @@ fn run_child(feed: impl FnOnce(ChildStdin) -> std::io::Result<()>) -> anyhow::Re
     let stdout = child.stdout.take().context("decoder stdout")?;
     // the child reads all of it before it writes anything. A child that died breaks the pipe.
     let fed = feed(stdin);
-    let max = crate::view::PHOTO_THUMB_MAX as u64;
+    let max = crate::view::media::PHOTO_THUMB_MAX as u64;
     let mut out = Vec::new();
     let read = stdout.take(HEADER as u64 + max * max * 4).read_to_end(&mut out);
     let _ = child.kill();
@@ -129,7 +129,7 @@ fn decode(data: Vec<u8>) -> Option<Decoded> {
     let (img, rotation, seconds) = mf::first_frame(data)?;
     let (w, h) = img.dimensions();
     let size = if matches!(rotation, 90 | 270) { (h, w) } else { (w, h) };
-    Some(Decoded { frame: sigwin_thumb::rotated(sigwin_thumb::downscale(img, crate::view::PHOTO_THUMB_MAX), rotation), size, seconds })
+    Some(Decoded { frame: sigwin_thumb::rotated(sigwin_thumb::downscale(img, crate::view::media::PHOTO_THUMB_MAX), rotation), size, seconds })
 }
 
 #[cfg(not(windows))]
