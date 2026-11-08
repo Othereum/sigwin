@@ -67,6 +67,7 @@ pub(crate) fn show_settings(app: &AppWindow, s: &settings::Settings) {
     d.set_zoom(settings::ZOOMS.iter().position(|&z| z == s.zoom).unwrap_or(1) as i32);
     d.set_enter_sends(s.enter_sends);
     d.set_link_previews(s.link_previews);
+    d.set_photo_quality(s.photo_quality as i32);
     d.set_autostart(s.autostart);
     d.set_start_hidden(s.start_hidden);
     d.set_auto_update(s.auto_update);

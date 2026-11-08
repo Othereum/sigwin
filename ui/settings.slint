@@ -68,6 +68,7 @@ export global SettingsData {
     in-out property <int> zoom: 1;
     in-out property <bool> enter-sends: true;
     in-out property <bool> link-previews: true;
+    in-out property <int> photo-quality: 0;
     in-out property <bool> autostart;
     in-out property <bool> start-hidden: true;
     in-out property <bool> auto-update: true;
@@ -288,6 +289,18 @@ export component SettingsPage inherits Rectangle {
                                 current: SettingsData.enter-sends ? 0 : 1;
                                 changed(i) => {
                                     SettingsData.enter-sends = i == 0;
+                                    SettingsData.changed();
+                                }
+                            }
+                        }
+                        SettingRow {
+                            label: "사진 전송 품질";
+                            hint: ["사진을 줄여서 보냅니다. 위치 같은 정보는 지워집니다.", "큰 해상도로 보냅니다. 위치 같은 정보는 지워집니다."][SettingsData.photo-quality];
+                            Segmented {
+                                options: ["표준", "높음"];
+                                current: SettingsData.photo-quality;
+                                changed(i) => {
+                                    SettingsData.photo-quality = i;
                                     SettingsData.changed();
                                 }
                             }

@@ -2,6 +2,8 @@
 //! main crate at opt-level 0 (slint's generated code), and generic/inlined pixel code is compiled
 //! in the crate that calls it: unoptimized, a 260px Lanczos resample took ~37ms instead of ~1ms.
 
+pub mod photo;
+
 pub use image::{DynamicImage, ImageResult, RgbaImage};
 
 /// Pixels ready for the UI. Filled here because their code is generic too.

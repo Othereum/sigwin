@@ -649,7 +649,7 @@ impl App {
                     warn!("unread button: {e:#}");
                 }
             }
-            Command::Send { text, files, quote, mentions, link } => self.send(text, files, quote, mentions, link).await,
+            Command::Send { text, files, quote, mentions, link, quality } => self.send(text, files, quote, mentions, link, quality).await,
             Command::ViewImage { id, index, fit, from_file } => self.view_image(&id, index, fit, from_file),
             Command::OpenVideo { id, index } => self.open_video(&id, index),
             Command::ViewerThumbs { id, px } => self.viewer_thumbs(&id, px),

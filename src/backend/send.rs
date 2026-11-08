@@ -1,9 +1,10 @@
 //! Sending messages and attachments; pending rows until presage saves them.
 
 use super::*;
+use sigwin_thumb::photo::{self, Quality};
 
 impl App {
-    pub(super) async fn send(&mut self, text: String, files: Vec<PathBuf>, quote_id: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String>) {
+    pub(super) async fn send(&mut self, text: String, files: Vec<PathBuf>, quote_id: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String>, quality: Quality) {
         let link = self.link_for_send(link);
         if self.manager.is_none() {
             return;
@@ -81,7 +82,7 @@ impl App {
             link: link.card(),
             error: None,
             after_seq: None,
-            job: SendJob::Text { body, body_ranges, files, quote, link },
+            job: SendJob::Text { body, body_ranges, files, quote, link, quality },
         });
         self.emit_messages(Scroll::Bottom).await;
         self.start_send(ts).await;
@@ -181,7 +182,7 @@ impl App {
 /// What a pending row sends.
 #[derive(Clone)]
 pub(super) enum SendJob {
-    Text { body: String, body_ranges: Vec<BodyRange>, files: Vec<PathBuf>, quote: Option<Quote>, link: LinkSend },
+    Text { body: String, body_ranges: Vec<BodyRange>, files: Vec<PathBuf>, quote: Option<Quote>, link: LinkSend, quality: Quality },
     Sticker(StickerSend),
 }
 
@@ -210,8 +211,8 @@ async fn send_job(m: Mgr, thread: Thread, job: SendJob, group_revision: u32, ts:
     let mut tries = 0;
     loop {
         let res = match job.clone() {
-            SendJob::Text { body, body_ranges, files, quote, link } => {
-                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, link, group_revision, ts, dir.clone())).await
+            SendJob::Text { body, body_ranges, files, quote, link, quality } => {
+                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, link, quality, group_revision, ts, dir.clone())).await
             }
             SendJob::Sticker(s) => Box::pin(send_sticker_task(m.clone(), thread.clone(), s, group_revision, dir.clone(), ts)).await,
         };
@@ -241,6 +242,7 @@ pub(super) async fn send_task(
     files: Vec<PathBuf>,
     quote: Option<Quote>,
     link: LinkSend,
+    quality: Quality,
     group_revision: u32,
     ts: u64,
     attachments_dir: PathBuf,
@@ -249,21 +251,47 @@ pub(super) async fn send_task(
     let long = long_body(&mut m, &mut text, &attachments_dir).await?;
     let mut specs = Vec::new();
     for path in &files {
-        let ct = mime_guess::from_path(path).first_or_octet_stream().to_string();
-        let (size, blur_hash) = if ct.starts_with("image/") {
-            read_facts(path, photo_facts).await
-        } else if ct.starts_with("video/") {
-            read_facts(path, video_facts).await
-        } else {
-            (None, None)
+        let mut ct = mime_guess::from_path(path).first_or_octet_stream().to_string();
+        let mut data = std::fs::read(path).with_context(|| format!("{} 읽기 실패", path.display()))?;
+        let mut file_name = path.file_name().map(|s| s.to_string_lossy().to_string());
+        let mut facts = None;
+        if ct.starts_with("image/") {
+            // a photo is shrunk and loses its EXIF; one this can't handle goes as it is
+            match prepare_photo(data, quality).await? {
+                (orig, Ok(None)) => data = orig,
+                (orig, Err(e)) => {
+                    warn!("prepare photo: {e:#}");
+                    data = orig;
+                }
+                (_, Ok(Some(p))) => {
+                    if p.content_type != ct {
+                        ct = p.content_type.to_string();
+                        let ext = match p.content_type {
+                            "image/png" => "png",
+                            "image/webp" => "webp",
+                            _ => "jpg",
+                        };
+                        file_name = file_name.map(|n| Path::new(&n).with_extension(ext).to_string_lossy().to_string());
+                    }
+                    if let Some(size) = p.size {
+                        facts = Some((Some(size), p.blurhash));
+                    }
+                    data = p.bytes;
+                }
+            }
+        }
+        let (size, blur_hash) = match facts {
+            Some(f) => f,
+            None if ct.starts_with("image/") => read_facts(path, photo_facts).await,
+            None if ct.starts_with("video/") => read_facts(path, video_facts).await,
+            None => (None, None),
         };
         let (width, height) = size.unzip();
-        let data = std::fs::read(path).with_context(|| format!("{} 읽기 실패", path.display()))?;
         specs.push((
             AttachmentSpec {
                 content_type: ct,
                 length: data.len(),
-                file_name: path.file_name().map(|s| s.to_string_lossy().to_string()),
+                file_name,
                 preview: None,
                 voice_note: None,
                 borderless: None,
@@ -290,6 +318,21 @@ pub(super) async fn send_task(
         ..Default::default()
     };
     deliver(&mut m, thread, dm.into(), ts, group_revision).await
+}
+
+/// Past this a photo goes as it is: decoding it would take too much memory and time.
+const PREPARE_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+/// `data` prepared for sending (off the backend thread), and handed back for when it stays as it is.
+async fn prepare_photo(data: Vec<u8>, quality: Quality) -> anyhow::Result<(Vec<u8>, anyhow::Result<Option<photo::Prepared>>)> {
+    if data.len() > PREPARE_MAX_BYTES {
+        return Ok((data, Ok(None)));
+    }
+    let job = tokio::task::spawn_blocking(move || {
+        let res = photo::prepare(&data, quality).map_err(anyhow::Error::from);
+        (data, res)
+    });
+    Ok(job.await?)
 }
 
 /// A size and a blurhash, as the message has them.

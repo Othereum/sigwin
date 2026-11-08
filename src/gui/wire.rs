@@ -232,7 +232,8 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let mentions = UI.with_borrow_mut(|ui| std::mem::take(&mut ui.picked));
         // `files` were taken above: with attachments there is no preview
         let link = linkcard::take_for_send(&app, if files.is_empty() { &text } else { "" });
-        s(Command::Send { text: text.to_string(), files, quote, mentions, link });
+        let quality = sigwin_thumb::photo::Quality::from_index(app.get_send_quality().clamp(0, 1) as u8);
+        s(Command::Send { text: text.to_string(), files, quote, mentions, link, quality });
         app.set_mention_items(ModelRc::default());
         app.set_draft(SharedString::new());
         app.set_pending_files(ModelRc::default());
@@ -677,6 +678,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             muted_replies: d.get_muted_replies(),
             badge_muted: d.get_badge_muted(),
             link_previews: d.get_link_previews(),
+            photo_quality: d.get_photo_quality().clamp(0, 1) as u8,
             last_seen_version: UI.with_borrow(|ui| ui.settings.last_seen_version.clone()),
             window: UI.with_borrow(|ui| ui.settings.window),
         };
@@ -762,10 +764,10 @@ pub(crate) fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
     if files.is_empty() {
         return;
     }
-    let names: Vec<SharedString> = UI.with_borrow_mut(|ui| {
+    let all = UI.with_borrow_mut(|ui| {
         ui.files.extend(files);
-        drafts::file_names(&ui.files)
+        ui.files.clone()
     });
-    app.set_pending_files(ModelRc::new(VecModel::from(names)));
+    drafts::show_pending(app, &all);
     app.invoke_focus_composer();
 }

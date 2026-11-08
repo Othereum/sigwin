@@ -73,6 +73,9 @@ export component AppWindow inherits Window {
     callback link-check();
     callback link-dismiss();
     in property <[string]> pending-files;
+    // a photo is among them: the quality it goes at can be picked
+    in property <bool> pending-has-photo;
+    in-out property <int> send-quality;
     in-out property <string> search;
     in-out property <string> draft;
 
@@ -742,6 +745,11 @@ export component AppWindow inherits Window {
                         overflow: elide;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
+                    }
+                    if root.pending-has-photo: Segmented {
+                        options: ["표준", "높음"];
+                        current <=> root.send-quality;
+                        y: (parent.height - self.height) / 2;
                     }
                     IconButton { label: "✕"; width: 28px; height: 28px; clicked => { root.clear-attachments(); } }
                 }

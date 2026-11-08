@@ -16,6 +16,8 @@ pub(crate) struct Draft {
     /// replying to: (message id, preview line)
     pub(crate) quote: Option<(String, String)>,
     pub(crate) files: Vec<PathBuf>,
+    /// the photo quality picked for `files` (None: the setting's)
+    pub(crate) quality: Option<u8>,
     /// when the draft last changed (ms); it replaces the snippet unless a newer message came in
     pub(crate) ts: u64,
 }
@@ -26,7 +28,7 @@ impl Draft {
     }
 
     fn same_content(&self, o: &Draft) -> bool {
-        self.text == o.text && self.mentions == o.mentions && self.quote == o.quote && self.files == o.files
+        self.text == o.text && self.mentions == o.mentions && self.quote == o.quote && self.files == o.files && self.quality == o.quality
     }
 
     /// The thread list line after "작성 중:" (Signal's `getDraftPreview`).
@@ -71,6 +73,7 @@ fn capture(app: &AppWindow, ui: &Ui) -> Option<Draft> {
         mentions: ui.picked.clone(),
         quote: ui.reply_to.clone().map(|id| (id, preview)),
         files: ui.files.clone(),
+        quality: (!ui.files.is_empty()).then(|| app.get_send_quality().clamp(0, 1) as u8),
         ts: 0,
     })
 }
@@ -122,7 +125,10 @@ pub(crate) fn restore(app: &AppWindow, d: Draft) {
     linkcard::clear(app);
     app.set_reply_preview(d.quote.map(|q| q.1).unwrap_or_default().into());
     app.set_edit_preview(SharedString::new());
-    app.set_pending_files(ModelRc::new(VecModel::from(file_names(&d.files))));
+    show_pending(app, &d.files);
+    if let Some(q) = d.quality.filter(|_| !d.files.is_empty()) {
+        app.set_send_quality(q.min(1) as i32);
+    }
     app.invoke_composer_to_end();
 }
 
@@ -187,6 +193,20 @@ pub(crate) fn refresh_draft_times(ui: &Ui) {
             ui.threads.set_row_data(i, row);
         }
     }
+}
+
+/// Shows `files` as the composer's attachments. Their first showing starts the quality at the
+/// setting's value.
+pub(crate) fn show_pending(app: &AppWindow, files: &[PathBuf]) {
+    if slint::Model::row_count(&app.get_pending_files()) == 0 {
+        app.set_send_quality(UI.with_borrow(|ui| ui.settings.photo_quality) as i32);
+    }
+    let photo = files.iter().any(|p| {
+        let t = mime_guess::from_path(p).first_or_octet_stream();
+        t.type_() == "image" && t.subtype() != "gif"
+    });
+    app.set_pending_has_photo(photo);
+    app.set_pending_files(ModelRc::new(VecModel::from(file_names(files))));
 }
 
 pub(crate) fn file_names(files: &[PathBuf]) -> Vec<SharedString> {

@@ -37,6 +37,8 @@ pub struct Settings {
     pub badge_muted: bool,
     /// a link in the composer gets a preview, fetched from its site
     pub link_previews: bool,
+    /// photos are sent at: 0 = standard, 1 = high (see `sigwin_thumb::photo::Quality`)
+    pub photo_quality: u8,
     /// the newest version whose "what's new" was seen or dismissed ("" = never recorded; not a
     /// preference, kept here for lack of a better file)
     pub last_seen_version: String,
@@ -71,6 +73,7 @@ impl Default for Settings {
             muted_replies: true,
             badge_muted: true,
             link_previews: true,
+            photo_quality: 0,
             last_seen_version: String::new(),
             window: None,
         }
@@ -85,6 +88,7 @@ impl Settings {
         s.preview = s.preview.min(2);
         s.theme = s.theme.min(2);
         s.badge_count = s.badge_count.min(1);
+        s.photo_quality = s.photo_quality.min(1);
         if !ZOOMS.contains(&s.zoom) {
             s.zoom = 100;
         }
