@@ -247,7 +247,7 @@ pub(crate) mod harness {
     use std::sync::Mutex;
 
     pub(crate) struct Harness {
-        pub app: App,
+        pub(in crate::backend) app: App,
         rx: UnboundedReceiver<Internal>,
         events: Arc<Mutex<Vec<Event>>>,
         dir: PathBuf,
