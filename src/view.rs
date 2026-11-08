@@ -910,59 +910,9 @@ pub fn build(
                     m.sender_key = sender.to_string();
                 }
                 if let Some(q) = &dm.quote {
-                    m.quote = q
-                        .text
-                        .as_deref()
-                        .filter(|t| !t.is_empty())
-                        .map(|t| with_mentions(t, &q.body_ranges, name_of))
-                        .unwrap_or_else(|| "(첨부파일)".into());
-                    m.quote_author = quote_author_name(q, me, name_of);
-                    m.quote_id = q.id.map(|i| i.to_string()).unwrap_or_default();
-                    // the quoted message's picture, as the sender's app cut it
-                    if let Some(a) = q.attachments.iter().find_map(|a| a.thumbnail.as_ref()) {
-                        let file_key = attachment_key(a, *ts, QUOTE_IMAGE_INDEX);
-                        m.quote_image_key = format!("{file_key}@{}x{}", QUOTE_IMAGE.0, QUOTE_IMAGE.1);
-                        wanted_cells.push(WantedCell { key: m.quote_image_key.clone(), file_key, ptr: a.clone(), size: QUOTE_IMAGE });
-                    }
+                    set_quote(&mut m, q, *ts, me, name_of, &mut wanted_cells);
                 }
-                let mut files = Vec::new();
-                let mut photos = Vec::new();
-                for (i, a) in shown_attachments(dm) {
-                    if !m.sticker && is_media(a) {
-                        photos.push((i, a));
-                    } else {
-                        files.push(a);
-                    }
-                }
-                m.attachment = files_label(&files);
-                if let [(i, a)] = photos[..] {
-                    let key = attachment_key(a, *ts, i);
-                    let (w, h) = fit(a.width, a.height);
-                    m.img_w = w;
-                    m.img_h = h;
-                    if is_video(a) {
-                        // the sender's size may be missing or wrong: cut to fill the box
-                        m.video = true;
-                        m.image_key = format!("{key}@{w}x{h}");
-                        wanted_cells.push(WantedCell { key: m.image_key.clone(), file_key: key, ptr: a.clone(), size: (w, h) });
-                    } else {
-                        // pre-resample to the on-screen size (nearest-neighbor scaling is jagged)
-                        wanted.push((key.clone(), a.clone(), w.max(h)));
-                        m.image_key = key;
-                    }
-                } else {
-                    set_photo_grid(&mut m, photos.len(), |n, w, h| {
-                        let (i, a) = photos[n];
-                        let file_key = attachment_key(a, *ts, i);
-                        // the same image may also be shown alone, or in a cell of another size
-                        let key = format!("{file_key}@{w}x{h}");
-                        wanted_cells.push(WantedCell { key: key.clone(), file_key, ptr: a.clone(), size: (w, h) });
-                        key
-                    });
-                    for (cell, (_, a)) in m.cells.iter_mut().zip(&photos) {
-                        cell.video = is_video(a);
-                    }
-                }
+                set_attachments(&mut m, dm, *ts, &mut wanted, &mut wanted_cells);
                 // not next to attachments (Signal's clients don't send that), and it would give
                 // away what a spoiler in the text hides
                 if !m.sticker && m.attachment.is_empty() && m.image_key.is_empty() && !m.styles.iter().any(|s| s.2 == STYLE_SPOILER) {
@@ -972,18 +922,7 @@ pub fn build(
                     }
                 }
                 if let Some(r) = reactions.get(ts).filter(|r| !r.is_empty()) {
-                    let mut counts: Vec<(String, u32, String)> = Vec::new();
-                    for (who, e) in r {
-                        let name = if *who == me { "나".to_string() } else { name_of(who) };
-                        match counts.iter_mut().find(|(x, ..)| x == e) {
-                            Some(c) => {
-                                c.1 += 1;
-                                add_name(&mut c.2, &name);
-                            }
-                            None => counts.push((e.clone(), 1, name)),
-                        }
-                    }
-                    m.reactions = counts;
+                    m.reactions = reaction_counts(r, me, name_of);
                     m.my_reaction = r.iter().find(|(s, _)| *s == me).map(|(_, e)| e.clone()).unwrap_or_default();
                 }
                 let fresh = outgoing && now.saturating_sub(*ts) < EDIT_WINDOW_MS;
@@ -1041,6 +980,88 @@ pub fn build(
     }
     // runs (`mark_runs`) are marked by the caller once pins, pending ops and stub rows are in
     Built { items, wanted_thumbs: wanted, wanted_cells, long_keys, wanted_texts, next_expiry }
+}
+
+/// The quote at the top of a reply: its text, author, target and picture.
+fn set_quote(m: &mut MsgDto, q: &Quote, ts: u64, me: Uuid, name_of: &dyn Fn(&Uuid) -> String, wanted_cells: &mut Vec<WantedCell>) {
+    m.quote = q
+        .text
+        .as_deref()
+        .filter(|t| !t.is_empty())
+        .map(|t| with_mentions(t, &q.body_ranges, name_of))
+        .unwrap_or_else(|| "(첨부파일)".into());
+    m.quote_author = quote_author_name(q, me, name_of);
+    m.quote_id = q.id.map(|i| i.to_string()).unwrap_or_default();
+    // the quoted message's picture, as the sender's app cut it
+    if let Some(a) = q.attachments.iter().find_map(|a| a.thumbnail.as_ref()) {
+        let file_key = attachment_key(a, ts, QUOTE_IMAGE_INDEX);
+        m.quote_image_key = format!("{file_key}@{}x{}", QUOTE_IMAGE.0, QUOTE_IMAGE.1);
+        wanted_cells.push(WantedCell { key: m.quote_image_key.clone(), file_key, ptr: a.clone(), size: QUOTE_IMAGE });
+    }
+}
+
+/// Attachments: one photo or video alone, several in a grid, the rest as a file line.
+fn set_attachments(
+    m: &mut MsgDto,
+    dm: &DataMessage,
+    ts: u64,
+    wanted: &mut Vec<(String, AttachmentPointer, u32)>,
+    wanted_cells: &mut Vec<WantedCell>,
+) {
+    let mut files = Vec::new();
+    let mut photos = Vec::new();
+    for (i, a) in shown_attachments(dm) {
+        if !m.sticker && is_media(a) {
+            photos.push((i, a));
+        } else {
+            files.push(a);
+        }
+    }
+    m.attachment = files_label(&files);
+    if let [(i, a)] = photos[..] {
+        let key = attachment_key(a, ts, i);
+        let (w, h) = fit(a.width, a.height);
+        m.img_w = w;
+        m.img_h = h;
+        if is_video(a) {
+            // the sender's size may be missing or wrong: cut to fill the box
+            m.video = true;
+            m.image_key = format!("{key}@{w}x{h}");
+            wanted_cells.push(WantedCell { key: m.image_key.clone(), file_key: key, ptr: a.clone(), size: (w, h) });
+        } else {
+            // pre-resample to the on-screen size (nearest-neighbor scaling is jagged)
+            wanted.push((key.clone(), a.clone(), w.max(h)));
+            m.image_key = key;
+        }
+    } else {
+        set_photo_grid(m, photos.len(), |n, w, h| {
+            let (i, a) = photos[n];
+            let file_key = attachment_key(a, ts, i);
+            // the same image may also be shown alone, or in a cell of another size
+            let key = format!("{file_key}@{w}x{h}");
+            wanted_cells.push(WantedCell { key: key.clone(), file_key, ptr: a.clone(), size: (w, h) });
+            key
+        });
+        for (cell, (_, a)) in m.cells.iter_mut().zip(&photos) {
+            cell.video = is_video(a);
+        }
+    }
+}
+
+/// Reactions as (emoji, count, who), in the order each emoji first came; we are "나".
+fn reaction_counts(r: &[(Uuid, String)], me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> Vec<(String, u32, String)> {
+    let mut counts: Vec<(String, u32, String)> = Vec::new();
+    for (who, e) in r {
+        let name = if *who == me { "나".to_string() } else { name_of(who) };
+        match counts.iter_mut().find(|(x, ..)| x == e) {
+            Some(c) => {
+                c.1 += 1;
+                add_name(&mut c.2, &name);
+            }
+            None => counts.push((e.clone(), 1, name)),
+        }
+    }
+    counts
 }
 
 /// Texts of long messages in the open window, and how much of each is shown.
