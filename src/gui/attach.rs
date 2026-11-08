@@ -35,11 +35,27 @@ pub(crate) fn admit(have: &[PathBuf], new: Vec<PathBuf>) -> (Vec<PathBuf>, Optio
             why.get_or_insert("파일은 한 번에 하나만 보낼 수 있습니다.");
         } else if !is_media(&p) && !all.is_empty() {
             why.get_or_insert("사진·동영상과 파일은 함께 보낼 수 없습니다.");
+        } else if too_big(&p) {
+            why.get_or_insert("파일이 너무 큽니다. 최대 100MB까지 보낼 수 있습니다.");
         } else {
             all.push(p);
         }
     }
     (all.split_off(have.len()), why)
+}
+
+/// What the server takes of one attachment, as the official app assumes it (its own setting
+/// can differ). Compared on the encrypted, padded size, like the official app does.
+const SEND_MAX_BYTES: u64 = 100 * 1024 * 1024;
+
+fn too_big(p: &Path) -> bool {
+    std::fs::metadata(p).is_ok_and(|m| sent_size(m.len()) > SEND_MAX_BYTES)
+}
+
+/// The size on the wire: padded up in 5% steps, plus the IV and the MAC.
+fn sent_size(plain: u64) -> u64 {
+    let padded = if plain <= 541 { 541 } else { 1.05f64.powf(((plain as f64).ln() / 1.05f64.ln()).ceil()).floor() as u64 };
+    padded + 16 + 32
 }
 
 fn file_name(p: &Path) -> SharedString {
@@ -140,6 +156,16 @@ mod tests {
 
     fn p(s: &str) -> PathBuf {
         s.into()
+    }
+
+    #[test]
+    fn the_wire_size_is_padded() {
+        assert_eq!(sent_size(10), 541 + 48);
+        let mb = 1024 * 1024;
+        assert!(sent_size(50 * mb) < SEND_MAX_BYTES);
+        // padding takes up to 5% more, so a file just under the limit can still be too big
+        assert!(sent_size(99 * mb) > SEND_MAX_BYTES);
+        assert!(sent_size(101 * mb) > SEND_MAX_BYTES);
     }
 
     #[test]
