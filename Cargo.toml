@@ -1,6 +1,6 @@
 [package]
 name = "sigwin"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2024"
 license = "AGPL-3.0-only"
 description = "A lightweight Signal-compatible desktop client (unofficial)"
