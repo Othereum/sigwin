@@ -2,6 +2,7 @@
 
 mod alloc;
 mod autostart;
+mod away;
 mod avatar;
 mod badge;
 mod backend;

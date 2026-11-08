@@ -6,6 +6,7 @@
 //!   Sticker animations pause while minimized for the same reason (`gui::anim::pause`).
 //! - Activation changes: tell the backend whether the window is in the foreground
 //!   (replaces polling).
+//! - The monitor turned off or on: the user is away (`away`).
 //! - DPI change: winit resets the scale factor to the monitor's; re-apply the zoom setting.
 
 use std::cell::{Cell, RefCell};
@@ -53,7 +54,30 @@ pub fn install(app: &AppWindow, hwnd: isize, on_focus: impl Fn(bool) + 'static) 
         return false;
     }
     // SAFETY: subclassing our own window on its UI thread; the proc only touches thread-locals
-    unsafe { SetWindowSubclass(hwnd as _, Some(subclass_proc), 1, 0) != 0 }
+    let ok = unsafe { SetWindowSubclass(hwnd as _, Some(subclass_proc), 1, 0) != 0 };
+    // SAFETY: the window is ours; the notification goes to it until it is destroyed
+    unsafe {
+        windows_sys::Win32::System::Power::RegisterPowerSettingNotification(
+            hwnd as _,
+            &GUID_CONSOLE_DISPLAY_STATE,
+            0, // DEVICE_NOTIFY_WINDOW_HANDLE
+        );
+    }
+    ok
+}
+
+/// The monitor's power state: `POWERBROADCAST_SETTING::Data` is 0 off, 1 on, 2 dimmed.
+#[cfg(windows)]
+const GUID_CONSOLE_DISPLAY_STATE: windows_sys::core::GUID =
+    windows_sys::core::GUID::from_u128(0x6fe69556_704a_47a0_8f24_c28d936fda47);
+
+/// `POWERBROADCAST_SETTING` (only registered for the display state).
+#[cfg(windows)]
+#[repr(C)]
+struct PowerSetting {
+    setting: windows_sys::core::GUID,
+    len: u32,
+    data: u8,
 }
 
 #[cfg(windows)]
@@ -68,13 +92,27 @@ unsafe extern "system" fn subclass_proc(
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_DPICHANGED,
-        WM_SHOWWINDOW, WM_SIZE,
+        WM_POWERBROADCAST, WM_SHOWWINDOW, WM_SIZE,
     };
+    /// `PBT_POWERSETTINGCHANGE`
+    const SETTING_CHANGE: usize = 0x8013;
     match msg {
         // close = hide to the tray (only while the icon exists), the app keeps running
         WM_CLOSE if crate::tray::active() => {
             crate::tray::hide_window(hwnd as isize);
             return 0;
+        }
+        WM_POWERBROADCAST if wparam == SETTING_CHANGE && lparam != 0 => {
+            // SAFETY: for this event `lparam` points to a `POWERBROADCAST_SETTING`
+            let off = unsafe { (*(lparam as *const PowerSetting)).data } == 0;
+            crate::away::set_display_off(off);
+            let _ = slint::invoke_from_event_loop(|| {
+                APP.with_borrow(|a| {
+                    if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
+                        crate::refresh_active(&app);
+                    }
+                });
+            });
         }
         WM_SHOWWINDOW => {
             // hidden windows are not drawn to: same pause as minimized

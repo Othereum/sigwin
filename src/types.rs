@@ -508,6 +508,8 @@ pub enum Command {
     /// "더 읽기" on a row: show more of its text
     ReadMore(String),
     Search(String),
+    /// the user is working in the window: it has the focus and they are not away. Otherwise
+    /// notifications show and nothing is read.
     WindowFocus(bool),
     Unlink,
     /// sticker panel opened: (re)load the pack list

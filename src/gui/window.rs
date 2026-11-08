@@ -318,22 +318,41 @@ fn fix_ctrl_shortcuts(app: &AppWindow) {
     });
 }
 
-/// Whether the user is working in the window (focused, and not away). The list reads nothing
-/// and keeps its place while not.
-pub(crate) fn set_active(app: &AppWindow, active: bool) {
+thread_local! {
+    static FOCUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    /// what the list and the backend were last told
+    static ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// The window gained or lost the focus.
+fn focus_changed(app: &AppWindow, focused: bool) {
+    FOCUSED.set(focused);
+    refresh_active(app);
+}
+
+/// Whether the user is working in the window (focused, and not away): tells the list, which
+/// reads nothing and keeps its place while not, and the backend (notifications, read
+/// receipts). Called when the focus changes, the monitor turns off or on, and every few seconds
+/// for the input and lock checks.
+pub(crate) fn refresh_active(app: &AppWindow) {
+    let active = FOCUSED.get() && !crate::away::is_away();
+    if ACTIVE.replace(active) == active {
+        return;
+    }
     UI.with_borrow_mut(|ui| {
         ui.inactive = !active;
         // coming back: the rows on screen are reported again
         ui.read_sent = None;
     });
+    tracing::info!(active, "user active");
     app.set_inactive(!active);
+    send_cmd(Command::WindowFocus(active));
 }
 
 /// Slint exposes neither focus nor minimize/restore: hook the window procedure once the
 /// native window exists (it is created when the event loop starts).
-pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
+pub(crate) fn hook_window(app: &AppWindow) {
     fix_ctrl_shortcuts(app);
-    let send = send.clone();
     let weak = app.as_weak();
     let tries = std::cell::Cell::new(0u32);
     let timer = Rc::new(slint::Timer::default());
@@ -349,7 +368,6 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
         // the zoom setting on top of the monitor's scale; also tells the backend the scale
         apply_zoom(&app);
         let last = std::rc::Rc::new(std::cell::Cell::new(true));
-        let s2 = send.clone();
         let l2 = last.clone();
         let w2 = app.as_weak();
         let hooked = winhook::install(&app, h, move |f| {
@@ -359,9 +377,16 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
                     crate::update::poke();
                 }
                 if let Some(app) = w2.upgrade() {
-                    set_active(&app, f);
+                    focus_changed(&app, f);
                 }
-                s2(Command::WindowFocus(f));
+            }
+        });
+        // away: no input for a while, or the screen locked (no event for those)
+        let weak = app.as_weak();
+        let away = Box::leak(Box::new(slint::Timer::default()));
+        away.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(2), move || {
+            if let Some(app) = weak.upgrade() {
+                refresh_active(&app);
             }
         });
         tracing::info!(hwnd = h, hooked, "window hook");
@@ -371,7 +396,6 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
         if !hooked {
             // fallback: poll the foreground window
             let weak = app.as_weak();
-            let s = send.clone();
             let poll = Box::leak(Box::new(slint::Timer::default()));
             poll.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(700), move || {
                 let Some(app) = weak.upgrade() else { return };
@@ -381,8 +405,7 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
                     if f {
                         crate::update::poke();
                     }
-                    set_active(&app, f);
-                    s(Command::WindowFocus(f));
+                    focus_changed(&app, f);
                 }
             });
         }

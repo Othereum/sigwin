@@ -15,8 +15,7 @@ pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     whatsnew::wire(app);
     if !headless::active() {
         // no native window in headless; started when the window is first shown
-        let send = send.clone();
-        set_starter(move |app| hook_window(app, &send));
+        set_starter(hook_window);
     }
 }
 
