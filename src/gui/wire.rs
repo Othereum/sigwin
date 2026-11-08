@@ -86,22 +86,23 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     app.on_search_changed(move |q| s(Command::Search(q.to_string())));
 
     let weak = app.as_weak();
-    app.on_open_thread_menu(move |key, x, y| {
+    app.global::<ThreadMenuData>().on_open(move |key, x, y| {
         let Some(app) = weak.upgrade() else { return };
         let Some(mute) = UI.with_borrow(|ui| ui.thread_dtos.iter().find(|t| t.key == key.as_str()).map(|t| t.mute)) else {
             return;
         };
         let now = view::now_ms();
-        app.set_tmenu_status(if mute.active(now) { types::mute_text(mute.until, now).into() } else { SharedString::new() });
-        app.set_tmenu_overridden(mute.overridden);
-        app.set_tmenu_phone(format!("휴대폰: {}", types::mute_text(mute.phone, now)).into());
-        app.set_tmenu_x(x);
-        app.set_tmenu_y(y);
-        app.set_tmenu_key(key);
+        let d = app.global::<ThreadMenuData>();
+        d.set_status(if mute.active(now) { types::mute_text(mute.until, now).into() } else { SharedString::new() });
+        d.set_overridden(mute.overridden);
+        d.set_phone(format!("휴대폰: {}", types::mute_text(mute.phone, now)).into());
+        d.set_menu_x(x);
+        d.set_menu_y(y);
+        d.set_key(key);
     });
 
     let s = send.clone();
-    app.on_set_mute(move |key, secs| {
+    app.global::<ThreadMenuData>().on_set_mute(move |key, secs| {
         let set = match secs {
             -2 => types::MuteSet::Phone,
             -1 => types::MuteSet::Always,
@@ -112,7 +113,7 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let weak = app.as_weak();
-    app.on_open_thread_prefs(move |key| {
+    app.global::<ThreadMenuData>().on_open_prefs(move |key| {
         let Some(app) = weak.upgrade() else { return };
         let found = UI.with_borrow(|ui| {
             let t = ui.thread_dtos.iter().find(|t| t.key == key.as_str())?;
@@ -126,25 +127,26 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             Some(false) => 2,
         };
         let preview = ["이름과 내용", "이름만", "숨김"][s.preview.min(2) as usize];
-        app.set_tprefs_name(name.into());
-        app.set_tprefs_preview(p.preview.map_or(0, |v| v.min(2) as i32 + 1));
-        app.set_tprefs_sound(index(p.sound));
-        app.set_tprefs_sound_default(on_off(s.sound).into());
-        app.set_tprefs_mentions(index(p.mentions));
-        app.set_tprefs_replies(index(p.replies));
-        app.set_tprefs_badge(index(p.badge));
-        app.set_tprefs_preview_default(if s.notify { preview.into() } else { "알림 꺼짐 (앱 설정)".into() });
-        app.set_tprefs_mentions_default(match phone_mentions {
+        let d = app.global::<ThreadMenuData>();
+        d.set_prefs_name(name.into());
+        d.set_prefs_preview(p.preview.map_or(0, |v| v.min(2) as i32 + 1));
+        d.set_prefs_sound(index(p.sound));
+        d.set_prefs_sound_default(on_off(s.sound).into());
+        d.set_prefs_mentions(index(p.mentions));
+        d.set_prefs_replies(index(p.replies));
+        d.set_prefs_badge(index(p.badge));
+        d.set_prefs_preview_default(if s.notify { preview.into() } else { "알림 꺼짐 (앱 설정)".into() });
+        d.set_prefs_mentions_default(match phone_mentions {
             Some(b) => format!("{} (휴대폰 설정)", on_off(b)).into(),
             None => on_off(s.muted_mentions).into(),
         });
-        app.set_tprefs_replies_default(on_off(s.muted_replies).into());
-        app.set_tprefs_badge_default(on_off(s.badge_muted).into());
-        app.set_tprefs_key(key);
+        d.set_prefs_replies_default(on_off(s.muted_replies).into());
+        d.set_prefs_badge_default(on_off(s.badge_muted).into());
+        d.set_prefs_key(key);
     });
 
     let s = send.clone();
-    app.on_set_pref(move |key, item, v| {
+    app.global::<ThreadMenuData>().on_set_pref(move |key, item, v| {
         let b = match v {
             1 => Some(true),
             2 => Some(false),

@@ -110,3 +110,4 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `ui/widgets.slint` | small shared widgets |
 | `ui/thread_row.slint`, `ui/stickers.slint`, `ui/link.slint` | thread list row, sticker panel, linking page |
 | `ui/settings.slint` | settings page, and `SettingsData`: what it shows and edits (Rust: `app.global::<SettingsData>()`) |
+| `ui/thread_menu.slint` | a chat's notification menu and settings dialog, and their `ThreadMenuData` |
