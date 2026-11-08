@@ -75,9 +75,11 @@ export component AppWindow inherits Window {
     in property <[MsgItem]> messages;
     in property <bool> can-load-older;
     in property <bool> can-load-newer;
-    // incoming messages that arrived while scrolled up
-    in-out property <int> new-below;
+    // unread messages of the open thread (the jump button's badge)
+    in property <int> open-unread;
     callback jump-to-bottom();
+    // row id: the row's bottom edge is on screen, so everything above it has been seen
+    callback row-seen(string);
     // a short message over the conversation pane (gui::notice)
     in property <string> notice-text;
     // what's going on with the connection, "" when all is well
@@ -198,6 +200,14 @@ export component AppWindow inherits Window {
     in-out property <bool> jump-found;
     in-out property <length> jump-pos;
     in-out property <length> jump-h;
+    // height above the row's bubble (day separator, unread line)
+    in-out property <length> jump-lead;
+    // the view is on its way to the first unread row: what passes by is not reported as seen,
+    // nor is the bottom (gui::scroll::jump_to_unread). Lifting it reports the rows on screen.
+    in-out property <bool> reading-hold;
+    // the window is in the background (or the user is away): nothing is being read. Becoming
+    // active reports the rows on screen.
+    in property <bool> inactive;
     in-out property <int> jump-probe;
     // flash the jumped-to row
     in-out property <string> flash-id;
@@ -345,11 +355,9 @@ export component AppWindow inherits Window {
     }
     out property <bool> near-bottom: msg-list.content-y <= msg-list.visible-height - msg-list.content-height + 120px;
     changed near-bottom => {
-        if (near-bottom && !can-load-newer) { new-below = 0; }
-        at-bottom-changed(near-bottom);
-    }
-    changed can-load-newer => {
-        if (near-bottom && !can-load-newer) { new-below = 0; }
+        if (!reading-hold) {
+            at-bottom-changed(near-bottom);
+        }
     }
 
     if page == "loading": Rectangle {
@@ -691,7 +699,16 @@ export component AppWindow inherits Window {
                             if (m.id == root.jump-id) {
                                 root.jump-pos = self.y + self.lead + msg-list.content-y;
                                 root.jump-h = self.height - self.lead;
+                                root.jump-lead = self.lead;
                                 root.jump-found = true;
+                            }
+                        }
+                        // reading as the user goes: a row whose bottom edge is on screen. The
+                        // id, not a bool: the ListView gives rows old instances with new data.
+                        property <string> seen-id: !root.reading-hold && !root.inactive && !m.typing && self.y + self.height + msg-list.content-y <= msg-list.visible-height + 1px ? m.id : "";
+                        changed seen-id => {
+                            if (self.seen-id != "") {
+                                root.row-seen(self.seen-id);
                             }
                         }
                         attachment-clicked(id, index) => { root.attachment-clicked(id, index); }
@@ -732,7 +749,7 @@ export component AppWindow inherits Window {
                         font-size: 18px;
                         color: Theme.text;
                     }
-                    if root.new-below > 0: Rectangle {
+                    if root.open-unread > 0: Rectangle {
                         x: parent.width - self.width + 4px;
                         y: -6px;
                         height: 18px;
@@ -740,7 +757,7 @@ export component AppWindow inherits Window {
                         border-radius: 9px;
                         background: Theme.accent;
                         badge := Text {
-                            text: root.new-below > 99 ? "99+" : root.new-below;
+                            text: root.open-unread > 99 ? "99+" : root.open-unread;
                             color: white;
                             font-size: 11px;
                             font-weight: 700;

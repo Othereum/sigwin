@@ -323,6 +323,7 @@ pub(crate) fn to_item(
         cells: if cells.is_empty() { Default::default() } else { ModelRc::new(VecModel::from(cells)) },
         deleted: m.deleted,
         day_sep: m.day_sep.as_str().into(),
+        unread_divider: m.unread_divider,
         system: m.system,
         sticker: m.sticker,
         receipt_info: m.receipt_info.as_str().into(),

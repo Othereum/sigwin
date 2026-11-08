@@ -32,11 +32,11 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         });
     }
     if std::env::var_os("SIGWIN_DEMO_INFO").is_some() {
-        // "new messages below" badge, set late so a test can scroll up first
+        // the jump button's unread badge, set late so a test can scroll up first
         let weak = app.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(4000), move || {
             if let Some(app) = weak.upgrade() {
-                app.set_new_below(3);
+                app.set_open_unread(3);
             }
         });
         let weak = app.as_weak();
@@ -388,7 +388,23 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             }
         });
     } else {
-        emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
+        // `SIGWIN_DEMO_UNREAD=<n>`: the thread opens with its last n rows unread (the line above
+        // the first, the list scrolled to it, the badge on the jump button)
+        let unread: usize = std::env::var("SIGWIN_DEMO_UNREAD").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let mut first = items.clone();
+        let mut scroll = Scroll::Bottom;
+        if unread > 0 && unread < first.len() {
+            let at = first.len() - unread;
+            first[at].unread_divider = true;
+            view::mark_runs(&mut first, true);
+            scroll = Scroll::Unread;
+            let mut list = threads.clone();
+            if let Some(t) = list.iter_mut().find(|t| t.key == "c:demo-1") {
+                t.unread = unread as u32;
+            }
+            emit(Event::Threads(list));
+        }
+        emit(Event::Messages { key: "c:demo-1".into(), items: first, paging: Paging::default(), scroll });
         let notes = std::env::var("SIGWIN_DEMO_NOTIFY").ok().map(|v| demo_notify(emit.clone(), v.parse().unwrap_or(10)));
         // clicking another thread shows the same rows under its key (drafts follow the key)
         let (emit, items, all_pins) = (emit.clone(), items.clone(), pins.clone());

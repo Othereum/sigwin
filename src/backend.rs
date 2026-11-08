@@ -266,6 +266,15 @@ struct Open {
     end_seq: Option<i64>,
     /// newest display position read, shown or not; rows after it are new
     tail_seq: i64,
+    /// the first message that was unread when the thread was opened, or when news came in
+    /// after everything was read (a window key): the list draws a line above it. It stays put
+    /// while the user reads on.
+    divider: Option<u64>,
+    /// the user has been at the divider's row (read on from it): the jump button goes to the
+    /// bottom then
+    divider_reached: bool,
+    /// the thread just got unread messages: the divider goes where the window shows them
+    divider_due: bool,
 }
 
 /// A stretch of a thread read into memory: what `Open` keeps about its window.
@@ -599,6 +608,16 @@ impl App {
             Command::AtBottom(at) => {
                 self.at_bottom = at;
                 self.read_if_seen();
+            }
+            Command::ReadUpTo(id) => {
+                if let Ok(row) = id.parse::<u64>() {
+                    self.read_through(row);
+                }
+            }
+            Command::UnreadButton => {
+                if let Err(e) = self.unread_button().await {
+                    warn!("unread button: {e:#}");
+                }
             }
             Command::Send { text, files, quote, mentions, link } => self.send(text, files, quote, mentions, link).await,
             Command::ViewImage { id, index, fit, from_file } => self.view_image(&id, index, fit, from_file),

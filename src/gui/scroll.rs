@@ -41,12 +41,32 @@ pub(crate) fn stick_to_bottom(app: &AppWindow) {
 ///   "random seek" formula (offset = floor(-content-y / average)) inverted, so for a far target
 ///   the row lands at the top of the view; a near one just scrolls toward it.
 pub(crate) fn jump_to_row(app: &AppWindow, id: String) {
-    seek_row(app, id, None);
+    seek_row(app, id, Anchor::Center);
 }
 
-/// Moves row `id` so its bottom edge is `want` px from the top of the list (None: centered,
-/// then flashed).
-pub(crate) fn seek_row(app: &AppWindow, id: String, want: Option<f32>) {
+/// The first unread row `id` goes near the top of the list, its line above it in view. A row
+/// too close to the end for that ends up as far up as the list allows. Reading is held back
+/// until it has landed: the frames on the way show rows that were never looked at.
+pub(crate) fn jump_to_unread(app: &AppWindow, id: String) {
+    app.set_reading_hold(true);
+    seek_row(app, id, Anchor::Top);
+}
+
+/// Where `seek_row` puts a row.
+pub(crate) enum Anchor {
+    /// centered, then flashed
+    Center,
+    /// its bottom edge this many px from the top of the list
+    Bottom(f32),
+    /// its line (the unread divider, a day separator) near the top
+    Top,
+}
+
+/// Space above the first unread row's line when it is put at the top.
+const TOP_MARGIN: f32 = 4.0;
+
+/// Moves row `id` to `anchor`.
+pub(crate) fn seek_row(app: &AppWindow, id: String, anchor: Anchor) {
     let Some(idx) = UI.with_borrow(|ui| ui.last.iter().position(|m| m.id == id)) else { return };
     TIMER.with(|t| t.stop());
     app.set_jump_id(id.as_str().into());
@@ -72,9 +92,10 @@ pub(crate) fn seek_row(app: &AppWindow, id: String, want: Option<f32>) {
                 // centered; a row taller than the view starts at the top
                 // a `want` is for the row's bottom edge, which doesn't move when its day
                 // separator comes or goes
-                let (want, near) = match want {
-                    Some(w) => (w - app.get_jump_h(), 0.5),
-                    None => (((vh - app.get_jump_h()) / 2.0).max(0.0), 4.0),
+                let (want, near) = match anchor {
+                    Anchor::Bottom(w) => (w - app.get_jump_h(), 0.5),
+                    Anchor::Center => (((vh - app.get_jump_h()) / 2.0).max(0.0), 4.0),
+                    Anchor::Top => (app.get_jump_lead() + TOP_MARGIN, 0.5),
                 };
                 // close enough, or the list can't scroll further (row near either end)
                 if (pos - want).abs() <= near || last_pos.is_some_and(|p: f32| (p - pos).abs() < near.min(1.0)) {
@@ -96,11 +117,22 @@ pub(crate) fn seek_row(app: &AppWindow, id: String, want: Option<f32>) {
                 JUMP.with(|t| t.stop());
                 let id = app.get_jump_id();
                 app.set_jump_id(SharedString::new());
-                if want.is_some() {
-                    tracing::debug!("older page anchored after {ticks} ticks");
-                    // still at the top (short page): go on loading
-                    app.invoke_check_older();
-                    return;
+                match anchor {
+                    Anchor::Bottom(_) => {
+                        tracing::debug!("older page anchored after {ticks} ticks");
+                        // still at the top (short page): go on loading
+                        app.invoke_check_older();
+                        return;
+                    }
+                    Anchor::Top => {
+                        tracing::debug!("first unread row reached after {ticks} ticks");
+                        // where the view ended up (the end of the list may have stopped it) is
+                        // the first thing the backend hears about it
+                        app.set_reading_hold(false);
+                        send_cmd(Command::AtBottom(app.get_near_bottom()));
+                        return;
+                    }
+                    Anchor::Center => {}
                 }
                 app.set_flash_id(id.clone());
                 let weak = app.as_weak();
@@ -119,20 +151,18 @@ pub(crate) fn seek_row(app: &AppWindow, id: String, want: Option<f32>) {
 /// screen keep the view where it is.
 pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, paging: Paging, scroll: Scroll, rebuild: bool) {
     let near_bottom = app.get_near_bottom();
+    let unread_row = if scroll == Scroll::Unread { items.iter().find(|m| m.unread_divider).map(|m| m.id.clone()) } else { None };
+    let news_row = if scroll == Scroll::News { items.iter().find(|m| m.unread_divider).map(|m| m.id.clone()) } else { None };
+    // what the view shows on the way to the first unread row hasn't been looked at
+    if unread_row.is_some() {
+        app.set_reading_hold(true);
+    } else if scroll == Scroll::Bottom {
+        app.set_reading_hold(false);
+    }
     UI.with_borrow_mut(|ui| {
         ui.loading_older = false;
         ui.loading_newer = false;
         ui.detached = paging.newer;
-        if rebuild {
-            app.set_new_below(0);
-        } else if !near_bottom {
-            // count incoming rows that weren't shown before
-            let seen: std::collections::HashSet<&str> = ui.last.iter().map(|m| m.id.as_str()).collect();
-            let fresh = items.iter().filter(|m| !m.outgoing && !m.system && !seen.contains(m.id.as_str())).count();
-            if matches!(scroll, Scroll::KeepIfNotAtBottom) && fresh > 0 {
-                app.set_new_below(app.get_new_below() + fresh as i32);
-            }
-        }
         let dark = app.global::<Theme>().get_dark();
         if rebuild {
             ui.messages.set_vec(items.iter().map(|m| to_item(m, &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, dark)).collect::<Vec<_>>());
@@ -146,13 +176,24 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, paging: Paging, scr
     });
     app.set_can_load_older(paging.older);
     app.set_can_load_newer(paging.newer);
-    if rebuild && scroll == Scroll::Bottom {
+    if rebuild && matches!(scroll, Scroll::Bottom | Scroll::Unread) {
         // otherwise the first frames lay out from the old thread's position
         app.invoke_seek_end();
     }
     match scroll {
         Scroll::Bottom => stick_to_bottom(app),
+        Scroll::Unread => match unread_row {
+            Some(id) => seek_row(app, id, Anchor::Top),
+            None => stick_to_bottom(app),
+        },
+        // news that came in while in the background: the unread line goes near the top (or the
+        // list's end stops it sooner), so what is new starts in view instead of cut off
+        Scroll::News if near_bottom && !paging.newer => match news_row {
+            Some(id) => jump_to_unread(app, id),
+            None => stick_to_bottom(app),
+        },
         Scroll::KeepIfNotAtBottom if near_bottom && !paging.newer => stick_to_bottom(app),
+        Scroll::News => {}
         Scroll::KeepIfNotAtBottom | Scroll::Keep | Scroll::Older => {}
     }
     if rebuild && scroll != Scroll::Older {
@@ -225,7 +266,7 @@ pub(crate) fn hold_older(app: &AppWindow, anchor: String, items: Vec<MsgDto>, pa
             tracing::debug!("older page: {idx} rows above the anchor, its bottom at {want:.1}px");
             show_rows(&app, items, paging, Scroll::Older, true);
             app.invoke_set_content_y_raw(-(idx as f32 + 0.5) * avg);
-            seek_row(&app, anchor.clone(), Some(want));
+            seek_row(&app, anchor.clone(), Anchor::Bottom(want));
         });
     });
 }

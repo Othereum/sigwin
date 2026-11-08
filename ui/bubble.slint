@@ -345,7 +345,7 @@ export component Bubble inherits VerticalLayout {
     padding-left: 16px;
     padding-right: 16px;
     // Signal's spacing: 6px above and below a run, 1px between rows of one run
-    padding-top: m.day-sep != "" || m.typing ? 8px : m.collapse-above ? 1px : 6px;
+    padding-top: m.day-sep != "" || m.unread-divider || m.typing ? 8px : m.collapse-above ? 1px : 6px;
     // the newest row gets extra room below so it doesn't touch the composer
     in property <bool> last;
     // the chips and the readers hang below the bubble: room for the part under its edge
@@ -365,7 +365,7 @@ export component Bubble inherits VerticalLayout {
     property <bool> flush: m.has-image && !m.sticker && m.text != "" && m.quote == "";
     property <bool> no-bubble: m.sticker || m.big-emoji || bare;
     // height of the day separator above the message itself (centering a jump on the bubble)
-    out property <length> lead: m.day-sep != "" ? root.padding-top + 36px + root.spacing : 0px;
+    out property <length> lead: m.day-sep != "" || m.unread-divider ? root.padding-top + (m.day-sep != "" ? 36px + root.spacing : 0px) + (m.unread-divider ? 28px + root.spacing : 0px) : 0px;
 
     if m.day-sep != "": HorizontalLayout {
         alignment: center;
@@ -381,6 +381,25 @@ export component Bubble inherits VerticalLayout {
                 padding-right: 10px;
                 Text { text: m.day-sep; color: Theme.subtle; font-size: 11.5px; }
             }
+        }
+    }
+
+    // where the unread messages start
+    if m.unread-divider: HorizontalLayout {
+        height: 28px;
+        spacing: 10px;
+        Rectangle {
+            Rectangle { y: parent.height / 2; height: 1px; background: Theme.accent; opacity: 0.5; }
+        }
+        Text {
+            text: "안 읽은 메시지";
+            color: Theme.accent;
+            font-size: 11.5px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+        Rectangle {
+            Rectangle { y: parent.height / 2; height: 1px; background: Theme.accent; opacity: 0.5; }
         }
     }
 

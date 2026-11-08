@@ -110,6 +110,8 @@ export struct MsgItem {
     cells: [ImageCell],
     deleted: bool,
     day-sep: string,
+    // the first unread message: a line above it
+    unread-divider: bool,
     system: bool,
     sticker: bool,
     receipt-info: string,

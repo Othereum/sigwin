@@ -790,6 +790,7 @@ fn same_run(older: &MsgDto, newer: &MsgDto) -> bool {
         && (older.outgoing || !older.sender_key.is_empty())
         && older.sender_key == newer.sender_key
         && newer.day_sep.is_empty()
+        && !newer.unread_divider
         && newer.ts.abs_diff(older.ts) < COLLAPSE_WITHIN_MS
 }
 

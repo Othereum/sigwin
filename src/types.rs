@@ -208,6 +208,9 @@ pub struct MsgDto {
     pub video: bool,
     pub deleted: bool,
     pub day_sep: String,
+    /// the first message that was unread when the thread was opened (or when news came in
+    /// after everything was read): a line above it says so
+    pub unread_divider: bool,
     pub system: bool,
     pub sticker: bool,
     /// who has the message (outgoing only), shown when the status is clicked
@@ -402,7 +405,13 @@ pub struct Paging {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Scroll {
     Bottom,
+    /// the first unread message (flagged `unread_divider`) near the top of the view, or the
+    /// bottom if the rows end sooner
+    Unread,
     KeepIfNotAtBottom,
+    /// like `KeepIfNotAtBottom`, but news came in while the user was away: from the bottom the
+    /// view goes to the unread line (flagged `unread_divider`) instead of past it
+    News,
     Older,
     /// leave the scroll position alone (a `JumpTo` follows)
     Keep,
@@ -423,12 +432,13 @@ pub enum Event {
     /// who can be @mentioned in the open thread: (uuid, name); empty outside groups
     Members(Vec<crate::mention::Member>),
     Messages { key: String, items: Vec<MsgDto>, paging: Paging, scroll: Scroll },
-    /// an incoming message for the open thread, below the rows that are loaded
-    NewBelow,
     /// pinned messages of the open thread, newest first
     Pins(Vec<PinDto>),
     /// scroll the message list to row `id` (already in the last `Messages`) and flash it
     JumpTo(String),
+    /// scroll the message list to the first unread row `id` (already in the last `Messages`),
+    /// its line near the top of the view
+    JumpToUnread(String),
     Thumb(Arc<Thumb>),
     /// what the picture known by `key` says about its file
     MediaLabel { key: String, label: MediaLabel },
@@ -473,6 +483,11 @@ pub enum Command {
     ToLatest,
     /// the message list reached or left its bottom
     AtBottom(bool),
+    /// row `id` is fully on screen: it and everything above it has been seen
+    ReadUpTo(String),
+    /// the jump button, while the thread has unread messages: to the first one, or on to the
+    /// bottom once the user has been there
+    UnreadButton,
     /// `mentions`: members picked in the composer, their "@name"s become mentions
     /// `link`: the url to preview on the message
     Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String> },

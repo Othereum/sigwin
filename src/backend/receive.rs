@@ -236,11 +236,15 @@ impl App {
                 if c.metadata.needs_receipt {
                     self.pending_receipts.entry(c.metadata.sender).or_default().push(c.timestamp());
                 }
-                if is_open && self.current.as_ref().is_some_and(|o| o.end_seq.is_some()) {
-                    (self.emit)(Event::NewBelow);
-                }
                 if !(is_open && self.focused && self.sees_latest()) {
-                    *self.persist.unread.entry(key.clone()).or_default() += 1;
+                    let n = self.persist.unread.entry(key.clone()).or_default();
+                    // the first news since everything was read: the open list marks where it starts
+                    if *n == 0 {
+                        if let Some(open) = self.current.as_mut().filter(|o| o.key == key) {
+                            open.divider_due = true;
+                        }
+                    }
+                    *n += 1;
                     self.persist_dirty = true;
                 }
                 self.notify_message(&thread, &key, &c).await;

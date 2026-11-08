@@ -32,8 +32,10 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     app.on_jump_to_bottom(move || {
         if let Some(app) = weak.upgrade() {
-            app.set_new_below(0);
-            if app.get_can_load_newer() {
+            // unread messages: the backend knows where they start
+            if app.get_open_unread() > 0 {
+                s(Command::UnreadButton);
+            } else if app.get_can_load_newer() {
                 s(Command::ToLatest);
             } else {
                 stick_to_bottom(&app);
@@ -56,6 +58,28 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
 
     let s = send.clone();
     app.on_at_bottom_changed(move |at| s(Command::AtBottom(at)));
+
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.on_row_seen(move |id| {
+        // not while a jump is settling: the rows on the way were never looked at
+        if weak.upgrade().is_none_or(|a| !a.get_jump_id().is_empty() || a.get_reading_hold()) {
+            return;
+        }
+        // each row only once, and nothing for rows above one already sent
+        let go = UI.with_borrow_mut(|ui| {
+            let pos = |ui: &Ui, id: &str| ui.last.iter().position(|m| m.id == id);
+            let Some(at) = pos(ui, &id) else { return false };
+            if ui.read_sent.as_deref().and_then(|s| pos(ui, s)).is_some_and(|sent| sent >= at) {
+                return false;
+            }
+            ui.read_sent = Some(id.to_string());
+            true
+        });
+        if go {
+            s(Command::ReadUpTo(id.to_string()));
+        }
+    });
 
     let s = send.clone();
     let weak = app.as_weak();

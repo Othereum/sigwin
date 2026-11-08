@@ -1,6 +1,6 @@
 //! Thread list: names, snippets, unread counts, read receipts, avatars.
 
-use super::window::fetch_rows;
+use super::window::{fetch_rows, is_incoming, newly_read};
 use super::*;
 
 impl App {
@@ -332,31 +332,64 @@ impl App {
     /// Queues read receipts for incoming messages in the open window newer than the thread's
     /// watermark. Without a watermark (first time) only the last `unread` ones count.
     pub(super) fn queue_reads(&mut self, key: &str, unread: u32) {
-        let Some(open) = self.current.as_ref().filter(|o| o.key == key) else { return };
+        self.queue_reads_to(key, unread, usize::MAX);
+    }
+
+    /// `queue_reads` for the window rows before index `end` only; returns how many it queued.
+    fn queue_reads_to(&mut self, key: &str, unread: u32, end: usize) -> u32 {
+        let Some(open) = self.current.as_ref().filter(|o| o.key == key) else { return 0 };
         let me = self.me;
-        let incoming: Vec<(ServiceId, u64)> = open
+        let incoming: Vec<(usize, ServiceId, u64)> = open
             .window
             .iter()
-            .filter(|(_, c)| {
-                let s = c.metadata.sender.raw_uuid();
-                s != me && !s.is_nil() && matches!(view::classify(c, me), Kind::Msg { outgoing: false, .. })
-            })
-            .map(|(_, c)| (c.metadata.sender, c.timestamp()))
+            .enumerate()
+            .filter(|(_, (_, c))| is_incoming(c, me))
+            .map(|(i, (_, c))| (i, c.metadata.sender, c.timestamp()))
             .collect();
-        let Some(newest) = incoming.iter().map(|(_, ts)| *ts).max() else { return };
+        let Some(newest) = incoming.iter().filter(|m| m.0 < end).map(|m| m.2).max() else { return 0 };
         let upto = self.persist.read_upto.get(key).copied();
         if upto.is_some_and(|u| u >= newest) {
-            return;
+            return 0;
         }
-        match upto {
-            Some(u) => self.pending_reads.extend(incoming.into_iter().filter(|(_, ts)| *ts > u)),
-            None => {
-                let skip = incoming.len().saturating_sub(unread as usize);
-                self.pending_reads.extend(incoming.into_iter().skip(skip));
-            }
-        }
+        let positions: Vec<(usize, u64)> = incoming.iter().map(|m| (m.0, m.2)).collect();
+        let picked = newly_read(&positions, end, upto, unread);
+        self.pending_reads.extend(picked.iter().map(|&i| (incoming[i].1, incoming[i].2)));
         self.persist.read_upto.insert(key.to_string(), newest);
         self.persist_dirty = true;
+        picked.len() as u32
+    }
+
+    /// The user has seen the open thread's rows up to window row `row`: reads what is unread
+    /// there (receipts, read sync, the counts) and no more. Seeing the window's last row, when
+    /// it is the thread's newest, reads it all.
+    pub(super) fn read_through(&mut self, row: u64) {
+        if !self.focused {
+            return;
+        }
+        let Some(open) = self.current.as_mut() else { return };
+        let Some(pos) = open.window.iter().position(|(t, _)| *t == row) else { return };
+        if open.divider.is_some_and(|d| open.window[..=pos].iter().any(|(t, _)| *t == d)) {
+            open.divider_reached = true;
+        }
+        let key = open.key.clone();
+        if open.end_seq.is_none() && pos + 1 == open.window.len() {
+            self.mark_read(&key);
+            return;
+        }
+        let unread = self.persist.unread.get(&key).copied().unwrap_or(0);
+        let n = self.queue_reads_to(&key, unread, pos + 1);
+        if n > 0 {
+            match unread.saturating_sub(n) {
+                0 => {
+                    self.persist.unread.remove(&key);
+                }
+                left => {
+                    self.persist.unread.insert(key, left);
+                }
+            }
+            self.persist_dirty = true;
+            self.threads_dirty = true;
+        }
     }
 }
 

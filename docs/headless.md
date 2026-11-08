@@ -6,6 +6,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 `SIGWIN_DEMO=1`, plus:
 - `SIGWIN_DEMO_REAL=1` (a believable chat list and conversation instead of test rows, for README screenshots)
 - `SIGWIN_DEMO_STICKERS=1|add`
+- `SIGWIN_DEMO_UNREAD=<n>` (the thread opens with its last n rows unread: the line above the first, the list scrolled to it, the count on the jump button)
 - `SIGWIN_DEMO_INFO=1`
 - `SIGWIN_DEMO_RELOAD=1` (uneven rows + the list re-sent every 250ms, like a live account)
 - `SIGWIN_DEMO_OLDER=<ms>` (60 rows, older pages of 60 loaded at the top after <ms>); with `SIGWIN_DEMO_CAP=<rows>` the window is bounded like the real one and moves through the rows

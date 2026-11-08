@@ -45,15 +45,87 @@ impl App {
         }
     }
 
-    /// Back to the thread's newest messages.
-    async fn to_latest(&mut self) -> anyhow::Result<()> {
+    /// The window becomes the thread's newest rows.
+    async fn show_latest(&mut self) -> anyhow::Result<()> {
         let Some(thread) = self.current.as_ref().map(|o| o.thread.clone()) else { return Ok(()) };
         let span = self.latest_rows(&thread).await?;
         let Some(open) = self.current.as_mut() else { return Ok(()) };
         open.show(span);
         self.moved = true;
+        Ok(())
+    }
+
+    /// Back to the thread's newest messages.
+    async fn to_latest(&mut self) -> anyhow::Result<()> {
+        self.show_latest().await?;
         self.at_bottom = true;
         self.read_if_seen();
+        Ok(())
+    }
+
+    /// The window row of the open thread's first unread message, reading older pages in as
+    /// needed (within the window's budget; past it, the oldest message there is). The window
+    /// must reach the thread's newest message: unread messages are counted from there.
+    pub(super) async fn find_first_unread(&mut self) -> Option<u64> {
+        let me = self.me;
+        loop {
+            let open = self.current.as_ref().filter(|o| o.end_seq.is_none())?;
+            let unread = *self.persist.unread.get(&open.key)?;
+            let flags = incoming_flags(&open.window, me);
+            if let Some(i) = first_unread_idx(&flags, unread) {
+                return Some(open.window[i].0);
+            }
+            let room = open.window.len() + PAGE as usize <= MAX_WINDOW;
+            if !(open.has_more && room) || !self.extend_older().await.unwrap_or(false) {
+                // fewer messages than counted, or more than we load: from the oldest we have
+                let open = self.current.as_ref()?;
+                return incoming_flags(&open.window, me).iter().position(|&b| b).map(|i| open.window[i].0);
+            }
+        }
+    }
+
+    /// Puts the divider where the thread's news starts, if the window shows it.
+    fn resolve_divider(&mut self) {
+        let me = self.me;
+        let Some(open) = self.current.as_mut().filter(|o| o.divider_due) else { return };
+        let unread = self.persist.unread.get(&open.key).copied().unwrap_or(0);
+        if unread == 0 {
+            open.divider_due = false;
+        } else if open.end_seq.is_none() {
+            let flags = incoming_flags(&open.window, me);
+            if let Some(i) = first_unread_idx(&flags, unread) {
+                open.divider = Some(open.window[i].0);
+                open.divider_reached = false;
+                open.divider_due = false;
+            }
+        }
+    }
+
+    /// The jump button, with unread messages: to the first one, or once the user has been
+    /// there on to the bottom.
+    pub(super) async fn unread_button(&mut self) -> anyhow::Result<()> {
+        let unread = self.current.as_ref().and_then(|o| self.persist.unread.get(&o.key)).copied().unwrap_or(0);
+        let reached = self.current.as_ref().is_some_and(|o| o.divider.is_some() && o.divider_reached);
+        if unread == 0 || reached {
+            self.emit_messages(Scroll::Bottom).await;
+            return Ok(());
+        }
+        if self.current.as_ref().is_some_and(|o| o.end_seq.is_some()) {
+            self.show_latest().await?;
+        }
+        let Some(row) = self.find_first_unread().await else {
+            self.emit_messages(Scroll::Bottom).await;
+            return Ok(());
+        };
+        // the line goes where the jump lands (the first unread then)
+        if let Some(open) = self.current.as_mut() {
+            open.divider = Some(row);
+            open.divider_reached = false;
+        }
+        // not at the bottom any more, whatever the UI last said
+        self.at_bottom = false;
+        self.emit_messages(Scroll::Keep).await;
+        (self.emit)(Event::JumpToUnread(row.to_string()));
         Ok(())
     }
 
@@ -130,10 +202,27 @@ impl App {
             oldest_seq: span.oldest_seq,
             end_seq: span.end_seq,
             tail_seq: span.tail_seq,
+            divider: None,
+            divider_reached: false,
+            divider_due: false,
         });
-        self.at_bottom = true;
-        self.mark_read(key);
-        self.emit_messages(Scroll::Bottom).await;
+        self.notes.remove(notify::By::Thread(key));
+        // with unread messages the list opens at the first one and reads as the user goes on
+        // (`read_through`); without, at the bottom, where there is nothing left to read
+        match self.find_first_unread().await {
+            Some(row) => {
+                if let Some(open) = self.current.as_mut() {
+                    open.divider = Some(row);
+                }
+                self.at_bottom = false;
+                self.emit_messages(Scroll::Unread).await;
+            }
+            None => {
+                self.at_bottom = true;
+                self.mark_read(key);
+                self.emit_messages(Scroll::Bottom).await;
+            }
+        }
         Ok(())
     }
 
@@ -315,7 +404,8 @@ impl App {
             }
         }
         self.read_if_seen();
-        self.emit_messages(Scroll::KeepIfNotAtBottom).await;
+        let news = !self.focused && self.current.as_ref().is_some_and(|o| self.persist.unread.contains_key(&o.key));
+        self.emit_messages(if news { Scroll::News } else { Scroll::KeepIfNotAtBottom }).await;
         Ok(())
     }
 
@@ -326,6 +416,7 @@ impl App {
                 warn!("to latest: {e:#}");
             }
         }
+        self.resolve_divider();
         let Some(open) = self.current.as_ref() else { return };
         let tss: Vec<u64> = open.window.iter().map(|(t, _)| *t).collect();
         let mut receipts: HashMap<u64, HashMap<Uuid, u8>> = HashMap::new();
@@ -447,6 +538,11 @@ impl App {
             items.push(pending_row(p, prev));
             prev = Some(p.ts);
         }
+        if let Some(id) = open.divider.map(|d| d.to_string()) {
+            if let Some(m) = items.iter_mut().find(|m| m.id == id) {
+                m.unread_divider = true;
+            }
+        }
         view::mark_runs(&mut items, open.is_group);
         // rows that left the window let go of what they asked for, so coming back asks again
         if std::mem::take(&mut self.moved) {
@@ -563,7 +659,75 @@ impl Open {
     }
 }
 
+/// A message from someone else: what counts as unread.
+pub(super) fn is_incoming(c: &Content, me: Uuid) -> bool {
+    let s = c.metadata.sender.raw_uuid();
+    s != me && !s.is_nil() && matches!(view::classify(c, me), Kind::Msg { outgoing: false, .. })
+}
+
+/// Per window row: whether it is an incoming message.
+fn incoming_flags(window: &[(u64, Content)], me: Uuid) -> Vec<bool> {
+    window.iter().map(|(_, c)| is_incoming(c, me)).collect()
+}
+
+/// Index of the oldest of the last `unread` incoming messages (`incoming[i]`: row `i` is one);
+/// None when there are fewer.
+fn first_unread_idx(incoming: &[bool], unread: u32) -> Option<usize> {
+    let n = (unread as usize).checked_sub(1)?;
+    incoming.iter().enumerate().rev().filter(|(_, b)| **b).nth(n).map(|(i, _)| i)
+}
+
+/// Which of `incoming` (`(row index, sent timestamp)` of each incoming message of the window,
+/// in display order) a read up to row `end` (exclusive) newly covers: the ones newer than the
+/// thread's watermark `upto`, or without one the last `unread` of all. Returns their indices
+/// into `incoming`.
+pub(super) fn newly_read(incoming: &[(usize, u64)], end: usize, upto: Option<u64>, unread: u32) -> Vec<usize> {
+    let skip = match upto {
+        Some(_) => 0,
+        None => incoming.len().saturating_sub(unread as usize),
+    };
+    (skip..incoming.len())
+        .filter(|&i| incoming[i].0 < end && upto.is_none_or(|u| incoming[i].1 > u))
+        .collect()
+}
+
 /// A stored message that produces a visible row.
 fn shows(c: &Content, me: Uuid) -> bool {
     matches!(view::classify(c, me), Kind::Msg { .. } | Kind::System(_) | Kind::Deleted | Kind::Pin { .. })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_unread_counts_incoming_from_the_end() {
+        // rows: in, out, in, in, out
+        let rows = [true, false, true, true, false];
+        assert_eq!(first_unread_idx(&rows, 0), None);
+        assert_eq!(first_unread_idx(&rows, 1), Some(3));
+        assert_eq!(first_unread_idx(&rows, 2), Some(2));
+        assert_eq!(first_unread_idx(&rows, 3), Some(0));
+        // more than the window holds
+        assert_eq!(first_unread_idx(&rows, 4), None);
+    }
+
+    #[test]
+    fn newly_read_without_watermark_takes_the_last_unread() {
+        let inc = [(0, 10), (2, 20), (3, 30), (5, 40)];
+        // all rows seen: the last two are the unread ones
+        assert_eq!(newly_read(&inc, usize::MAX, None, 2), vec![2, 3]);
+        // seen up to row 3 (exclusive end 4): only the unread among them
+        assert_eq!(newly_read(&inc, 4, None, 2), vec![2]);
+        assert_eq!(newly_read(&inc, 2, None, 2), Vec::<usize>::new());
+        assert_eq!(newly_read(&inc, usize::MAX, None, 0), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn newly_read_with_watermark_takes_newer_messages() {
+        let inc = [(0, 10), (2, 20), (3, 30), (5, 40)];
+        assert_eq!(newly_read(&inc, usize::MAX, Some(20), 9), vec![2, 3]);
+        assert_eq!(newly_read(&inc, 4, Some(20), 9), vec![2]);
+        assert_eq!(newly_read(&inc, usize::MAX, Some(40), 9), Vec::<usize>::new());
+    }
 }

@@ -49,6 +49,11 @@ pub(crate) struct Ui {
     /// photos next to group messages by sender uuid, open thread only
     sender_avatars: HashMap<String, Image>,
     last: Vec<MsgDto>,
+    /// the furthest row of the open thread reported seen (`ReadUpTo`), to send only what's new
+    read_sent: Option<String>,
+    /// the window is not the one the user is working in (no focus, or away): rows coming in
+    /// don't scroll the list
+    inactive: bool,
     files: Vec<PathBuf>,
     reply_to: Option<String>,
     /// id of our message being edited in the composer
@@ -139,6 +144,12 @@ pub(crate) fn header_avatar(app: &AppWindow, ui: &Ui) {
     app.set_current_photo(row.photo);
 }
 
+/// The open thread's unread count, on the jump button.
+pub(crate) fn show_open_unread(app: &AppWindow, ui: &Ui) {
+    let n = ui.thread_dtos.iter().find(|t| t.key == ui.open_key).map_or(0, |t| t.unread);
+    app.set_open_unread(n as i32);
+}
+
 /// Unread count for the taskbar and tray badges and the window title; chats with notifications off
 /// count only when the setting says so.
 pub(crate) fn show_total_unread(app: &AppWindow, ui: &Ui) {
@@ -201,6 +212,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         }
         Event::Threads(list) => UI.with_borrow_mut(|ui| {
             ui.thread_dtos = list;
+            show_open_unread(app, ui);
             show_total_unread(app, ui);
             drafts::show_threads(ui);
             header_avatar(app, ui);
@@ -228,6 +240,8 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                     // the composer moves into the old thread's draft, the new one's comes back
                     restored = Some(drafts::switch(app, ui, &key));
                     ui.open_key = key.clone();
+                    ui.read_sent = None;
+                    show_open_unread(app, ui);
                     ui.mention_rows.clear();
                     ui.typing.clear();
                 }
@@ -244,7 +258,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 UI.with_borrow(|ui| header_avatar(app, ui));
             }
             app.set_current_key(key.into());
-            if !switched && scroll != Scroll::Bottom && UI.with_borrow(|ui| ui.older.is_some()) {
+            if !switched && !matches!(scroll, Scroll::Bottom | Scroll::Unread) && UI.with_borrow(|ui| ui.older.is_some()) {
                 // an older page is being anchored: show the newest rows when it lands
                 UI.with_borrow_mut(|ui| ui.older = Some((items, paging)));
                 return;
@@ -266,7 +280,6 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             }
             viewer::close_if_gone();
         }
-        Event::NewBelow => app.set_new_below(app.get_new_below() + 1),
         Event::Pins(list) => {
             let items: Vec<PinItem> = list
                 .iter()
@@ -278,6 +291,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             app.set_pins(ModelRc::new(VecModel::from(items)));
         }
         Event::JumpTo(id) => jump_to_row(app, id),
+        Event::JumpToUnread(id) => jump_to_unread(app, id),
         Event::Avatar(t) => UI.with_borrow_mut(|ui| {
             let img = (t.width > 0).then(|| {
                 Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height))

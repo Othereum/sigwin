@@ -318,6 +318,17 @@ fn fix_ctrl_shortcuts(app: &AppWindow) {
     });
 }
 
+/// Whether the user is working in the window (focused, and not away). The list reads nothing
+/// and keeps its place while not.
+pub(crate) fn set_active(app: &AppWindow, active: bool) {
+    UI.with_borrow_mut(|ui| {
+        ui.inactive = !active;
+        // coming back: the rows on screen are reported again
+        ui.read_sent = None;
+    });
+    app.set_inactive(!active);
+}
+
 /// Slint exposes neither focus nor minimize/restore: hook the window procedure once the
 /// native window exists (it is created when the event loop starts).
 pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
@@ -340,11 +351,15 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
         let last = std::rc::Rc::new(std::cell::Cell::new(true));
         let s2 = send.clone();
         let l2 = last.clone();
+        let w2 = app.as_weak();
         let hooked = winhook::install(&app, h, move |f| {
             if f != l2.get() {
                 l2.set(f);
                 if f {
                     crate::update::poke();
+                }
+                if let Some(app) = w2.upgrade() {
+                    set_active(&app, f);
                 }
                 s2(Command::WindowFocus(f));
             }
@@ -366,6 +381,7 @@ pub(crate) fn hook_window(app: &AppWindow, send: &(impl Fn(Command) + Clone + 's
                     if f {
                         crate::update::poke();
                     }
+                    set_active(&app, f);
                     s(Command::WindowFocus(f));
                 }
             });
