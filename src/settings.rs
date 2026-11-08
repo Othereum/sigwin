@@ -40,6 +40,18 @@ pub struct Settings {
     /// the newest version whose "what's new" was seen or dismissed ("" = never recorded; not a
     /// preference, kept here for lack of a better file)
     pub last_seen_version: String,
+    /// where the window was last (not a preference; restored at start)
+    pub window: Option<WindowGeom>,
+}
+
+/// Normal (not maximized) window rect in physical pixels, and whether it was maximized.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WindowGeom {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+    pub maximized: bool,
 }
 
 impl Default for Settings {
@@ -60,6 +72,7 @@ impl Default for Settings {
             badge_muted: true,
             link_previews: true,
             last_seen_version: String::new(),
+            window: None,
         }
     }
 }

@@ -290,6 +290,7 @@ fn main() -> anyhow::Result<()> {
         }
         app.run()?;
     }
+    save_geometry(&app);
     tray::remove();
     // like Signal's `fastClear` on unload: a toast we can no longer act on goes away
     if !headless::active() {

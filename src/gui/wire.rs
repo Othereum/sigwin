@@ -663,6 +663,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             badge_muted: app.get_set_badge_muted(),
             link_previews: app.get_set_link_previews(),
             last_seen_version: UI.with_borrow(|ui| ui.settings.last_seen_version.clone()),
+            window: UI.with_borrow(|ui| ui.settings.window),
         };
         let (old, path) = UI.with_borrow_mut(|ui| (std::mem::replace(&mut ui.settings, new.clone()), ui.settings_path.clone()));
         if old == new {

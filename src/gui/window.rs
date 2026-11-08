@@ -124,6 +124,7 @@ pub(crate) fn ensure_shown(app: &AppWindow) -> bool {
     if SHOWN.replace(true) {
         return false;
     }
+    restore_geometry(app);
     if let Err(e) = app.show() {
         tracing::warn!("show window: {e}");
     }
@@ -133,6 +134,78 @@ pub(crate) fn ensure_shown(app: &AppWindow) -> bool {
         }
     });
     true
+}
+
+thread_local! {
+    /// the last normal rect seen (updated on move / resize)
+    static GEOM: std::cell::Cell<Option<settings::WindowGeom>> = const { std::cell::Cell::new(None) };
+}
+
+/// Remembers the window's rect unless it is minimized; a maximized window keeps its old
+/// normal rect and only sets the flag.
+fn track_geometry(w: &slint::Window) {
+    if w.is_minimized() {
+        return;
+    }
+    let maximized = w.is_maximized();
+    let prev = GEOM.get();
+    let g = if maximized && prev.is_some() {
+        settings::WindowGeom { maximized, ..prev.unwrap() }
+    } else {
+        let (p, s) = (w.position(), w.size());
+        if s.width == 0 || s.height == 0 {
+            return;
+        }
+        settings::WindowGeom { x: p.x, y: p.y, w: s.width, h: s.height, maximized }
+    };
+    GEOM.set(Some(g));
+}
+
+/// Before the first show: the saved rect, if it still lands on a monitor.
+fn restore_geometry(app: &AppWindow) {
+    if headless::active() {
+        return;
+    }
+    let Some(g) = UI.with_borrow(|ui| ui.settings.window) else { return };
+    GEOM.set(Some(g));
+    let w = app.window();
+    if g.w >= 200 && g.h >= 200 && on_screen(&g) {
+        w.set_size(slint::PhysicalSize::new(g.w, g.h));
+        w.set_position(slint::PhysicalPosition::new(g.x, g.y));
+    }
+    if g.maximized {
+        w.set_maximized(true);
+    }
+}
+
+#[cfg(windows)]
+fn on_screen(g: &settings::WindowGeom) -> bool {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{MonitorFromRect, MONITOR_DEFAULTTONULL};
+    // the title bar's strip must touch a monitor, or the window couldn't be dragged back
+    let r = RECT { left: g.x, top: g.y, right: g.x + g.w as i32, bottom: g.y + 40 };
+    // SAFETY: plain query with a local rect
+    !unsafe { MonitorFromRect(&r, MONITOR_DEFAULTTONULL) }.is_null()
+}
+
+#[cfg(not(windows))]
+fn on_screen(_: &settings::WindowGeom) -> bool {
+    true
+}
+
+/// On exit: writes the window's rect into the settings file.
+pub(crate) fn save_geometry(app: &AppWindow) {
+    if headless::active() || !SHOWN.get() {
+        return;
+    }
+    track_geometry(app.window());
+    let Some(g) = GEOM.get() else { return };
+    UI.with_borrow_mut(|ui| {
+        if ui.settings.window != Some(g) {
+            ui.settings.window = Some(g);
+            ui.settings.save(&ui.settings_path);
+        }
+    });
 }
 
 /// Before the window exists: image sizes follow the system DPI and the zoom setting.
@@ -226,6 +299,7 @@ fn fix_ctrl_shortcuts(app: &AppWindow) {
     app.window().on_winit_window_event(move |window, event| {
         match event {
             WindowEvent::ModifiersChanged(m) => mods.set(m.state()),
+            WindowEvent::Moved(_) | WindowEvent::Resized(_) => track_geometry(window),
             WindowEvent::KeyboardInput { event: e, is_synthetic: false, .. } if e.state.is_pressed() => {
                 if let Some(c) = ctrl_letter(&e.logical_key, e.physical_key, mods.get()) {
                     let text = c.to_string().into();
