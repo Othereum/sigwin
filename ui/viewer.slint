@@ -43,6 +43,8 @@ export component ImageViewer inherits Window {
     // the scale readout is showing: for a moment after each wheel notch
     in property <bool> scale-on;
     in property <string> notice-text;
+    in property <string> notice-action;
+    callback notice-action-clicked();
     // the thumbnail strip is showing wherever the cursor is: for a moment after going to an image
     in property <bool> strip-on;
     // wanted offset of the image from the center when it is bigger than the window, physical px
@@ -318,6 +320,8 @@ export component ImageViewer inherits Window {
     // above the scale readout
     if root.notice-text != "": Notice {
         text: root.notice-text;
+        action: root.notice-action;
+        action-clicked => { root.notice-action-clicked(); }
         max-text-width: root.width - 64px;
         x: (root.width - self.width) / 2;
         y: root.height - self.height - (root.strip-shown ? 108px : 50px);

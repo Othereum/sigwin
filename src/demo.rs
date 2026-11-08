@@ -315,7 +315,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             m.sticker = false;
             m.quote.clear();
             m.quote_author.clear();
-            m.attachment = if count == 5 { "보고서.pdf · 2.4MB".into() } else { String::new() };
+            m.attachment = if count == 5 { "setup.exe · 2.4MB".into() } else { String::new() }; m.file_danger = count == 5;
             m.text = if count == 3 { "사진 설명이 함께 있는 메시지".into() } else { String::new() };
             view::media::set_photo_grid(m, count, |n, _, _| format!("demo-grid-{count}-{n}"));
         }
@@ -815,8 +815,8 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
     if let Command::ViewImage { id, index, fit, .. } = c {
         return demo_viewer(emit, id, *index, *fit);
     }
-    if let Command::SaveViewed { .. } = c {
-        return emit(Event::Notice("저장했습니다.".into()));
+    if let Command::SaveViewed { .. } | Command::SaveFiles { .. } = c {
+        return emit(Event::Saved("첨부 파일 1개를 저장했습니다.".into(), std::env::temp_dir().join("demo.pdf")));
     }
     if let Command::ViewerThumbs { id, px } = c {
         for index in 0..demo_viewer_count() {

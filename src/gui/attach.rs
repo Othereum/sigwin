@@ -83,6 +83,7 @@ pub(crate) fn show(app: &AppWindow, files: &[PathBuf]) {
                     has_thumb: thumb.is_some(),
                     thumb: thumb.unwrap_or_default(),
                     is_file,
+                    danger: is_file && crate::view::media::is_dangerous_file(&file_name(p)),
                     name: if is_file { file_name(p) } else { SharedString::new() },
                     size: size.into(),
                 }

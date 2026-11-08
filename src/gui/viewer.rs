@@ -86,17 +86,18 @@ thread_local! {
     static PENDING: RefCell<Option<(String, Option<(i32, i32)>)>> = const { RefCell::new(None) };
 }
 
-pub(crate) fn open(app: &AppWindow, id: String, index: usize, from_file: bool) {
+pub(crate) fn open(app: &AppWindow, id: String, index: usize) {
     close();
     PENDING.with_borrow_mut(|p| *p = Some((id.clone(), cursor_pos())));
-    send_cmd(Command::ViewImage { id, index, fit: screen_box(window::hwnd(app)), from_file });
+    send_cmd(Command::ViewImage { id, index, fit: screen_box(window::hwnd(app)) });
 }
 
 /// A main window notice also shows here: the viewer usually covers it.
-pub(crate) fn set_notice(text: &SharedString) {
+pub(crate) fn set_notice(text: &SharedString, action: &SharedString) {
     VIEWER.with_borrow(|v| {
         if let Some(v) = v {
             v.win.set_notice_text(text.clone());
+            v.win.set_notice_action(action.clone());
         }
     });
 }
@@ -190,6 +191,7 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
     win.on_prev(|| step(-1));
     win.on_next(|| step(1));
     win.on_dismiss(close);
+    win.on_notice_action_clicked(super::notice::reveal);
     win.on_save(|| {
         with_current(|v| {
             send_cmd(Command::SaveViewed { id: v.id.clone(), index: v.index, owner: viewer_hwnd(&v.win) });
@@ -339,7 +341,7 @@ fn go_to(index: usize) {
             v.win.set_strip_on(true);
             v.hide_strip.start(slint::TimerMode::SingleShot, STRIP_SHOWN, || with_current(|v| v.win.set_strip_on(false)));
             let fit = screen_box(viewer_hwnd(&v.win));
-            send_cmd(Command::ViewImage { id: v.id.clone(), index, fit, from_file: false });
+            send_cmd(Command::ViewImage { id: v.id.clone(), index, fit });
         }
     });
 }

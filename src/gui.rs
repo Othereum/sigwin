@@ -267,6 +267,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::ViewerThumb(id, index, t) => viewer::thumb_arrived(&id, index, t),
         Event::Frames(f) => anim::frames_arrived(f),
         Event::Notice(s) => notice::show(app, &s),
+        Event::Saved(s, path) => notice::saved(app, &s, path),
         Event::Progress(s) => notice::progress(app, &s),
         Event::ProgressDone => notice::progress_done(app),
         Event::Connection { text, at_once } => notice::connection(app, text, at_once),

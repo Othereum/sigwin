@@ -192,6 +192,10 @@ enum Internal {
     /// a long message's full text: (attachment key, text)
     LongText(String, String),
     Notice(String),
+    /// the user chose where to save a message's files: download and write them
+    SaveFiles(Vec<(PathBuf, AttachmentPointer)>, files::SaveTo),
+    /// the files were saved (the last one's path)
+    Saved(String, PathBuf),
     Progress(String),
     ProgressDone,
     PackInstalled(Result<String, String>),
@@ -650,7 +654,8 @@ impl App {
                 }
             }
             Command::Send { text, files, quote, mentions, link, quality } => self.send(text, files, quote, mentions, link, quality).await,
-            Command::ViewImage { id, index, fit, from_file } => self.view_image(&id, index, fit, from_file),
+            Command::ViewImage { id, index, fit } => self.view_image(&id, index, fit),
+            Command::SaveFiles { id, owner } => self.save_files(&id, owner),
             Command::OpenVideo { id, index } => self.open_video(&id, index),
             Command::ViewerThumbs { id, px } => self.viewer_thumbs(&id, px),
             Command::OpenViewed { id, index } => self.open_viewed(&id, index),
@@ -811,6 +816,11 @@ impl App {
                 }
             }
             Internal::Notice(s) => self.notice(s),
+            Internal::SaveFiles(jobs, to) => self.save_files_to(jobs, to),
+            Internal::Saved(text, path) => {
+                (self.emit)(Event::ProgressDone);
+                (self.emit)(Event::Saved(text, path));
+            }
             Internal::Progress(s) => self.progress(s),
             Internal::ProgressDone => (self.emit)(Event::ProgressDone),
             Internal::PackInstalled(Ok(id)) => {

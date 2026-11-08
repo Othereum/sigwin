@@ -60,6 +60,9 @@ export component AppWindow inherits Window {
     callback row-seen(string);
     // a short message over the conversation pane (gui::notice)
     in property <string> notice-text;
+    // the notice's button ("" for none)
+    in property <string> notice-action;
+    callback notice-action-clicked();
     // what's going on with the connection, "" when all is well
     in property <string> connection-text;
     in property <string> reply-preview;
@@ -750,7 +753,7 @@ export component AppWindow inherits Window {
                         width: 40px;
                         height: 40px;
                         border-radius: 6px;
-                        background: Theme.accent;
+                        background: root.pending-files[0].danger ? #d97706 : Theme.accent;
                         Text {
                             text: root.pending-files[0].ext;
                             color: #ffffff;
@@ -774,8 +777,8 @@ export component AppWindow inherits Window {
                             overflow: elide;
                         }
                         Text {
-                            text: root.pending-files[0].size;
-                            color: Theme.subtle;
+                            text: root.pending-files[0].danger ? root.pending-files[0].size + " · 위험할 수 있음" : root.pending-files[0].size;
+                            color: root.pending-files[0].danger ? #f0a030 : Theme.subtle;
                             font-size: 12px;
                         }
                     }
@@ -1377,6 +1380,8 @@ export component AppWindow inherits Window {
     // over the conversation pane, just above the composer (the window's bottom when there is none)
     if page == "main" && root.notice-text != "": Notice {
         text: root.notice-text;
+        action: root.notice-action;
+        action-clicked => { root.notice-action-clicked(); }
         max-text-width: root.width - 300px - 76px;
         x: 300px + (root.width - 300px - self.width) / 2;
         y: composer-bar.absolute-position.y - self.height - 10px;

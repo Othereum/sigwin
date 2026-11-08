@@ -237,21 +237,56 @@ impl App {
         });
     }
 
-    /// The message's file line: its images have their own place, in the row and the viewer.
-    pub(super) fn open_attachment(&self, id: &str) {
+    /// The message's file line: its pictures and videos have their own place, in the row and the
+    /// viewer. A file is never opened for the user (it could be a program): they choose where it
+    /// goes, one file by name, several into a folder.
+    pub(super) fn save_files(&self, id: &str, owner: isize) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let jobs: Vec<(PathBuf, AttachmentPointer)> = view::media::shown_attachments(dm)
             .filter(|(_, a)| !view::media::is_media(a))
             .map(|(i, a)| (attachment_path(&self.paths.attachments, &view::media::attachment_key(a, ts, i)), a.clone()))
             .collect();
+        let tx = self.tx.clone();
+        match jobs.as_slice() {
+            [] => {}
+            [(_, ptr)] => crate::picker::spawn_save(owner, attachment_name(ptr), move |dst| {
+                if let Some(dst) = dst {
+                    let _ = tx.send(Internal::SaveFiles(jobs, SaveTo::File(dst)));
+                }
+            }),
+            _ => crate::picker::spawn_folder(owner, move |dir| {
+                if let Some(dir) = dir {
+                    let _ = tx.send(Internal::SaveFiles(jobs, SaveTo::Folder(dir)));
+                }
+            }),
+        }
+    }
+
+    /// Downloads what isn't here yet and writes the files where the user chose.
+    pub(super) fn save_files_to(&self, jobs: Vec<(PathBuf, AttachmentPointer)>, to: SaveTo) {
         let manager = self.manager.clone();
         let tx = self.tx.clone();
-        let open_dir = self.paths.open.clone();
         tokio::task::spawn_local(async move {
-            for (path, ptr) in jobs {
-                if fetch_attachment(&manager, &tx, &path, &ptr).await {
-                    open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
+            let mut saved = Vec::new();
+            for (path, ptr) in &jobs {
+                if !fetch_attachment(&manager, &tx, path, ptr).await {
+                    continue;
                 }
+                let dst = match &to {
+                    SaveTo::File(f) => f.clone(),
+                    SaveTo::Folder(dir) => free_name(dir, &attachment_name(ptr)),
+                };
+                match sigwin_vault::decrypt_file(path, &dst) {
+                    Ok(()) => saved.push(dst),
+                    Err(e) => {
+                        let _ = tx.send(Internal::Notice(format!("저장 실패: {e}")));
+                        return;
+                    }
+                }
+            }
+            if let Some(last) = saved.pop() {
+                let text = format!("첨부 파일 {}개를 저장했습니다.", saved.len() + 1);
+                let _ = tx.send(Internal::Saved(text, last));
             }
         });
     }
@@ -274,12 +309,11 @@ impl App {
         Some((attachment_path(&self.paths.attachments, &view::media::attachment_key(a, ts, i)), a.clone()))
     }
 
-    pub(super) fn view_image(&self, id: &str, index: usize, fit: (u32, u32), from_file: bool) {
+    pub(super) fn view_image(&self, id: &str, index: usize, fit: (u32, u32)) {
         let Some((_, dm)) = self.row_message(id) else { return };
-        let shown = view::media::shown_attachments(dm).count();
         let count = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a)).count();
-        if count == 0 || (from_file && count != shown) {
-            return self.open_attachment(id);
+        if count == 0 {
+            return;
         }
         let index = index.min(count - 1);
         let Some((path, ptr)) = self.viewed(id, index) else { return };
@@ -370,13 +404,34 @@ impl App {
         let tx = self.tx.clone();
         crate::picker::spawn_save(owner, attachment_name(&ptr), move |dst| {
             let Some(dst) = dst else { return };
-            let status = match sigwin_vault::decrypt_file(&path, &dst) {
-                Ok(()) => "저장했습니다.".to_string(),
-                Err(e) => format!("저장 실패: {e}"),
-            };
-            let _ = tx.send(Internal::Notice(status));
+            let _ = tx.send(match sigwin_vault::decrypt_file(&path, &dst) {
+                Ok(()) => Internal::Saved("저장했습니다.".into(), dst),
+                Err(e) => Internal::Notice(format!("저장 실패: {e}")),
+            });
         });
     }
+}
+
+/// Where the user chose to save files: one file's whole path, or a folder for several.
+pub(super) enum SaveTo {
+    File(PathBuf),
+    Folder(PathBuf),
+}
+
+/// `name` in `dir`, or `name (2)`, `name (3)`… if it is taken: saving several files never
+/// overwrites one.
+fn free_name(dir: &Path, name: &str) -> PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let p = Path::new(name);
+    let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    (2..)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|c| !c.exists())
+        .unwrap_or(first)
 }
 
 /// Safety limit, not a budget: more pixels than this are abnormal input and go to an outside app.
@@ -785,6 +840,18 @@ pub(super) fn clear_dir(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saving_several_files_never_overwrites() {
+        let dir = std::env::temp_dir().join(format!("sigwin-free-name-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(free_name(&dir, "a.pdf"), dir.join("a.pdf"));
+        std::fs::write(dir.join("a.pdf"), b"x").unwrap();
+        assert_eq!(free_name(&dir, "a.pdf"), dir.join("a (2).pdf"));
+        std::fs::write(dir.join("a (2).pdf"), b"x").unwrap();
+        assert_eq!(free_name(&dir, "a.pdf"), dir.join("a (3).pdf"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn downloads_are_checked_decrypted_and_unpadded() {

@@ -7,7 +7,12 @@ import { Theme } from "theme.slint";
 export component Notice inherits Rectangle {
     in property <string> text;
     in property <length> max-text-width;
-    width: min(label.preferred-width, root.max-text-width) + 28px;
+    // a button at the end ("" for none)
+    in property <string> action;
+    callback action-clicked();
+    property <length> action-w: root.action != "" ? act-measure.preferred-width + 24px : 0px;
+    act-measure := Text { visible: false; text: root.action; font-size: 13px; font-weight: 700; }
+    width: min(label.preferred-width, root.max-text-width) + 28px + root.action-w;
     height: min(label.preferred-height, 40px) + 16px;
     border-radius: 8px;
     background: #303034;
@@ -18,7 +23,7 @@ export component Notice inherits Rectangle {
     label := Text {
         x: 14px;
         y: 8px;
-        width: parent.width - 28px;
+        width: parent.width - 28px - root.action-w;
         height: parent.height - 16px;
         text: root.text;
         color: white;
@@ -26,6 +31,26 @@ export component Notice inherits Rectangle {
         wrap: word-wrap;
         overflow: elide;
         horizontal-alignment: center;
+    }
+    if root.action != "": Rectangle {
+        x: parent.width - root.action-w - 6px;
+        y: 5px;
+        width: root.action-w;
+        height: parent.height - 10px;
+        border-radius: 5px;
+        background: act-area.has-hover ? #ffffff28 : #ffffff14;
+        Text {
+            text: root.action;
+            color: #8ab4ff;
+            font-size: 13px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        act-area := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.action-clicked(); }
+        }
     }
 }
 

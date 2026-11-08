@@ -607,7 +607,7 @@ export component Bubble inherits VerticalLayout {
                             height: 40px;
                             y: 0px;
                             border-radius: 6px;
-                            background: m.outgoing ? #ffffff40 : Theme.accent;
+                            background: m.file-danger ? #d97706 : m.outgoing ? #ffffff40 : Theme.accent;
                             Text {
                                 text: m.file-ext != "" ? m.file-ext : "FILE";
                                 color: #ffffff;
@@ -627,9 +627,9 @@ export component Bubble inherits VerticalLayout {
                                 font-size: 14px;
                                 overflow: elide;
                             }
-                            if m.file-size != "": Text {
-                                text: m.file-size;
-                                color: m.outgoing ? #ffffffc0 : Theme.subtle;
+                            if m.file-size != "" || m.file-danger: Text {
+                                text: m.file-danger ? (m.file-size != "" ? m.file-size + " · " : "") + "위험할 수 있음" : m.file-size;
+                                color: m.file-danger ? (m.outgoing ? #ffe2a8 : #f0a030) : m.outgoing ? #ffffffc0 : Theme.subtle;
                                 font-size: 12px;
                             }
                         }

@@ -134,6 +134,19 @@ pub fn file_line(first: &str, more: usize, bytes: Option<u64>) -> String {
     }
 }
 
+/// A file that runs or changes the system when opened: the official desktop app refuses to send
+/// or save these. We only warn. Trailing dots and spaces don't change what Windows opens.
+pub fn is_dangerous_file(name: &str) -> bool {
+    const KINDS: &[&str] = &[
+        "ade", "adp", "apk", "bat", "cab", "chm", "cmd", "com", "cpl", "diagcab", "dll", "dmg", "exe", "hta", "inf", "ins",
+        "isp", "jar", "js", "jse", "lib", "lnk", "mde", "mht", "msc", "msi", "msp", "mst", "nsh", "pif", "ps1", "psc1",
+        "psm1", "psrc", "reg", "scr", "sct", "settingcontent-ms", "shb", "sys", "vb", "vbe", "vbs", "vxd", "wsc", "wsf",
+        "wsh",
+    ];
+    let name = name.trim_end_matches(['.', ' ']);
+    name.rsplit_once('.').is_some_and(|(_, e)| KINDS.contains(&e.to_ascii_lowercase().as_str()))
+}
+
 /// What a message's file card shows, taken from its [`file_line`]: the name (with "외 N개"), its
 /// size, and the extension of the first file for the badge.
 pub fn file_card(line: &str) -> (String, String, String) {
@@ -268,6 +281,7 @@ pub(super) fn set_attachments(
         }
     }
     m.attachment = files_label(&files);
+    m.file_danger = files.iter().any(|a| is_dangerous_file(&attachment_label(a)));
     if let [(i, a)] = photos[..] {
         let key = attachment_key(a, ts, i);
         let (w, h) = fit(a.width, a.height);
@@ -301,6 +315,16 @@ pub(super) fn set_attachments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dangerous_files() {
+        assert!(is_dangerous_file("setup.EXE"));
+        assert!(is_dangerous_file("run.bat."));
+        assert!(is_dangerous_file("a.b.ps1 "));
+        assert!(!is_dangerous_file("보고서.pdf"));
+        assert!(!is_dangerous_file("exe"));
+        assert!(!is_dangerous_file("a.exe.txt"));
+    }
 
     #[test]
     fn file_card_takes_its_line_apart() {

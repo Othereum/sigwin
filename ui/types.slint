@@ -88,6 +88,8 @@ export struct MsgItem {
     file-name: string,
     file-size: string,
     file-ext: string,
+    // a kind that can run or change the system: marked
+    file-danger: bool,
     has-image: bool,
     image: image,
     // `image` is the picture of a video: drawn with a play mark, clicking opens the video
@@ -163,6 +165,7 @@ export struct PendingFile {
     has-thumb: bool,
     // not a picture or video: shown as a card with name and size
     is-file: bool,
+    danger: bool,
     name: string,
     size: string,
 }

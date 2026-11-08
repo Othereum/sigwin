@@ -549,18 +549,30 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             Some((_, ClickedMedia::Video(index))) => s(Command::OpenVideo { id: id.to_string(), index }),
             Some((_, ClickedMedia::Image(index))) => {
                 if let Some(app) = weak.upgrade() {
-                    viewer::open(&app, id.to_string(), index, false);
+                    viewer::open(&app, id.to_string(), index);
                 }
             }
             None => {}
         }
     });
 
+    app.on_notice_action_clicked(notice::reveal);
+
     let weak = app.as_weak();
     app.on_file_clicked(move |id| {
-        if let Some(app) = weak.upgrade() {
-            viewer::open(&app, id.to_string(), 0, true);
+        let Some(app) = weak.upgrade() else { return };
+        let danger = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id.as_str() && m.file_danger));
+        if danger {
+            let ok = rfd::MessageDialog::new()
+                .set_title("위험할 수 있는 파일")
+                .set_description("이런 종류의 파일은 컴퓨터에 해를 끼칠 수 있습니다. 보낸 사람을 믿을 수 있을 때만 저장하세요. 저장할까요?")
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show();
+            if ok != rfd::MessageDialogResult::Yes {
+                return;
+            }
         }
+        send_cmd(Command::SaveFiles { id: id.to_string(), owner: window::hwnd(&app) });
     });
 
     let weak = app.as_weak();
@@ -763,13 +775,17 @@ pub(crate) fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
     if files.is_empty() {
         return;
     }
-    let (all, why) = UI.with_borrow_mut(|ui| {
+    let (all, why, danger) = UI.with_borrow_mut(|ui| {
         let (ok, why) = attach::admit(&ui.files, files);
+        let name = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let danger = ok.iter().any(|p| view::media::is_dangerous_file(&name(p)));
         ui.files.extend(ok);
-        (ui.files.clone(), why)
+        (ui.files.clone(), why, danger)
     });
     if let Some(why) = why {
         notice::show(app, why);
+    } else if danger {
+        notice::show(app, "이런 종류의 파일은 상대의 공식 앱에서 받지 못할 수 있습니다.");
     }
     attach::show(app, &all);
     app.invoke_focus_composer();

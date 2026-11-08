@@ -315,6 +315,7 @@ pub(crate) fn to_item(
         file_name: file.0.into(),
         file_size: file.1.into(),
         file_ext: file.2.into(),
+        file_danger: m.file_danger,
         has_image: !m.image_key.is_empty(),
         video: m.video,
         media_label: if m.sticker || !m.cells.is_empty() { SharedString::new() } else { label_of(&m.image_key) },
