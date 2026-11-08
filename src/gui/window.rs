@@ -522,7 +522,7 @@ pub(crate) fn visibility(app: &AppWindow, shown: bool) {
     RELEASE.with(|t| {
         t.start(slint::TimerMode::SingleShot, RELEASE_AFTER, move || {
             if let Some(app) = weak.upgrade() {
-                close_stickers(&app);
+                stickers::close(&app);
             }
             UI.with_borrow_mut(|ui| {
                 ui.anims.clear_list();

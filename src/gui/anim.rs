@@ -226,11 +226,11 @@ fn set_rows(ui: &Ui, key: &str) {
 }
 
 fn set_picker_row(ui: &Ui, key: &str, (frames, frame): (ModelRc<Image>, ModelRc<i32>)) {
-    let Some(i) = ui.grid.iter().position(|s| s.key == key) else { return };
-    if let Some(mut row) = ui.stickers.row_data(i) {
+    let Some(i) = ui.sticker.grid.iter().position(|s| s.key == key) else { return };
+    if let Some(mut row) = ui.sticker.stickers.row_data(i) {
         row.frames = frames;
         row.frame = frame;
-        ui.stickers.set_row_data(i, row);
+        ui.sticker.stickers.set_row_data(i, row);
     }
 }
 

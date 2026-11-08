@@ -587,7 +587,7 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     app.on_toggle_stickers(move || {
         let Some(app) = weak.upgrade() else { return };
         if app.get_sticker_open() {
-            close_stickers(&app);
+            stickers::close(&app);
         } else {
             app.set_sticker_open(true);
             s(Command::StickerPanel);
@@ -609,7 +609,7 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     app.on_send_sticker(move |pack, id| {
         s(Command::SendSticker { pack: pack.to_string(), id: id as u32 });
         if let Some(app) = weak.upgrade() {
-            close_stickers(&app);
+            stickers::close(&app);
         }
     });
 
