@@ -12,6 +12,7 @@ pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     wire_messages(app, &send);
     wire_stickers(app, &send);
     wire_settings(app, &send);
+    wire_update(app);
     anim::wire(app);
     whatsnew::wire(app);
     if !headless::active() {
@@ -702,6 +703,53 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
 
     let s = send.clone();
     app.on_clear_thumbs(move || s(Command::ClearThumbs));
+}
+
+/// The update buttons on the settings page.
+fn wire_update(app: &AppWindow) {
+    app.on_restart_for_update(update::restart);
+    let weak = app.as_weak();
+    app.on_install_update(move || {
+        let Some(app) = weak.upgrade() else { return };
+        if !update::install() {
+            app.set_update_installing(false);
+        }
+    });
+    let weak = app.as_weak();
+    app.on_check_update(move || {
+        let Some(app) = weak.upgrade() else { return };
+        if update::check_now() {
+            app.set_update_status(SharedString::new());
+            app.set_update_checking(true);
+        } else {
+            app.set_update_status("설치된 Sigwin에서만 업데이트할 수 있습니다.".into());
+        }
+    });
+}
+
+/// Starts checking for updates of the installed `exe`; the settings page shows what it finds.
+pub(crate) fn start_updates(app: &AppWindow, exe: PathBuf) {
+    let weak = app.as_weak();
+    update::spawn(exe, move |st| {
+        let _ = weak.upgrade_in_event_loop(move |app| {
+            app.set_update_checking(false);
+            app.set_update_installing(false);
+            match st {
+                update::Status::Ready(v) => {
+                    app.set_update_available(SharedString::new());
+                    app.set_update_version(v.into());
+                }
+                update::Status::Available(v) => app.set_update_available(v.into()),
+                update::Status::UpToDate => {
+                    app.set_update_available(SharedString::new());
+                    app.set_update_status("최신 버전입니다.".into());
+                }
+                update::Status::Failed => {
+                    app.set_update_status("확인하지 못했습니다. 네트워크를 확인하고 다시 시도하세요.".into())
+                }
+            }
+        });
+    });
 }
 
 

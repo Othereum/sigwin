@@ -10,7 +10,7 @@ use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffe
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::types::{ClickedMedia, Command, Event, MsgDto, Paging, Scroll, ThreadDto};
-use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, view, winhook};
+use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
     AppWindow, ImageCell, ImageViewer, Links, MentionItem, MsgItem, NoteLine, PackItem, PinItem, ReactionItem, ReaderItem,
     StickerItem, Theme, ThreadItem,
@@ -101,6 +101,23 @@ pub(crate) struct Ui {
     /// showing it again reloads the thread (`window::visibility`)
     released: bool,
     pub(crate) link: linkcard::State,
+}
+
+/// Gives the window the UI state's models, and starts the timer that ages their times.
+pub(crate) fn bind_models(app: &AppWindow) {
+    let age_timer = Box::leak(Box::new(slint::Timer::default()));
+    age_timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(30), || {
+        UI.with_borrow(|ui| {
+            refresh_times(ui);
+            drafts::refresh_draft_times(ui);
+        });
+    });
+    UI.with_borrow(|ui| {
+        app.set_threads(ModelRc::from(ui.threads.clone()));
+        app.set_messages(ModelRc::from(ui.messages.clone()));
+        app.set_packs(ModelRc::from(ui.packs.clone()));
+        app.set_stickers(ModelRc::from(ui.stickers.clone()));
+    });
 }
 
 /// Scenario steps (headless with `SIGWIN_FIXTURE`) need the window.
