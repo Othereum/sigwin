@@ -14,7 +14,7 @@ const PHOTO_BOX_TALL: (u32, u32) = (300, 450);
 /// Decode size of photo thumbnails: the longest side a photo can show.
 pub const PHOTO_THUMB_MAX: u32 = PHOTO_BOX_TALL.1;
 
-pub const STICKER_SIZE: u32 = 140;
+pub const STICKER_SIZE: u32 = 180;
 
 pub fn attachment_key(ptr: &AttachmentPointer, ts: u64, idx: usize) -> String {
     match &ptr.digest {
