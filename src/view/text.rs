@@ -299,7 +299,7 @@ pub fn one_line(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
             .next()
             .map(|(_, a)| {
                 let l = attachment_label(a);
-                if is_image(a) { format!("📷 {l}") } else { format!("📎 {l}") }
+                if is_image(a) { format!("📷 {l}") } else { format!("📄 {l}") }
             })
             .unwrap_or_default();
     }

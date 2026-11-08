@@ -998,9 +998,9 @@ fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiv
     let threads = vec![
         th(1, "이서연", "그럼 토요일 11시에 합정역에서 봐요!", "오후 6:42", 0, false),
         th(2, "가족 단톡방", "엄마: 이번 주말에 다들 올 수 있지?", "오후 5:58", 2, true),
-        th(3, "김민준", "사진 보냈어요", "오후 2:10", 0, false),
+        th(3, "김민준", "📷 IMG_2041.jpg", "오후 2:10", 0, false),
         th(4, "프로젝트 팀", "박지훈: 리뷰 올렸습니다", "오전 11:30", 0, true),
-        th(5, "박지훈", "넵 확인했습니다", "어제", 0, false),
+        th(5, "박지훈", "📄 unlockfps_nc_signed.exe", "어제", 0, false),
         th(6, "최유나", "고마워요 :)", "어제", 0, false),
         th(7, "독서 모임", "다음 책은 뭐로 할까요?", "11월 1일", 0, true),
         th(8, "Alice Kim", "See you next week!", "10월 31일", 0, false),
