@@ -456,6 +456,8 @@ export component Bubble inherits VerticalLayout {
     callback file-clicked(string);
     // the hover toolbar's save: every picture, video and file of the message
     callback save-clicked(string);
+    // the file line's files are on their way to be saved
+    property <bool> file-loading: m.file-state.length > 0 && m.file-state[0].progress >= 0;
     // the quote in a reply: the quoted message's sent timestamp
     callback quote-clicked(string);
     callback reply(string);
@@ -702,7 +704,14 @@ export component Bubble inherits VerticalLayout {
                             y: 0px;
                             border-radius: 6px;
                             background: m.file-danger ? #d97706 : m.outgoing ? #ffffff40 : Theme.accent;
-                            Text {
+                            // on its way: the picture's mark, a ring and the stop it takes
+                            if root.file-loading: VideoMark {
+                                undownloaded: true;
+                                progress: m.file-state[0].progress;
+                                ring: m.file-state[0].ring;
+                                hovered: ata.has-hover;
+                            }
+                            if !root.file-loading: Text {
                                 text: m.file-ext != "" ? m.file-ext : "FILE";
                                 color: #ffffff;
                                 font-size: 11px;
@@ -721,7 +730,12 @@ export component Bubble inherits VerticalLayout {
                                 font-size: 14px;
                                 overflow: elide;
                             }
-                            if m.file-size != "" || m.file-danger: Text {
+                            if root.file-loading: Text {
+                                text: m.file-state[0].label;
+                                color: m.outgoing ? #ffffffc0 : Theme.subtle;
+                                font-size: 12px;
+                            }
+                            if !root.file-loading && (m.file-size != "" || m.file-danger): Text {
                                 text: m.file-danger ? (m.file-size != "" ? m.file-size + " · " : "") + "위험할 수 있음" : m.file-size;
                                 color: m.file-danger ? (m.outgoing ? #ffe2a8 : #f0a030) : m.outgoing ? #ffffffc0 : Theme.subtle;
                                 font-size: 12px;

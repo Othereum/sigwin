@@ -109,6 +109,8 @@ export struct MsgItem {
     file-ext: string,
     // a kind that can run or change the system: marked
     file-danger: bool,
+    // how far saving the files has come (one, while it is on its way), as a picture's `state`
+    file-state: [MediaState],
     // a picture, video or sticker is shown (`cells`, or `image` for a sticker)
     has-image: bool,
     // a sticker's picture

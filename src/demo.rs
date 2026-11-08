@@ -876,7 +876,20 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
 
 /// SIGWIN_DEMO_VIDEO: the newest rows show videos: with a frame on the way, with a blurhash only,
 /// with nothing, and in a grid with an image.
+/// SIGWIN_DEMO_VIDEO's row with a file being saved
+static DEMO_FILE_ROW: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 fn demo_video_rows(items: &mut [types::MsgDto]) {
+    // above them, a file on its way to be saved
+    let file = items.len() - 5;
+    let f = &mut items[file];
+    f.big_emoji = false;
+    f.sticker = false;
+    f.text.clear();
+    f.cells.clear();
+    f.image_key.clear();
+    f.attachment = view::media::file_line("보고서_최종.pdf", 0, Some(12 * 1024 * 1024));
+    let _ = DEMO_FILE_ROW.set(f.id.clone());
     let last = items.len() - 4;
     for (n, m) in items[last..].iter_mut().enumerate() {
         m.big_emoji = false;
@@ -925,6 +938,9 @@ fn demo_videos(emit: &backend::Emit) {
     label("demo-video-grid-1", "2.4MB", true);
     downloading("demo-video-grid-2", "123MB / 1.2GB", 0);
     label("demo-video-grid-3", "3.1MB", true);
+    if let Some(id) = DEMO_FILE_ROW.get() {
+        downloading(&types::file_line_key(id), "4.2MB / 12MB", 35);
+    }
     // the first frame replaces the blurhash
     std::thread::sleep(std::time::Duration::from_millis(1500));
     let (w, h) = (types::physical_px(400), types::physical_px(225));

@@ -642,6 +642,11 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     let save = move |weak: &slint::Weak<AppWindow>, id: &str, all: bool| {
         let Some(app) = weak.upgrade() else { return };
+        // while its files are on their way, a click stops that, as on a picture
+        if UI.with_borrow(|ui| ui.media_labels.downloading(&crate::types::file_line_key(id))) {
+            send_cmd(Command::StopFileSave { id: id.to_string() });
+            return;
+        }
         let danger = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && m.file_danger));
         if danger {
             let ok = rfd::MessageDialog::new()

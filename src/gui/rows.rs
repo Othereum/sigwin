@@ -88,6 +88,7 @@ pub(crate) fn shows_key(m: &MsgDto, key: &str) -> bool {
         || m.cells.iter().any(|c| c.key == key)
         || m.link.as_ref().is_some_and(|l| l.image_key == key)
         || (!m.quote_image_key.is_empty() && m.quote_image_key == key)
+        || (!m.attachment.is_empty() && key.strip_prefix(types::FILE_LINE_PREFIX) == Some(m.id.as_str()))
 }
 
 /// Re-derives the relative times of recent bubbles ("3분") as the minutes pass.
@@ -283,6 +284,11 @@ impl MediaStates {
         }
     }
 
+    /// On its way now (not merely not here).
+    pub(crate) fn downloading(&self, key: &str) -> bool {
+        self.models.borrow().get(key).is_some_and(|m| slint::Model::row_data(&**m, 0).is_some_and(|s| s.progress >= 0))
+    }
+
     pub(crate) fn undownloaded(&self, key: &str) -> bool {
         self.models.borrow().get(key).is_some_and(|m| slint::Model::row_data(&**m, 0).is_some_and(|s| s.undownloaded))
     }
@@ -389,6 +395,8 @@ pub(crate) fn to_item(
         file_size: file.1.into(),
         file_ext: file.2.into(),
         file_danger: m.file_danger,
+        // shared and changed in place, like a picture's: no row is drawn again for a percent
+        file_state: if m.attachment.is_empty() { Default::default() } else { states.model(&types::file_line_key(&m.id)) },
         has_image: !m.image_key.is_empty() || !m.cells.is_empty(),
         image: image.unwrap_or_default(),
         frames,

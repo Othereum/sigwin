@@ -203,7 +203,7 @@ enum Internal {
     LongText(String, String),
     Notice(String),
     /// the user chose where to save a message's files: download and write them
-    SaveFiles(Vec<files::SaveJob>, files::SaveTo),
+    SaveFiles(files::Save, files::SaveTo),
     /// the files were saved (the last one's path)
     Saved(String, PathBuf),
     ProgressDone,
@@ -684,6 +684,7 @@ impl App {
             Command::SaveFiles { id, owner, all } => self.save_files(&id, owner, all),
             Command::OpenVideo { id, index } => self.open_video(&id, index).await,
             Command::ToggleImageDownload { id, index } => self.toggle_image_download(&id, index).await,
+            Command::StopFileSave { id } => self.attachment_downloads.stop_save(&id),
             Command::PlayGif { id, index, seq, size } => self.play_gif(&id, index, seq, size),
             Command::StopGif => self.stop_gif(),
             Command::PlayPendingGif { path, seq, tile } => self.play_pending_gif(path, seq, tile),
@@ -848,7 +849,7 @@ impl App {
                 }
             }
             Internal::Notice(s) => self.notice(s),
-            Internal::SaveFiles(jobs, to) => self.save_files_to(jobs, to),
+            Internal::SaveFiles(save, to) => self.save_files_to(save, to),
             Internal::Saved(text, path) => {
                 (self.emit)(Event::ProgressDone);
                 (self.emit)(Event::Saved(text, path));

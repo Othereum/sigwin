@@ -237,40 +237,55 @@ impl App {
                 SaveJob { path: attachment_path(&self.paths.attachments, &file_key), file_key, ptr: a.clone() }
             })
             .collect();
+        // the row's file line shows how far it is, and a click on it stops it; a row of pictures
+        // alone has no line, so that goes to the notice
+        let line = view::media::shown_attachments(dm).any(|(_, a)| !view::media::is_media(a));
+        let save = Save { id: id.to_string(), line, jobs };
         let tx = self.tx.clone();
-        match jobs.as_slice() {
+        match save.jobs.as_slice() {
             [] => {}
             [SaveJob { ptr, .. }] => crate::picker::spawn_save(owner, attachment_name(ptr), move |dst| {
                 if let Some(dst) = dst {
-                    let _ = tx.send(Internal::SaveFiles(jobs, SaveTo::File(dst)));
+                    let _ = tx.send(Internal::SaveFiles(save, SaveTo::File(dst)));
                 }
             }),
             _ => crate::picker::spawn_folder(owner, move |dir| {
                 if let Some(dir) = dir {
-                    let _ = tx.send(Internal::SaveFiles(jobs, SaveTo::Folder(dir)));
+                    let _ = tx.send(Internal::SaveFiles(save, SaveTo::Folder(dir)));
                 }
             }),
         }
     }
 
     /// Downloads what isn't here yet and writes the files where the user chose.
-    pub(super) fn save_files_to(&self, jobs: Vec<SaveJob>, to: SaveTo) {
+    pub(super) fn save_files_to(&self, save: Save, to: SaveTo) {
         let downloads = self.attachment_downloads.clone();
         let online = self.manager.is_some();
         let (tx, emit) = (self.tx.clone(), self.emit.clone());
         tokio::task::spawn_local(async move {
+            let Save { id, line, jobs } = save;
+            let key = crate::types::file_line_key(&id);
+            let show = if line { Show::Cells(vec![key.clone()]) } else { Show::Toast };
+            let run = downloads.begin_save(&id);
             let mut saved = Vec::new();
             for SaveJob { file_key, path, ptr } in &jobs {
                 if !path.exists() {
                     if !online {
-                        return;
+                        break;
                     }
-                    // a save is asked for: a download that was stopped starts over for it
-                    let mut got = downloads.ensure(file_key, ptr, &Show::Toast, &emit, path).await;
-                    if matches!(got, Ok(false)) {
-                        got = downloads.ensure(file_key, ptr, &Show::Toast, &emit, path).await;
+                    downloads.saving(&id, run, file_key);
+                    let mut got = downloads.ensure(file_key, ptr, &show, &emit, path).await;
+                    // stopped by someone else (a click on the same picture): the save still wants it.
+                    // Stopped from the file line: nothing more is saved
+                    if matches!(got, Ok(false)) && !downloads.save_stopped(&id, run) {
+                        got = downloads.ensure(file_key, ptr, &show, &emit, path).await;
                     }
-                    let _ = tx.send(Internal::ProgressDone);
+                    if !line {
+                        let _ = tx.send(Internal::ProgressDone);
+                    }
+                    if downloads.save_stopped(&id, run) {
+                        break;
+                    }
                     match got {
                         Ok(true) => {}
                         Ok(false) => continue,
@@ -288,9 +303,15 @@ impl App {
                     Ok(()) => saved.push(dst),
                     Err(e) => {
                         let _ = tx.send(Internal::Notice(format!("저장 실패: {e}")));
-                        return;
+                        saved.clear();
+                        break;
                     }
                 }
+            }
+            downloads.end_save(&id, run);
+            // the line goes back to its name and size, however it ended
+            if line {
+                emit(Event::MediaLabel { key, label: Default::default() });
             }
             if let Some(last) = saved.pop() {
                 let text = format!("첨부 파일 {}개를 저장했습니다.", saved.len() + 1);
@@ -459,6 +480,14 @@ pub(super) struct SaveJob {
     pub ptr: AttachmentPointer,
 }
 
+/// The files of row `id` the user asked to save. `line`: the row has a file line, which shows
+/// how far it is.
+pub(super) struct Save {
+    pub id: String,
+    pub line: bool,
+    pub jobs: Vec<SaveJob>,
+}
+
 /// Where the user chose to save files: one file's whole path, or a folder for several.
 pub(super) enum SaveTo {
     File(PathBuf),
@@ -514,6 +543,10 @@ pub(super) struct AttachmentDownloads {
     allowed: Rc<RefCell<HashSet<String>>>,
     /// a download ended (done, failed or stopped)
     ended: Rc<tokio::sync::Notify>,
+    /// row id -> the save of its files under way: which run that is (a stopped one may still be
+    /// winding down when the next begins) and the file it is downloading
+    saves: Rc<RefCell<HashMap<String, (u64, Option<String>)>>>,
+    save_runs: Rc<std::cell::Cell<u64>>,
 }
 
 impl AttachmentDownloads {
@@ -549,6 +582,44 @@ impl AttachmentDownloads {
         self.allowed.borrow_mut().remove(file_key);
         self.ended.notify_waiters();
         true
+    }
+
+    /// A save of row `id`'s files begins; what it returns names this one.
+    pub(super) fn begin_save(&self, id: &str) -> u64 {
+        let run = self.save_runs.get() + 1;
+        self.save_runs.set(run);
+        self.saves.borrow_mut().insert(id.to_string(), (run, None));
+        run
+    }
+
+    /// The save is downloading `file_key` now: that is what stopping it stops.
+    pub(super) fn saving(&self, id: &str, run: u64, file_key: &str) {
+        if let Some((r, current)) = self.saves.borrow_mut().get_mut(id) {
+            if *r == run {
+                *current = Some(file_key.to_string());
+            }
+        }
+    }
+
+    /// Whether the save was stopped (or another took its place): it saves nothing more.
+    pub(super) fn save_stopped(&self, id: &str, run: u64) -> bool {
+        self.saves.borrow().get(id).is_none_or(|(r, _)| *r != run)
+    }
+
+    pub(super) fn end_save(&self, id: &str, run: u64) {
+        let mut saves = self.saves.borrow_mut();
+        if saves.get(id).is_some_and(|(r, _)| *r == run) {
+            saves.remove(id);
+        }
+    }
+
+    /// A click on the file line of row `id`: its save stops, and the download it waits for.
+    pub(super) fn stop_save(&self, id: &str) {
+        let Some((_, current)) = self.saves.borrow_mut().remove(id) else { return };
+        info!("save stopped by a click");
+        if let Some(file_key) = current {
+            self.stop(&file_key);
+        }
     }
 
     /// The attachment is at `dest` when this returns true. One that is on its way already is
@@ -1040,6 +1111,28 @@ mod tests {
             assert!(d.stop("k"));
             assert!(!waiter.await.unwrap());
         }));
+    }
+
+    #[test]
+    fn a_save_stopped_from_its_line_stops_its_download_and_stays_stopped() {
+        let d = AttachmentDownloads::default();
+        let run = d.begin_save("row");
+        d.saving("row", run, "f");
+        let (handle, _registration) = AbortHandle::new_pair();
+        d.running.borrow_mut().insert("f".into(), handle);
+        assert!(!d.save_stopped("row", run));
+        d.stop_save("row");
+        // the download it waited for is stopped, and the save doesn't start it over
+        assert!(!d.is_running("f") && d.was_stopped("f"));
+        assert!(d.save_stopped("row", run));
+
+        // a new save of the same row isn't the old one: the old one, winding down, can't end it
+        let next = d.begin_save("row");
+        assert!(d.save_stopped("row", run) && !d.save_stopped("row", next));
+        d.end_save("row", run);
+        assert!(!d.save_stopped("row", next));
+        d.end_save("row", next);
+        assert!(d.save_stopped("row", next));
     }
 
     #[test]

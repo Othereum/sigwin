@@ -288,6 +288,14 @@ pub struct ReplyDto {
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
 pub const STICKER_THUMB_PREFIX: &str = "sp_";
 
+/// The `MediaLabel` key of row `id`'s file line: how far saving its files has come. One line
+/// stands for all of the row's files.
+pub fn file_line_key(id: &str) -> String {
+    format!("{FILE_LINE_PREFIX}{id}")
+}
+
+pub const FILE_LINE_PREFIX: &str = "files:";
+
 /// Window scale factor x1000, set by the UI once the window exists.
 static UI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1000);
 
@@ -590,6 +598,8 @@ pub enum Command {
     OpenVideo { id: String, index: usize },
     /// image `index` (among the row's images) isn't here: stops its download, or starts it
     ToggleImageDownload { id: String, index: usize },
+    /// row `id`'s files are being downloaded to be saved: that stops, and nothing more is saved
+    StopFileSave { id: String },
     /// Square thumbnails of `px` physical px of all images of a message for the viewer. The ones
     /// that aren't here yet stay blank: nothing but the list downloads a picture.
     ViewerThumbs { id: String, px: u32 },
