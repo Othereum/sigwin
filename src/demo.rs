@@ -1,6 +1,7 @@
 //! Demo modes: a fake backend with synthetic data (`SIGWIN_DEMO`), and the memory self-test.
 
 use super::*;
+use crate::gui::{initial, tint_rgb};
 use crate::types::{MsgDto, Mute, MuteSet, Paging, Scroll, ThreadDto, ThreadPrefs, MUTE_ALWAYS};
 
 /// Demo mode: the fake backend plus the `SIGWIN_DEMO_*` / `SIGWIN_SELFTEST` extras.

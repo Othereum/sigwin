@@ -109,7 +109,7 @@ unsafe extern "system" fn subclass_proc(
             let _ = slint::invoke_from_event_loop(|| {
                 APP.with_borrow(|a| {
                     if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
-                        crate::refresh_active(&app);
+                        crate::gui::refresh_active(&app);
                     }
                 });
             });
@@ -121,7 +121,7 @@ unsafe extern "system" fn subclass_proc(
             let _ = slint::invoke_from_event_loop(move || {
                 APP.with_borrow(|a| {
                     if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
-                        crate::visibility(&app, shown);
+                        crate::gui::visibility(&app, shown);
                     }
                 });
             });
@@ -160,7 +160,7 @@ unsafe extern "system" fn subclass_proc(
             let _ = slint::invoke_from_event_loop(|| {
                 APP.with_borrow(|a| {
                     if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
-                        crate::apply_zoom(&app);
+                        crate::gui::apply_zoom(&app);
                     }
                 });
             });

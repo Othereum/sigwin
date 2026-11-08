@@ -10,7 +10,11 @@ use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffe
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::types::{ClickedMedia, Command, Event, MsgDto, Paging, Scroll, ThreadDto};
-use crate::*;
+use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, view, winhook};
+use sigwin_ui::{
+    AppWindow, ImageCell, ImageViewer, Links, MentionItem, MsgItem, NoteLine, PackItem, PinItem, ReactionItem, ReaderItem,
+    StickerItem, Theme, ThreadItem,
+};
 
 pub(crate) mod anim;
 pub(crate) mod drafts;

@@ -39,7 +39,10 @@ use std::sync::Arc;
 use slint::{ComponentHandle, ModelRc, SharedString};
 use tokio::sync::mpsc::unbounded_channel;
 
-use gui::*;
+use gui::{
+    apply, apply_theme, drafts, ensure_shown, open_from_toast, preset_scale, refresh_times, save_geometry, show_settings,
+    to_front, wire, UI,
+};
 use types::{Command, Event};
 
 pub use sigwin_ui::*;
