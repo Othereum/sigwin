@@ -387,7 +387,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             ui.reply_to = Some(m.id.clone());
             let who = if m.outgoing { "나".to_string() } else { m.sender.clone() };
             let body = if m.text.is_empty() {
-                m.attachment.clone()
+                if m.sticker { "스티커".to_string() } else { m.attachment.clone() }
             } else {
                 view::text::mask_spoilers(m.text.clone(), &m.styles).replace('\n', " ")
             };
