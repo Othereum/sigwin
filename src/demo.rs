@@ -183,6 +183,8 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             // page that SIGWIN_DEMO_OLDER pages in for it)
             quote_id: if i >= 298 { (i - 175).to_string() } else if i % 11 == 0 { i.saturating_sub(40).to_string() } else { String::new() },
             reactions: if i % 9 == 0 { vec![("❤️".into(), 2, "이서연, 나".into()), ("👍".into(), 1, "박지훈".into()), ("😂".into(), 3, "이서연, 박지훈, 최민수".into())] } else { Vec::new() },
+            // some with reactions too (every 9th), some alone
+            replies: if i % 7 == 3 { (i % 4 + 1) as u32 } else { 0 },
             attachment: if i % 13 == 0 { "보고서.pdf · 2.4MB".into() } else { String::new() },
             day_sep: i % 50 == 0,
             // 50 rows a day, the newest today
@@ -436,6 +438,17 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         std::thread::spawn(move || {
             while let Some(c) = cmd_rx.blocking_recv() {
                 demo_frames(&emit, &c);
+                if let Command::Replies(id) = &c {
+                    // the rows after it stand in for its replies (demo ids are row ids)
+                    let at = id.parse::<usize>().unwrap_or(0);
+                    let list = items
+                        .iter()
+                        .skip(at + 1)
+                        .take(items.get(at).map_or(0, |m| m.replies as usize))
+                        .map(|m| types::ReplyDto { id: m.id.clone(), sender: if m.outgoing { "나".into() } else { m.sender.clone() }, text: m.text.replace('\n', " "), time: m.time.clone() })
+                        .collect();
+                    emit(Event::Replies(list));
+                }
                 if let Command::SetMute { key, set } = &c {
                     demo_mute(&mut threads, key, *set);
                     emit(Event::Threads(threads.clone()));

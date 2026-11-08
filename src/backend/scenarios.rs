@@ -310,6 +310,38 @@ fn ops_are_indexed_when_stored_and_undone_when_they_fail() {
     });
 }
 
+/// A message shows how many replies it has, the list names them, and a reply that is gone is
+/// dropped from both.
+#[test]
+fn replies_are_counted_and_listed() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=5").await;
+        h.open(1).await;
+        let key = h.app.current.as_ref().unwrap().key.clone();
+        let (target_id, reply_id) = (h.row(0), h.row(3));
+        let target = h.app.target(&target_id).unwrap().1;
+        let (reply, by) = {
+            let t = h.app.target(&reply_id).unwrap();
+            (t.1, t.2)
+        };
+        h.app.index.record_reply(&key, target, reply, by).await.unwrap();
+        // a reply whose message is not stored (deleted, expired)
+        h.app.index.record_reply(&key, target, 1, by).await.unwrap();
+        h.app.emit_messages(Scroll::Keep).await;
+        let ev = h.take_events();
+        let (items, _) = last_list(&ev).expect("a list");
+        assert_eq!(items.iter().find(|m| m.id == target_id).map(|m| m.replies), Some(2));
+
+        h.cmd(Command::Replies(target_id.clone())).await;
+        let ev = h.take_events();
+        let list = ev.iter().find_map(|e| if let Event::Replies(l) = e { Some(l) } else { None }).expect("the list");
+        assert_eq!(list.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), [reply.to_string()]);
+        // the missing one was forgotten
+        assert_eq!(h.app.index.reply_counts(&key, &[target]).await.unwrap()[&target], 1);
+    });
+}
+
 #[test]
 fn jumping_to_a_day_lands_on_its_first_message() {
     scenario(|| async {

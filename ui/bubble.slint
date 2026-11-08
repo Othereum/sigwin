@@ -3,6 +3,7 @@
 import { MsgItem } from "types.slint";
 import { Anim, Links, Theme } from "theme.slint";
 import { Avatar } from "widgets.slint";
+import { RepliesData } from "replies.slint";
 
 // time + delivery status of a message; clicking either shows who has it
 export component MsgMeta inherits HorizontalLayout {
@@ -448,7 +449,7 @@ export component Bubble inherits VerticalLayout {
     // the newest row gets extra room below so it doesn't touch the composer
     in property <bool> last;
     // the chips and the readers hang below the bubble: room for the part under its edge
-    padding-bottom: (m.typing ? 8px : (m.reactions.length > 0 ? (under-time ? 10px : no-bubble && !photo-only ? 30px : 19px) : m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 15px) : m.collapse-below ? 1px : 6px)) + (last ? 10px : 0px);
+    padding-bottom: (m.typing ? 8px : (has-chips ? (under-time ? 10px : no-bubble && !photo-only ? 30px : 19px) : m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 15px) : m.collapse-below ? 1px : 6px)) + (last ? 10px : 0px);
     // bubble corners: 18px, 4px on the side that joins a neighbour of the same run
     out property <length> r-tl: !m.outgoing && m.collapse-above ? 4px : 18px;
     out property <length> r-tr: m.outgoing && m.collapse-above ? 4px : 18px;
@@ -456,6 +457,8 @@ export component Bubble inherits VerticalLayout {
     out property <length> r-br: m.outgoing && m.collapse-below ? 4px : 18px;
     spacing: 4px;
     opacity: m.pending && !m.failed ? 0.6 : 1.0;
+    // reactions and the reply count hang below the bubble as chips
+    property <bool> has-chips: m.reactions.length > 0 || m.replies > 0;
     // plain text: the time sits at the right of the last line instead of below
     property <bool> inline-time: m.text != "" && !m.big-emoji && !m.sticker;
     // a photo alone: no bubble around it, the picture itself is the message
@@ -572,7 +575,7 @@ export component Bubble inherits VerticalLayout {
         Rectangle {
             max-width: root.flush ? max(m.img-w, 200px) : root.max-w;
             // a short bubble is at least as wide as its chips
-            min-width: m.reactions.length > 0 ? chips.width + 16px : 0px;
+            min-width: has-chips ? chips.width + 16px : 0px;
             border-top-left-radius: root.r-tl;
             border-top-right-radius: root.r-tr;
             border-bottom-left-radius: root.r-bl;
@@ -812,12 +815,12 @@ export component Bubble inherits VerticalLayout {
             // readers; `Bubble.padding-bottom` makes room. Always present (hidden when empty) so the bubble
             // can take its width as a minimum. A click shows who reacted.
             chips := Rectangle {
-                visible: m.reactions.length > 0;
+                visible: has-chips;
                 // received: right side; sent: left (the readers take the right)
                 x: m.outgoing ? 8px : parent.width - self.width - 8px;
                 y: root.under-time ? parent.height - 25px : root.no-bubble && !root.photo-only ? parent.height + 2px : parent.height - 8px;
-                width: m.reactions.length > 0 ? chip-row.preferred-width : 0px;
-                height: m.reactions.length > 0 ? chip-row.preferred-height : 0px;
+                width: has-chips ? chip-row.preferred-width : 0px;
+                height: has-chips ? chip-row.preferred-height : 0px;
                 border-radius: 13px;
                 background: Theme.pane;
                 chip-row := HorizontalLayout {
@@ -852,6 +855,33 @@ export component Bubble inherits VerticalLayout {
                         TouchArea {
                             mouse-cursor: pointer;
                             clicked => { root.show-reactors(r.emoji + "  " + r.who); }
+                        }
+                    }
+                    // how many replies it has; a click lists them
+                    if m.replies > 0: Rectangle {
+                        border-radius: 11px;
+                        background: reply-ta.has-hover ? Theme.hover : Theme.bubble-in;
+                        HorizontalLayout {
+                            padding-left: 7px;
+                            padding-right: 7px;
+                            spacing: 3px;
+                            Text {
+                                text: "↩";
+                                font-family: "Segoe UI Symbol";
+                                font-size: 12px;
+                                color: Theme.subtle;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: m.replies;
+                                font-size: 11px;
+                                color: Theme.text;
+                                vertical-alignment: center;
+                            }
+                        }
+                        reply-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { RepliesData.request(m.id); }
                         }
                     }
                 }

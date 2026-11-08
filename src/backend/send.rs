@@ -139,6 +139,13 @@ impl App {
     /// presage stored what was sent as `ts` (a message or an op).
     pub(super) async fn sent(&mut self, ts: u64) {
         // presage stored the message before returning: swap the stub for the real row now
+        if let Some(p) = self.pending.iter().find(|p| p.ts == ts) {
+            if let Ok(target) = p.quote_id.parse::<u64>() {
+                if let Err(e) = self.index.record_reply(&p.thread_key, target, ts, self.me).await {
+                    warn!("record reply: {e:#}");
+                }
+            }
+        }
         self.pending.retain(|p| p.ts != ts);
         self.op_sent(ts).await;
         if let Err(e) = self.reload_window().await {

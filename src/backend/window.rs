@@ -508,6 +508,10 @@ impl App {
             warn!("reactions: {e:#}");
             Default::default()
         });
+        let replies = self.index.reply_counts(&open.key, &tss).await.unwrap_or_else(|e| {
+            warn!("replies: {e:#}");
+            Default::default()
+        });
         let mut edits = Vec::new();
         match self.index.edits_for(&open.key, &tss).await {
             Ok(rows) => {
@@ -519,7 +523,7 @@ impl App {
             }
             Err(e) => warn!("edits: {e:#}"),
         }
-        let indexed = view::Indexed { status: receipts, my_deletes, reactions, edits };
+        let indexed = view::Indexed { status: receipts, my_deletes, reactions, edits, replies };
         // resolve names first (async), then build synchronously
         let mut senders: Vec<Uuid> = open.window.iter().map(|(_, c)| c.metadata.sender.raw_uuid()).collect();
         senders.extend(open.members.iter().copied());

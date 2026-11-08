@@ -86,6 +86,8 @@ export struct MsgItem {
     has-quote-image: bool,
     quote-image: image,
     reactions: [ReactionItem],
+    // how many messages quote this one (a chip next to the reactions)
+    replies: int,
     big-emoji: bool,
     attachment: string,
     // the file card: name, size and the badge text
@@ -151,6 +153,15 @@ export struct PinItem {
     id: string,
     sender: string,
     text: string,
+}
+
+// a line of the list a message's reply chip opens
+export struct ReplyItem {
+    // sent timestamp of the reply
+    id: string,
+    sender: string,
+    text: string,
+    time: string,
 }
 
 export struct MentionItem {

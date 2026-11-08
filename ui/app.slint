@@ -10,13 +10,15 @@ import { EmojiPicker, PickerLayout, ReactionCell } from "reactions.slint";
 import { WhatsNewPage } from "whatsnew.slint";
 import { ThreadMenu, ThreadMenuData, ThreadPrefsDialog } from "thread_menu.slint";
 import { LinkPage } from "link.slint";
+import { RepliesData, RepliesDialog } from "replies.slint";
 
 // Structs and globals the Rust side uses.
-export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
+export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, ReplyItem, MentionItem, PackItem, StickerItem } from "types.slint";
 export { Anim, Links, Theme } from "theme.slint";
 export { ImageViewer } from "viewer.slint";
 export { SettingsData } from "settings.slint";
 export { ThreadMenuData } from "thread_menu.slint";
+export { RepliesData } from "replies.slint";
 
 export component AppWindow inherits Window {
     in property <int> total-unread;
@@ -1407,6 +1409,8 @@ export component AppWindow inherits Window {
 
     if ThreadMenuData.key != "": ThreadMenu { }
     if ThreadMenuData.prefs-key != "": ThreadPrefsDialog { }
+
+    if RepliesData.open: RepliesDialog { }
 
     // message info (who received / read an outgoing message)
     if root.info-text != "": Rectangle {

@@ -12,8 +12,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::types::{ClickedMedia, Command, Event, MsgDto, Paging, Scroll, ThreadDto};
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
-    AppWindow, ImageCell, ImageViewer, Links, MentionItem, MsgItem, NoteLine, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, SettingsData,
-    StickerItem, Theme, ThreadItem, ThreadMenuData,
+    AppWindow, ImageCell, ImageViewer, Links, MentionItem, MsgItem, NoteLine, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem,
+    SettingsData, StickerItem, Theme, ThreadItem, ThreadMenuData,
 };
 
 pub(crate) mod anim;
@@ -258,6 +258,20 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 app.set_pin_index(0);
             }
             app.set_pins(ModelRc::new(VecModel::from(items)));
+        }
+        Event::Replies(list) => {
+            let items: Vec<ReplyItem> = list
+                .iter()
+                .map(|r| ReplyItem {
+                    id: r.id.as_str().into(),
+                    sender: r.sender.as_str().into(),
+                    text: r.text.as_str().into(),
+                    time: r.time.as_str().into(),
+                })
+                .collect();
+            let d = app.global::<RepliesData>();
+            d.set_items(ModelRc::new(VecModel::from(items)));
+            d.set_open(true);
         }
         Event::JumpTo(id) => jump_to_row(app, id),
         Event::JumpToDay(id) => jump_to_day(app, id),

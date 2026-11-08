@@ -157,6 +157,8 @@ pub struct Indexed {
     pub reactions: HashMap<u64, Vec<(Uuid, String)>>,
     /// stored edits of window rows: (stored ts, content)
     pub edits: Vec<(u64, Content)>,
+    /// target ts -> how many messages quote it
+    pub replies: HashMap<u64, u32>,
 }
 
 pub struct Built {
@@ -182,8 +184,9 @@ fn same_run(older: &MsgDto, newer: &MsgDto) -> bool {
         // the retry / discard links hang below the bubble
         && !older.failed
         && !newer.failed
-        // reactions hang below the bubble
+        // reactions and the reply count hang below the bubble
         && older.reactions.is_empty()
+        && older.replies == 0
         && older.outgoing == newer.outgoing
         // deleted rows from others no longer say who sent them
         && (older.outgoing || !older.sender_key.is_empty())
@@ -221,7 +224,7 @@ pub fn build(
     long: &LongTexts,
     name_of: &dyn Fn(&Uuid) -> String,
 ) -> Built {
-    let Indexed { status, my_deletes, reactions, edits: outside } = indexed;
+    let Indexed { status, my_deletes, reactions, edits: outside, replies } = indexed;
     let mut edits: HashMap<u64, (u64, &DataMessage, Uuid)> = HashMap::new();
     let now = now_ms();
     let mut next_expiry: Option<u64> = None;
@@ -321,6 +324,7 @@ pub fn build(
                     m.reactions = reaction_counts(r, me, name_of);
                     m.my_reaction = r.iter().find(|(s, _)| *s == me).map(|(_, e)| e.clone()).unwrap_or_default();
                 }
+                m.replies = replies.get(ts).copied().unwrap_or(0);
                 let fresh = outgoing && now.saturating_sub(*ts) < EDIT_WINDOW_MS;
                 m.can_delete = fresh;
                 m.more = cut_for_read_more(&mut m, long.shown.get(ts).copied().unwrap_or(READ_MORE_AT));
@@ -548,11 +552,13 @@ mod tests {
             ..Default::default()
         };
         indexed.reactions.insert(row, vec![(author, "up".into()), (Uuid::from_u128(1), "up".into())]);
+        indexed.replies.insert(row, 2);
         let window = [(row, original)];
         let b = build(&window, Uuid::from_u128(1), &[], &indexed, &LongTexts::default(), &|_: &Uuid| String::new());
         assert_eq!(b.items[0].text, "after");
         assert_eq!(b.items[0].reactions, [("up".to_string(), 2, "나".to_string())]);
         assert_eq!(b.items[0].my_reaction, "up");
+        assert_eq!(b.items[0].replies, 2);
     }
 
     #[test]

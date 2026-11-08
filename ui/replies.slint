@@ -1,0 +1,90 @@
+// The list of replies to a message, opened by the chip under it.
+
+import { Button, ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { ReplyItem } from "types.slint";
+
+// The list's state; Rust fills it (`gui::wire`, `Event::Replies`).
+export global RepliesData {
+    // shown once the backend has answered, so it never opens on a stale list
+    in-out property <bool> open;
+    in-out property <[ReplyItem]> items;
+    // the chip was clicked: Rust asks the backend, which answers with the items
+    callback request(string);
+    // a line was clicked: scroll to that reply
+    callback pick(string);
+}
+
+export component RepliesDialog inherits Rectangle {
+    background: #00000080;
+    TouchArea {
+        clicked => { RepliesData.open = false; }
+    }
+    Rectangle {
+        width: min(420px, parent.width - 40px);
+        height: replies-col.preferred-height;
+        border-radius: 12px;
+        background: Theme.pane;
+        border-width: 1px;
+        border-color: Theme.border;
+        TouchArea { }
+        replies-col := VerticalLayout {
+            padding: 18px;
+            padding-bottom: 14px;
+            spacing: 10px;
+            Text {
+                text: RepliesData.items.length > 0 ? "답장 " + RepliesData.items.length + "개" : "답장";
+                font-weight: 700;
+                font-size: 15px;
+                color: Theme.text;
+            }
+            if RepliesData.items.length == 0: Text {
+                text: "답장이 없습니다";
+                color: Theme.subtle;
+                font-size: 13px;
+            }
+            if RepliesData.items.length > 0: ListView {
+                height: min(RepliesData.items.length * 56px, 336px);
+                for r in RepliesData.items: Rectangle {
+                    height: 56px;
+                    border-radius: 8px;
+                    background: ta.has-hover ? Theme.hover : transparent;
+                    ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            RepliesData.pick(r.id);
+                            RepliesData.open = false;
+                        }
+                    }
+                    VerticalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        padding-top: 6px;
+                        padding-bottom: 6px;
+                        spacing: 2px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: r.sender;
+                                font-size: 12.5px;
+                                font-weight: 700;
+                                color: Theme.text;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                            Text { text: r.time; font-size: 11.5px; color: Theme.subtle; horizontal-stretch: 0; }
+                        }
+                        Text { text: r.text; font-size: 13px; color: Theme.subtle; overflow: elide; }
+                    }
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                Button {
+                    text: "닫기";
+                    clicked => { RepliesData.open = false; }
+                }
+            }
+        }
+    }
+}

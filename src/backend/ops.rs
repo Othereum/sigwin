@@ -187,6 +187,46 @@ impl App {
         out
     }
 
+    /// Answer to `Command::Replies`: the newest `MAX_REPLIES` replies to row `id`, oldest first.
+    /// Replies that turned out to be gone are dropped from the index.
+    pub(super) async fn replies(&mut self, id: &str) {
+        let Some((_, target, ..)) = self.target(id) else { return };
+        let Some((key, thread)) = self.current.as_ref().map(|o| (o.key.clone(), o.thread.clone())) else { return };
+        let rows = match self.index.replies_to(&key, target, MAX_REPLIES).await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("replies: {e:#}");
+                return;
+            }
+        };
+        let now = view::time::now_ms();
+        let mut out = Vec::new();
+        for (ts, by) in rows {
+            let c = self.store.message(&thread, ts).await.ok().flatten();
+            let gone = c.as_ref().map_or(true, |c| {
+                !matches!(view::classify(c, self.me), Kind::Msg { .. }) || view::expires_at(c).is_some_and(|t| t <= now)
+            });
+            if gone {
+                if let Err(e) = self.index.forget_replies(&key, ts).await {
+                    warn!("drop reply: {e:#}");
+                }
+                continue;
+            }
+            let Some(c) = c else { continue };
+            let Kind::Msg { dm, .. } = view::classify(&c, self.me) else { continue };
+            let dm = self.latest_edit(&key, &thread, ts, by).await.unwrap_or_else(|| dm.clone());
+            for u in view::text::mentioned(&dm) {
+                self.name(u).await;
+            }
+            let sender = if by == self.me { "나".to_string() } else { self.name(by).await };
+            let names = &self.names;
+            let text = view::text::one_line(&dm, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()));
+            out.push(ReplyDto { id: ts.to_string(), sender, text, time: view::time::time_short(ts) });
+        }
+        out.reverse();
+        (self.emit)(Event::Replies(out));
+    }
+
     /// The newest text `author` gave message `target`, if they edited it.
     pub(super) async fn latest_edit(&self, key: &str, thread: &Thread, target: u64, author: Uuid) -> Option<DataMessage> {
         let at = match self.index.latest_edit(key, target, author).await {
@@ -210,9 +250,12 @@ impl App {
             self.forget_snippet(&key, target);
         }
         match self.ops.iter().find(|o| o.ts == ts) {
-            Some(PendingOp { op: Op::Delete(target), .. }) => {
+            Some(PendingOp { op: Op::Delete(target), thread_key, .. }) => {
                 if let Err(e) = self.index.record_my_delete(*target).await {
                     warn!("record delete: {e:#}");
+                }
+                if let Err(e) = self.index.forget_replies(thread_key, *target).await {
+                    warn!("forget replies: {e:#}");
                 }
             }
             Some(PendingOp { op: Op::Edit { target, .. }, thread_key, .. }) => {
@@ -308,6 +351,14 @@ pub(super) async fn record_reaction(index: &Index, key: &str, c: &Content, me: U
     let Kind::Reaction { target, emoji, remove } = view::classify(c, me) else { return Ok(false) };
     let at = c.metadata.client_timestamp.timestamp_millis() as u64;
     index.record_reaction(key, target, c.metadata.sender.raw_uuid(), if remove { "" } else { &emoji }, at).await?;
+    Ok(true)
+}
+
+/// Notes which message a stored reply quotes; true if `c` was a reply.
+pub(super) async fn record_reply(index: &Index, key: &str, c: &Content, me: Uuid) -> anyhow::Result<bool> {
+    let Kind::Msg { dm, .. } = view::classify(c, me) else { return Ok(false) };
+    let Some(target) = dm.quote.as_ref().and_then(|q| q.id) else { return Ok(false) };
+    index.record_reply(key, target, c.timestamp(), c.metadata.sender.raw_uuid()).await?;
     Ok(true)
 }
 

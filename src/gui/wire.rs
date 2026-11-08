@@ -558,6 +558,17 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     app.on_unpin(move |id| s(Command::Unpin(id.to_string())));
 
     let s = send.clone();
+    app.global::<RepliesData>().on_request(move |id| s(Command::Replies(id.to_string())));
+
+    // a reply is shown like a pinned message: its sent timestamp
+    let weak = app.as_weak();
+    app.global::<RepliesData>().on_pick(move |id| {
+        if let Some(app) = weak.upgrade() {
+            app.invoke_show_message(id);
+        }
+    });
+
+    let s = send.clone();
     let weak = app.as_weak();
     // the paged demo (SIGWIN_DEMO_OLDER) pages in the target like the backend does
     let demo = std::env::var_os("SIGWIN_DEMO").is_some() && std::env::var_os("SIGWIN_DEMO_OLDER").is_none();

@@ -211,6 +211,23 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        // which messages quote which: a reply stores its target, the target knows nothing of its
+        // replies. Ids only, no text: a reply's text is read from the store when listed
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_replies (
+                thread TEXT NOT NULL,
+                target_ts INTEGER NOT NULL,
+                reply_ts INTEGER NOT NULL,
+                sender BLOB NOT NULL,
+                PRIMARY KEY (thread, target_ts, reply_ts)
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
+        // finding a reply by itself, to forget it when it is deleted
+        sqlx::query("CREATE INDEX IF NOT EXISTS ls_replies_by_reply ON ls_replies (thread, reply_ts)")
+            .execute(&pool)
+            .await?;
         // title and cover of installed sticker packs: presage keeps every sticker's bytes in one
         // JSON column, so listing packs from its table means reading all of them
         sqlx::query(
@@ -424,6 +441,63 @@ impl Index {
         sqlx::query("DELETE FROM ls_reactions WHERE thread = ? AND target_ts = ?")
             .bind(thread)
             .bind(target as i64)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// `reply` (sent at `reply_ts` by `sender`) quotes the message sent at `target`.
+    pub async fn record_reply(&self, thread: &str, target: u64, reply_ts: u64, sender: uuid::Uuid) -> anyhow::Result<()> {
+        sqlx::query("INSERT OR IGNORE INTO ls_replies (thread, target_ts, reply_ts, sender) VALUES (?, ?, ?, ?)")
+            .bind(thread)
+            .bind(target as i64)
+            .bind(reply_ts as i64)
+            .bind(sender.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// How many replies each of `targets` has.
+    pub async fn reply_counts(&self, thread: &str, targets: &[u64]) -> anyhow::Result<HashMap<u64, u32>> {
+        let rows = sqlx::query(
+            "SELECT target_ts, COUNT(*) AS n FROM ls_replies
+             WHERE thread = ? AND target_ts IN (SELECT value FROM json_each(?)) GROUP BY target_ts",
+        )
+        .bind(thread)
+        .bind(json_list(targets))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| Some((r.try_get::<i64, _>("target_ts").ok()? as u64, r.try_get::<i64, _>("n").ok()? as u32)))
+            .collect())
+    }
+
+    /// The newest `limit` replies to `target`, newest first: (reply sent ts, sender).
+    pub async fn replies_to(&self, thread: &str, target: u64, limit: u32) -> anyhow::Result<Vec<(u64, uuid::Uuid)>> {
+        let rows = sqlx::query("SELECT reply_ts, sender FROM ls_replies WHERE thread = ? AND target_ts = ? ORDER BY reply_ts DESC LIMIT ?")
+            .bind(thread)
+            .bind(target as i64)
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let who: Vec<u8> = r.try_get("sender").ok()?;
+                Some((r.try_get::<i64, _>("reply_ts").ok()? as u64, uuid::Uuid::from_slice(&who).ok()?))
+            })
+            .collect())
+    }
+
+    /// The message sent at `ts` is gone (deleted, expired): it is no reply any more, and its
+    /// replies have nothing to hang on.
+    pub async fn forget_replies(&self, thread: &str, ts: u64) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM ls_replies WHERE thread = ? AND (reply_ts = ? OR target_ts = ?)")
+            .bind(thread)
+            .bind(ts as i64)
+            .bind(ts as i64)
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -975,6 +1049,30 @@ pub(crate) mod tests {
         assert_eq!(index.reactions_for("t", &[1]).await.unwrap()[&1], [(b, "heart".to_string())]);
         index.forget_reactions("t", 1).await.unwrap();
         assert!(index.reactions_for("t", &[1]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn replies_are_counted_listed_and_forgotten() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        let (a, b) = (Uuid::from_u128(3), Uuid::from_u128(4));
+        index.record_reply("t", 1, 10, a).await.unwrap();
+        index.record_reply("t", 1, 20, b).await.unwrap();
+        // twice (live, then the backfill) counts once
+        index.record_reply("t", 1, 20, b).await.unwrap();
+        index.record_reply("t", 2, 30, a).await.unwrap();
+        index.record_reply("u", 1, 40, a).await.unwrap();
+        let counts = index.reply_counts("t", &[1, 2, 3]).await.unwrap();
+        assert_eq!((counts[&1], counts[&2], counts.get(&3)), (2, 1, None));
+        assert_eq!(index.replies_to("t", 1, 10).await.unwrap(), [(20, b), (10, a)]);
+        assert_eq!(index.replies_to("t", 1, 1).await.unwrap(), [(20, b)]);
+        // a deleted reply leaves its target's count
+        index.forget_replies("t", 20).await.unwrap();
+        assert_eq!(index.reply_counts("t", &[1]).await.unwrap()[&1], 1);
+        // a gone target takes its replies' entries with it
+        index.forget_replies("t", 1).await.unwrap();
+        assert!(index.reply_counts("t", &[1]).await.unwrap().is_empty());
+        assert_eq!(index.reply_counts("u", &[1]).await.unwrap()[&1], 1);
     }
 
     #[tokio::test(flavor = "current_thread")]

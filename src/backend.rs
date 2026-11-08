@@ -34,8 +34,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::db::Index;
 use crate::types::{
-    parse_thread_key, thread_key, Command, Event, Frames, MsgDto, PackDto, Paging, PinDto, Scroll, StickerDto, Thumb, ThreadDto, ANIM_BUDGET,
-    STICKER_THUMB_PREFIX,
+    parse_thread_key, thread_key, Command, Event, Frames, MsgDto, PackDto, Paging, PinDto, ReplyDto, Scroll, StickerDto, Thumb, ThreadDto,
+    ANIM_BUDGET, STICKER_THUMB_PREFIX,
 };
 use crate::view::media::THUMB_MAX;
 use crate::view::{self, Kind};
@@ -83,6 +83,8 @@ const SETTLE_AFTER: Duration = Duration::from_secs(30);
 const SWEEP_EVERY: Duration = Duration::from_secs(300);
 /// Signal keeps at most this many pinned messages per chat; a newer pin pushes out the oldest
 const MAX_PINS: usize = 3;
+/// most replies the list of a message shows (the newest); a few messages draw hundreds
+const MAX_REPLIES: u32 = 50;
 
 pub struct Paths {
     pub db: PathBuf,
@@ -139,6 +141,9 @@ struct Persist {
     /// reactions stored before the reaction index existed have been indexed
     #[serde(default)]
     reactions_indexed: bool,
+    /// replies stored before the reply index existed have been indexed
+    #[serde(default)]
+    replies_indexed: bool,
     /// layout of the attachment and thumbnail caches on disk (`CACHE_FORMAT` once converted)
     #[serde(default)]
     cache_format: u32,
@@ -629,7 +634,11 @@ impl App {
         if !self.persist.receipts_indexed {
             self.backfill_receipts();
         }
-        if !self.persist.pins_indexed || !self.persist.edits_indexed || !self.persist.reactions_indexed {
+        if !self.persist.pins_indexed
+            || !self.persist.edits_indexed
+            || !self.persist.reactions_indexed
+            || !self.persist.replies_indexed
+        {
             self.backfill_pins();
         }
     }
@@ -720,6 +729,7 @@ impl App {
             Command::DiscardFailed(id) => self.discard_failed(&id).await,
             Command::Pin { id, secs } => self.pin(&id, secs).await,
             Command::Unpin(id) => self.unpin(&id).await,
+            Command::Replies(id) => self.replies(&id).await,
             Command::OpenFromToast { key, msg } => self.open_from_toast(&key, msg).await,
             Command::JumpTo(id) => {
                 if let Err(e) = self.jump_to(&id).await {
@@ -855,6 +865,7 @@ impl App {
                 self.persist.pins_indexed = true;
                 self.persist.edits_indexed = true;
                 self.persist.reactions_indexed = true;
+                self.persist.replies_indexed = true;
                 self.persist_dirty = true;
                 self.current_dirty = true;
             }
@@ -954,6 +965,9 @@ impl App {
                             deleted |= store.delete_message(&row.thread, ts).await.unwrap_or(false);
                             if let Err(e) = index.forget_reactions(&key, c.timestamp()).await {
                                 warn!("forget reactions: {e:#}");
+                            }
+                            if let Err(e) = index.forget_replies(&key, c.timestamp()).await {
+                                warn!("forget replies: {e:#}");
                             }
                         } else {
                             st.hold = Some(st.hold.map_or(ts, |h| h.min(ts)));

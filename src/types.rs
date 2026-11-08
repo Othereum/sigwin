@@ -199,6 +199,8 @@ pub struct MsgDto {
     pub quote_image_key: String,
     /// (emoji, count, who: names joined by ", ", "나" for us)
     pub reactions: Vec<(String, u32, String)>,
+    /// how many messages quote this one
+    pub replies: u32,
     /// the message is only 1..=5 emoji: shown large, without a bubble
     pub big_emoji: bool,
     pub attachment: String,
@@ -274,6 +276,16 @@ pub struct PinDto {
     pub id: String,
     pub sender: String,
     pub text: String,
+}
+
+/// A reply in the list a message's "답장" chip opens.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReplyDto {
+    /// sent timestamp of the reply (what `Command::JumpTo` takes)
+    pub id: String,
+    pub sender: String,
+    pub text: String,
+    pub time: String,
 }
 
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
@@ -490,6 +502,8 @@ pub enum Event {
     Messages { key: String, items: Vec<MsgDto>, paging: Paging, scroll: Scroll },
     /// pinned messages of the open thread, newest first
     Pins(Vec<PinDto>),
+    /// answer to `Command::Replies`, oldest first (empty: they are all gone)
+    Replies(Vec<ReplyDto>),
     /// scroll the message list to row `id` (already in the last `Messages`) and flash it
     JumpTo(String),
     /// scroll the message list to row `id`, the first of its day: the day separator goes near the top
@@ -618,6 +632,8 @@ pub enum Command {
     Pin { id: String, secs: Option<u32> },
     /// unpin; `id` is the pinned message's sent timestamp (`PinDto::id`)
     Unpin(String),
+    /// list the replies to message row `id`: answered with `Event::Replies`
+    Replies(String),
     /// show the pinned message with this sent timestamp, loading older rows if needed
     JumpTo(String),
     /// the first message of local day `day` (`view::time::day_num`) in the open thread

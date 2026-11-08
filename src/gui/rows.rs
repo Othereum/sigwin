@@ -289,6 +289,7 @@ pub(crate) fn to_item(
         link_img_w: card.map_or(0.0, |c| c.img_w as f32),
         link_img_h: card.map_or(0.0, |c| c.img_h as f32),
         reactions: ModelRc::new(VecModel::from(reactions)),
+        replies: m.replies as i32,
         big_emoji: m.big_emoji,
         id: m.id.as_str().into(),
         sender: m.sender.as_str().into(),
