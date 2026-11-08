@@ -1384,6 +1384,8 @@ export component AppWindow inherits Window {
         action-clicked => { root.notice-action-clicked(); }
         max-text-width: root.width - 300px - 76px;
         x: 300px + (root.width - 300px - self.width) / 2;
-        y: composer-bar.absolute-position.y - self.height - 10px;
+        // above everything that sits over the input (attachment, reply, link preview), not just the
+        // input row: the list ends where those begin
+        y: msg-list.absolute-position.y + msg-list.height - self.height - 10px;
     }
 }
