@@ -562,9 +562,9 @@ pub enum Command {
     /// show image `index` of row `id` in the viewer, shrunk to fit in `fit` (physical px).
     /// `from_file`: the file line was clicked; a row with other files then opens them outside.
     ViewImage { id: String, index: usize, fit: (u32, u32) },
-    /// save the message's files (not pictures or videos): the user picks where, in a dialog owned
-    /// by `owner` (HWND)
-    SaveFiles { id: String, owner: isize },
+    /// save the message's files, and with `all` its pictures and videos too: the user picks where,
+    /// in a dialog owned by `owner` (HWND)
+    SaveFiles { id: String, owner: isize, all: bool },
     /// open video `index` of row `id` in the default app, downloading it first if needed
     OpenVideo { id: String, index: usize },
     /// Square thumbnails of `px` physical px of all images of a message for the viewer, downloading

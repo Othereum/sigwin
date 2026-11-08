@@ -239,11 +239,12 @@ impl App {
 
     /// The message's file line: its pictures and videos have their own place, in the row and the
     /// viewer. A file is never opened for the user (it could be a program): they choose where it
-    /// goes, one file by name, several into a folder.
-    pub(super) fn save_files(&self, id: &str, owner: isize) {
+    /// goes, one file by name, several into a folder. `all` adds the pictures and videos (the
+    /// hover toolbar's save).
+    pub(super) fn save_files(&self, id: &str, owner: isize, all: bool) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let jobs: Vec<(PathBuf, AttachmentPointer)> = view::media::shown_attachments(dm)
-            .filter(|(_, a)| !view::media::is_media(a))
+            .filter(|(_, a)| all || !view::media::is_media(a))
             .map(|(i, a)| (attachment_path(&self.paths.attachments, &view::media::attachment_key(a, ts, i)), a.clone()))
             .collect();
         let tx = self.tx.clone();

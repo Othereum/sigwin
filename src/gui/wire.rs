@@ -597,9 +597,9 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     app.on_notice_action_clicked(notice::reveal);
 
     let weak = app.as_weak();
-    app.on_file_clicked(move |id| {
+    let save = move |weak: &slint::Weak<AppWindow>, id: &str, all: bool| {
         let Some(app) = weak.upgrade() else { return };
-        let danger = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id.as_str() && m.file_danger));
+        let danger = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && m.file_danger));
         if danger {
             let ok = rfd::MessageDialog::new()
                 .set_title("위험할 수 있는 파일")
@@ -610,8 +610,14 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
                 return;
             }
         }
-        send_cmd(Command::SaveFiles { id: id.to_string(), owner: window::hwnd(&app) });
+        send_cmd(Command::SaveFiles { id: id.to_string(), owner: window::hwnd(&app), all });
+    };
+    app.on_file_clicked({
+        let weak = weak.clone();
+        move |id| save(&weak, &id, false)
     });
+    let weak = app.as_weak();
+    app.on_save_clicked(move |id| save(&weak, &id, true));
 
     let weak = app.as_weak();
     let s = send.clone();

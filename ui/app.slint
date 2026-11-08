@@ -101,6 +101,7 @@ export component AppWindow inherits Window {
     // the message and which of its images
     callback attachment-clicked(string, int);
     callback file-clicked(string);
+    callback save-clicked(string);
     callback reply(string);
     callback cancel-reply();
     callback search-changed(string);
@@ -657,6 +658,7 @@ export component AppWindow inherits Window {
                         }
                         attachment-clicked(id, index) => { root.attachment-clicked(id, index); }
                         file-clicked(id) => { root.file-clicked(id); }
+                        save-clicked(id) => { root.save-clicked(id); }
                         quote-clicked(id) => { root.show-message(id); }
                         reply(id) => { root.reply(id); }
                         show-info(t) => { root.info-title = "메시지 정보"; root.info-text = t; }

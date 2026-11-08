@@ -669,7 +669,7 @@ impl App {
             }
             Command::Send { text, files, quote, mentions, link, quality } => self.send(text, files, quote, mentions, link, quality).await,
             Command::ViewImage { id, index, fit } => self.view_image(&id, index, fit),
-            Command::SaveFiles { id, owner } => self.save_files(&id, owner),
+            Command::SaveFiles { id, owner, all } => self.save_files(&id, owner, all),
             Command::OpenVideo { id, index } => self.open_video(&id, index),
             Command::PlayGif { id, seq, px } => self.play_gif(&id, seq, px),
             Command::StopGif => self.stop_gif(),
