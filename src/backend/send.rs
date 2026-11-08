@@ -66,11 +66,30 @@ impl App {
         self.composing = None;
         let ts = self.next_send_ts();
         // the same line the stored row gets, so it doesn't change when the send ends
-        let attachment = files.first().map_or(String::new(), |first| {
-            let bytes = files.iter().map(|f| std::fs::metadata(f).ok().map(|m| m.len())).sum();
-            view::media::file_line(&file_label(first), files.len() - 1, bytes)
+        // photos show as photos while they go; what the row will show once stored
+        let (photo_files, other_files): (Vec<&PathBuf>, Vec<&PathBuf>) = files.iter().partition(|f| {
+            mime_guess::from_path(f).first_or_octet_stream().type_() == "image"
         });
+        let mut photo_paths = Vec::new();
+        let mut photos = Vec::new();
+        let mut other_files = other_files;
+        for f in photo_files {
+            match sigwin_thumb::photo_size(f) {
+                Ok(size) => {
+                    photo_paths.push(f.clone());
+                    photos.push(size);
+                }
+                // one this PC can't read goes as a file
+                Err(_) => other_files.push(f),
+            }
+        }
+        let attachment = other_files.first().map_or(String::new(), |first| {
+            let bytes = other_files.iter().map(|f| std::fs::metadata(f).ok().map(|m| m.len())).sum();
+            view::media::file_line(&file_label(first), other_files.len() - 1, bytes)
+        });
+        self.spawn_pending_thumbs(ts, photo_paths, &photos);
         self.pending.push(Pending {
+            photos,
             ts,
             thread_key: key,
             text: text.clone(),
@@ -86,6 +105,34 @@ impl App {
         });
         self.emit_messages(Scroll::Bottom).await;
         self.start_send(ts).await;
+    }
+
+    /// Pictures for the pending row's photos, straight from the files being sent (no cache).
+    /// One photo is fitted to its size, several fill the cells of a grid.
+    fn spawn_pending_thumbs(&self, ts: u64, paths: Vec<PathBuf>, sizes: &[(u32, u32)]) {
+        if paths.is_empty() {
+            return;
+        }
+        let sizes = sizes.to_vec();
+        let emit = self.emit.clone();
+        tokio::task::spawn_blocking(move || {
+            let single = paths.len() == 1;
+            let shown = paths.len().min(view::media::GRID_SHOWN);
+            for (n, path) in paths.iter().take(shown).enumerate() {
+                let Ok(bytes) = std::fs::read(path) else { continue };
+                let Ok(img) = sigwin_thumb::decode_thumb(&bytes, view::media::PHOTO_THUMB_MAX) else { continue };
+                let rgba = sigwin_thumb::to_rgba(&img);
+                let key = pending_photo_key(ts, n, single);
+                let rgba = if single {
+                    let (w, h) = view::media::fit(Some(sizes[0].0), Some(sizes[0].1));
+                    sigwin_thumb::fit(rgba, crate::types::physical_px(w.max(h)))
+                } else {
+                    let (w, h) = view::media::grid_cell_size(paths.len(), n);
+                    sigwin_thumb::cover(&rgba, crate::types::physical_px(w), crate::types::physical_px(h))
+                };
+                emit(Event::Thumb(Arc::new(Thumb { key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })));
+            }
+        });
     }
 
     /// Queues the send of the pending row `ts`.
@@ -397,6 +444,11 @@ pub(super) fn file_label(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
 }
 
+/// Thumbnail key of photo `n` of a pending row.
+fn pending_photo_key(ts: u64, n: usize, single: bool) -> String {
+    if single { format!("pending-{ts}") } else { format!("pending-{ts}-{n}") }
+}
+
 pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     let mut m = view::outgoing_stub(p.ts, prev_ts);
     (m.text, m.styles) = crate::format::parse(&p.text);
@@ -405,6 +457,14 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     m.quote_id = p.quote_id.clone();
     m.attachment = p.attachment.clone();
     m.link = p.link.clone();
+    match p.photos[..] {
+        [] => {}
+        [(w, h)] => {
+            (m.img_w, m.img_h) = view::media::fit(Some(w), Some(h));
+            m.image_key = pending_photo_key(p.ts, 0, true);
+        }
+        _ => view::media::set_photo_grid(&mut m, p.photos.len(), |n, _, _| pending_photo_key(p.ts, n, false)),
+    }
     if !p.image_key.is_empty() {
         m.image_key = p.image_key.clone();
         m.img_w = view::media::STICKER_SIZE;
@@ -413,6 +473,7 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     }
     m.big_emoji = !m.sticker
         && m.attachment.is_empty()
+        && p.photos.is_empty()
         && m.quote.is_empty()
         && crate::emoji::only_emoji(&m.text, 5).is_some();
     match &p.error {

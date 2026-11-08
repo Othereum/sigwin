@@ -248,6 +248,8 @@ struct Pending {
     attachment: String,
     /// sticker preview: thumbnail key, already emitted to the UI
     image_key: String,
+    /// photos being sent (their size as shown, 0 if unknown): shown as photos, not as a file
+    photos: Vec<(u32, u32)>,
     /// the link preview going with it; its thumbnail is the composer's, already emitted
     link: Option<crate::types::LinkCard>,
     error: Option<String>,

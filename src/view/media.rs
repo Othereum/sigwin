@@ -213,7 +213,7 @@ pub struct WantedCell {
 }
 
 /// Images a grid shows; the rest are a "+N" on its last cell and wait for the viewer.
-pub(super) const GRID_SHOWN: usize = 5;
+pub const GRID_SHOWN: usize = 5;
 
 /// Where a grid of `count` images (2 or more) puts them: x, y, width and height in logical px,
 /// with a 1px gap. As in Signal's apps, the first ones are the largest.
@@ -225,6 +225,11 @@ fn grid_cells(count: usize) -> &'static [(u32, u32, u32, u32)] {
         4 => &[(0, 0, 150, 150), (151, 0, 150, 150), (0, 151, 150, 150), (151, 151, 150, 150)],
         _ => &[(0, 0, 150, 150), (151, 0, 150, 150), (0, 151, 100, 100), (101, 151, 99, 100), (201, 151, 100, 100)],
     }
+}
+
+/// Width and height of cell `n` in a grid of `count` images (logical px).
+pub fn grid_cell_size(count: usize, n: usize) -> (u32, u32) {
+    grid_cells(count).get(n).map_or((0, 0), |c| (c.2, c.3))
 }
 
 /// Makes `m` show `count` images as a grid, if that is 2 or more. `key` gets the index of each
@@ -251,7 +256,8 @@ pub fn set_photo_grid(m: &mut MsgDto, count: usize, mut key: impl FnMut(usize, u
     m.img_h = cells.iter().map(|c| c.1 + c.3).max().unwrap_or(0);
 }
 
-fn fit(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
+/// Size a single photo of `w` x `h` is shown at (logical px).
+pub fn fit(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
     match (w, h) {
         (Some(w), Some(h)) if w > 0 && h > 0 => {
             // scale into the box for its orientation, never up

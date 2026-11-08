@@ -55,6 +55,18 @@ pub fn decode_thumb(bytes: &[u8], max: u32) -> ImageResult<DynamicImage> {
     Ok(decode_upright(bytes)?.thumbnail(max, max))
 }
 
+/// A photo file's size as shown (EXIF applied), from its header alone.
+pub fn photo_size(path: &std::path::Path) -> ImageResult<(u32, u32)> {
+    use image::ImageDecoder;
+    use image::metadata::Orientation::{Rotate90, Rotate90FlipH, Rotate270, Rotate270FlipH};
+    let mut decoder = image::ImageReader::open(path)?.with_guessed_format()?.into_decoder()?;
+    let (w, h) = decoder.dimensions();
+    Ok(match decoder.orientation()? {
+        Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH => (h, w),
+        _ => (w, h),
+    })
+}
+
 /// A photo file's size as shown (EXIF applied) and its blurhash. Past `max_pixels` it isn't
 /// decoded and has no blurhash, nor does one that turns out broken after its header.
 pub fn photo_facts(path: &std::path::Path, max_pixels: u64) -> ImageResult<((u32, u32), Option<String>)> {
