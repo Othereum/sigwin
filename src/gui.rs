@@ -73,6 +73,9 @@ pub(crate) struct Ui {
     /// where pasted clipboard images are written
     pub(crate) paste_dir: PathBuf,
     open_key: String,
+    /// where the user left each thread not at its bottom: (row id, the row's top px from the
+    /// list's top). In memory only, for this run.
+    places: HashMap<String, (String, f32)>,
     loading_older: bool,
     loading_newer: bool,
     /// the rows stop short of the thread's newest message: nothing happening now goes below them
@@ -322,6 +325,7 @@ fn messages_arrived(app: &AppWindow, key: String, items: Vec<MsgDto>, paging: Pa
             ui.sender_avatars.clear();
             ui.revealed.clear();
             sigwin_clear_plain_styles();
+            remember_place(app, ui);
             // the composer moves into the old thread's draft, the new one's comes back
             restored = Some(drafts::switch(app, ui, &key));
             ui.open_key = key.clone();

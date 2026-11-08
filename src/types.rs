@@ -462,6 +462,9 @@ pub enum Scroll {
     Older,
     /// leave the scroll position alone (a `JumpTo` follows)
     Keep,
+    /// the thread is opened where the user left it (`Command::RestoreAt`): the UI puts that row
+    /// back where it was, or goes to the bottom if it can't
+    Restore,
 }
 
 pub enum Event {
@@ -528,6 +531,9 @@ pub enum Event {
 pub enum Command {
     StartLink(String),
     OpenThread(String),
+    /// sent just before `OpenThread`: when the thread has nothing unread, open it around row
+    /// `id` (where the user left off) instead of at the bottom
+    RestoreAt(String),
     LoadOlder,
     LoadNewer,
     /// back to the thread's newest messages

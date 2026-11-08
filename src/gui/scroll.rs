@@ -60,6 +60,26 @@ pub(crate) enum Anchor {
     Bottom(f32),
     /// its line (the unread divider, a day separator) near the top
     Top,
+    /// its top at this many px from the top of the list (negative: above it): where the user
+    /// left it
+    At(f32),
+}
+
+/// Saves where the open thread's list is, to come back to it (`Command::RestoreAt`): the row
+/// across the top edge and where its top is. At the bottom there is nothing to keep.
+pub(crate) fn remember_place(app: &AppWindow, ui: &mut Ui) {
+    let id = app.get_view_top_id();
+    let off = app.get_view_top_off();
+    app.set_view_top_id(SharedString::new());
+    if ui.open_key.is_empty() {
+        return;
+    }
+    // the properties follow the shown rows; a row of another thread or the typing bubble isn't one
+    if app.get_near_bottom() || id.is_empty() || !ui.last.iter().any(|m| m.id == id.as_str()) {
+        ui.places.remove(&ui.open_key);
+    } else {
+        ui.places.insert(ui.open_key.clone(), (id.to_string(), off));
+    }
 }
 
 /// Space above the first unread row's line when it is put at the top.
@@ -96,6 +116,7 @@ pub(crate) fn seek_row(app: &AppWindow, id: String, anchor: Anchor) {
                     Anchor::Bottom(w) => (w - app.get_jump_h(), 0.5),
                     Anchor::Center => (((vh - app.get_jump_h()) / 2.0).max(0.0), 4.0),
                     Anchor::Top => (app.get_jump_lead() + TOP_MARGIN, 0.5),
+                    Anchor::At(off) => (off + app.get_jump_lead(), 0.5),
                 };
                 // close enough, or the list can't scroll further (row near either end)
                 if (pos - want).abs() <= near || last_pos.is_some_and(|p: f32| (p - pos).abs() < near.min(1.0)) {
@@ -122,6 +143,13 @@ pub(crate) fn seek_row(app: &AppWindow, id: String, anchor: Anchor) {
                         tracing::debug!("older page anchored after {ticks} ticks");
                         // still at the top (short page): go on loading
                         app.invoke_check_older();
+                        return;
+                    }
+                    Anchor::At(_) => {
+                        tracing::debug!("place restored after {ticks} ticks");
+                        send_cmd(Command::AtBottom(app.get_near_bottom()));
+                        app.invoke_check_older();
+                        app.invoke_check_newer();
                         return;
                     }
                     Anchor::Top => {
@@ -176,11 +204,24 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, paging: Paging, scr
     });
     app.set_can_load_older(paging.older);
     app.set_can_load_newer(paging.newer);
-    if rebuild && matches!(scroll, Scroll::Bottom | Scroll::Unread) {
+    // where the thread was left, if that row is among these
+    let place = if scroll == Scroll::Restore {
+        UI.with_borrow_mut(|ui| {
+            let p = ui.places.remove(&ui.open_key)?;
+            ui.last.iter().any(|m| m.id == p.0).then_some(p)
+        })
+    } else {
+        None
+    };
+    if rebuild && (matches!(scroll, Scroll::Bottom | Scroll::Unread) || scroll == Scroll::Restore) {
         // otherwise the first frames lay out from the old thread's position
         app.invoke_seek_end();
     }
     match scroll {
+        Scroll::Restore => match place {
+            Some((id, off)) => seek_row(app, id, Anchor::At(off)),
+            None => stick_to_bottom(app),
+        },
         Scroll::Bottom => stick_to_bottom(app),
         Scroll::Unread => match unread_row {
             Some(id) => seek_row(app, id, Anchor::Top),

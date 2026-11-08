@@ -351,6 +351,8 @@ struct App {
     settle_at: Option<Instant>,
     /// the message list is at its bottom (always, until the UI says otherwise)
     at_bottom: bool,
+    /// row the next `open_thread` opens around (`Command::RestoreAt`)
+    restore_at: Option<u64>,
     synced: bool,
     tx: UnboundedSender<Internal>,
     link_task: Option<JoinHandle<()>>,
@@ -503,6 +505,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         moved: false,
         settle_at: None,
         at_bottom: true,
+        restore_at: None,
         synced: false,
         tx,
         link_task: None,
@@ -634,6 +637,7 @@ impl App {
                     self.notice(format!("대화를 열지 못했습니다: {e:#}"));
                 }
             }
+            Command::RestoreAt(id) => self.restore_at = id.parse().ok(),
             Command::LoadOlder => {
                 if let Err(e) = self.load_older().await {
                     warn!("load_older: {e:#}");

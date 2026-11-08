@@ -162,6 +162,9 @@ export component AppWindow inherits Window {
     // active reports the rows on screen.
     in property <bool> inactive;
     in-out property <int> jump-probe;
+    // the row across the message list's top edge (0 = its top, above the edge when negative)
+    in-out property <string> view-top-id;
+    in-out property <length> view-top-off;
     // the message list moved: the hover is brought up to date for the cursor (gui::anim)
     callback gif-scrolled();
     // flash the jumped-to row
@@ -635,7 +638,14 @@ export component AppWindow inherits Window {
                         }
                         property <length> screen-top: self.y + msg-list.content-y;
                         property <bool> is-divider: m.unread-divider;
-                        changed screen-top => { if (self.is-divider) { root.divider-top = self.screen-top; } }
+                        // the row across the list's top edge and where its top is: where the user
+                        // left off (gui::scroll::remember_place)
+                        property <string> top-id: self.screen-top <= 0px && self.screen-top + self.height > 0px ? m.id : "";
+                        changed top-id => { if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; } }
+                        changed screen-top => {
+                            if (self.is-divider) { root.divider-top = self.screen-top; }
+                            if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; }
+                        }
                         changed is-divider => { if (self.is-divider) { root.divider-top = self.screen-top; } }
                         // reading as the user goes: a row whose bottom edge is on screen. The
                         // id, not a bool: the ListView gives rows old instances with new data.

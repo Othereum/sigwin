@@ -97,6 +97,9 @@ fn probe(app: &AppWindow, name: &str) -> anyhow::Result<String> {
         "bottom-gap" => (app.invoke_content_height() + app.invoke_list_content_y() - app.invoke_list_visible_height()).round().to_string(),
         // where the "unread" line's row starts, from the top of the visible list
         "divider-top" => app.get_divider_top().round().to_string(),
+        // the row across the list's top edge and where its top is (negative: above the edge)
+        "top-id" => app.get_view_top_id().to_string(),
+        "top-off" => app.get_view_top_off().round().to_string(),
         _ => anyhow::bail!("expect ui: no value called {name}"),
     })
 }

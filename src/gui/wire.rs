@@ -40,7 +40,15 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     app.on_start_link(move |name| s(Command::StartLink(name.to_string())));
 
     let s = send.clone();
-    app.on_open_thread(move |key| s(Command::OpenThread(key.to_string())));
+    app.on_open_thread(move |key| {
+        let key = key.to_string();
+        // clicking the open thread again starts over at the bottom, as before
+        let place = UI.with_borrow(|ui| if ui.open_key == key { None } else { ui.places.get(&key).map(|p| p.0.clone()) });
+        if let Some(id) = place {
+            s(Command::RestoreAt(id));
+        }
+        s(Command::OpenThread(key));
+    });
 
     let s = send.clone();
     let weak = app.as_weak();

@@ -178,6 +178,7 @@ impl App {
 
     pub(super) async fn open_thread(&mut self, key: &str) -> anyhow::Result<()> {
         let thread = parse_thread_key(key).context("bad thread key")?;
+        let restore = self.restore_at.take();
         let span = self.latest_rows(&thread).await?;
         let is_group = matches!(thread, Thread::Group(_));
         let members = self.emit_header(&thread).await;
@@ -223,13 +224,50 @@ impl App {
                 self.at_bottom = false;
                 self.emit_messages(Scroll::Unread).await;
             }
+            // nothing unread: where the user left off, if that row is still there
             None => {
-                self.at_bottom = true;
-                self.mark_read(key);
-                self.emit_messages(Scroll::Bottom).await;
+                let restored = match restore {
+                    Some(row) => self.show_around(row).await.unwrap_or(false),
+                    None => false,
+                };
+                if restored {
+                    self.at_bottom = false;
+                    self.emit_messages(Scroll::Restore).await;
+                } else {
+                    self.at_bottom = true;
+                    self.mark_read(key);
+                    self.emit_messages(Scroll::Bottom).await;
+                }
             }
         }
         Ok(())
+    }
+
+    /// Moves the open window around row `row` with `JUMP_MARGIN` rows either side when history
+    /// allows (see `jump_to`); false when the row is gone.
+    async fn show_around(&mut self, row: u64) -> anyhow::Result<bool> {
+        let Some(open) = self.current.as_ref() else { return Ok(false) };
+        if !open.window.iter().any(|(t, _)| *t == row) {
+            let thread = open.thread.clone();
+            let Some(seq) = self.index.seq_of(&thread, row).await? else { return Ok(false) };
+            let span = self.rows_around(&thread, seq).await?;
+            if !span.window.iter().any(|(t, _)| *t == row) {
+                return Ok(false);
+            }
+            let Some(open) = self.current.as_mut() else { return Ok(false) };
+            open.show(span);
+            self.moved = true;
+        }
+        for _ in 0..8 {
+            let Some(open) = self.current.as_ref() else { return Ok(false) };
+            let Some(pos) = open.window.iter().position(|(t, _)| *t == row) else { return Ok(false) };
+            let below = open.window.len() - pos - 1;
+            if pos < JUMP_MARGIN && self.extend_older().await? || below < JUMP_MARGIN && self.extend_newer().await? {
+                continue;
+            }
+            break;
+        }
+        Ok(self.current.as_ref().is_some_and(|o| o.window.iter().any(|(t, _)| *t == row)))
     }
 
     pub(super) async fn load_older(&mut self) -> anyhow::Result<()> {
