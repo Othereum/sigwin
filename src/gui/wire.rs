@@ -763,10 +763,14 @@ pub(crate) fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
     if files.is_empty() {
         return;
     }
-    let all = UI.with_borrow_mut(|ui| {
-        ui.files.extend(files);
-        ui.files.clone()
+    let (all, why) = UI.with_borrow_mut(|ui| {
+        let (ok, why) = attach::admit(&ui.files, files);
+        ui.files.extend(ok);
+        (ui.files.clone(), why)
     });
+    if let Some(why) = why {
+        notice::show(app, why);
+    }
     attach::show(app, &all);
     app.invoke_focus_composer();
 }

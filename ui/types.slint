@@ -157,6 +157,10 @@ export struct PendingFile {
     ext: string,
     thumb: image,
     has-thumb: bool,
+    // not a picture or video: shown as a card with name and size
+    is-file: bool,
+    name: string,
+    size: string,
 }
 
 export struct PackItem {

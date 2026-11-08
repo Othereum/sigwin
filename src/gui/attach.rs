@@ -21,6 +21,31 @@ fn has_picture(p: &Path) -> bool {
     mime_guess::from_path(p).first_or_octet_stream().type_() == "image"
 }
 
+/// Pictures and videos can go together; any other file goes alone.
+fn is_media(p: &Path) -> bool {
+    matches!(mime_guess::from_path(p).first_or_octet_stream().type_().as_str(), "image" | "video")
+}
+
+/// Which of `new` may join `have`, in order, and why the first refused one was refused.
+pub(crate) fn admit(have: &[PathBuf], new: Vec<PathBuf>) -> (Vec<PathBuf>, Option<&'static str>) {
+    let mut all = have.to_vec();
+    let mut why = None;
+    for p in new {
+        if all.iter().any(|f| !is_media(f)) {
+            why.get_or_insert("파일은 한 번에 하나만 보낼 수 있습니다.");
+        } else if !is_media(&p) && !all.is_empty() {
+            why.get_or_insert("사진·동영상과 파일은 함께 보낼 수 없습니다.");
+        } else {
+            all.push(p);
+        }
+    }
+    (all.split_off(have.len()), why)
+}
+
+fn file_name(p: &Path) -> SharedString {
+    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default().into()
+}
+
 /// Shows `files` as the composer's attachments.
 pub(crate) fn show(app: &AppWindow, files: &[PathBuf]) {
     let photo = files.iter().any(|p| {
@@ -47,7 +72,20 @@ pub(crate) fn show(app: &AppWindow, files: &[PathBuf]) {
                     }
                     None => None,
                 };
-                PendingFile { ext: ext(p), has_thumb: thumb.is_some(), thumb: thumb.unwrap_or_default() }
+                let is_file = !is_media(p);
+                let size = if is_file {
+                    std::fs::metadata(p).map(|m| crate::view::media::size_text(m.len())).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                PendingFile {
+                    ext: ext(p),
+                    has_thumb: thumb.is_some(),
+                    thumb: thumb.unwrap_or_default(),
+                    is_file,
+                    name: if is_file { file_name(p) } else { SharedString::new() },
+                    size: size.into(),
+                }
             })
             .collect();
         (rows, wanted)
@@ -92,6 +130,45 @@ fn arrived(app: &AppWindow, path: PathBuf, pixels: Option<(Vec<u8>, u32)>) {
         row.thumb = img;
         row.has_thumb = true;
         slint::Model::set_row_data(&model, i, row);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(s: &str) -> PathBuf {
+        s.into()
+    }
+
+    #[test]
+    fn media_go_together() {
+        let (ok, why) = admit(&[p("a.jpg")], vec![p("b.mp4"), p("c.gif")]);
+        assert_eq!(ok.len(), 2);
+        assert!(why.is_none());
+    }
+
+    #[test]
+    fn file_refused_after_media() {
+        let (ok, why) = admit(&[p("a.jpg")], vec![p("b.pdf")]);
+        assert!(ok.is_empty());
+        assert!(why.unwrap().contains("함께"));
+    }
+
+    #[test]
+    fn media_refused_after_file() {
+        let (ok, why) = admit(&[p("a.pdf")], vec![p("b.jpg"), p("c.zip")]);
+        assert!(ok.is_empty());
+        assert!(why.unwrap().contains("하나만"));
+    }
+
+    #[test]
+    fn first_of_a_mixed_batch_decides() {
+        let (ok, why) = admit(&[], vec![p("a.pdf"), p("b.jpg")]);
+        assert_eq!(ok, vec![p("a.pdf")]);
+        assert!(why.is_some());
+        let (ok, _) = admit(&[], vec![p("a.jpg"), p("b.pdf"), p("c.png")]);
+        assert_eq!(ok, vec![p("a.jpg"), p("c.png")]);
     }
 }
 

@@ -733,7 +733,79 @@ export component AppWindow inherits Window {
                     IconButton { label: "✕"; width: 28px; height: 28px; clicked => { root.cancel-reply(); } }
                 }
             }
-            if root.current-key != "" && root.pending-files.length > 0: Rectangle {
+            if root.current-key != "" && root.pending-files.length > 0 && root.pending-files[0].is-file: Rectangle {
+                background: Theme.sidebar;
+                height: 80px;
+                // a file goes alone: one card with its name and size
+                Rectangle {
+                    x: 16px;
+                    y: 8px;
+                    width: min(parent.width - 32px, 360px);
+                    height: 64px;
+                    border-radius: 8px;
+                    background: Theme.hover;
+                    Rectangle {
+                        x: 12px;
+                        y: 12px;
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 6px;
+                        background: Theme.accent;
+                        Text {
+                            text: root.pending-files[0].ext;
+                            color: #ffffff;
+                            font-size: 11px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    VerticalLayout {
+                        x: 64px;
+                        y: 0px;
+                        width: parent.width - 64px - 40px;
+                        height: parent.height;
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: root.pending-files[0].name;
+                            color: Theme.text;
+                            font-size: 14px;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: root.pending-files[0].size;
+                            color: Theme.subtle;
+                            font-size: 12px;
+                        }
+                    }
+                    Rectangle {
+                        x: parent.width - self.width - 10px;
+                        y: (parent.height - self.height) / 2;
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 10px;
+                        background: file-remove.has-hover ? #000000d0 : #000000a0;
+                        Path {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 8px;
+                            height: 8px;
+                            viewbox-width: 8;
+                            viewbox-height: 8;
+                            commands: "M 0 0 L 8 8 M 8 0 L 0 8";
+                            stroke: #ffffff;
+                            stroke-width: 1.5px;
+                            stroke-line-cap: round;
+                        }
+                        file-remove := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.remove-attachment(0); }
+                        }
+                    }
+                }
+            }
+            if root.current-key != "" && root.pending-files.length > 0 && !root.pending-files[0].is-file: Rectangle {
                 background: Theme.sidebar;
                 HorizontalLayout {
                     padding: 8px;
