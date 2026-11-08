@@ -28,6 +28,18 @@ export struct ThreadItem {
     readers-more: int,
 }
 
+// what a picture says about its download
+export struct MediaState {
+    // a video's length, or the size of what isn't downloaded yet
+    label: string,
+    // a click on it downloads it first
+    undownloaded: bool,
+    // percent while it downloads; -1: none
+    progress: int,
+    // that percent, drawn
+    ring: image,
+}
+
 // one image of a message's grid
 export struct ImageCell {
     x: length,
@@ -40,14 +52,10 @@ export struct ImageCell {
     video: bool,
     // a GIF: it plays in place while the pointer is on it (`frames` then hold its current frame)
     gif: bool,
-    // a video's length, or the size of what isn't downloaded yet
-    label: string,
-    // a click on this video downloads it first
-    undownloaded: bool,
-    // percent while it downloads; -1: none
-    progress: int,
-    // that percent, drawn
-    ring: image,
+    // what it says about its download: one row, shared with every cell of the same picture and
+    // changed in place, so a percent going up doesn't draw the cell again (a click that began on
+    // the old one would end on nothing)
+    state: [MediaState],
     // the playing GIF's frame: its index in `frame[0]` (empty: show `image`)
     frames: [image],
     frame: [int],

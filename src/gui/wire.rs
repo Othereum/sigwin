@@ -619,7 +619,7 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             ui.last.iter().find(|m| m.id == id.as_str()).map(|m| {
                 let key = m.cells.get(index as usize).map_or("", |c| c.key.as_str());
                 // not here: the picture says so, and the viewer has nothing to show
-                let missing = ui.media_labels.get(key).is_some_and(|l| l.undownloaded);
+                let missing = ui.media_labels.undownloaded(key);
                 (m.sticker, m.clicked_media(index as usize), missing)
             })
         });

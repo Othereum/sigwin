@@ -91,11 +91,9 @@ pub(super) fn label_arrived(key: String, label: types::MediaLabel) {
         if ui.released {
             return;
         }
-        if label == types::MediaLabel::default() {
-            ui.media_labels.remove(&key);
-        } else {
-            ui.media_labels.insert(key.clone(), label);
+        // in place when a cell shows it already: no row is drawn again for a percent
+        if !ui.media_labels.set(&key, &label) {
+            rows::redraw_rows(ui, |m| rows::shows_key(m, &key));
         }
-        rows::redraw_rows(ui, |m| rows::shows_key(m, &key));
     });
 }

@@ -264,7 +264,7 @@ fn forget_unshown_thumbs(ui: &mut Ui, items: &[MsgDto]) {
         .collect();
     let card = ui.link.key.clone();
     ui.thumbs.retain(|k, _| shown.contains(k.as_str()) || k.ends_with(COMPOSER_KEY) || *k == card);
-    ui.media_labels.retain(|k, _| shown.contains(k.as_str()));
+    ui.media_labels.retain(|k| shown.contains(k));
 }
 
 /// An older page arrived: keep the row that was on top (`anchor`, the oldest row so far) at

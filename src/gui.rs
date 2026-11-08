@@ -12,7 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::types::{ClickedMedia, Command, Event, MsgDto, Paging, Scroll, ThreadDto};
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
-    AppWindow, ImageCell, ImageViewer, Links, MentionItem, MsgItem, NoteLine, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem,
+    AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, NoteLine, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem,
     SettingsData, StickerItem, Theme, ThreadItem, ThreadMenuData,
 };
 
@@ -49,7 +49,7 @@ pub(crate) struct Ui {
     /// thumbnails for the open thread only; cleared on thread switch to bound memory
     thumbs: HashMap<String, Image>,
     /// text over pictures, by the same keys
-    media_labels: HashMap<String, types::MediaLabel>,
+    media_labels: rows::MediaStates,
     /// animated stickers' frames (message list, open thread; the hovered picker sticker)
     anims: anim::Anims,
     /// round photos by thread key, for the whole session (~6KB each at 40px)

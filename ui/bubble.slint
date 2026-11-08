@@ -170,13 +170,13 @@ export component MsgImage inherits Rectangle {
             image-fit: cover;
         }
         // a picture that isn't here has the same mark: a click gets it or stops it
-        if (cell.video || cell.undownloaded) && cell.more == 0: VideoMark { undownloaded: cell.undownloaded; progress: cell.progress; ring: cell.ring; }
-        if cell.label != "" && cell.more == 0: MediaLabel {
-            text: cell.label;
+        if (cell.video || cell.state[0].undownloaded) && cell.more == 0: VideoMark { undownloaded: cell.state[0].undownloaded; progress: cell.state[0].progress; ring: cell.state[0].ring; }
+        if cell.state[0].label != "" && cell.more == 0: MediaLabel {
+            text: cell.state[0].label;
             x: 6px;
             y: parent.height - self.height - 6px;
         }
-        if cell.gif && cell.frames.length == 0 && cell.label == "" && cell.more == 0: MediaLabel {
+        if cell.gif && cell.frames.length == 0 && cell.state[0].label == "" && cell.more == 0: MediaLabel {
             text: "GIF";
             x: 6px;
             y: parent.height - self.height - 6px;

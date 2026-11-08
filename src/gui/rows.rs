@@ -246,10 +246,60 @@ pub(crate) fn ring_of(label: &types::MediaLabel) -> Image {
     })
 }
 
+/// What the pictures say about their downloads, by key. Each key has a one-row model that every
+/// cell of that picture shares, and `set` changes it in place: drawing the cell again would
+/// give it new elements, and a click that began on the old ones would end on nothing. That
+/// happens a few times a second while a picture downloads.
+#[derive(Default)]
+pub(crate) struct MediaStates {
+    models: RefCell<HashMap<String, Rc<VecModel<MediaState>>>>,
+}
+
+fn state_of(label: &types::MediaLabel) -> MediaState {
+    MediaState { label: label.text.as_str().into(), undownloaded: label.undownloaded, progress: progress_of(label), ring: ring_of(label) }
+}
+
+impl MediaStates {
+    /// The model a cell of `key` shows, made if there is none yet.
+    pub(crate) fn model(&self, key: &str) -> ModelRc<MediaState> {
+        let mut models = self.models.borrow_mut();
+        let model = models.entry(key.to_string()).or_insert_with(|| Rc::new(VecModel::from(vec![state_of(&Default::default())])));
+        ModelRc::from(model.clone())
+    }
+
+    /// Changes what `key` says. False: nothing shows it yet, so the rows that do have to be
+    /// drawn once to get its model.
+    pub(crate) fn set(&self, key: &str, label: &types::MediaLabel) -> bool {
+        let found = self.models.borrow().get(key).cloned();
+        match found {
+            Some(model) => {
+                slint::Model::set_row_data(&*model, 0, state_of(label));
+                true
+            }
+            None => {
+                self.models.borrow_mut().insert(key.to_string(), Rc::new(VecModel::from(vec![state_of(label)])));
+                false
+            }
+        }
+    }
+
+    pub(crate) fn undownloaded(&self, key: &str) -> bool {
+        self.models.borrow().get(key).is_some_and(|m| slint::Model::row_data(&**m, 0).is_some_and(|s| s.undownloaded))
+    }
+
+    pub(crate) fn retain(&self, keep: impl Fn(&str) -> bool) {
+        self.models.borrow_mut().retain(|k, _| keep(k));
+    }
+
+    pub(crate) fn clear(&self) {
+        self.models.borrow_mut().clear();
+    }
+}
+
 pub(crate) fn to_item(
     m: &MsgDto,
     thumbs: &HashMap<String, Image>,
-    labels: &HashMap<String, types::MediaLabel>,
+    states: &MediaStates,
     anims: &super::anim::Anims,
     senders: &HashMap<String, Image>,
     revealed: &std::collections::HashSet<String>,
@@ -258,10 +308,6 @@ pub(crate) fn to_item(
     // stickers: the picture and its frames
     let image = thumbs.get(&m.image_key).cloned();
     let (frames, frame) = anims.models(&m.image_key);
-    let label_of = |key: &str| labels.get(key).map_or(SharedString::new(), |l| l.text.as_str().into());
-    let undownloaded = |key: &str| labels.get(key).is_some_and(|l| l.undownloaded);
-    let progress = |key: &str| labels.get(key).map_or(-1, progress_of);
-    let ring = |key: &str| labels.get(key).map_or_else(Image::default, ring_of);
     let cells: Vec<ImageCell> = m
         .cells
         .iter()
@@ -275,10 +321,7 @@ pub(crate) fn to_item(
             more: c.more as i32,
             video: c.video,
             gif: c.gif,
-            label: label_of(&c.key),
-            undownloaded: undownloaded(&c.key),
-            progress: progress(&c.key),
-            ring: ring(&c.key),
+            state: states.model(&c.key),
             frames: anims.gif_models(&m.id, n).0,
             frame: anims.gif_models(&m.id, n).1,
         })
@@ -439,7 +482,7 @@ mod tests {
         for (old, new) in cases {
             let mut ui = Ui::default();
             ui.last = rows(old);
-            ui.messages.set_vec(ui.last.iter().map(|m| to_item(m, &HashMap::new(), &HashMap::new(), &Default::default(), &HashMap::new(), &Default::default(), false)).collect::<Vec<_>>());
+            ui.messages.set_vec(ui.last.iter().map(|m| to_item(m, &HashMap::new(), &Default::default(), &Default::default(), &HashMap::new(), &Default::default(), false)).collect::<Vec<_>>());
             let new = rows(new);
             update_rows(&mut ui, &new, false);
             let got: Vec<String> = ui.messages.iter().map(|m| m.text.to_string()).collect();
