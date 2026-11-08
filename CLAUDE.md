@@ -1,6 +1,11 @@
 # CLAUDE.md
 
-**Sigwin**: lightweight unofficial Signal desktop client. Never use "Signal" in its name (Signal brand guidelines). Rust + presage (Signal protocol) + Slint (software renderer). Windows-first. User-facing text is Korean.
+**Sigwin**: lightweight unofficial Signal desktop client. Never use "Signal" in its name (Signal brand guidelines). Rust + presage (Signal protocol) + Slint (software renderer). Windows-first. User-facing text is Korean (for now).
+
+## Goal
+- **Light is the promise.** A feature is judged by whether it fits the memory target below.
+- **Scope is everyday messaging**: 1:1 and group conversations, attachments, notifications, message requests, starting a chat, history on linking. Group management comes only if there is room. Stories, calls and payments are out.
+- **Windows first, one platform done deeply.** Other OSes aren't built or tested. Keep platform-specific code behind a small boundary so that one can follow later.
 
 ## Where things live
 - `docs/architecture.md`: thread model and per-file roles. Read before touching an unfamiliar module.
