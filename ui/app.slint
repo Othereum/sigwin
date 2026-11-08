@@ -87,6 +87,8 @@ export component AppWindow inherits Window {
     callback load-newer();
     callback at-bottom-changed(bool);
     callback attach();
+    // files are being dragged over the window
+    in property <bool> drop-hover;
     callback remove-attachment(int);
     // the message and which of its images
     callback attachment-clicked(string, int);
@@ -1278,6 +1280,25 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+        }
+    }
+
+    // files being dragged over the conversation: where they would go
+    if page == "main" && root.current-key != "" && root.drop-hover: Rectangle {
+        x: 300px;
+        y: 0px;
+        width: root.width - 300px;
+        height: root.height;
+        background: Theme.accent.with-alpha(0.14);
+        border-width: 3px;
+        border-color: Theme.accent;
+        Text {
+            text: "여기에 놓아서 첨부합니다";
+            color: Theme.accent;
+            font-size: 18px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 

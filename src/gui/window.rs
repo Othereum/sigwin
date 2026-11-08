@@ -314,9 +314,29 @@ fn ctrl_letter(logical: &Key, physical: PhysicalKey, mods: ModifiersState) -> Op
 /// Keep Ctrl shortcuts working in every text field regardless of Caps Lock and the IME.
 fn fix_ctrl_shortcuts(app: &AppWindow) {
     let mods = std::cell::Cell::new(ModifiersState::empty());
+    let weak = app.as_weak();
     app.window().on_winit_window_event(move |window, event| {
         match event {
             WindowEvent::ModifiersChanged(m) => mods.set(m.state()),
+            // files dragged in from Explorer: there is one event per file
+            WindowEvent::HoveredFile(_) => {
+                if let Some(app) = weak.upgrade() {
+                    app.set_drop_hover(true);
+                }
+            }
+            WindowEvent::HoveredFileCancelled => {
+                if let Some(app) = weak.upgrade() {
+                    app.set_drop_hover(false);
+                }
+            }
+            WindowEvent::DroppedFile(path) => {
+                if let Some(app) = weak.upgrade() {
+                    app.set_drop_hover(false);
+                    if !app.get_current_key().is_empty() && path.is_file() {
+                        super::wire::add_files(&app, vec![path.clone()]);
+                    }
+                }
+            }
             WindowEvent::Moved(_) | WindowEvent::Resized(_) => track_geometry(window),
             WindowEvent::KeyboardInput { event: e, is_synthetic: false, .. } if e.state.is_pressed() => {
                 if let Some(c) = ctrl_letter(&e.logical_key, e.physical_key, mods.get()) {
