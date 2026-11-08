@@ -506,12 +506,12 @@ pub fn animation(bytes: &[u8], px: u32, max_bytes: usize) -> ImageResult<Option<
     Ok(Some(anim))
 }
 
-/// Whether `bytes` are a GIF with more than one frame.
+/// Whether `bytes` are an animation (GIF, animated WebP or APNG) with more than one frame.
 pub fn is_animated_gif(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"GIF8") && is_animated(bytes)
+    is_animated(bytes)
 }
 
-/// A GIF's size, from its header.
+/// An animation's size, from its header.
 pub fn gif_size(bytes: &[u8]) -> Option<(u32, u32)> {
     image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()
 }
@@ -522,11 +522,18 @@ pub fn gif_size(bytes: &[u8]) -> Option<(u32, u32)> {
 /// Returns the frames of the first loop (a still, or a broken file, has fewer than 2 and stops).
 pub fn stream_gif(bytes: &[u8], px: u32, mut on_frame: impl FnMut(RgbaImage, u32) -> bool) -> ImageResult<usize> {
     use image::AnimationDecoder;
-    use image::codecs::gif::GifDecoder;
+    use image::codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder};
+    let cur = || std::io::Cursor::new(bytes);
+    let format = image::guess_format(bytes)?;
     let mut first_loop = 0;
     loop {
         let mut n = 0;
-        for f in GifDecoder::new(std::io::Cursor::new(bytes))?.into_frames() {
+        let frames = match format {
+            image::ImageFormat::WebP => WebPDecoder::new(cur())?.into_frames(),
+            image::ImageFormat::Png => PngDecoder::new(cur())?.apng()?.into_frames(),
+            _ => GifDecoder::new(cur())?.into_frames(),
+        };
+        for f in frames {
             let f = f?;
             let delay = delay_us(f.delay());
             n += 1;
@@ -602,6 +609,38 @@ mod tests {
         assert_eq!(seen, [0, 40, 80, 0, 40, 80, 0]);
         // a still doesn't loop
         assert_eq!(stream_gif(&gif(1, 50), 32, |_, _| true).unwrap(), 1);
+    }
+
+    fn apng(frames: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut enc = png::Encoder::new(&mut out, 16, 16);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.set_animated(frames, 0).unwrap();
+        enc.set_frame_delay(1, 20).unwrap();
+        let mut w = enc.write_header().unwrap();
+        for i in 0..frames {
+            w.write_image_data(&[(i * 60) as u8, 0, 0, 255].repeat(16 * 16)).unwrap();
+        }
+        w.finish().unwrap();
+        out
+    }
+
+    #[test]
+    fn streams_an_apng() {
+        let a = apng(3);
+        assert!(is_animated_gif(&a) && !is_animated_gif(&png_rgba(&RgbaImage::new(8, 8)).unwrap()));
+        // a one-frame APNG says it animates, but stops after one frame
+        assert_eq!(stream_gif(&apng(1), 16, |_, _| true).unwrap(), 1);
+        assert_eq!(gif_size(&a), Some((16, 16)));
+        let mut seen = Vec::new();
+        stream_gif(&a, 16, |f, d| {
+            assert_eq!(d, 50_000);
+            seen.push(f.get_pixel(0, 0)[0]);
+            seen.len() < 4
+        })
+        .unwrap();
+        assert_eq!(seen, [0, 60, 120, 0]);
     }
 
     #[test]

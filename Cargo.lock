@@ -6076,6 +6076,7 @@ version = "0.1.0"
 dependencies = [
  "fast_image_resize",
  "image",
+ "png",
  "slint",
 ]
 
