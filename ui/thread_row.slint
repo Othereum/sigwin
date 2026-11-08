@@ -12,6 +12,8 @@ export component ThreadRow inherits Rectangle {
     callback menu(length, length);
     height: 64px;
     background: selected ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
+    // the reader photos' outline: the row's own color
+    property <color> ring: selected ? Theme.selected : (ta.has-hover ? Theme.hover : Theme.sidebar);
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -79,6 +81,48 @@ export component ThreadRow inherits Rectangle {
                         font-size: 12.5px;
                         overflow: elide;
                         horizontal-stretch: 1;
+                    }
+                }
+                // who read our last message: overlapping round photos, ringed in the row's color
+                if !item.draft && item.readers.length > 0: Rectangle {
+                    horizontal-stretch: 0;
+                    width: 16px + (item.readers.length + (item.readers-more > 0 ? 1 : 0) - 1) * 9px;
+                    height: 16px;
+                    for r[i] in item.readers: Rectangle {
+                        x: i * 9px;
+                        width: 16px;
+                        height: 16px;
+                        border-radius: 8px;
+                        background: root.ring;
+                        Avatar {
+                            x: 1px;
+                            y: 1px;
+                            size: 14px;
+                            initial: r.initial;
+                            tint: r.tint;
+                            photo: r.photo;
+                            has-photo: r.has-photo;
+                        }
+                    }
+                    if item.readers-more > 0: Rectangle {
+                        x: item.readers.length * 9px;
+                        width: 16px;
+                        height: 16px;
+                        border-radius: 8px;
+                        background: root.ring;
+                        Rectangle {
+                            x: 1px;
+                            y: 1px;
+                            width: 14px;
+                            height: 14px;
+                            border-radius: 7px;
+                            background: Theme.hover;
+                            Text {
+                                text: "+" + item.readers-more;
+                                font-size: 8px;
+                                color: Theme.text;
+                            }
+                        }
                     }
                 }
                 if item.unread > 0: Rectangle {

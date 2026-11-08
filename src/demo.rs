@@ -134,6 +134,14 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             // own settings in one chat, the phone's mention setting in a group
             prefs: if i == 5 { ThreadPrefs { preview: Some(1), sound: Some(false), badge: Some(false), ..Default::default() } } else { ThreadPrefs::default() },
             phone_mentions: (i == 3).then_some(false),
+            // our last message, read by one with a photo, one without, and by a crowd
+            readers: match i {
+                0 | 4 => vec![("demo-a".into(), "이서연".into())],
+                1 => vec![("demo-b".into(), "박지훈".into())],
+                3 => vec![("demo-a".into(), "이서연".into()), ("demo-b".into(), "박지훈".into()), ("demo-c".into(), "최유나".into())],
+                _ => Vec::new(),
+            },
+            readers_more: if i == 3 { 2 } else { 0 },
         })
         .collect();
     let mut items = Vec::new();
@@ -478,6 +486,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     // one sender with a photo, the other falls back to the initial
     photo(format!("{}demo-a", avatar::MSG_PREFIX), 1, avatar::MSG_SIZE);
     photo(format!("{}demo-a", avatar::READ_PREFIX), 1, avatar::READ_SIZE);
+    photo(format!("{}demo-a", avatar::LIST_READ_PREFIX), 1, avatar::LIST_READ_SIZE);
     if let Ok(text) = std::env::var("SIGWIN_DEMO_NOTICE") {
         emit(Event::Notice(text));
     }
@@ -995,6 +1004,8 @@ fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiv
         mute: Mute::default(),
         prefs: ThreadPrefs::default(),
         phone_mentions: None,
+        readers: Vec::new(),
+        readers_more: 0,
     };
     let threads = vec![
         th(1, "이서연", "그럼 토요일 11시에 합정역에서 봐요!", "오후 6:42", 0, false),

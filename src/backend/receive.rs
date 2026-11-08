@@ -207,6 +207,10 @@ impl App {
                     self.current_dirty = true;
                 }
             }
+            // the list shows who read the message it displays
+            if read && self.persist.snippets.values().any(|(_, ts, _)| targets.contains(ts)) {
+                self.threads_dirty = true;
+            }
             return;
         }
 

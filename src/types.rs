@@ -44,6 +44,10 @@ pub struct ThreadDto {
     pub prefs: ThreadPrefs,
     /// the phone's "notify for mentions while muted" (groups only; None = not set there)
     pub phone_mentions: Option<bool>,
+    /// our last message in the thread was read by these: (uuid, name), at most `MAX_READER_PHOTOS`
+    pub readers: Vec<(String, String)>,
+    /// readers beyond `readers`
+    pub readers_more: u32,
 }
 
 /// A thread's own notification settings; each None follows the next layer (the phone's

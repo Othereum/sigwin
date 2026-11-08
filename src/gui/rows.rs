@@ -193,12 +193,16 @@ pub(crate) fn rich_text(m: &MsgDto, links: &[(usize, usize)], spoilers: &[(usize
 
 /// The photos (first `MAX_READER_PHOTOS`) of those who read a message; keys `r:<uuid>` in `senders`.
 pub(crate) fn reader_items(m: &MsgDto, senders: &HashMap<String, Image>) -> ModelRc<ReaderItem> {
-    let rows: Vec<ReaderItem> = m
-        .readers
+    readers_model(&m.readers, senders, avatar::READ_PREFIX)
+}
+
+/// `reader_items` for any list of (uuid, name); the photos are keyed `<prefix><uuid>`.
+pub(crate) fn readers_model(readers: &[(String, String)], photos: &HashMap<String, Image>, prefix: &str) -> ModelRc<ReaderItem> {
+    let rows: Vec<ReaderItem> = readers
         .iter()
         .take(types::MAX_READER_PHOTOS)
         .map(|(uuid, name)| {
-            let photo = senders.get(&format!("{}{uuid}", avatar::READ_PREFIX)).cloned();
+            let photo = photos.get(&format!("{prefix}{uuid}")).cloned();
             ReaderItem {
                 has_photo: photo.is_some(),
                 photo: photo.unwrap_or_default(),
@@ -360,6 +364,8 @@ pub(crate) fn thread_item(t: &ThreadDto, avatars: &HashMap<String, Image>) -> Th
         is_group: t.is_group,
         draft: false,
         muted: t.mute.active(view::time::now_ms()),
+        readers: readers_model(&t.readers, avatars, avatar::LIST_READ_PREFIX),
+        readers_more: t.readers_more as i32,
     }
 }
 

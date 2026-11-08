@@ -363,6 +363,9 @@ struct App {
     pending_reads: Vec<(ServiceId, u64)>,
     /// threads whose photo was loaded (or is queued) this session
     avatars_done: HashSet<String>,
+    /// thread key -> (sent ts of the thread list's message, whether it is ours), so the list
+    /// reads a message from the store once
+    last_outgoing: HashMap<String, (u64, bool)>,
     avatars_running: bool,
     avatar_queue: std::collections::VecDeque<crate::avatar::Want>,
     /// bumped per opened sticker pack: image work for an older grid stops
@@ -513,6 +516,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         pending_receipts: HashMap::new(),
         pending_reads: Vec::new(),
         avatars_done: HashSet::new(),
+        last_outgoing: HashMap::new(),
         avatars_running: false,
         avatar_queue: Default::default(),
         grid_gen: Default::default(),
@@ -983,6 +987,7 @@ impl App {
         self.threads.clear();
         self.names.clear();
         self.avatars_done.clear();
+        self.last_outgoing.clear();
         self.avatar_queue.clear();
         self.persist = Persist::default();
         self.save_persist();

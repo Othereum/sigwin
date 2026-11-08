@@ -33,6 +33,11 @@ pub const MSG_SIZE: u32 = 28;
 pub const READ_SIZE: u32 = 16;
 /// Emitted key prefix of a reader avatar: `r:<uuid>`.
 pub const READ_PREFIX: &str = "r:";
+/// who read our last message, in the thread list (ui/thread_row.slint `ThreadRow`)
+pub const LIST_READ_SIZE: u32 = 14;
+/// Emitted key prefix of a thread-list reader avatar: `tr:<uuid>`. Unlike the message list's
+/// avatars, the UI keeps these across thread switches.
+pub const LIST_READ_PREFIX: &str = "tr:";
 /// Emitted key prefix of a message-list avatar: `m:<uuid>`.
 pub const MSG_PREFIX: &str = "m:";
 /// Emitted keys of our own photo: in the sidebar header and on the settings page.

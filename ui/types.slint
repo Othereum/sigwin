@@ -1,5 +1,13 @@
 // Data rows the Rust side fills (exported from app.slint for the generated code).
 
+// one reader's photo (or the initial) under a message or in the thread list
+export struct ReaderItem {
+    photo: image,
+    has-photo: bool,
+    initial: string,
+    tint: color,
+}
+
 export struct ThreadItem {
     key: string,
     name: string,
@@ -15,6 +23,9 @@ export struct ThreadItem {
     draft: bool,
     // notifications are off: a crossed-out bell, a grey unread count
     muted: bool,
+    // photos of those who read our last message (the preview line), and how many more there are
+    readers: [ReaderItem],
+    readers-more: int,
 }
 
 // one image of a message's grid
@@ -44,13 +55,6 @@ export struct ReactionItem {
     mine: bool,
     // names of who reacted, joined by ", " ("나" for us)
     who: string,
-}
-
-export struct ReaderItem {
-    photo: image,
-    has-photo: bool,
-    initial: string,
-    tint: color,
 }
 
 export struct MsgItem {

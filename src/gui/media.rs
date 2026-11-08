@@ -50,6 +50,19 @@ pub(super) fn avatar_arrived(app: &AppWindow, t: Arc<types::Thumb>) {
             }
             return;
         }
+        if let Some(uuid) = t.key.strip_prefix(avatar::LIST_READ_PREFIX) {
+            let Some(img) = img else { return };
+            ui.avatars.insert(t.key.clone(), img);
+            for i in 0..slint::Model::row_count(&*ui.threads) {
+                let Some(mut row) = slint::Model::row_data(&*ui.threads, i) else { continue };
+                let Some(dto) = ui.thread_dtos.iter().find(|d| d.key.as_str() == row.key.as_str()) else { continue };
+                if dto.readers.iter().any(|(u, _)| u == uuid) {
+                    row.readers = readers_model(&dto.readers, &ui.avatars, avatar::LIST_READ_PREFIX);
+                    slint::Model::set_row_data(&*ui.threads, i, row);
+                }
+            }
+            return;
+        }
         let changed = match img.clone() {
             Some(i) => {
                 ui.avatars.insert(t.key.clone(), i);

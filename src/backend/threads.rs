@@ -91,9 +91,12 @@ impl App {
                     key,
                     name,
                     snippet,
+                    readers: Vec::new(),
+                    readers_more: 0,
                 },
             ));
         }
+        self.fill_readers(&mut list).await;
         // groups we're in but haven't talked in yet
         if let Ok(groups) = self.store.groups().await {
             for (k, g) in groups.flatten() {
@@ -114,6 +117,8 @@ impl App {
                         ts: 0,
                         unread: 0,
                         is_group: true,
+                        readers: Vec::new(),
+                        readers_more: 0,
                     },
                 ));
             }
@@ -130,7 +135,70 @@ impl App {
         self.mute_due = self.next_mute_change();
         self.emit_threads().await;
         self.load_avatars();
+        self.load_list_reader_avatars();
         Ok(())
+    }
+
+    /// Whoever read the message each thread shows, when it is ours (`ThreadDto::readers`). The
+    /// rows' `ts` is the message's own here, before the list floors it.
+    async fn fill_readers(&mut self, list: &mut [(i64, ThreadDto)]) {
+        let mut mine = Vec::new();
+        for (_, t) in list.iter() {
+            if t.ts == 0 {
+                continue;
+            }
+            let known = self.last_outgoing.get(&t.key).filter(|(ts, _)| *ts == t.ts).map(|(_, out)| *out);
+            let outgoing = match known {
+                Some(out) => out,
+                None => {
+                    let out = match parse_thread_key(&t.key) {
+                        Some(thread) => match self.store.message(&thread, t.ts).await {
+                            Ok(Some(c)) => matches!(view::classify(&c, self.me), Kind::Msg { outgoing: true, .. }),
+                            _ => false,
+                        },
+                        None => false,
+                    };
+                    self.last_outgoing.insert(t.key.clone(), (t.ts, out));
+                    out
+                }
+            };
+            if outgoing {
+                mine.push(t.ts);
+            }
+        }
+        if mine.is_empty() {
+            return;
+        }
+        let Ok(receipts) = self.index.receipts_for(&mine).await else { return };
+        let mut by_ts: HashMap<u64, Vec<Uuid>> = HashMap::new();
+        for (ts, who, level) in receipts {
+            if level >= 2 && who != self.me {
+                by_ts.entry(ts).or_default().push(who);
+            }
+        }
+        for (_, t) in list.iter_mut() {
+            let Some(who) = by_ts.remove(&t.ts).filter(|_| mine.contains(&t.ts)) else { continue };
+            let mut named = Vec::with_capacity(who.len());
+            for u in who {
+                named.push((self.name(u).await, u.to_string()));
+            }
+            named.sort();
+            t.readers_more = named.len().saturating_sub(crate::types::MAX_READER_PHOTOS) as u32;
+            t.readers = named.into_iter().take(crate::types::MAX_READER_PHOTOS).map(|(n, u)| (u, n)).collect();
+        }
+    }
+
+    /// Photos of those shown as readers in the thread list, after the threads' own.
+    fn load_list_reader_avatars(&mut self) {
+        let uuids: Vec<Uuid> = self.threads.iter().flat_map(|t| t.readers.iter()).filter_map(|(u, _)| u.parse().ok()).collect();
+        for u in uuids {
+            let key = format!("{}{u}", crate::avatar::LIST_READ_PREFIX);
+            if self.avatars_done.insert(key.clone()) {
+                let thread = Thread::Contact(ServiceId::Aci(u.into()));
+                self.avatar_queue.push_back(crate::avatar::Want { key, thread, size: crate::avatar::LIST_READ_SIZE });
+            }
+        }
+        self.run_avatars();
     }
 
     /// Queues the photos of listed threads not seen yet this session.
@@ -307,6 +375,8 @@ impl App {
                         ts: 0,
                         unread: 0,
                         is_group: false,
+                        readers: Vec::new(),
+                        readers_more: 0,
                     });
                 }
                 if out.len() > 200 {
