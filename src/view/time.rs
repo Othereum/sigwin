@@ -83,20 +83,52 @@ pub fn bubble_time(ts: u64, abs: &str) -> String {
     }
 }
 
-pub(super) fn day_label(dt: &DateTime<Local>) -> String {
+/// A local day as a number (days since 0001-01-01), the form rows carry.
+pub fn day_num(dt: &DateTime<Local>) -> i32 {
+    dt.date_naive().num_days_from_ce()
+}
+
+/// Milliseconds at which local day `day` (`day_num`) starts.
+pub fn day_start_ms(day: i32) -> Option<u64> {
+    let d = chrono::NaiveDate::from_num_days_from_ce_opt(day).filter(|_| day > 0)?;
+    let start = Local.from_local_datetime(&d.and_hms_opt(0, 0, 0)?).earliest()?;
+    u64::try_from(start.timestamp_millis()).ok()
+}
+
+/// The date shown while scrolling: "오늘", "어제", "11월 7일 (토)", with the year when it differs.
+pub fn scroll_day_label(day: i32) -> String {
     const WD: [&str; 7] = ["월", "화", "수", "목", "금", "토", "일"];
-    format!(
-        "{}년 {}월 {}일 {}요일",
-        dt.year(),
-        dt.month(),
-        dt.day(),
-        WD[dt.weekday().num_days_from_monday() as usize]
-    )
+    // 0: no day
+    let Some(d) = chrono::NaiveDate::from_num_days_from_ce_opt(day).filter(|_| day > 0) else { return String::new() };
+    let now = Local::now().date_naive();
+    match (now - d).num_days() {
+        0 => return "오늘".into(),
+        1 => return "어제".into(),
+        _ => {}
+    }
+    let wd = WD[d.weekday().num_days_from_monday() as usize];
+    if d.year() == now.year() {
+        format!("{}월 {}일 ({wd})", d.month(), d.day())
+    } else {
+        format!("{}년 {}월 {}일 ({wd})", d.year(), d.month(), d.day())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scroll_day_labels() {
+        let today = day_num(&Local::now());
+        assert_eq!(scroll_day_label(today), "오늘");
+        assert_eq!(scroll_day_label(today - 1), "어제");
+        let d = chrono::NaiveDate::from_ymd_opt(2020, 11, 7).unwrap().num_days_from_ce();
+        assert_eq!(scroll_day_label(d), "2020년 11월 7일 (토)");
+        let start = day_start_ms(d).unwrap();
+        assert_eq!(day_num(&local(start)), d);
+        assert_eq!(day_num(&local(start - 1)), d - 1);
+    }
 
     #[test]
     fn timer_labels() {

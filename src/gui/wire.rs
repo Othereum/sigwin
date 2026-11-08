@@ -15,6 +15,7 @@ pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     wire_update(app);
     anim::wire(app);
     whatsnew::wire(app);
+    app.on_day_label(|day| crate::view::time::scroll_day_label(day).into());
     if !headless::active() {
         // no native window in headless; started when the window is first shown
         set_starter(hook_window);
@@ -564,6 +565,20 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         // no backend: demo pin and quote ids are row ids
         Some(app) if demo => jump_to_row(&app, id.to_string()),
         _ => s(Command::JumpTo(id.to_string())),
+    });
+
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.on_show_day(move |day| match weak.upgrade() {
+        // no backend: the demo's first row of that day
+        Some(app) if demo => {
+            let msgs = app.get_messages();
+            let id = slint::Model::iter(&msgs).find(|m| m.day == day && m.day_sep).map(|m| m.id.to_string());
+            if let Some(id) = id {
+                scroll::jump_to_day(&app, id);
+            }
+        }
+        _ => s(Command::JumpToDay(day)),
     });
 
     let s = send.clone();

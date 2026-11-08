@@ -124,7 +124,9 @@ export struct MsgItem {
     // several images: the grid drawn instead of `image`
     cells: [ImageCell],
     deleted: bool,
-    day-sep: string,
+    day-sep: bool,
+    // the day it was sent on, for the date shown while scrolling (AppWindow.day-label)
+    day: int,
     // the first unread message: a line above it
     unread-divider: bool,
     system: bool,

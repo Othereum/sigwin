@@ -309,3 +309,30 @@ fn ops_are_indexed_when_stored_and_undone_when_they_fail() {
         assert!(last_list(&ev).is_some(), "the row is shown again without the change");
     });
 }
+
+#[test]
+fn jumping_to_a_day_lands_on_its_first_message() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        // the fixture's messages start two days ago, a second apart: all on one day, far more
+        // than the window the thread opens with
+        h.op("seed who=1 n=300").await;
+        h.open(1).await;
+        let day = view::time::day_num(&(chrono::Local::now() - chrono::Duration::days(2)));
+        h.take_events();
+        h.cmd(Command::JumpToDay(day)).await;
+        let ev = h.take_events();
+        let id = ev
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                Event::JumpToDay(id) => Some(id.clone()),
+                _ => None,
+            })
+            .expect("a jump");
+        let (items, _) = last_list(&ev).expect("the window moved to it");
+        let first = items.iter().find(|m| m.id == id).expect("the target is in the window");
+        assert_eq!(first.text, "메시지 1");
+        assert!(first.day_sep && first.day == day);
+    });
+}

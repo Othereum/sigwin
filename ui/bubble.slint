@@ -434,6 +434,8 @@ export component Bubble inherits VerticalLayout {
     // the quote in a reply: the quoted message's sent timestamp
     callback quote-clicked(string);
     callback reply(string);
+    // "오늘", "어제", "11월 7일 (토)": the day separator's text
+    pure callback day-label(int) -> string;
     callback show-info(string);
     // click on a reaction chip: "emoji  names"
     callback show-reactors(string);
@@ -442,7 +444,7 @@ export component Bubble inherits VerticalLayout {
     padding-left: 16px;
     padding-right: 16px;
     // Signal's spacing: 6px above and below a run, 1px between rows of one run
-    padding-top: m.day-sep != "" || m.unread-divider || m.typing ? 8px : m.collapse-above ? 1px : 6px;
+    padding-top: m.day-sep || m.unread-divider || m.typing ? 8px : m.collapse-above ? 1px : 6px;
     // the newest row gets extra room below so it doesn't touch the composer
     in property <bool> last;
     // the chips and the readers hang below the bubble: room for the part under its edge
@@ -467,9 +469,9 @@ export component Bubble inherits VerticalLayout {
     // a sent bare photo: the time row sits under the picture, so the chips straddle its edge, above that row
     property <bool> under-time: photo-only && m.outgoing && !m.hide-time;
     // height of the day separator above the message itself (centering a jump on the bubble)
-    out property <length> lead: m.day-sep != "" || m.unread-divider ? root.padding-top + (m.day-sep != "" ? 36px + root.spacing : 0px) + (m.unread-divider ? 28px + root.spacing : 0px) : 0px;
+    out property <length> lead: m.day-sep || m.unread-divider ? root.padding-top + (m.day-sep ? 36px + root.spacing : 0px) + (m.unread-divider ? 28px + root.spacing : 0px) : 0px;
 
-    if m.day-sep != "": HorizontalLayout {
+    if m.day-sep: HorizontalLayout {
         alignment: center;
         height: 36px;
         padding-top: 6px;
@@ -481,7 +483,7 @@ export component Bubble inherits VerticalLayout {
                 padding: 4px;
                 padding-left: 10px;
                 padding-right: 10px;
-                Text { text: m.day-sep; color: Theme.subtle; font-size: 11.5px; }
+                Text { text: root.day-label(m.day); color: Theme.subtle; font-size: 11.5px; }
             }
         }
     }

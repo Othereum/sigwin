@@ -260,6 +260,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             app.set_pins(ModelRc::new(VecModel::from(items)));
         }
         Event::JumpTo(id) => jump_to_row(app, id),
+        Event::JumpToDay(id) => jump_to_day(app, id),
         Event::JumpToUnread(id) => jump_to_unread(app, id),
         Event::Avatar(t) => media::avatar_arrived(app, t),
         Event::StickerThumbs(list) => stickers::thumbs_arrived(app, list),

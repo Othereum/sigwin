@@ -217,7 +217,9 @@ pub struct MsgDto {
     /// `image_key` is a GIF that plays in place when clicked (`Command::PlayGif`)
     pub gif: bool,
     pub deleted: bool,
-    pub day_sep: String,
+    pub day_sep: bool,
+    /// the local day the message was sent on (`view::time::day_num`), for the date shown while scrolling
+    pub day: i32,
     /// the first message that was unread when the thread was opened (or when news came in
     /// after everything was read): a line above it says so
     pub unread_divider: bool,
@@ -490,6 +492,8 @@ pub enum Event {
     Pins(Vec<PinDto>),
     /// scroll the message list to row `id` (already in the last `Messages`) and flash it
     JumpTo(String),
+    /// scroll the message list to row `id`, the first of its day: the day separator goes near the top
+    JumpToDay(String),
     /// scroll the message list to the first unread row `id` (already in the last `Messages`),
     /// its line near the top of the view
     JumpToUnread(String),
@@ -616,6 +620,8 @@ pub enum Command {
     Unpin(String),
     /// show the pinned message with this sent timestamp, loading older rows if needed
     JumpTo(String),
+    /// the first message of local day `day` (`view::time::day_num`) in the open thread
+    JumpToDay(i32),
     /// a toast was clicked: open chat `key` at message `msg` (sent timestamp)
     OpenFromToast { key: String, msg: Option<u64> },
     /// the composer was edited; false when it became empty

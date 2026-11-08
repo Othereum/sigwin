@@ -44,6 +44,11 @@ pub(crate) fn jump_to_row(app: &AppWindow, id: String) {
     seek_row(app, id, Anchor::Center);
 }
 
+/// The first row `id` of a day goes near the top, its day separator in view.
+pub(crate) fn jump_to_day(app: &AppWindow, id: String) {
+    seek_row(app, id, Anchor::Top);
+}
+
 /// The first unread row `id` goes near the top of the list, its line above it in view. A row
 /// too close to the end for that ends up as far up as the list allows. Reading is held back
 /// until it has landed: the frames on the way show rows that were never looked at.
@@ -153,7 +158,7 @@ pub(crate) fn seek_row(app: &AppWindow, id: String, anchor: Anchor) {
                         return;
                     }
                     Anchor::Top => {
-                        tracing::debug!("first unread row reached after {ticks} ticks");
+                        tracing::debug!("top-anchored row reached after {ticks} ticks");
                         // where the view ended up (the end of the list may have stopped it) is
                         // the first thing the backend hears about it
                         app.set_reading_hold(false);

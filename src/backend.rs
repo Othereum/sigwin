@@ -726,6 +726,11 @@ impl App {
                     warn!("jump to {id}: {e:#}");
                 }
             }
+            Command::JumpToDay(day) => {
+                if let Err(e) = self.jump_to_day(day).await {
+                    warn!("jump to day: {e:#}");
+                }
+            }
             Command::Composing(active) => self.composing(active),
             Command::SettingsOpened => {
                 self.emit_account().await;

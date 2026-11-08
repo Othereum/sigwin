@@ -22,7 +22,7 @@ use text::{
     body_text_spans, cut_for_read_more, long_text, pin_label, push_with_mentions, quote_author_name, with_mentions, LongTexts,
     READ_MORE_AT, STYLE_SPOILER,
 };
-use time::{ampm, day_label, local, now_ms, timer_label};
+use time::{ampm, day_num, local, now_ms, timer_label};
 
 /// DataMessage.Flags.EXPIRATION_TIMER_UPDATE
 const EXPIRATION_TIMER_UPDATE: u32 = 2;
@@ -188,7 +188,7 @@ fn same_run(older: &MsgDto, newer: &MsgDto) -> bool {
         // deleted rows from others no longer say who sent them
         && (older.outgoing || !older.sender_key.is_empty())
         && older.sender_key == newer.sender_key
-        && newer.day_sep.is_empty()
+        && !newer.day_sep
         && !newer.unread_divider
         && newer.ts.abs_diff(older.ts) < COLLAPSE_WITHIN_MS
 }
@@ -253,7 +253,7 @@ pub fn build(
         let kind = classify(c, me);
         let dt = local(*ts);
         let day = dt.date_naive();
-        let mut m = MsgDto { id: ts.to_string(), ts: *ts, time: ampm(&dt), ..Default::default() };
+        let mut m = MsgDto { id: ts.to_string(), ts: *ts, time: ampm(&dt), day: day_num(&dt), ..Default::default() };
         match kind {
             Kind::Msg { outgoing, dm } => {
                 let sender = c.metadata.sender.raw_uuid();
@@ -363,7 +363,7 @@ pub fn build(
             _ => continue,
         }
         if prev_day != Some(day) {
-            m.day_sep = day_label(&dt);
+            m.day_sep = true;
             prev_day = Some(day);
         }
         items.push(m);
@@ -467,7 +467,8 @@ pub fn set_deleted(m: &mut MsgDto) {
         id: std::mem::take(&mut m.id),
         ts: m.ts,
         time: std::mem::take(&mut m.time),
-        day_sep: std::mem::take(&mut m.day_sep),
+        day_sep: m.day_sep,
+        day: m.day,
         outgoing: true,
         deleted: true,
         text: DELETED_MINE.into(),
@@ -478,9 +479,9 @@ pub fn set_deleted(m: &mut MsgDto) {
 /// Skeleton row for a message we are still sending; `prev_ts` is the row above (for the day separator).
 pub fn outgoing_stub(ts: u64, prev_ts: Option<u64>) -> MsgDto {
     let dt = local(ts);
-    let mut m = MsgDto { id: ts.to_string(), ts, time: ampm(&dt), outgoing: true, pending: true, ..Default::default() };
+    let mut m = MsgDto { id: ts.to_string(), ts, time: ampm(&dt), day: day_num(&dt), outgoing: true, pending: true, ..Default::default() };
     if prev_ts.map(|p| local(p).date_naive()) != Some(dt.date_naive()) {
-        m.day_sep = day_label(&dt);
+        m.day_sep = true;
     }
     m
 }

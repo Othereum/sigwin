@@ -168,6 +168,18 @@ export component AppWindow inherits Window {
     in-out property <length> view-top-off;
     // the message list moved: the hover is brought up to date for the cursor (gui::anim)
     callback gif-scrolled();
+    // the date shown at the top while scrolling: "오늘", "어제", "11월 7일 (토)" for a day number
+    pure callback day-label(int) -> string;
+    // scroll to the first message of a day (a day number, as in `Message.day`)
+    callback show-day(int);
+    // the day of the row across the list's top edge; 0: none, or its own day separator is in view
+    property <int> top-day;
+    // the last non-zero `top-day`: what the label says while it fades out
+    property <int> shown-day;
+    changed top-day => { if (self.top-day != 0) { self.shown-day = self.top-day; } }
+    // the date label is up; it goes `date-idle` ticks after the last scroll
+    property <bool> date-show;
+    property <int> date-idle;
     // flash the jumped-to row
     in-out property <string> flash-id;
     // message menu (right click); menu-id is "" when closed
@@ -609,7 +621,7 @@ export component AppWindow inherits Window {
                     // watched too, once the user has scrolled this thread
                     property <bool> user-scrolled;
                     property <string> key: root.current-key;
-                    changed key => { self.user-scrolled = false; }
+                    changed key => { self.user-scrolled = false; root.date-show = false; }
                     scrolled => {
                         self.user-scrolled = true;
                         root.check-older();
@@ -621,6 +633,12 @@ export component AppWindow inherits Window {
                         if (self.user-scrolled) {
                             root.check-older();
                             root.check-newer();
+                            // not while stuck to the bottom: news arriving moves content-y too
+                            // nor while a jump is on its way: the row it lands on shows its own separator
+                            if (root.off-bottom && root.jump-id == "") {
+                                root.date-show = true;
+                                root.date-idle = 0;
+                            }
                         }
                     }
                     for m[idx] in root.messages: Bubble {
@@ -642,10 +660,12 @@ export component AppWindow inherits Window {
                         // the row across the list's top edge and where its top is: where the user
                         // left off (gui::scroll::remember_place)
                         property <string> top-id: self.screen-top <= 0px && self.screen-top + self.height > 0px ? m.id : "";
-                        changed top-id => { if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; } }
+                        // the day of the top row, unless its own separator pill is still in view
+                        property <int> top-day: !(m.day-sep && self.screen-top + self.lead > 0px) ? m.day : 0;
+                        changed top-id => { if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; root.top-day = self.top-day; } }
                         changed screen-top => {
                             if (self.is-divider) { root.divider-top = self.screen-top; }
-                            if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; }
+                            if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; root.top-day = self.top-day; }
                         }
                         changed is-divider => { if (self.is-divider) { root.divider-top = self.screen-top; } }
                         // reading as the user goes: a row whose bottom edge is on screen. The
@@ -657,6 +677,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         attachment-clicked(id, index) => { root.attachment-clicked(id, index); }
+                        day-label(d) => { return root.day-label(d); }
                         file-clicked(id) => { root.file-clicked(id); }
                         save-clicked(id) => { root.save-clicked(id); }
                         quote-clicked(id) => { root.show-message(id); }
@@ -664,6 +685,45 @@ export component AppWindow inherits Window {
                         show-info(t) => { root.info-title = "메시지 정보"; root.info-text = t; }
                         show-reactors(t) => { root.info-title = "반응"; root.info-text = t; }
                         menu(id, x, y) => { root.open-menu(id, x, y); }
+                    }
+                }
+                // the date of the messages at the top, while the user scrolls
+                date-pill := Rectangle {
+                    y: 8px;
+                    x: (parent.width - self.width) / 2;
+                    width: date-text.preferred-width + 20px;
+                    height: 26px;
+                    border-radius: 13px;
+                    background: date-ta.has-hover ? Theme.hover : Theme.sidebar;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    opacity: root.date-show && root.top-day != 0 ? 1.0 : 0.0;
+                    visible: self.opacity > 0;
+                    animate opacity { duration: 150ms; }
+                    // a click goes to the first message of that day
+                    date-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.date-show = false;
+                            root.show-day(root.shown-day);
+                        }
+                    }
+                    date-text := Text {
+                        x: 10px;
+                        height: parent.height;
+                        text: root.day-label(root.shown-day);
+                        color: Theme.subtle;
+                        font-size: 11.5px;
+                        vertical-alignment: center;
+                    }
+                }
+                Timer {
+                    interval: 300ms;
+                    running: root.date-show;
+                    triggered => {
+                        // stays up while the cursor is on it
+                        root.date-idle = date-ta.has-hover ? 0 : root.date-idle + 1;
+                        if (root.date-idle >= 9) { root.date-show = false; }
                     }
                 }
                 // jump to the latest message

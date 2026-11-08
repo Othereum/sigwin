@@ -184,7 +184,9 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             quote_id: if i >= 298 { (i - 175).to_string() } else if i % 11 == 0 { i.saturating_sub(40).to_string() } else { String::new() },
             reactions: if i % 9 == 0 { vec![("❤️".into(), 2, "이서연, 나".into()), ("👍".into(), 1, "박지훈".into()), ("😂".into(), 3, "이서연, 박지훈, 최민수".into())] } else { Vec::new() },
             attachment: if i % 13 == 0 { "보고서.pdf · 2.4MB".into() } else { String::new() },
-            day_sep: if i % 50 == 0 { "2026년 11월 1일 일요일".into() } else { String::new() },
+            day_sep: i % 50 == 0,
+            // 50 rows a day, the newest today
+            day: crate::view::time::day_num(&chrono::Local::now()) - (299 - i as i32) / 50,
             sticker: i == 298 || i == 297,
             image_key: if i == 298 || i == 297 { format!("demo-st-{}", i % 2) } else { String::new() },
             img_w: if i == 298 || i == 297 { 140 } else { 0 },
@@ -358,9 +360,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         let all = items.clone();
         let rows = move |start: usize, end: usize| {
             let mut rows = all[start..end].to_vec();
-            if rows[0].day_sep.is_empty() {
-                rows[0].day_sep = "2026년 10월 31일 토요일".into();
-            }
+            rows[0].day_sep = true;
             view::mark_runs(&mut rows, true);
             rows
         };
@@ -1049,7 +1049,8 @@ fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiv
             status: if outgoing { "✓✓".into() } else { String::new() },
             can_edit: outgoing,
             can_delete: outgoing,
-            day_sep: if i == 0 { "2026년 11월 3일 화요일".into() } else { String::new() },
+            day_sep: i == 0,
+            day: crate::view::time::day_num(&chrono::Local::now()) - 2,
             ..Default::default()
         })
         .collect();

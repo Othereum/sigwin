@@ -356,7 +356,34 @@ impl App {
     /// screen, and anchoring it (`gui::scroll::hold_older`) fights the wheel: the view shakes.
     /// With a margin, more pages come in through the usual prefetch, off screen.
     pub(super) async fn jump_to(&mut self, id: &str) -> anyhow::Result<()> {
-        let target: u64 = id.parse()?;
+        self.jump_to_msg(id.parse()?, false).await
+    }
+
+    /// Scrolls to the first message shown on local day `day` (`view::time::day_num`), its
+    /// separator near the top.
+    pub(super) async fn jump_to_day(&mut self, day: i32) -> anyhow::Result<()> {
+        let Some(start) = crate::view::time::day_start_ms(day) else { return Ok(()) };
+        let Some(thread) = self.current.as_ref().map(|o| o.thread.clone()) else { return Ok(()) };
+        // a 1:1 thread is mostly receipts: look page by page until a message shows
+        let mut after = match self.index.seq_from_ts(&thread, start).await? {
+            Some(seq) => seq - 1,
+            None => return Ok(()),
+        };
+        for _ in 0..40 {
+            let rows = self.index.page_newer(&thread, after, PAGE).await?;
+            let Some(last) = rows.last().map(|r| r.0) else { break };
+            if let Some((ts, _)) = self.fetch_shown(&thread, &rows).await?.first() {
+                return self.jump_to_msg(*ts, true).await;
+            }
+            after = last;
+        }
+        self.notice("메시지를 찾을 수 없습니다");
+        Ok(())
+    }
+
+    /// `jump_to` for sent timestamp `target`; `top`: the row's day separator goes near the top
+    /// of the view instead of the row to the middle.
+    async fn jump_to_msg(&mut self, target: u64, top: bool) -> anyhow::Result<()> {
         let is_target = |c: &Content| c.timestamp() == target;
         let mut loaded = false;
         let mut searched = false;
@@ -381,7 +408,7 @@ impl App {
                 if loaded {
                     self.emit_messages(Scroll::Keep).await;
                 }
-                (self.emit)(Event::JumpTo(row));
+                (self.emit)(if top { Event::JumpToDay(row) } else { Event::JumpTo(row) });
                 return Ok(());
             }
             let (thread, oldest_seq, len) = (open.thread.clone(), open.oldest_seq, open.window.len());
