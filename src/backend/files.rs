@@ -21,23 +21,45 @@ impl App {
         let emit = self.emit.clone();
         let tx = self.tx.clone();
         let gate = self.thumb_gate.clone();
+        let downloads = self.attachment_downloads.clone();
+        // the same picture can be shown at another size; each shows how far it is
+        let shown: Vec<String> = self.thumbs_requested.borrow().iter().filter(|k| k.starts_with(&file_key)).cloned().collect();
         tokio::task::spawn_local(async move {
             let mut labelled = false;
             if !thumb_path.exists() {
                 if !orig_path.exists() {
                     labelled = true;
+                    // its blurhash until it is here
+                    if let Some(t) = ptr.blur_hash.as_deref().and_then(|b| blur_for(&key, b, &ptr, &shape)) {
+                        emit(Event::Thumb(Arc::new(t)));
+                    }
                     emit(Event::MediaLabel { key: key.clone(), label: view::media::undownloaded_label(&ptr) });
-                    let Some(m) = manager else { return };
-                    match m.get_attachment(&ptr).await {
-                        Ok(data) => {
-                            if let Err(e) = sigwin_vault::write(&orig_path, &data) {
-                                warn!("save attachment: {e}");
-                            }
+                    if manager.is_none() {
+                        return;
+                    }
+                    // stopped by a click: it stays so until the next one
+                    if downloads.was_stopped(&file_key) {
+                        return;
+                    }
+                    // the same picture shown at another size is getting it already
+                    if downloads.is_running(&file_key) {
+                        while downloads.is_running(&file_key) {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                         }
-                        Err(e) => {
-                            warn!("download attachment: {e}");
-                            let _ = tx.send(Internal::ThumbFailed(key));
+                        // stopped (it has put its label back) or failed
+                        if !orig_path.exists() {
                             return;
+                        }
+                    } else {
+                        let shown = if shown.is_empty() { vec![key.clone()] } else { shown };
+                        match downloads.run(&file_key, &ptr, &shown, &emit, &orig_path).await {
+                            Ok(true) => {}
+                            Ok(false) => return,
+                            Err(e) => {
+                                warn!("download attachment: {e:#}");
+                                let _ = tx.send(Internal::ThumbFailed(key));
+                                return;
+                            }
                         }
                     }
                 }
@@ -77,7 +99,7 @@ impl App {
         let gate = self.thumb_gate.clone();
         let fetch_gate = self.video_gate.clone();
         let requested = self.thumbs_requested.clone();
-        let downloads = self.video_downloads.clone();
+        let downloads = self.attachment_downloads.clone();
         tokio::task::spawn_local(async move {
             if !thumb_path.exists() {
                 if let Some(t) = ptr.blur_hash.as_deref().and_then(|b| blur_thumb(&key, b, w, h)) {
@@ -103,21 +125,14 @@ impl App {
                             return;
                         }
                         let shown = [key.clone()];
-                        let data = match downloads.run(&file_key, &ptr, &shown, &emit).await {
-                            Ok(Some(data)) => data,
-                            Ok(None) => return,
+                        match downloads.run(&file_key, &ptr, &shown, &emit, &orig_path).await {
+                            Ok(true) => {}
+                            Ok(false) => return,
                             Err(e) => {
                                 warn!("download video: {e:#}");
                                 let _ = tx.send(Internal::ThumbFailed(key));
                                 return;
                             }
-                        };
-                        let path = orig_path.clone();
-                        let saved = tokio::task::spawn_blocking(move || sigwin_vault::write(&path, &data)).await;
-                        if !matches!(saved, Ok(Ok(()))) {
-                            warn!("save video failed");
-                            let _ = tx.send(Internal::ThumbFailed(key));
-                            return;
                         }
                     }
                 }
@@ -160,12 +175,12 @@ impl App {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let Some((i, a)) = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_video(a)).nth(index) else { return };
         let file_key = view::media::attachment_key(a, ts, i);
-        if self.video_downloads.stop(&file_key) {
+        if self.attachment_downloads.stop(&file_key) {
             return;
         }
         let path = attachment_path(&self.paths.attachments, &file_key);
         let ptr = a.clone();
-        let downloads = self.video_downloads.clone();
+        let downloads = self.attachment_downloads.clone();
         // the same video can be shown at another size; a row that isn't asking for it shows nothing
         let shown: Vec<String> = self.thumbs_requested.borrow().iter().filter(|k| k.starts_with(&file_key)).cloned().collect();
         let registered = self.manager.is_some();
@@ -183,9 +198,9 @@ impl App {
             if shown.is_empty() {
                 let _ = tx.send(Internal::Progress("첨부파일 다운로드 중…".into()));
             }
-            let data = match downloads.run(&file_key, &ptr, &shown, &emit).await {
-                Ok(Some(data)) => data,
-                Ok(None) => {
+            match downloads.run(&file_key, &ptr, &shown, &emit, &path).await {
+                Ok(true) => {}
+                Ok(false) => {
                     let _ = tx.send(Internal::ProgressDone);
                     return;
                 }
@@ -193,14 +208,6 @@ impl App {
                     let _ = tx.send(Internal::Notice(format!("다운로드 실패: {e:#}")));
                     return;
                 }
-            };
-            match tokio::task::spawn_blocking(move || sigwin_vault::write(&path, &data)).await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    let _ = tx.send(Internal::Notice(format!("저장 실패: {e}")));
-                    return;
-                }
-                Err(_) => return,
             }
             let _ = tx.send(Internal::ProgressDone);
             let _ = tx.send(Internal::VideoFetched(file_key));
@@ -265,12 +272,13 @@ impl App {
 
     /// Downloads what isn't here yet and writes the files where the user chose.
     pub(super) fn save_files_to(&self, jobs: Vec<(PathBuf, AttachmentPointer)>, to: SaveTo) {
+        let downloads = self.attachment_downloads.clone();
         let manager = self.manager.clone();
         let tx = self.tx.clone();
         tokio::task::spawn_local(async move {
             let mut saved = Vec::new();
             for (path, ptr) in &jobs {
-                if !fetch_attachment(&manager, &tx, path, ptr).await {
+                if !fetch_attachment(&downloads, &manager, &tx, path, ptr).await {
                     continue;
                 }
                 let dst = match &to {
@@ -305,9 +313,30 @@ impl App {
 
     /// Image `index` of row `id`: cache path and pointer.
     pub(super) fn viewed(&self, id: &str, index: usize) -> Option<(PathBuf, AttachmentPointer)> {
+        let (_, path, ptr) = self.viewed_key(id, index)?;
+        Some((path, ptr))
+    }
+
+    /// `viewed`, with the attachment's file key too.
+    fn viewed_key(&self, id: &str, index: usize) -> Option<(String, PathBuf, AttachmentPointer)> {
         let (ts, dm) = self.row_message(id)?;
         let (i, a) = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a)).nth(index)?;
-        Some((attachment_path(&self.paths.attachments, &view::media::attachment_key(a, ts, i)), a.clone()))
+        let key = view::media::attachment_key(a, ts, i);
+        let path = attachment_path(&self.paths.attachments, &key);
+        Some((key, path, a.clone()))
+    }
+
+    /// A click on image `index` of row `id` that isn't here: stops its download if it's on its
+    /// way, otherwise gets it (the list asks for it again, which downloads and cuts the picture).
+    /// As for videos, a stopped one isn't downloaded by itself again while the app runs.
+    pub(super) async fn toggle_image_download(&mut self, id: &str, index: usize) {
+        let Some((file_key, path, _)) = self.viewed_key(id, index) else { return };
+        if path.exists() || self.attachment_downloads.stop(&file_key) {
+            return;
+        }
+        self.attachment_downloads.allow(&file_key);
+        self.thumbs_requested.borrow_mut().retain(|k| !k.starts_with(&file_key));
+        self.emit_messages(Scroll::Keep).await;
     }
 
     pub(super) fn view_image(&mut self, id: &str, index: usize, fit: (u32, u32)) {
@@ -319,14 +348,15 @@ impl App {
         let index = index.min(count - 1);
         let Some((path, ptr)) = self.viewed(id, index) else { return };
         let id = id.to_string();
-        let manager = self.manager.clone();
         let emit = self.emit.clone();
         let tx = self.tx.clone();
         let open_dir = self.paths.open.clone();
         // what played before stops now; a GIF opened here plays until the next one replaces it
         let stop = self.new_gif_stop();
         tokio::task::spawn_local(async move {
-            if !fetch_attachment(&manager, &tx, &path, &ptr).await {
+            // the viewer never downloads: a picture that isn't here is the list's to get
+            if !path.exists() {
+                let _ = tx.send(Internal::Notice("아직 받지 않은 이미지입니다.".into()));
                 return;
             }
             let p = path.clone();
@@ -377,22 +407,17 @@ impl App {
     pub(super) fn viewer_thumbs(&self, id: &str, px: u32) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let images = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a));
-        let jobs: Vec<(String, AttachmentPointer)> = images.map(|(i, a)| (view::media::attachment_key(a, ts, i), a.clone())).collect();
+        let jobs: Vec<String> = images.map(|(i, a)| view::media::attachment_key(a, ts, i)).collect();
         let id = id.to_string();
-        let manager = self.manager.clone();
         let emit = self.emit.clone();
         let (attachments, thumbs) = (self.paths.attachments.clone(), self.paths.thumbs.clone());
         tokio::task::spawn_local(async move {
-            for (index, (key, ptr)) in jobs.into_iter().enumerate() {
+            for (index, key) in jobs.into_iter().enumerate() {
                 let orig = attachment_path(&attachments, &key);
                 let thumb = thumbs.join(format!("{key}.enc"));
+                // never downloaded here: a picture that isn't here stays a blank cell
                 if !thumb.exists() && !orig.exists() {
-                    let Some(m) = manager.as_ref() else { return };
-                    let saved = m.get_attachment(&ptr).await.map_err(anyhow::Error::from);
-                    if let Err(e) = saved.and_then(|data| Ok(sigwin_vault::write(&orig, &data)?)) {
-                        warn!("viewer thumbnail: {e:#}");
-                        continue;
-                    }
+                    continue;
                 }
                 let made = tokio::task::spawn_blocking(move || -> anyhow::Result<Thumb> {
                     let t = make_thumb(&key, &orig, &thumb, 0)?;
@@ -466,18 +491,23 @@ const PRESAGE_USER_AGENT: &str = "presage-rs-0.8.0-dev";
 /// Videos on their way, by file key, so a click can stop them. One that was stopped isn't
 /// downloaded by itself again while the app runs, or it would start over when its row comes back.
 #[derive(Clone, Default)]
-pub(super) struct VideoDownloads {
+pub(super) struct AttachmentDownloads {
     running: Rc<RefCell<HashMap<String, AbortHandle>>>,
     stopped: Rc<RefCell<HashSet<String>>>,
 }
 
-impl VideoDownloads {
+impl AttachmentDownloads {
     fn is_running(&self, file_key: &str) -> bool {
         self.running.borrow().contains_key(file_key)
     }
 
     fn was_stopped(&self, file_key: &str) -> bool {
         self.stopped.borrow().contains(file_key)
+    }
+
+    /// Lets a stopped download start by itself again: the user asked for it.
+    fn allow(&self, file_key: &str) {
+        self.stopped.borrow_mut().remove(file_key);
     }
 
     /// False if it isn't on its way.
@@ -491,7 +521,7 @@ impl VideoDownloads {
     /// Downloads a video as `Manager::get_attachment` does, which can't say how far along it is,
     /// showing that on the pictures `shown`. `None`: it was stopped. When it doesn't finish they
     /// go back to how they were.
-    async fn run(&self, file_key: &str, ptr: &AttachmentPointer, shown: &[String], emit: &Emit) -> anyhow::Result<Option<Vec<u8>>> {
+    async fn run(&self, file_key: &str, ptr: &AttachmentPointer, shown: &[String], emit: &Emit, dest: &Path) -> anyhow::Result<bool> {
         let (handle, registration) = AbortHandle::new_pair();
         self.running.borrow_mut().insert(file_key.to_string(), handle.clone());
         self.stopped.borrow_mut().remove(file_key);
@@ -502,16 +532,30 @@ impl VideoDownloads {
         };
         show(view::media::downloading_label(ptr, 0, 0));
         let res = Abortable::new(download(ptr, |got, percent| show(view::media::downloading_label(ptr, got, percent))), registration).await;
+        // saved before it counts as done: whoever waits for it finds the file
+        let res = match res {
+            Ok(Ok(data)) => {
+                let dest = dest.to_path_buf();
+                let saved = tokio::task::spawn_blocking(move || sigwin_vault::write(&dest, &data)).await;
+                Ok(match saved {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(e)) => Err(anyhow::anyhow!("저장 실패: {e}")),
+                    Err(e) => Err(anyhow::anyhow!("저장 실패: {e}")),
+                })
+            }
+            Ok(Err(e)) => Ok(Err(e)),
+            Err(aborted) => Err(aborted),
+        };
         // a stopped one is already out of the list, and a new one may have taken its place
         if !handle.is_aborted() {
             self.running.borrow_mut().remove(file_key);
         }
-        if !matches!(res, Ok(Ok(_))) {
+        if !matches!(res, Ok(Ok(()))) {
             show(view::media::undownloaded_label(ptr));
         }
         match res {
-            Ok(res) => res.map(Some),
-            Err(_) => Ok(None),
+            Ok(res) => res.map(|()| true),
+            Err(_) => Ok(false),
         }
     }
 }
@@ -562,8 +606,19 @@ fn open_download(mut data: Vec<u8>, digest: &[u8], key: [u8; 64], size: Option<u
     Ok(data)
 }
 
-/// Downloads an attachment unless it is cached; false (notice shown) if that failed.
-pub(super) async fn fetch_attachment(manager: &Option<Mgr>, tx: &UnboundedSender<Internal>, path: &Path, ptr: &AttachmentPointer) -> bool {
+/// Downloads an attachment unless it is cached; false (notice shown) if that failed. One that
+/// is on its way already (a picture or video of the list) is waited for, not downloaded twice.
+async fn fetch_attachment(
+    downloads: &AttachmentDownloads,
+    manager: &Option<Mgr>,
+    tx: &UnboundedSender<Internal>,
+    path: &Path,
+    ptr: &AttachmentPointer,
+) -> bool {
+    let file_key = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    while downloads.is_running(&file_key) {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
     if path.exists() {
         return true;
     }
@@ -662,6 +717,16 @@ fn blur_thumb(key: &str, hash: &str, w: u32, h: u32) -> Option<Thumb> {
     let (bw, bh) = if w >= h { (DRAWN, (DRAWN * h / w.max(1)).max(1)) } else { ((DRAWN * w / h.max(1)).max(1), DRAWN) };
     let cell = sigwin_thumb::cover(&sigwin_thumb::blurhash(hash, bw, bh)?, w, h);
     Some(Thumb { key: key.to_string(), width: cell.width(), height: cell.height(), rgba: cell.into_raw() })
+}
+
+/// The blurhash of a picture shown with `shape`, at the size its box has in the list.
+fn blur_for(key: &str, hash: &str, ptr: &AttachmentPointer, shape: &ThumbShape) -> Option<Thumb> {
+    let (w, h) = match *shape {
+        ThumbShape::Cover(w, h) => (w, h),
+        // a single photo: the box its size gives (`set_attachments`)
+        ThumbShape::Fit(_) => view::media::fit(ptr.width, ptr.height),
+    };
+    blur_thumb(key, hash, crate::types::physical_px(w), crate::types::physical_px(h))
 }
 
 fn make_video_thumb(key: &str, orig: &Path, thumb: &Path, length: &Path, no_frame: &Path, w: u32, h: u32) -> anyhow::Result<Thumb> {
@@ -892,7 +957,7 @@ mod tests {
 
     #[test]
     fn stopping_a_video_is_remembered_until_it_is_asked_for_again() {
-        let d = VideoDownloads::default();
+        let d = AttachmentDownloads::default();
         assert!(!d.stop("v"));
         assert!(!d.was_stopped("v"));
 

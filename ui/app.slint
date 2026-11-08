@@ -2,7 +2,7 @@ import { LineEdit, Button, ListView, Palette, Spinner } from "std-widgets.slint"
 import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, NoteLine, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
 import { Avatar, IconButton, MenuRow, Notice, StickerIcon, TextButton } from "widgets.slint";
-import { Bubble, QuoteBox } from "bubble.slint";
+import { Bubble, MediaLabel, QuoteBox } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
 import { SettingsData, SettingsPage } from "settings.slint";
@@ -100,6 +100,8 @@ export component AppWindow inherits Window {
     // files are being dragged over the window
     in property <bool> drop-hover;
     callback remove-attachment(int);
+    // the pointer came onto a composer tile or left it (a GIF there plays meanwhile)
+    callback pending-gif-hover(int, bool);
     // the message and which of its images
     callback attachment-clicked(string, int);
     callback file-clicked(string);
@@ -922,8 +924,17 @@ export component AppWindow inherits Window {
                                         width: parent.width;
                                         height: parent.height;
                                         source: f.thumb;
-                                        // already resampled to this size
-                                        image-fit: fill;
+                                        // a still is already this size; a GIF's frame is cut to fill it
+                                        image-fit: cover;
+                                    }
+                                    if f.gif && !f.playing: MediaLabel {
+                                        text: "GIF";
+                                        x: 6px;
+                                        y: parent.height - self.height - 6px;
+                                    }
+                                    if f.gif: TouchArea {
+                                        property <bool> hovered: self.has-hover;
+                                        changed hovered => { root.pending-gif-hover(i, self.hovered); }
                                     }
                                     if !f.has-thumb: Text {
                                         text: f.ext;

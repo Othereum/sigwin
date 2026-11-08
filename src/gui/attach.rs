@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use super::*;
+use crate::types::GifSlot;
 
 /// Tile size in logical px.
 const TILE: u32 = 120;
@@ -97,6 +98,8 @@ pub(crate) fn show(app: &AppWindow, files: &[PathBuf]) {
                 PendingFile {
                     ext: ext(p),
                     has_thumb: thumb.is_some(),
+                    gif: is_gif(p),
+                    playing: false,
                     thumb: thumb.unwrap_or_default(),
                     is_file,
                     danger: is_file && crate::view::media::is_dangerous_file(&file_name(p)),
@@ -199,8 +202,88 @@ mod tests {
     }
 }
 
+fn is_gif(p: &Path) -> bool {
+    mime_guess::from_path(p).first_or_octet_stream().subtype() == "gif"
+}
+
+/// The pointer came onto the `i`th tile or left it: a GIF there plays while it stays, one at a
+/// time, as in the message list.
+pub(crate) fn gif_hover(app: &AppWindow, i: usize, on: bool) {
+    let path = UI.with_borrow(|ui| ui.files.get(i).cloned());
+    let Some(path) = path else { return };
+    if !on {
+        // moving from one tile to the next, the new one's "on" can come before the old one's "off"
+        if UI.with_borrow(|ui| ui.pending_gif.as_ref().is_some_and(|g| g.1 == path)) {
+            stop_gif(app);
+        }
+        return;
+    }
+    if !is_gif(&path) {
+        return;
+    }
+    stop_gif(app);
+    UI.with_borrow_mut(|ui| {
+        ui.pending_gif_seq += 1;
+        let seq = ui.pending_gif_seq;
+        ui.pending_gif = Some((seq, path.clone()));
+        if let Some(tx) = &ui.tx {
+            let _ = tx.send(Command::PlayPendingGif { path, seq, tile: types::physical_px(TILE) });
+        }
+    });
+}
+
+/// The tile's GIF stops and the tile goes back to its still.
+pub(crate) fn stop_gif(app: &AppWindow) {
+    let Some((_, path)) = UI.with_borrow_mut(|ui| ui.pending_gif.take()) else { return };
+    UI.with_borrow(|ui| {
+        if let Some(tx) = &ui.tx {
+            let _ = tx.send(Command::StopGif);
+        }
+    });
+    show_still(app, &path);
+}
+
+fn show_still(app: &AppWindow, path: &Path) {
+    let (i, still) = UI.with_borrow(|ui| (ui.files.iter().position(|p| p == path), ui.pending_thumbs.get(path).cloned().flatten()));
+    let Some(i) = i else { return };
+    let model = app.get_pending_files();
+    if let Some(mut row) = slint::Model::row_data(&model, i) {
+        row.has_thumb = still.is_some();
+        row.thumb = still.unwrap_or_default();
+        row.playing = false;
+        slint::Model::set_row_data(&model, i, row);
+    }
+}
+
+/// A frame of the GIF playing in a tile, or its end.
+pub(crate) fn gif_arrived(app: &AppWindow, slot: &GifSlot) {
+    let (frame, done) = slot.take();
+    let path = UI.with_borrow_mut(|ui| {
+        let path = ui.pending_gif.as_ref().filter(|g| g.0 == slot.seq).map(|g| g.1.clone())?;
+        if done {
+            ui.pending_gif = None;
+        }
+        Some(path)
+    });
+    let Some(path) = path else { return };
+    if let Some(t) = frame {
+        let i = UI.with_borrow(|ui| ui.files.iter().position(|p| *p == path));
+        let model = app.get_pending_files();
+        if let Some((i, mut row)) = i.and_then(|i| slint::Model::row_data(&model, i).map(|r| (i, r))) {
+            row.thumb = Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height));
+            row.has_thumb = true;
+            row.playing = true;
+            slint::Model::set_row_data(&model, i, row);
+        }
+    }
+    if done {
+        show_still(app, &path);
+    }
+}
+
 /// Takes the `i`th attachment off.
 pub(crate) fn remove(app: &AppWindow, i: usize) {
+    stop_gif(app);
     let files = UI.with_borrow_mut(|ui| {
         if i < ui.files.len() {
             ui.files.remove(i);

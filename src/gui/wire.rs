@@ -258,6 +258,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         s(Command::Send { text: text.to_string(), files, quote, mentions, link, quality });
         app.set_mention_items(ModelRc::default());
         app.set_draft(SharedString::new());
+        attach::stop_gif(&app);
         app.set_pending_files(ModelRc::default());
         app.set_pending_has_photo(false);
         UI.with_borrow_mut(|ui| ui.pending_thumbs.clear());
@@ -385,6 +386,13 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
         if let Some(app) = weak.upgrade().filter(|_| !active) {
             drafts::drop_if_empty(&app);
+        }
+    });
+
+    let weak = app.as_weak();
+    app.on_pending_gif_hover(move |i, on| {
+        if let Some(app) = weak.upgrade() {
+            attach::gif_hover(&app, i.max(0) as usize, on);
         }
     });
 
@@ -607,11 +615,20 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let s = send.clone();
     let weak = app.as_weak();
     app.on_attachment_clicked(move |id, index| {
-        let row = UI.with_borrow(|ui| ui.last.iter().find(|m| m.id == id.as_str()).map(|m| (m.sticker, m.clicked_media(index as usize))));
+        let row = UI.with_borrow(|ui| {
+            ui.last.iter().find(|m| m.id == id.as_str()).map(|m| {
+                let key = if m.cells.is_empty() { m.image_key.as_str() } else { m.cells.get(index as usize).map_or("", |c| c.key.as_str()) };
+                // not here: the picture says so, and the viewer has nothing to show
+                let missing = ui.media_labels.get(key).is_some_and(|l| l.undownloaded);
+                (m.sticker, m.clicked_media(index as usize), missing)
+            })
+        });
         match row {
-            Some((true, _)) => s(Command::StickerClicked(id.to_string())),
-            Some((_, ClickedMedia::Video(index))) => s(Command::OpenVideo { id: id.to_string(), index }),
-            Some((_, ClickedMedia::Image(index))) => {
+            Some((true, ..)) => s(Command::StickerClicked(id.to_string())),
+            Some((_, ClickedMedia::Video(index), _)) => s(Command::OpenVideo { id: id.to_string(), index }),
+            // like a video: a click stops the download, or starts it again
+            Some((_, ClickedMedia::Image(index), true)) => s(Command::ToggleImageDownload { id: id.to_string(), index }),
+            Some((_, ClickedMedia::Image(index), false)) => {
                 if let Some(app) = weak.upgrade() {
                     viewer::open(&app, id.to_string(), index);
                 }

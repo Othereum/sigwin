@@ -94,21 +94,53 @@ impl App {
         }
     }
 
+    /// Plays a GIF file of the user's, waiting in the composer, in a tile `tile` physical px wide.
+    /// Frames are cut to fill it by the tile itself, so the short side is `tile` here.
+    pub(super) fn play_pending_gif(&mut self, path: PathBuf, seq: u64, tile: u32) {
+        let stop = self.new_gif_stop();
+        let emit = self.emit.clone();
+        let slot = Arc::new(GifSlot::new(String::new(), seq, GifTarget::Composer));
+        tokio::task::spawn_local(async move {
+            let read = tokio::task::spawn_blocking(move || {
+                // a safety limit: the tile only needs the picture, and the file stays in memory
+                if std::fs::metadata(&path).ok()?.len() > 30 * 1024 * 1024 {
+                    return None;
+                }
+                let bytes = std::fs::read(&path).ok()?;
+                if !sigwin_thumb::is_animated_gif(&bytes) {
+                    return None;
+                }
+                let (w, h) = sigwin_thumb::gif_size(&bytes)?;
+                let px = (u64::from(tile) * u64::from(w.max(h)) / u64::from(w.min(h).max(1))).clamp(u64::from(tile), u64::from(tile) * 4);
+                Some((bytes, px as u32))
+            })
+            .await;
+            match read {
+                Ok(Some((bytes, px))) if !stop.load(Ordering::Relaxed) => stream(bytes, px, slot, stop, emit, Some(LIST_LIMIT)),
+                _ => {
+                    if slot.finish() {
+                        emit(Event::Gif(slot.clone()));
+                    }
+                }
+            }
+        });
+    }
+
     /// Plays the GIF of row `id` in the message list, at `px` physical px on its long side.
     pub(super) fn play_gif(&mut self, id: &str, seq: u64, px: u32) {
-        let Some((path, ptr)) = self.viewed(id, 0) else { return };
+        let Some((path, _)) = self.viewed(id, 0) else { return };
         let stop = self.new_gif_stop();
-        let (manager, tx, emit) = (self.manager.clone(), self.tx.clone(), self.emit.clone());
+        let emit = self.emit.clone();
         let slot = Arc::new(GifSlot::new(id.to_string(), seq, GifTarget::List));
         tokio::task::spawn_local(async move {
-            if !super::files::fetch_attachment(&manager, &tx, &path, &ptr).await {
-                let _ = slot.finish() && {
+            // not here yet: the picture's own download shows how far it is, and it plays once that
+            // is done and the pointer is on it again
+            if !path.exists() {
+                if slot.finish() {
                     emit(Event::Gif(slot.clone()));
-                    true
-                };
+                }
                 return;
             }
-            let _ = tx.send(Internal::ProgressDone);
             let read = tokio::task::spawn_blocking(move || sigwin_vault::read(&path)).await;
             match read {
                 Ok(Ok(bytes)) if !stop.load(Ordering::Relaxed) && sigwin_thumb::is_animated_gif(&bytes) => {

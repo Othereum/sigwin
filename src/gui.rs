@@ -67,6 +67,9 @@ pub(crate) struct Ui {
     files: Vec<PathBuf>,
     /// pictures of `files` for the composer: None while being cut (or when there is none)
     pending_thumbs: HashMap<PathBuf, Option<Image>>,
+    /// the GIF playing in a composer tile: (playback number, file), and the last number used
+    pending_gif: Option<(u64, PathBuf)>,
+    pending_gif_seq: u64,
     reply_to: Option<String>,
     /// id of our message being edited in the composer
     editing: Option<String>,
@@ -284,6 +287,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::ViewerImage(v) => viewer::arrived(app, v),
         Event::ViewerThumb(id, index, t) => viewer::thumb_arrived(&id, index, t),
         Event::Frames(f) => anim::frames_arrived(f),
+        Event::Gif(slot) if slot.target == types::GifTarget::Composer => attach::gif_arrived(app, &slot),
         Event::Gif(slot) => anim::gif_arrived(slot),
         Event::Notice(s) => notice::show(app, &s),
         Event::Saved(s, path) => notice::saved(app, &s, path),

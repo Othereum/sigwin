@@ -389,6 +389,8 @@ pub enum GifTarget {
     List,
     /// the viewer's image `index` of row `id`
     Viewer(usize),
+    /// a tile of the composer's attachments (the slot's `seq` says which playback)
+    Composer,
 }
 
 /// The latest frame of a playing GIF. The decoding thread only announces it (`Event::Gif`) when
@@ -577,6 +579,9 @@ pub enum Command {
     PlayGif { id: String, seq: u64, px: u32 },
     /// the playing GIF stops (list or viewer)
     StopGif,
+    /// Plays a GIF waiting in the composer (a file of the user's, not a cached one) in a tile
+    /// `tile` physical px wide, until it is stopped.
+    PlayPendingGif { path: PathBuf, seq: u64, tile: u32 },
     /// show image `index` of row `id` in the viewer, shrunk to fit in `fit` (physical px).
     /// `from_file`: the file line was clicked; a row with other files then opens them outside.
     ViewImage { id: String, index: usize, fit: (u32, u32) },
@@ -585,8 +590,10 @@ pub enum Command {
     SaveFiles { id: String, owner: isize, all: bool },
     /// open video `index` of row `id` in the default app, downloading it first if needed
     OpenVideo { id: String, index: usize },
-    /// Square thumbnails of `px` physical px of all images of a message for the viewer, downloading
-    /// the ones still missing: whoever opens an album usually goes through it.
+    /// image `index` (among the row's images) isn't here: stops its download, or starts it
+    ToggleImageDownload { id: String, index: usize },
+    /// Square thumbnails of `px` physical px of all images of a message for the viewer. The ones
+    /// that aren't here yet stay blank: nothing but the list downloads a picture.
     ViewerThumbs { id: String, px: u32 },
     /// the viewer's "기본 앱으로 열기"
     OpenViewed { id: String, index: usize },

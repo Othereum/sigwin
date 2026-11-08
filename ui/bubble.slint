@@ -88,7 +88,7 @@ component VideoMark inherits Rectangle {
 }
 
 // a video's length or a file's size, in a corner of its picture
-component MediaLabel inherits Rectangle {
+export component MediaLabel inherits Rectangle {
     in property <string> text;
     width: label.preferred-width + 10px;
     height: label.preferred-height + 2px;
@@ -149,7 +149,7 @@ export component MsgImage inherits Rectangle {
         background: #80808030;
         z: -1;
     }
-    if m.video: VideoMark { undownloaded: m.undownloaded; progress: m.progress; ring: m.ring; }
+    if (m.video || m.undownloaded) && !m.sticker: VideoMark { undownloaded: m.undownloaded; progress: m.progress; ring: m.ring; }
     if m.media-label != "": MediaLabel {
         text: m.media-label;
         x: 6px;
@@ -186,7 +186,8 @@ export component MsgImage inherits Rectangle {
             // already resampled to this size
             image-fit: fill;
         }
-        if cell.video && cell.more == 0: VideoMark { undownloaded: cell.undownloaded; progress: cell.progress; ring: cell.ring; }
+        // a picture that isn't here has the same mark: a click gets it or stops it
+        if (cell.video || cell.undownloaded) && cell.more == 0: VideoMark { undownloaded: cell.undownloaded; progress: cell.progress; ring: cell.ring; }
         if cell.label != "" && cell.more == 0: MediaLabel {
             text: cell.label;
             x: 6px;

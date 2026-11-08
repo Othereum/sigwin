@@ -182,6 +182,10 @@ export struct PendingFile {
     ext: string,
     thumb: image,
     has-thumb: bool,
+    // plays while the pointer is on it
+    gif: bool,
+    // its frames are showing
+    playing: bool,
     // not a picture or video: shown as a card with name and size
     is-file: bool,
     danger: bool,

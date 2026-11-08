@@ -214,6 +214,8 @@ pub(crate) fn gif_arrived(slot: std::sync::Arc<GifSlot>) {
     let img = frame.map(|t| Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height)));
     match slot.target {
         GifTarget::Viewer(index) => super::viewer::gif_frame(&slot.id, index, img, done),
+        // routed to the composer by the event dispatch
+        GifTarget::Composer => {}
         GifTarget::List => UI.with_borrow_mut(|ui| {
             let Some(g) = ui.anims.gif.as_ref().filter(|g| g.seq == slot.seq) else { return };
             if let Some(img) = img {
