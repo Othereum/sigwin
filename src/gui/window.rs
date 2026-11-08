@@ -159,6 +159,28 @@ fn track_geometry(w: &slint::Window) {
         settings::WindowGeom { x: p.x, y: p.y, w: s.width, h: s.height, maximized }
     };
     GEOM.set(Some(g));
+    // save soon after the window stops moving, so a kill or crash keeps the last rect
+    GEOM_SAVE.with(|t| {
+        t.start(slint::TimerMode::SingleShot, std::time::Duration::from_secs(1), persist_geometry);
+    });
+}
+
+thread_local! {
+    static GEOM_SAVE: slint::Timer = slint::Timer::default();
+}
+
+/// Writes the tracked rect into the settings file if it changed.
+fn persist_geometry() {
+    if headless::active() || !SHOWN.get() {
+        return;
+    }
+    let Some(g) = GEOM.get() else { return };
+    UI.with_borrow_mut(|ui| {
+        if ui.settings.window != Some(g) {
+            ui.settings.window = Some(g);
+            ui.settings.save(&ui.settings_path);
+        }
+    });
 }
 
 /// Before the first show: the saved rect, if it still lands on a monitor.
@@ -199,13 +221,7 @@ pub(crate) fn save_geometry(app: &AppWindow) {
         return;
     }
     track_geometry(app.window());
-    let Some(g) = GEOM.get() else { return };
-    UI.with_borrow_mut(|ui| {
-        if ui.settings.window != Some(g) {
-            ui.settings.window = Some(g);
-            ui.settings.save(&ui.settings_path);
-        }
-    });
+    persist_geometry();
 }
 
 /// Before the window exists: image sizes follow the system DPI and the zoom setting.
