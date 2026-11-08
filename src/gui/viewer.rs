@@ -73,6 +73,8 @@ struct Viewer {
     pixels: ViewerPixels,
     /// a GIF: its frames arrive one by one (`gif_frame`), and zooming is off
     animated: Cell<bool>,
+    /// the picture on screen is on its way, and this is its `MediaLabel` key; empty: it is here
+    pending: RefCell<String>,
     /// the latest patch asked for; older ones are dropped when they finish
     patch_id: Cell<u64>,
     /// a patch is being resampled: only one at a time, the next one starts when it ends
@@ -118,6 +120,8 @@ pub(crate) fn close() {
     if v.animated.get() {
         send_cmd(Command::StopGif);
     }
+    // a download it followed goes on, shown in the list
+    UI.with_borrow(|ui| ui.media_labels.retain(|k| !k.starts_with(crate::types::VIEWER_PREFIX)));
     let _ = v.win.hide();
     slint::Timer::single_shot(Duration::ZERO, move || drop(v));
 }
@@ -149,14 +153,20 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
     }
     let moved = VIEWER.with_borrow_mut(|v| {
         let v = v.as_mut()?;
-        // late, or back at the image already on screen
-        if img.index != v.wanted_index.get() || img.index == v.index {
+        // late, or back at the image already on screen (unless that was still on its way)
+        if img.index != v.wanted_index.get() || (img.index == v.index && v.pending.borrow().is_empty()) {
             return None;
         }
+        let arrived = !v.pending.borrow().is_empty() && img.pending.is_empty();
         v.index = img.index;
         v.count = img.count;
         v.animated.set(img.animated);
         show_details(&v.win, &img);
+        set_pending(v, &img.pending);
+        if arrived && v.count > 1 {
+            // its blurhash in the strip becomes the picture
+            send_cmd(Command::ViewerThumbs { id: v.id.clone(), px: strip_px(&v.win) });
+        }
         v.pixels = img.pixels;
         clear_patch(v);
         let first = v.pixels.take_first();
@@ -203,6 +213,33 @@ pub(crate) fn thumb_arrived(id: &str, index: usize, t: crate::types::Thumb) {
     });
 }
 
+/// The picture on screen is on its way under `key` (its download shows over it), or here (empty).
+fn set_pending(v: &Viewer, key: &str) {
+    *v.pending.borrow_mut() = key.to_string();
+    let state = if key.is_empty() { Default::default() } else { UI.with_borrow(|ui| ui.media_labels.model(key)) };
+    v.win.set_loading(state);
+}
+
+/// Pixels of a cell of the thumbnail strip.
+fn strip_px(win: &ImageViewer) -> u32 {
+    (THUMB_CELL * win.window().scale_factor()).round() as u32
+}
+
+/// The mark over a picture on its way: stops its download, or starts it again.
+fn toggle_download() {
+    with_current(|v| {
+        let key = v.pending.borrow().clone();
+        if key.is_empty() {
+            return;
+        }
+        if UI.with_borrow(|ui| ui.media_labels.downloading(&key)) {
+            send_cmd(Command::ToggleImageDownload { id: v.id.clone(), index: v.index });
+        } else {
+            send_cmd(Command::ViewImage { id: v.id.clone(), index: v.index, fit: screen_box(viewer_hwnd(&v.win)) });
+        }
+    });
+}
+
 /// What the window shows about an image besides its pixels.
 fn show_details(win: &ImageViewer, img: &ViewerImage) {
     win.set_original_w(img.pixels.full().0 as i32);
@@ -210,11 +247,13 @@ fn show_details(win: &ImageViewer, img: &ViewerImage) {
 }
 
 fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) -> Result<(), slint::PlatformError> {
+    let pending = img.pending.clone();
     let win = ImageViewer::new()?;
     win.on_go(|index| go_to(index as usize));
     win.on_prev(|| step(-1));
     win.on_next(|| step(1));
     win.on_dismiss(close);
+    win.on_toggle_download(toggle_download);
     win.on_notice_action_clicked(super::notice::reveal);
     win.on_save(|| {
         with_current(|v| {
@@ -296,11 +335,13 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
             refit: slint::Timer::default(),
             pixels: img.pixels,
             animated: Cell::new(img.animated),
+            pending: RefCell::new(String::new()),
             patch_id: Cell::new(0),
             patch_busy: Cell::new(false),
             press: Cell::new(None),
         });
     });
+    with_current(|v| set_pending(v, &pending));
     Ok(())
 }
 
@@ -387,8 +428,8 @@ fn wheel_scale(scale: f64, notches: f32) -> f64 {
 fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
     let moved = VIEWER.with_borrow(|v| {
         let v = v.as_ref()?;
-        // frames come at one size
-        if v.animated.get() {
+        // frames come at one size; a blurhash has nothing to zoom into
+        if v.animated.get() || !v.pending.borrow().is_empty() {
             return None;
         }
         // also at the limits and during the hold: it tells why nothing moves

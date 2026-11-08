@@ -204,6 +204,8 @@ enum Internal {
     Notice(String),
     /// the user chose where to save a message's files: download and write them
     SaveFiles(files::Save, files::SaveTo),
+    /// the viewer downloaded this file: the list's cells of it make their thumbnails now
+    Fetched(String),
     /// the files were saved (the last one's path)
     Saved(String, PathBuf),
     ProgressDone,
@@ -850,6 +852,10 @@ impl App {
             }
             Internal::Notice(s) => self.notice(s),
             Internal::SaveFiles(save, to) => self.save_files_to(save, to),
+            Internal::Fetched(file_key) => {
+                self.thumbs_requested.borrow_mut().retain(|k| !k.starts_with(&file_key));
+                self.emit_messages(Scroll::Keep).await;
+            }
             Internal::Saved(text, path) => {
                 (self.emit)(Event::ProgressDone);
                 (self.emit)(Event::Saved(text, path));

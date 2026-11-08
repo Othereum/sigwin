@@ -357,7 +357,17 @@ pub struct ViewerImage {
     pub pixels: ViewerPixels,
     /// a GIF: `pixels` is its first frame and the rest follow as `Event::Gif`
     pub animated: bool,
+    /// not here yet: `pixels` is its blurhash while it downloads, and this the `MediaLabel` key
+    /// that says how far. Empty: the picture itself
+    pub pending: String,
 }
+
+/// The `MediaLabel` key the viewer follows a picture's download by.
+pub fn viewer_key(file_key: &str) -> String {
+    format!("{VIEWER_PREFIX}{file_key}")
+}
+
+pub const VIEWER_PREFIX: &str = "viewer:";
 
 /// A decoded image for the viewer window.
 pub struct ViewerPixels {

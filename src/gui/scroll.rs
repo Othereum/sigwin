@@ -267,7 +267,10 @@ fn forget_unshown_thumbs(ui: &mut Ui, items: &[MsgDto]) {
     // and the file lines: keyed by their row
     let lines: std::collections::HashSet<&str> = items.iter().filter(|m| !m.attachment.is_empty()).map(|m| m.id.as_str()).collect();
     ui.media_labels.retain(|k| {
-        shown.contains(k) || k.strip_prefix(crate::types::FILE_LINE_PREFIX).is_some_and(|id| lines.contains(id))
+        shown.contains(k)
+            || k.strip_prefix(crate::types::FILE_LINE_PREFIX).is_some_and(|id| lines.contains(id))
+            // the viewer's: it drops them when it closes
+            || k.starts_with(crate::types::VIEWER_PREFIX)
     });
 }
 

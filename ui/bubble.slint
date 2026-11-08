@@ -38,7 +38,7 @@ export component MsgMeta inherits HorizontalLayout {
 }
 
 // marks a picture as a video: what a click does to it
-component VideoMark inherits Rectangle {
+export component VideoMark inherits Rectangle {
     in property <bool> undownloaded;
     in property <int> progress: -1;
     in property <image> ring;

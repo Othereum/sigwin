@@ -362,18 +362,41 @@ impl App {
             return;
         }
         let index = index.min(count - 1);
-        let Some((path, ptr)) = self.viewed(id, index) else { return };
+        let Some((file_key, path, ptr)) = self.viewed_key(id, index) else { return };
         let id = id.to_string();
         let emit = self.emit.clone();
         let tx = self.tx.clone();
         let open_dir = self.paths.open.clone();
+        let online = self.manager.is_some();
+        let downloads = self.attachment_downloads.clone();
+        // its cells in the list show the download too
+        let mut keys: Vec<String> = self.thumbs_requested.borrow().iter().filter(|k| k.starts_with(&file_key)).cloned().collect();
         // what played before stops now; a GIF opened here plays until the next one replaces it
         let stop = self.new_gif_stop();
         tokio::task::spawn_local(async move {
-            // the viewer never downloads: a picture that isn't here is the list's to get
+            // going to a picture that isn't here asks for it: its blurhash shows meanwhile
             if !path.exists() {
-                let _ = tx.send(Internal::Notice("아직 받지 않은 이미지입니다.".into()));
-                return;
+                if !online {
+                    let _ = tx.send(Internal::Notice("아직 받지 않은 이미지입니다.".into()));
+                    return;
+                }
+                let pending = crate::types::viewer_key(&file_key);
+                let pixels = placeholder(&ptr, fit);
+                emit(Event::ViewerImage(crate::types::ViewerImage { id: id.clone(), index, count, pixels, animated: false, pending: pending.clone() }));
+                keys.push(pending);
+                match downloads.ensure(&file_key, &ptr, &Show::Cells(keys), &emit, &path).await {
+                    Ok(true) => {
+                        // the list makes its thumbnails from it now
+                        let _ = tx.send(Internal::Fetched(file_key));
+                    }
+                    // stopped: the blurhash stays, and its mark starts it again
+                    Ok(false) => return,
+                    Err(e) => {
+                        warn!("download attachment: {e:#}");
+                        let _ = tx.send(Internal::Notice(format!("다운로드 실패: {e:#}")));
+                        return;
+                    }
+                }
             }
             let p = path.clone();
             enum Decoded {
@@ -396,12 +419,12 @@ impl App {
             match decoded {
                 Ok(Ok(Some(Decoded::Still(pixels)))) => {
                     let _ = tx.send(Internal::ProgressDone);
-                    emit(Event::ViewerImage(crate::types::ViewerImage { id, index, count, pixels, animated: false }));
+                    emit(Event::ViewerImage(crate::types::ViewerImage { id, index, count, pixels, animated: false, pending: String::new() }));
                 }
                 Ok(Ok(Some(Decoded::Gif(bytes, pixels)))) => {
                     let _ = tx.send(Internal::ProgressDone);
                     let px = pixels.full().0.max(pixels.full().1);
-                    emit(Event::ViewerImage(crate::types::ViewerImage { id: id.clone(), index, count, pixels, animated: true }));
+                    emit(Event::ViewerImage(crate::types::ViewerImage { id: id.clone(), index, count, pixels, animated: true, pending: String::new() }));
                     if !stop.load(std::sync::atomic::Ordering::Relaxed) {
                         let slot = Arc::new(crate::types::GifSlot::new(id, super::gif::next_gen(), crate::types::GifTarget::Viewer(index)));
                         super::gif::stream(bytes, px, slot, stop, emit, None);
@@ -423,16 +446,19 @@ impl App {
     pub(super) fn viewer_thumbs(&self, id: &str, px: u32) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let images = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a));
-        let jobs: Vec<String> = images.map(|(i, a)| view::media::attachment_key(a, ts, i)).collect();
+        let jobs: Vec<(String, Option<String>)> = images.map(|(i, a)| (view::media::attachment_key(a, ts, i), a.blur_hash.clone())).collect();
         let id = id.to_string();
         let emit = self.emit.clone();
         let (attachments, thumbs) = (self.paths.attachments.clone(), self.paths.thumbs.clone());
         tokio::task::spawn_local(async move {
-            for (index, key) in jobs.into_iter().enumerate() {
+            for (index, (key, blur)) in jobs.into_iter().enumerate() {
                 let orig = attachment_path(&attachments, &key);
                 let thumb = thumbs.join(format!("{key}.enc"));
-                // never downloaded here: a picture that isn't here stays a blank cell
+                // not here: its blurhash, until going to it gets it
                 if !thumb.exists() && !orig.exists() {
+                    if let Some(t) = blur.as_deref().and_then(|b| blur_thumb(&key, b, px, px)) {
+                        emit(Event::ViewerThumb(id.clone(), index, t));
+                    }
                     continue;
                 }
                 let made = tokio::task::spawn_blocking(move || -> anyhow::Result<Thumb> {
@@ -547,6 +573,9 @@ pub(super) struct AttachmentDownloads {
     /// winding down when the next begins) and the file it is downloading
     saves: Rc<RefCell<HashMap<String, (u64, Option<String>)>>>,
     save_runs: Rc<std::cell::Cell<u64>>,
+    /// file key -> more places that show a download on its way, which came to wait for it (the
+    /// viewer, for a picture the list is getting)
+    watchers: Rc<RefCell<HashMap<String, Vec<String>>>>,
 }
 
 impl AttachmentDownloads {
@@ -628,6 +657,11 @@ impl AttachmentDownloads {
     /// how far it is; false when stopped.
     pub(super) async fn ensure(&self, file_key: &str, ptr: &AttachmentPointer, show: &Show, emit: &Emit, dest: &Path) -> anyhow::Result<bool> {
         if self.is_running(file_key) {
+            if let Show::Cells(keys) = show {
+                let mut watchers = self.watchers.borrow_mut();
+                let shown = watchers.entry(file_key.to_string()).or_default();
+                shown.extend(keys.iter().filter(|k| !shown.contains(k)).cloned().collect::<Vec<_>>());
+            }
             while self.is_running(file_key) {
                 self.ended.notified().await;
             }
@@ -645,9 +679,11 @@ impl AttachmentDownloads {
         let (handle, registration) = AbortHandle::new_pair();
         self.running.borrow_mut().insert(file_key.to_string(), handle.clone());
         self.stopped.borrow_mut().remove(file_key);
+        self.watchers.borrow_mut().remove(file_key);
         let show_now = |label: crate::types::MediaLabel| match show {
             Show::Cells(keys) => {
-                for key in keys {
+                let watchers = self.watchers.borrow().get(file_key).cloned().unwrap_or_default();
+                for key in keys.iter().chain(watchers.iter().filter(|k| !keys.contains(k))) {
                     emit(Event::MediaLabel { key: key.clone(), label: label.clone() });
                 }
             }
@@ -680,8 +716,13 @@ impl AttachmentDownloads {
             self.running.borrow_mut().remove(file_key);
             self.ended.notify_waiters();
         }
-        if !matches!(res, Ok(Ok(()))) {
-            show_now(view::media::undownloaded_label(ptr));
+        // however it ended, what showed its progress stops showing it here, whoever started it:
+        // waiting for the caller to clear it left a full ring on cells a different caller got
+        // the file for (the viewer)
+        show_now(if matches!(res, Ok(Ok(()))) { Default::default() } else { view::media::undownloaded_label(ptr) });
+        // unless a new one has started meanwhile, with watchers of its own
+        if !self.is_running(file_key) {
+            self.watchers.borrow_mut().remove(file_key);
         }
         info!(
             result = match &res {
@@ -827,6 +868,27 @@ fn blur_thumb(key: &str, hash: &str, w: u32, h: u32) -> Option<Thumb> {
 }
 
 /// The blurhash of a picture shown with `shape`, at the size its box has in the list.
+/// What the viewer shows of a picture on its way: its blurhash (or plain dark without one) at
+/// the size the picture will have, within `fit`.
+fn placeholder(ptr: &AttachmentPointer, fit: (u32, u32)) -> crate::types::ViewerPixels {
+    let (w, h) = match (ptr.width, ptr.height) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => (w, h),
+        _ => (4, 3),
+    };
+    let scale = (fit.0 as f64 / w as f64).min(fit.1 as f64 / h as f64);
+    // a picture with no size given takes the box; a known one never grows past its own size
+    let scale = if ptr.width.is_some() { scale.min(1.0) } else { scale };
+    let (sw, sh) = (((w as f64 * scale) as u32).max(1), ((h as f64 * scale) as u32).max(1));
+    let img = ptr
+        .blur_hash
+        .as_deref()
+        .and_then(|b| sigwin_thumb::blurhash(b, 32, 32))
+        .map(|b| sigwin_thumb::cover(&b, sw, sh))
+        .unwrap_or_else(|| image::RgbaImage::from_pixel(sw, sh, image::Rgba([0x2a, 0x2a, 0x2a, 0xff])));
+    let original = slint::SharedPixelBuffer::clone_from_slice(img.as_raw(), sw, sh);
+    crate::types::ViewerPixels { original, fitted: None, opaque: true }
+}
+
 fn blur_for(key: &str, hash: &str, ptr: &AttachmentPointer, shape: &ThumbShape) -> Option<Thumb> {
     let (w, h) = match *shape {
         ThumbShape::Cover(w, h) => (w, h),

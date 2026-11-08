@@ -773,7 +773,7 @@ fn demo_viewer(emit: &backend::Emit, id: &str, index: usize, fit: (u32, u32)) {
     let Ok(Some(view)) = sigwin_thumb::decode_view(&png, fit.0, fit.1, u64::MAX) else { return };
     let pixels = types::ViewerPixels::from(view);
     let count = demo_viewer_count();
-    emit(Event::ViewerImage(types::ViewerImage { id: id.to_string(), index: index.min(count - 1), count, pixels, animated: false }));
+    emit(Event::ViewerImage(types::ViewerImage { id: id.to_string(), index: index.min(count - 1), count, pixels, animated: false, pending: String::new() }));
 }
 
 /// SIGWIN_DEMO_VIEWER_COUNT: images in the album, 3 by default; past the third they repeat it.

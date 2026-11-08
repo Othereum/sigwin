@@ -1,6 +1,8 @@
 // The image viewer window. Fixed dark look: globals (`Theme`) aren't shared between windows.
 
 import { Notice } from "widgets.slint";
+import { MediaLabel, VideoMark } from "bubble.slint";
+import { MediaState } from "types.slint";
 
 component ViewerButton inherits Rectangle {
     in property <string> text;
@@ -97,6 +99,9 @@ export component ImageViewer inherits Window {
     callback save();
     callback open-outside();
     callback dismiss();
+    // the picture on screen is on its way: how far (one), and its mark stops or restarts that
+    in property <[MediaState]> loading;
+    callback toggle-download();
     callback resized();
     callback drag-window();
     // wheel notches (+ = up) and the cursor in physical px
@@ -217,6 +222,35 @@ export component ImageViewer inherits Window {
         scroll-event(e) => {
             root.zoom(e.delta-y / 60px, self.mouse-x / 1phx, self.mouse-y / 1phx);
             accept
+        }
+        // a picture on its way, over its blurhash: the list's mark, and how much has come
+        // (here already, it is only being decoded: no mark)
+        if root.loading.length > 0 && root.loading[0].undownloaded: VerticalLayout {
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+            width: self.preferred-width;
+            height: self.preferred-height;
+            spacing: 8px;
+            alignment: center;
+            HorizontalLayout {
+                alignment: center;
+                VideoMark {
+                    undownloaded: true;
+                    progress: root.loading[0].progress;
+                    ring: root.loading[0].ring;
+                    hovered: mark-ta.has-hover;
+                    mark-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.toggle-download(); }
+                    }
+                }
+            }
+            if root.loading[0].label != "": HorizontalLayout {
+                alignment: center;
+                MediaLabel {
+                    text: root.loading[0].label;
+                }
+            }
         }
         if root.near-top: Rectangle {
             // apart from ✕, which closes the window
