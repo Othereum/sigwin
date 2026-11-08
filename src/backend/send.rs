@@ -179,6 +179,7 @@ impl App {
         let group_revision = self.group_revision(&thread).await;
         let tx = self.tx.clone();
         let dir = self.paths.attachments.clone();
+        let uploads = Uploads { index: self.index.clone(), thread: key.clone() };
         let (turn, done) = self.send_turn(&key);
         tokio::task::spawn_local(async move {
             let _done = done;
@@ -186,7 +187,7 @@ impl App {
                 let _ = turn.await;
             }
             let started = std::time::Instant::now();
-            let res = send_job(manager, thread, job, group_revision, ts, dir).await;
+            let res = send_job(manager, thread, job, group_revision, ts, dir, uploads).await;
             info!(ms = started.elapsed().as_millis() as u64, ok = res.is_ok(), "message sent");
             let _ = tx.send(Internal::Sent(ts, res.map_err(|e| format!("{e:#}"))));
         });
@@ -254,12 +255,94 @@ fn rate_limit_wait(e: &anyhow::Error) -> Option<Duration> {
     (wait <= RATE_LIMIT_MAX_WAIT).then_some(wait)
 }
 
-async fn send_job(m: Mgr, thread: Thread, job: SendJob, group_revision: u32, ts: u64, dir: PathBuf) -> anyhow::Result<()> {
+/// Uploads of attachments we sent to one thread: sending the same bytes there again reuses the
+/// earlier upload instead of sending them to the server again (a retry, or the same photo twice).
+#[derive(Clone)]
+pub(super) struct Uploads {
+    index: Index,
+    thread: String,
+}
+
+/// How long an upload is reused. The server keeps attachments for longer (Signal Desktop
+/// assumes weeks); this stays well inside that, since a recipient can't fetch an expired one.
+const REUSE_UPLOAD_FOR: u64 = 7 * 24 * 3600 * 1000;
+
+impl Uploads {
+    /// Of the bytes as they would be uploaded; the type goes in too, as it's part of the pointer.
+    fn hash(spec: &AttachmentSpec, data: &[u8]) -> Vec<u8> {
+        use sha2::Digest;
+        let mut h = sha2::Sha256::new();
+        h.update((spec.content_type.len() as u64).to_le_bytes());
+        h.update(spec.content_type.as_bytes());
+        h.update(data);
+        h.finalize().to_vec()
+    }
+
+    async fn find(&self, hash: &[u8]) -> Option<AttachmentPointer> {
+        use presage::libsignal_service::prelude::ProtobufMessage;
+        let since = now_ms().saturating_sub(REUSE_UPLOAD_FOR);
+        let raw = self.index.upload_find(&self.thread, hash, since).await.ok()??;
+        AttachmentPointer::decode(raw.as_slice()).ok().filter(|p| p.cdn_number.is_some() && p.key.is_some() && p.digest.is_some())
+    }
+
+    async fn put(&self, hash: &[u8], ptr: &AttachmentPointer) {
+        use presage::libsignal_service::prelude::ProtobufMessage;
+        let now = now_ms();
+        let keep_since = now.saturating_sub(REUSE_UPLOAD_FOR);
+        if let Err(e) = self.index.upload_put(&self.thread, hash, &ptr.encode_to_vec(), now, keep_since).await {
+            warn!("remember upload: {e:#}");
+        }
+    }
+}
+
+/// Pointers for `specs`, in order: an earlier upload where there is one, the rest uploaded now.
+/// Each upload is remembered right away, so a send that fails later doesn't upload it again.
+async fn upload_all(m: &mut Mgr, specs: Vec<(AttachmentSpec, Vec<u8>)>, uploads: &Uploads) -> anyhow::Result<Vec<AttachmentPointer>> {
+    let mut slots: Vec<Option<AttachmentPointer>> = Vec::with_capacity(specs.len());
+    let mut todo = Vec::new();
+    let mut todo_hashes = Vec::new();
+    for (spec, data) in specs {
+        let hash = Uploads::hash(&spec, &data);
+        match uploads.find(&hash).await {
+            Some(mut ptr) => {
+                // same bytes, maybe another name
+                ptr.file_name = spec.file_name;
+                slots.push(Some(ptr));
+            }
+            None => {
+                slots.push(None);
+                todo_hashes.push(hash);
+                todo.push((spec, data));
+            }
+        }
+    }
+    let (reused, uploaded) = (slots.len() - todo.len(), todo.len());
+    let mut results = if todo.is_empty() { Vec::new() } else { m.upload_attachments(todo).await? };
+    let mut failed = None;
+    let mut fresh = Vec::with_capacity(results.len());
+    for (res, hash) in results.drain(..).zip(&todo_hashes) {
+        match res {
+            Ok(ptr) => {
+                uploads.put(hash, &ptr).await;
+                fresh.push(ptr);
+            }
+            Err(e) => failed = failed.or(Some(e)),
+        }
+    }
+    if let Some(e) = failed {
+        return Err(e.into());
+    }
+    info!(reused, uploaded, "attachments ready");
+    let mut fresh = fresh.into_iter();
+    Ok(slots.into_iter().filter_map(|s| s.or_else(|| fresh.next())).collect())
+}
+
+async fn send_job(m: Mgr, thread: Thread, job: SendJob, group_revision: u32, ts: u64, dir: PathBuf, uploads: Uploads) -> anyhow::Result<()> {
     let mut tries = 0;
     loop {
         let res = match job.clone() {
             SendJob::Text { body, body_ranges, files, quote, link, quality } => {
-                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, link, quality, group_revision, ts, dir.clone())).await
+                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, link, quality, group_revision, ts, dir.clone(), uploads.clone())).await
             }
             SendJob::Sticker(s) => Box::pin(send_sticker_task(m.clone(), thread.clone(), s, group_revision, dir.clone(), ts)).await,
         };
@@ -293,6 +376,7 @@ pub(super) async fn send_task(
     group_revision: u32,
     ts: u64,
     attachments_dir: PathBuf,
+    uploads: Uploads,
 ) -> anyhow::Result<()> {
     let mut text = text;
     let long = long_body(&mut m, &mut text, &attachments_dir).await?;
@@ -352,7 +436,7 @@ pub(super) async fn send_task(
     }
     let mut attachments: Vec<AttachmentPointer> = long.into_iter().collect();
     if !specs.is_empty() {
-        attachments.extend(m.upload_attachments(specs).await?.into_iter().collect::<Result<Vec<_>, _>>()?);
+        attachments.extend(upload_all(&mut m, specs, &uploads).await?);
     }
     let preview = Box::pin(for_message(&m, &text, !files.is_empty(), link, ts, &attachments_dir)).await;
     let dm = DataMessage {

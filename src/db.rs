@@ -234,9 +234,49 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        // attachments we uploaded, so sending the same bytes to the same thread again can reuse
+        // the upload. `hash` is of the bytes as uploaded; `pointer` is the protobuf, `at` its
+        // upload time. A cache: rows past their useful life are dropped on every `put`
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_uploads (
+                thread TEXT NOT NULL,
+                hash BLOB NOT NULL,
+                pointer BLOB NOT NULL,
+                at INTEGER NOT NULL,
+                PRIMARY KEY (thread, hash)
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
         ensure_order(&pool).await?;
         migrate(&pool).await?;
         Ok(Self { pool })
+    }
+
+    /// The pointer of an earlier upload of `hash` to `thread` made at or after `since` (ms).
+    pub async fn upload_find(&self, thread: &str, hash: &[u8], since: u64) -> anyhow::Result<Option<Vec<u8>>> {
+        Ok(sqlx::query_scalar("SELECT pointer FROM ls_uploads WHERE thread = ? AND hash = ? AND at >= ?")
+            .bind(thread)
+            .bind(hash)
+            .bind(since as i64)
+            .fetch_optional(&self.pool)
+            .await?)
+    }
+
+    /// Remembers an upload made at `at`, and forgets those made before `keep_since`.
+    pub async fn upload_put(&self, thread: &str, hash: &[u8], pointer: &[u8], at: u64, keep_since: u64) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM ls_uploads WHERE at < ?").bind(keep_since as i64).execute(&self.pool).await?;
+        sqlx::query(
+            "INSERT INTO ls_uploads (thread, hash, pointer, at) VALUES (?, ?, ?, ?)
+             ON CONFLICT (thread, hash) DO UPDATE SET pointer = excluded.pointer, at = excluded.at",
+        )
+        .bind(thread)
+        .bind(hash)
+        .bind(pointer)
+        .bind(at as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// A pin sent at `at`; an older pin of the same message is replaced, a newer one kept.
@@ -803,6 +843,24 @@ pub(crate) mod tests {
     /// Sent timestamps in display order.
     async fn order(index: &Index) -> Vec<u64> {
         index.rows_from(&thread(), 0).await.unwrap().into_iter().map(|(_, ts)| ts).collect()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn uploads_are_reused_per_thread_while_fresh() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        index.upload_put("c:1", b"h", b"ptr", 1_000, 0).await.unwrap();
+        assert_eq!(index.upload_find("c:1", b"h", 1_000).await.unwrap().as_deref(), Some(&b"ptr"[..]));
+        // another thread, other bytes, or too old: no reuse
+        assert!(index.upload_find("c:2", b"h", 0).await.unwrap().is_none());
+        assert!(index.upload_find("c:1", b"x", 0).await.unwrap().is_none());
+        assert!(index.upload_find("c:1", b"h", 1_001).await.unwrap().is_none());
+        // a newer upload replaces it; putting also drops what is past keeping
+        index.upload_put("c:1", b"h", b"ptr2", 2_000, 0).await.unwrap();
+        index.upload_put("c:1", b"old", b"o", 10, 0).await.unwrap();
+        index.upload_put("c:1", b"new", b"n", 3_000, 1_500).await.unwrap();
+        assert_eq!(index.upload_find("c:1", b"h", 0).await.unwrap().as_deref(), Some(&b"ptr2"[..]));
+        assert!(index.upload_find("c:1", b"old", 0).await.unwrap().is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
