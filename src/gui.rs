@@ -12,11 +12,12 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::types::{ClickedMedia, Command, Event, MsgDto, Paging, Scroll, ThreadDto};
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
-    AppWindow, ImageCell, ImageViewer, Links, MentionItem, MsgItem, NoteLine, PackItem, PinItem, ReactionItem, ReaderItem, SettingsData,
+    AppWindow, ImageCell, ImageViewer, Links, MentionItem, MsgItem, NoteLine, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, SettingsData,
     StickerItem, Theme, ThreadItem, ThreadMenuData,
 };
 
 pub(crate) mod anim;
+pub(crate) mod attach;
 pub(crate) mod drafts;
 pub(crate) mod linkcard;
 mod media;
@@ -64,6 +65,8 @@ pub(crate) struct Ui {
     /// rows seen in a window that is only watched, with when: they count as read after a while
     dwell: Vec<(String, std::time::Instant)>,
     files: Vec<PathBuf>,
+    /// pictures of `files` for the composer: None while being cut (or when there is none)
+    pending_thumbs: HashMap<PathBuf, Option<Image>>,
     reply_to: Option<String>,
     /// id of our message being edited in the composer
     editing: Option<String>,

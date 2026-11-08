@@ -41,7 +41,7 @@ Demo data can't show behavior: reading, unread counts, focus, the list moving as
 
 Scenario steps, besides the ones above (`@file`: `#` lines are comments, one step per line):
 - `fx seed who=1 name=철수 n=100 unread=30` (older messages from contact 1, stored and synced, the newest 30 unread), `fx recv who=1 n=2` (new ones through the receive path), `fx phone-read who=1`
-- `open N`, `jump` (the jump button), `focus on|off`, `away on|off`, `shown on|off` (the window counts as seen without the focus, like on a second monitor; headless starts as not seen), plus the input steps (`wheel`, `click`, ...)
+- `attach A|B` (files into the composer, as if picked), `open N`, `jump` (the jump button), `focus on|off`, `away on|off`, `shown on|off` (the window counts as seen without the focus, like on a second monitor; headless starts as not seen), plus the input steps (`wheel`, `click`, ...)
 - `settle`: waits until the UI and the backend have stopped talking. Use it, never a `wait`, between a cause and its check.
 - `expect backend WHAT [who=N] OP VALUE`: `unread`, `read_upto`, `sent` (delivery, read receipts and read-sync entries), `toasts`, `window` (rows, where the line is)
 - `expect ui NAME OP VALUE`: `open-unread`, `inactive`, `reading-hold`, `near-bottom`, `rows`, `current-key`, `bottom-gap` (0 = the newest row is whole at the bottom), `divider-top` (the "unread" line's row, from the list's top; only while that row is instantiated)

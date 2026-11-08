@@ -151,6 +151,14 @@ export struct NoteLine {
     text: string,
 }
 
+// an attachment waiting in the composer
+export struct PendingFile {
+    // the extension, drawn when there is no picture
+    ext: string,
+    thumb: image,
+    has-thumb: bool,
+}
+
 export struct PackItem {
     id: string,
     title: string,

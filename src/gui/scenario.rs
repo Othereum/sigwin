@@ -41,6 +41,8 @@ fn exec(app: &AppWindow, line: &str) -> anyhow::Result<()> {
             app.invoke_open_thread(format!("c:{}", backend::fixture::contact(who)).into());
         }
         "jump" => app.invoke_jump_to_bottom(),
+        // files into the composer, as if picked: `attach A|B`
+        "attach" => wire::add_files(app, rest.split('|').map(|p| p.trim().into()).collect()),
         "focus" => window::focus_changed(app, on_off("focus")?),
         "away" => {
             away::force(Some(on_off("away")?));

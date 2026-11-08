@@ -232,11 +232,12 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let mentions = UI.with_borrow_mut(|ui| std::mem::take(&mut ui.picked));
         // `files` were taken above: with attachments there is no preview
         let link = linkcard::take_for_send(&app, if files.is_empty() { &text } else { "" });
-        let quality = sigwin_thumb::photo::Quality::from_index(app.get_send_quality().clamp(0, 1) as u8);
+        let quality = sigwin_thumb::photo::Quality::from_index(UI.with_borrow(|ui| ui.settings.photo_quality));
         s(Command::Send { text: text.to_string(), files, quote, mentions, link, quality });
         app.set_mention_items(ModelRc::default());
         app.set_draft(SharedString::new());
         app.set_pending_files(ModelRc::default());
+        UI.with_borrow_mut(|ui| ui.pending_thumbs.clear());
         app.set_reply_preview(SharedString::new());
         drafts::drop_if_empty(&app);
     });
@@ -365,11 +366,9 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let weak = app.as_weak();
-    app.on_clear_attachments(move || {
-        UI.with_borrow_mut(|ui| ui.files.clear());
+    app.on_remove_attachment(move |i| {
         if let Some(app) = weak.upgrade() {
-            app.set_pending_files(ModelRc::default());
-            drafts::drop_if_empty(&app);
+            attach::remove(&app, i.max(0) as usize);
         }
     });
 
@@ -768,6 +767,6 @@ pub(crate) fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
         ui.files.extend(files);
         ui.files.clone()
     });
-    drafts::show_pending(app, &all);
+    attach::show(app, &all);
     app.invoke_focus_composer();
 }

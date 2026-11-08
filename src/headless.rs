@@ -63,7 +63,7 @@ enum Step {
 }
 
 /// Scenario steps the driver runs.
-const SCENARIO_STEPS: [&str; 8] = ["fx", "open", "jump", "focus", "away", "shown", "expect", "settle"];
+const SCENARIO_STEPS: [&str; 9] = ["fx", "open", "jump", "focus", "away", "shown", "expect", "settle", "attach"];
 
 /// What runs scenario steps: it knows the window and the backend.
 pub struct Driver {

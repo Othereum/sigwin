@@ -1,7 +1,7 @@
 import { LineEdit, Button, ListView, Palette, Spinner } from "std-widgets.slint";
-import { ThreadItem, MsgItem, PinItem, MentionItem, NoteLine, PackItem, StickerItem } from "types.slint";
+import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, NoteLine, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, IconButton, MenuRow, Notice, Segmented, StickerIcon, TextButton } from "widgets.slint";
+import { Avatar, IconButton, MenuRow, Notice, StickerIcon, TextButton } from "widgets.slint";
 import { Bubble } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
@@ -72,10 +72,9 @@ export component AppWindow inherits Window {
     in property <bool> compose-link-has-image;
     callback link-check();
     callback link-dismiss();
-    in property <[string]> pending-files;
+    in property <[PendingFile]> pending-files;
     // a photo is among them: the quality it goes at can be picked
     in property <bool> pending-has-photo;
-    in-out property <int> send-quality;
     in-out property <string> search;
     in-out property <string> draft;
 
@@ -88,7 +87,7 @@ export component AppWindow inherits Window {
     callback load-newer();
     callback at-bottom-changed(bool);
     callback attach();
-    callback clear-attachments();
+    callback remove-attachment(int);
     // the message and which of its images
     callback attachment-clicked(string, int);
     callback file-clicked(string);
@@ -738,20 +737,72 @@ export component AppWindow inherits Window {
                     padding: 8px;
                     padding-left: 16px;
                     spacing: 8px;
-                    Text {
-                        text: "📎 " + root.pending-files.length + "개 첨부: " + root.pending-files[0] + (root.pending-files.length > 1 ? " 외" : "");
-                        color: Theme.subtle;
-                        font-size: 12px;
-                        overflow: elide;
-                        vertical-alignment: center;
+                    // The wheel only scrolls vertically, which this Flickable can't: the TouchArea
+                    // gets the event the Flickable rejects and turns it into a horizontal move.
+                    TouchArea {
                         horizontal-stretch: 1;
+                        height: 120px;
+                        scroll-event(e) => {
+                            files-flick.content-x = clamp(files-flick.content-x + (e.delta-y != 0px ? e.delta-y : e.delta-x),
+                                min(0px, files-flick.width - files-flick.content-width), 0px);
+                            accept
+                        }
+                        files-flick := Flickable {
+                            width: parent.width;
+                            height: parent.height;
+                            content-width: files-row.preferred-width;
+                            files-row := HorizontalLayout {
+                                spacing: 8px;
+                                for f[i] in root.pending-files: Rectangle {
+                                    width: 120px;
+                                    height: 120px;
+                                    border-radius: 8px;
+                                    clip: true;
+                                    background: Theme.hover;
+                                    if f.has-thumb: Image {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        source: f.thumb;
+                                        // already resampled to this size
+                                        image-fit: fill;
+                                    }
+                                    if !f.has-thumb: Text {
+                                        text: f.ext;
+                                        color: Theme.subtle;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle {
+                                        x: parent.width - self.width - 3px;
+                                        y: 3px;
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 10px;
+                                        background: remove-area.has-hover ? #000000d0 : #000000a0;
+                                        // drawn, not a glyph: the glyph sits off the circle's center
+                                        Path {
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            width: 8px;
+                                            height: 8px;
+                                            viewbox-width: 8;
+                                            viewbox-height: 8;
+                                            commands: "M 0 0 L 8 8 M 8 0 L 0 8";
+                                            stroke: #ffffff;
+                                            stroke-width: 1.5px;
+                                            stroke-line-cap: round;
+                                        }
+                                        remove-area := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.remove-attachment(i); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    if root.pending-has-photo: Segmented {
-                        options: ["표준", "높음"];
-                        current <=> root.send-quality;
-                        y: (parent.height - self.height) / 2;
-                    }
-                    IconButton { label: "✕"; width: 28px; height: 28px; clicked => { root.clear-attachments(); } }
                 }
             }
             if root.current-key != "" && root.compose-link-url != "" && root.pending-files.length == 0 && root.edit-preview == "": Rectangle {
@@ -811,10 +862,82 @@ export component AppWindow inherits Window {
                             label: "📎";
                             clicked => { root.attach(); }
                         }
-                        IconButton {
+                        // a sticker goes alone, never with a photo: a photo being sent takes its
+                        // place with the quality photos go at (the setting)
+                        if !root.pending-has-photo: IconButton {
                             label: "";
                             clicked => { root.toggle-stickers(); }
                             StickerIcon { }
+                        }
+                        // drawn like its neighbors (an outline, no fill), crossed out when off and lit
+                        // with the accent when on
+                        if root.pending-has-photo: hd-btn := Rectangle {
+                            width: 36px;
+                            height: 36px;
+                            border-radius: 18px;
+                            background: hd-area.has-hover ? Theme.hover : transparent;
+                            // the hint shows after the pointer rests on the button
+                            property <bool> tip-ready;
+                            Timer {
+                                running: hd-area.has-hover && !hd-btn.tip-ready;
+                                interval: 400ms;
+                                triggered => { hd-btn.tip-ready = true; }
+                            }
+                            hd-area := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    SettingsData.photo-quality = SettingsData.photo-quality == 1 ? 0 : 1;
+                                    SettingsData.changed();
+                                }
+                                changed has-hover => {
+                                    if (!self.has-hover) {
+                                        hd-btn.tip-ready = false;
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                width: 24px;
+                                height: 17px;
+                                border-radius: 4px;
+                                border-width: 1.5px;
+                                border-color: SettingsData.photo-quality == 1 ? Theme.accent : Theme.subtle;
+                                background: SettingsData.photo-quality == 1 ? Theme.accent.with-alpha(0.2) : transparent;
+                                Text {
+                                    text: "HD";
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    color: SettingsData.photo-quality == 1 ? Theme.accent : Theme.subtle;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            if SettingsData.photo-quality != 1: Path {
+                                width: 36px;
+                                height: 36px;
+                                viewbox-width: 36;
+                                viewbox-height: 36;
+                                commands: "M 8 8 L 28 28";
+                                stroke: Theme.subtle;
+                                stroke-width: 1.5px;
+                                stroke-line-cap: round;
+                            }
+                            if hd-area.has-hover && hd-btn.tip-ready: Rectangle {
+                                x: 0px;
+                                y: -self.height - 8px;
+                                width: hd-tip.preferred-width + 20px;
+                                height: hd-tip.preferred-height + 14px;
+                                border-radius: 6px;
+                                background: Theme.sidebar;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                hd-tip := Text {
+                                    x: 10px;
+                                    y: 7px;
+                                    text: SettingsData.photo-quality == 1 ? "높은 화질로 보냅니다\n눌러서 표준으로 바꿀 수 있습니다" : "표준 화질로 보냅니다\n눌러서 높은 화질로 바꿀 수 있습니다";
+                                    color: Theme.text;
+                                    font-size: 12px;
+                                }
+                            }
                         }
                     }
                     Rectangle {
