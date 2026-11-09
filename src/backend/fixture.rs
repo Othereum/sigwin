@@ -40,6 +40,9 @@ pub(crate) enum FxOp {
     Big { who: u32, gif: bool },
     /// the phone read `who`'s thread up to its newest message
     PhoneRead { who: u32 },
+    /// `n` read receipts from `who` for messages of ours elsewhere (a group): they file under
+    /// `who`'s 1:1 thread, which then holds nothing to show
+    Receipts { who: u32, n: u32 },
     /// a value to check: `unread`, `read_upto`, `sent`, `toasts`, `window`
     Query { what: String, who: u32 },
 }
@@ -70,6 +73,7 @@ impl FxOp {
             "gifs" => Self::Gifs { who, n, same },
             "big" => Self::Big { who, gif },
             "phone-read" => Self::PhoneRead { who },
+            "receipts" => Self::Receipts { who, n },
             "query" => Self::Query { what, who },
             _ => anyhow::bail!("unknown fixture op: {cmd}"),
         })
@@ -117,6 +121,14 @@ fn incoming_dm(who: u32, dm: DataMessage, me: Uuid) -> Content {
             server_guid: None,
         },
     )
+}
+
+/// `who` telling us they read our message `ts`.
+fn read_receipt(who: u32, ts: u64, me: Uuid) -> Content {
+    let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Read as i32), timestamp: vec![ts] };
+    let mut c = incoming_dm(who, DataMessage { timestamp: Some(ts), ..Default::default() }, me);
+    c.body = ContentBody::ReceiptMessage(receipt);
+    c
 }
 
 /// Our phone telling us it read `who`'s message `ts` (a read sync).
@@ -258,6 +270,15 @@ impl App {
                 let rows = self.index.page(&thread, i64::MAX, 1).await?;
                 let ts = rows.first().map(|r| r.1).ok_or_else(|| anyhow::anyhow!("thread {who} is empty"))?;
                 self.content(read_sync(who, ts, me)).await;
+            }
+            FxOp::Receipts { who, n } => {
+                let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));
+                for _ in 0..n {
+                    let ts = self.fx_ts();
+                    let c = read_receipt(who, ts, me);
+                    self.store.save_message(&thread, c.clone()).await?;
+                    self.content(c).await;
+                }
             }
             FxOp::Query { what, who } => return Ok(self.fixture_query(&what, who)),
         }

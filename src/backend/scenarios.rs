@@ -224,6 +224,25 @@ fn news_in_another_thread_is_counted() {
 }
 
 #[test]
+fn someone_who_only_sent_receipts_is_not_listed() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=3").await;
+        h.op("receipts who=2 n=3").await;
+        h.settle().await;
+        let ev = h.take_events();
+        let keys = |who: u32| thread_key(&Thread::Contact(ServiceId::Aci(super::fixture::contact(who).into())));
+        let list = ev.iter().rev().find_map(|e| match e {
+            Event::Threads(l) => Some(l),
+            _ => None,
+        });
+        let list = list.expect("a thread list");
+        assert!(list.iter().any(|t| t.key == keys(1)));
+        assert!(!list.iter().any(|t| t.key == keys(2)), "a thread of receipts only is listed");
+    });
+}
+
+#[test]
 fn the_button_goes_to_the_first_unread_then_to_the_bottom() {
     scenario(|| async {
         let mut h = Harness::new().await;

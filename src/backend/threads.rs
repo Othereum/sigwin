@@ -80,6 +80,11 @@ impl App {
                     (ts, s)
                 }
             };
+            // receipts file under the sender's 1:1 thread, also for group messages: one that holds
+            // only those is someone we never talked with
+            if display_ts == 0 && matches!(row.thread, Thread::Contact(_)) {
+                continue;
+            }
             let name = self.thread_name(&row.thread).await;
             list.push((
                 self.index.seq_of(&row.thread, display_ts).await.ok().flatten().unwrap_or(0),
