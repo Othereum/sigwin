@@ -116,7 +116,7 @@ impl App {
                 self.names.clear();
                 self.threads_dirty = true;
             }
-            Received::DecryptionError(id) => debug!("decryption error from {}", id.service_id_string()),
+            Received::DecryptionError(_) => debug!("decryption error"),
             Received::Content(c) => self.content(*c).await,
         }
     }
@@ -189,7 +189,7 @@ impl App {
         }
 
         if let Kind::Receipt { read, targets } = view::classify(&c, self.me) {
-            debug!("receipt from {who} for {targets:?} read={read}", who = c.metadata.sender.raw_uuid());
+            debug!("receipt for {targets:?} read={read}");
             let who = c.metadata.sender.raw_uuid();
             match self.index.record_receipts(who, targets, if read { 2 } else { 1 }).await {
                 Ok(()) => self.drop_receipt(&c).await,
@@ -388,16 +388,16 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid) {
                 let ts = now();
                 match Box::pin(m.send_message(to, receipt, ts)).await {
                     Ok(()) => drop_sent_receipt(&mut store, to, ts).await,
-                    Err(e) => debug!("delivery receipt to {}: {e}", to.service_id_string()),
+                    Err(e) => debug!("delivery receipt: {e}"),
                 }
             }
             Outgoing::Read { to, timestamps } => {
-                debug!("read receipt to {} for {timestamps:?}", to.service_id_string());
+                debug!("read receipt for {timestamps:?}");
                 let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Read as i32), timestamp: timestamps };
                 let ts = now();
                 match Box::pin(m.send_message(to, receipt, ts)).await {
                     Ok(()) => drop_sent_receipt(&mut store, to, ts).await,
-                    Err(e) => debug!("read receipt to {}: {e}", to.service_id_string()),
+                    Err(e) => debug!("read receipt: {e}"),
                 }
             }
             Outgoing::ReadSync(read) => {

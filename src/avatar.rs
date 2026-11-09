@@ -145,7 +145,7 @@ impl Job {
                         }
                     }
                     Err(e) => {
-                        debug!("profile {uuid}: {e}");
+                        debug!("profile: {e}");
                         if let Some(old) = cached {
                             let _ = self.store.save_profile(uuid, key, old).await;
                         }
@@ -159,7 +159,7 @@ impl Job {
             match Box::pin(self.manager.retrieve_profile_avatar_by_uuid(uuid, key)).await {
                 Ok(Some(b)) => return (Some(b), fetched),
                 Ok(None) => {}
-                Err(e) => debug!("profile avatar {uuid}: {e}"),
+                Err(e) => debug!("profile avatar: {e}"),
             }
         }
         // the photo saved in the phone's contacts
@@ -215,7 +215,7 @@ fn cached(dir: &Path, owner: &str, key: &str, bytes: &[u8], px: u32) -> Option<T
     let rgba = match round(bytes, px) {
         Ok(r) => r,
         Err(e) => {
-            debug!("avatar {key}: {e}");
+            debug!("avatar: {e}");
             return None;
         }
     };
