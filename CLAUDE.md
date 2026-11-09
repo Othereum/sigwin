@@ -5,6 +5,7 @@
 ## Goal
 - **Light is the promise.** A feature is judged by whether it fits the memory target below.
 - **Scope is everyday messaging**: 1:1 and group conversations, attachments, notifications, message requests, starting a chat, history on linking. Group management comes only if there is room. Stories, calls and payments are out.
+- **Every bit of server surface is upkeep.** Sigwin is unofficial: Signal changes its service without notice, and whatever we use of it (endpoints, message kinds, sync flows) can break and must then be fixed by us or by an upstream we don't control. Weigh that exposure as a cost next to memory: before building a feature, say what new server surface it adds, and prefer doing more with what we already receive over reaching for more.
 - **Windows first, one platform done deeply.** Other OSes aren't built or tested. Keep platform-specific code behind a small boundary so that one can follow later.
 
 ## Where things live
