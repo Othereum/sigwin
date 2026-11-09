@@ -245,6 +245,10 @@ pub fn grid_cell_size(count: usize, n: usize) -> (u32, u32) {
 /// Makes `m` show `count` images as a grid, if that is 2 or more. `key` gets the index of each
 /// image shown and the size of its cell, and returns its key in the UI thumbnail cache.
 pub fn set_photo_grid(m: &mut MsgDto, count: usize, mut key: impl FnMut(usize, u32, u32) -> String) {
+    // no pictures: what else the row shows (a sticker) keeps its size
+    if count == 0 {
+        return;
+    }
     let cells = grid_cells(count);
     let more = count.saturating_sub(GRID_SHOWN) as u32;
     m.cells = cells

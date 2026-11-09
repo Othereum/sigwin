@@ -626,6 +626,18 @@ mod tests {
     }
 
     #[test]
+    fn stickers_keep_their_size() {
+        let data = AttachmentPointer { content_type: Some("image/webp".into()), digest: Some(vec![7; 32]), ..Default::default() };
+        let sticker = presage::proto::data_message::Sticker { data: Some(data), ..Default::default() };
+        let window = [(5u64, incoming(DataMessage { sticker: Some(sticker), ..Default::default() }))];
+        let b = build(&window, Uuid::from_u128(1), &[], &Default::default(), &LongTexts::default(), &|_: &Uuid| String::new());
+        let m = &b.items[0];
+        assert!(m.sticker && m.cells.is_empty());
+        assert_eq!((m.img_w, m.img_h), (STICKER_SIZE, STICKER_SIZE));
+        assert_eq!(b.wanted_thumbs[0].0, m.image_key);
+    }
+
+    #[test]
     fn videos_show_as_pictures() {
         let video = |d: u8| AttachmentPointer {
             content_type: Some("video/mp4".into()),
