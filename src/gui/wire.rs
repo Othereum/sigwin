@@ -105,7 +105,32 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let s = send.clone();
-    app.on_search_changed(move |q| s(Command::Search(q.to_string())));
+    let weak = app.as_weak();
+    app.global::<SearchData>().on_changed(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let d = app.global::<SearchData>();
+        if !d.get_active() {
+            UI.with_borrow_mut(|ui| {
+                ui.results.set_vec(Vec::new());
+                ui.result_dtos.clear();
+            });
+        }
+        s(Command::Search { query: d.get_query().to_string(), contacts: d.get_contacts() });
+    });
+    let weak = app.as_weak();
+    app.global::<SearchData>().on_accept(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let key = UI.with_borrow(|ui| {
+            ui.result_dtos.iter().find_map(|r| match r {
+                ResultDto::Thread(t) | ResultDto::Contact(t) => Some(t.key.clone()),
+                ResultDto::Header(_) => None,
+            })
+        });
+        let Some(key) = key else { return };
+        app.set_settings_open(false);
+        app.invoke_open_thread(key.into());
+        app.global::<SearchData>().invoke_leave_contacts();
+    });
 
     let weak = app.as_weak();
     app.global::<ThreadMenuData>().on_open(move |key, x, y| {

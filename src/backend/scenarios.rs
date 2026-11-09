@@ -3,6 +3,7 @@
 //! at the events that come out, the counts and the receipts that would have gone out.
 
 use super::fixture::harness::Harness;
+use crate::types::ResultDto;
 use super::*;
 
 /// Runs a scenario the way the backend runs: a thread with its big stack (the presage futures
@@ -220,6 +221,34 @@ fn news_in_another_thread_is_counted() {
         h.op("recv who=2 n=3").await;
         assert_eq!(h.query("unread", 2), "3");
         assert_eq!(h.query("unread", 1), "0");
+    });
+}
+
+#[test]
+fn searching_leaves_the_thread_list_whole() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 name=철수 n=2").await;
+        h.op("seed who=2 name=영희 n=2").await;
+        h.settle().await;
+        h.take_events();
+        h.cmd(Command::Search { query: "철수".into(), contacts: false }).await;
+        let ev = h.take_events();
+        let results = ev.iter().rev().find_map(|e| match e {
+            Event::Results(r) => Some(r),
+            _ => None,
+        });
+        let names: Vec<&str> = results
+            .expect("results")
+            .iter()
+            .filter_map(|r| match r {
+                ResultDto::Thread(t) => Some(t.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, ["철수"]);
+        // the unread badge and the rest count from the whole list
+        assert!(!ev.iter().any(|e| matches!(e, Event::Threads(l) if l.len() < 2)), "the thread list was cut to the search");
     });
 }
 

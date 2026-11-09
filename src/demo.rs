@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::gui::{initial, tint_rgb};
-use crate::types::{MsgDto, Mute, MuteSet, Paging, Scroll, ThreadDto, ThreadPrefs, MUTE_ALWAYS};
+use crate::types::{MsgDto, Mute, MuteSet, Paging, ResultDto, Scroll, ThreadDto, ThreadPrefs, MUTE_ALWAYS};
 
 /// Demo mode: the fake backend plus the `SIGWIN_DEMO_*` / `SIGWIN_SELFTEST` extras.
 pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Command>) {
@@ -447,6 +447,9 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                         .collect();
                     emit(Event::Replies(list));
                 }
+                if let Command::Search { query, contacts } = &c {
+                    emit(Event::Results(demo_results(&threads, query, *contacts)));
+                }
                 if let Command::SetMute { key, set } = &c {
                     demo_mute(&mut threads, key, *set);
                     emit(Event::Threads(threads.clone()));
@@ -599,6 +602,45 @@ fn demo_link_fetch(emit: &backend::Emit, url: &str) {
     });
     emit(Event::Thumb(Arc::new(demo_link_image("demo-compose-c", 44, 44))));
     emit(Event::LinkPreview { url: url.into(), card });
+}
+
+/// The sidebar's search over the demo threads and a few made-up contacts (by name only).
+fn demo_results(threads: &[ThreadDto], query: &str, contacts: bool) -> Vec<ResultDto> {
+    let q = query.trim().to_lowercase();
+    let hit = |name: &str| q.is_empty() || name.to_lowercase().contains(&q);
+    let person = |i: usize, name: &str, phone: &str| ThreadDto {
+        key: format!("c:demo-contact-{i}"),
+        name: name.into(),
+        snippet: phone.into(),
+        time: String::new(),
+        ts: 0,
+        unread: 0,
+        is_group: false,
+        mute: Mute::default(),
+        prefs: ThreadPrefs::default(),
+        phone_mentions: None,
+        readers: Vec::new(),
+        readers_more: 0,
+    };
+    let people: Vec<ThreadDto> = [("나에게 쓰는 메모", ""), ("김민준", "+82 10-1234-5678"), ("박서연", "+82 10-9876-5432"), ("이도윤", ""), ("Alice Kim", "+1 415-555-0123")]
+        .iter()
+        .enumerate()
+        .filter(|(i, (name, _))| hit(name) && (contacts || *i > 0))
+        .map(|(i, (name, phone))| person(i, name, phone))
+        .collect();
+    let mut rows = Vec::new();
+    if !contacts {
+        let found: Vec<ResultDto> = threads.iter().filter(|t| hit(&t.name)).cloned().map(ResultDto::Thread).collect();
+        if !found.is_empty() {
+            rows.push(ResultDto::Header("대화".into()));
+            rows.extend(found);
+        }
+        if !people.is_empty() {
+            rows.push(ResultDto::Header("연락처".into()));
+        }
+    }
+    rows.extend(people.into_iter().map(ResultDto::Contact));
+    rows
 }
 
 /// `App::set_mute` on the demo list.

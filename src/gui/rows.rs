@@ -441,6 +441,14 @@ pub(crate) fn thread_item(t: &ThreadDto, avatars: &HashMap<String, Image>) -> Th
     }
 }
 
+pub(crate) fn result_item(r: &ResultDto, avatars: &HashMap<String, Image>) -> ResultItem {
+    match r {
+        ResultDto::Header(text) => ResultItem { kind: ResultKind::Header, text: text.as_str().into(), thread: ThreadItem::default() },
+        ResultDto::Thread(t) => ResultItem { kind: ResultKind::Thread, text: SharedString::new(), thread: thread_item(t, avatars) },
+        ResultDto::Contact(t) => ResultItem { kind: ResultKind::Contact, text: SharedString::new(), thread: thread_item(t, avatars) },
+    }
+}
+
 /// Shows the spoilers of message `id` (clicked).
 pub(crate) fn reveal_spoilers(app: &AppWindow, id: &str) {
     use slint::Model;

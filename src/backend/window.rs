@@ -674,7 +674,7 @@ impl App {
             }
             Thread::Contact(id) => {
                 if let Some(p) = self.store.contact_by_id(id).await.ok().flatten().and_then(|c| c.phone_number) {
-                    parts.push(p.to_string());
+                    parts.push(super::threads::show_number(&p));
                 }
             }
         }

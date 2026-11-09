@@ -106,13 +106,15 @@ impl App {
                 if !self.synced {
                     self.sweep();
                     crate::update::start();
-                    self.sync_phone_mutes();
+                    self.sync_phone_storage();
                 }
                 self.synced = true;
                 self.connection("", true);
                 self.threads_dirty = true;
             }
             Received::Contacts => {
+                let n = self.store.contacts().await.map(|c| c.count()).unwrap_or(0);
+                info!(stored = n, "contact sync from the phone");
                 self.names.clear();
                 self.threads_dirty = true;
             }
@@ -151,7 +153,7 @@ impl App {
         // the phone changed something in the Storage Service (e.g. a chat's notifications)
         if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::FetchLatest(f)), .. }) = &c.body {
             if f.r#type() == presage::proto::sync_message::fetch_latest::Type::StorageManifest {
-                self.sync_phone_mutes();
+                self.sync_phone_storage();
             }
         }
 

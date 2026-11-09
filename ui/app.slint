@@ -11,6 +11,7 @@ import { WhatsNewPage } from "whatsnew.slint";
 import { ThreadMenu, ThreadMenuData, ThreadPrefsDialog } from "thread_menu.slint";
 import { LinkPage } from "link.slint";
 import { RepliesData, RepliesDialog } from "replies.slint";
+import { ResultRow, ResultKind, SearchData } from "search.slint";
 
 // Structs and globals the Rust side uses.
 export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, ReplyItem, MentionItem, PackItem, StickerItem } from "types.slint";
@@ -18,6 +19,7 @@ export { Anim, Links, Theme } from "theme.slint";
 export { ImageViewer } from "viewer.slint";
 export { SettingsData } from "settings.slint";
 export { ThreadMenuData } from "thread_menu.slint";
+export { ResultItem, ResultKind, SearchData } from "search.slint";
 export { RepliesData } from "replies.slint";
 
 export component AppWindow inherits Window {
@@ -85,7 +87,6 @@ export component AppWindow inherits Window {
     in property <[PendingFile]> pending-files;
     // a photo is among them: the quality it goes at can be picked
     in property <bool> pending-has-photo;
-    in-out property <string> search;
     in-out property <string> draft;
 
     callback start-link(string);
@@ -108,7 +109,6 @@ export component AppWindow inherits Window {
     callback save-clicked(string);
     callback reply(string);
     callback cancel-reply();
-    callback search-changed(string);
     callback unlink();
 
     // settings page (over the conversation pane)
@@ -337,7 +337,13 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     padding: 10px;
                     spacing: 6px;
-                    Rectangle {
+                    // the contact list: the way back to the threads
+                    if SearchData.contacts: IconButton {
+                        y: (parent.height - self.height) / 2;
+                        label: "←";
+                        clicked => { SearchData.leave-contacts(); }
+                    }
+                    if !SearchData.contacts: Rectangle {
                         width: 32px;
                         // as tall as the search box beside it
                         min-height: 36px;
@@ -380,10 +386,34 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    LineEdit {
-                        placeholder-text: "검색";
-                        text <=> root.search;
-                        edited(t) => { root.search-changed(t); }
+                    search-edit := LineEdit {
+                        placeholder-text: SearchData.contacts ? "이름, 전화번호" : "검색";
+                        text <=> SearchData.query;
+                        edited => { SearchData.changed(); }
+                        accepted => { SearchData.accept(); }
+                        key-pressed(event) => {
+                            if (event.text != Key.Escape) {
+                                return reject;
+                            }
+                            if (SearchData.query != "") {
+                                SearchData.query = "";
+                                SearchData.changed();
+                            } else {
+                                SearchData.leave-contacts();
+                            }
+                            accept
+                        }
+                    }
+                    // start a conversation: the contact list
+                    if !SearchData.contacts: IconButton {
+                        y: (parent.height - self.height) / 2;
+                        label: "✎";
+                        clicked => {
+                            SearchData.contacts = true;
+                            SearchData.query = "";
+                            SearchData.changed();
+                            search-edit.focus();
+                        }
                     }
                 }
                 if root.connection-text != "": Rectangle {
@@ -399,15 +429,46 @@ export component AppWindow inherits Window {
                         vertical-alignment: center;
                     }
                 }
-                ListView {
-                    for t in root.threads: ThreadRow {
-                        item: t;
-                        selected: t.key == root.current-key;
-                        clicked => {
-                            root.settings-open = false;
-                            root.open-thread(t.key);
+                // the threads, or the search's results over them (the threads keep their place)
+                Rectangle {
+                    vertical-stretch: 1;
+                    ListView {
+                        visible: !SearchData.active;
+                        for t in root.threads: ThreadRow {
+                            item: t;
+                            selected: t.key == root.current-key;
+                            clicked => {
+                                root.settings-open = false;
+                                root.open-thread(t.key);
+                            }
+                            menu(x, y) => { ThreadMenuData.open(t.key, x, y); }
                         }
-                        menu(x, y) => { ThreadMenuData.open(t.key, x, y); }
+                    }
+                    if SearchData.active: ListView {
+                        for r in SearchData.results: ResultRow {
+                            item: r;
+                            selected: r.kind != ResultKind.header && r.thread.key == root.current-key;
+                            clicked => {
+                                if (r.kind != ResultKind.header) {
+                                    root.settings-open = false;
+                                    root.open-thread(r.thread.key);
+                                    SearchData.leave-contacts();
+                                }
+                            }
+                            menu(x, y) => {
+                                if (r.kind == ResultKind.thread) {
+                                    ThreadMenuData.open(r.thread.key, x, y);
+                                }
+                            }
+                        }
+                    }
+                    if SearchData.active && SearchData.results.length == 0: Text {
+                        y: 24px;
+                        width: parent.width;
+                        horizontal-alignment: center;
+                        text: SearchData.contacts && SearchData.query == "" ? "연락처가 없습니다" : "결과가 없습니다";
+                        color: Theme.subtle;
+                        font-size: 13px;
                     }
                 }
                 if root.whatsnew-offer: Rectangle {

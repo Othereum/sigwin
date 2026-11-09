@@ -50,8 +50,10 @@ mod ops;
 mod receive;
 #[cfg(test)]
 mod scenarios;
+mod search;
 mod send;
 mod stickers;
+mod storage;
 mod threads;
 mod typing;
 mod window;
@@ -168,10 +170,13 @@ struct Persist {
     /// groups whose mentions don't notify while muted, on the phone (`dontNotifyForMentionsIfMuted`)
     #[serde(default)]
     phone_no_mentions: HashSet<String>,
-    /// what the last Storage Service read collected (`mute::STORAGE_FORMAT`); older reads
+    /// what the last Storage Service read collected (`storage::STORAGE_FORMAT`); older reads
     /// are redone even when the manifest is unchanged
     #[serde(default)]
     storage_format: u32,
+    /// thread keys of the people the phone lists as contacts (Storage Service); empty until read
+    #[serde(default)]
+    listed: HashSet<String>,
     /// thread key -> its own notification settings (only threads with any)
     #[serde(default)]
     thread_prefs: HashMap<String, crate::types::ThreadPrefs>,
@@ -214,7 +219,7 @@ enum Internal {
     PinsIndexed,
     Swept { sweep: HashMap<String, SweepState>, changed: Vec<String> },
     Avatars(crate::avatar::Done),
-    PhoneMutes(Result<Option<mute::PhoneMutes>, String>),
+    PhoneStorage(Result<Option<storage::PhoneStorage>, String>),
     /// a fixture operation (`fixture.rs`); the sender hears back once it and the flush after it are done
     Fixture(fixture::FxOp, std::sync::mpsc::Sender<String>),
 }
@@ -322,7 +327,7 @@ struct App {
     persist_dirty: bool,
     names: HashMap<Uuid, String>,
     threads: Vec<ThreadDto>,
-    search: String,
+    search: search::Search,
     current: Option<Open>,
     current_dirty: bool,
     threads_dirty: bool,
@@ -384,7 +389,7 @@ struct App {
     notes: notify::Notifier,
     /// a thread's "notifications off" runs out then (the list shows it)
     mute_due: Option<u64>,
-    mutes_syncing: bool,
+    storage_syncing: bool,
     /// stops the GIF that plays (`gif.rs`)
     gif_stop: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
@@ -493,7 +498,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         persist_dirty: false,
         names: HashMap::new(),
         threads: Vec::new(),
-        search: String::new(),
+        search: Default::default(),
         current: None,
         current_dirty: false,
         threads_dirty: false,
@@ -532,7 +537,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         grid_gen: Default::default(),
         notes: Default::default(),
         mute_due: None,
-        mutes_syncing: false,
+        storage_syncing: false,
         gif_stop: None,
     };
     if sealed_now {
@@ -699,10 +704,7 @@ impl App {
                     self.emit_messages(Scroll::Keep).await;
                 }
             }
-            Command::Search(s) => {
-                self.search = s;
-                self.emit_threads().await;
-            }
+            Command::Search { query, contacts } => self.set_search(query, contacts).await,
             Command::WindowFocus(f) => {
                 self.focused = f;
                 if f {
@@ -892,7 +894,7 @@ impl App {
                 }
                 self.run_avatars();
             }
-            Internal::PhoneMutes(res) => self.phone_mutes(res),
+            Internal::PhoneStorage(res) => self.phone_storage(res).await,
             Internal::Fixture(op, ack) => {
                 let out = self.fixture_op(op).await;
                 // what the op queued goes out now, so the ack means "done and shown"

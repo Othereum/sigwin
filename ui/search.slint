@@ -1,0 +1,65 @@
+// The sidebar's search: threads and contacts from the thread list, or the contact list the ✎
+// button opens to start a conversation.
+
+import { ThreadItem } from "types.slint";
+import { Theme } from "theme.slint";
+import { ThreadRow } from "thread_row.slint";
+
+export enum ResultKind { header, thread, contact }
+
+export struct ResultItem {
+    kind: ResultKind,
+    // a header's title
+    text: string,
+    thread: ThreadItem,
+}
+
+export global SearchData {
+    in-out property <string> query;
+    // the contact list (✎) instead of the search over everything
+    in-out property <bool> contacts;
+    in property <[ResultItem]> results;
+    // the list shows the results instead of the threads
+    out property <bool> active: query != "" || contacts;
+    // the query or the scope changed
+    callback changed();
+    // Enter: the first row that opens something
+    callback accept();
+
+    public function leave-contacts() {
+        if (contacts) {
+            contacts = false;
+            query = "";
+            changed();
+        }
+    }
+}
+
+export component ResultRow inherits Rectangle {
+    in property <ResultItem> item;
+    in property <bool> selected;
+    callback clicked;
+    callback menu(length, length);
+    height: item.kind == ResultKind.header ? 30px : 64px;
+    if item.kind == ResultKind.header: Text {
+        x: 12px;
+        y: 0;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: item.text;
+        color: Theme.subtle;
+        font-size: 12px;
+        font-weight: 600;
+        vertical-alignment: center;
+    }
+    if item.kind != ResultKind.header: ThreadRow {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        item: root.item.thread;
+        selected: root.selected;
+        clicked => { root.clicked(); }
+        menu(x, y) => { root.menu(x, y); }
+    }
+}

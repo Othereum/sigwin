@@ -9,11 +9,11 @@ use i_slint_core::styled_text::{sigwin_clear_plain_styles, sigwin_set_plain_styl
 use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::types::{ClickedMedia, Command, Event, MsgDto, Paging, Scroll, ThreadDto};
+use crate::types::{ClickedMedia, Command, Event, MsgDto, Paging, ResultDto, Scroll, ThreadDto};
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
     AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, NoteLine, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem,
-    SettingsData, StickerItem, Theme, ThreadItem, ThreadMenuData,
+    ResultItem, ResultKind, SearchData, SettingsData, StickerItem, Theme, ThreadItem, ThreadMenuData,
 };
 
 pub(crate) mod anim;
@@ -42,6 +42,9 @@ pub(crate) struct Ui {
     pub(crate) threads: Rc<VecModel<ThreadItem>>,
     /// the backend's last thread list; `threads` is this with drafts merged in
     thread_dtos: Vec<ThreadDto>,
+    /// the sidebar's search or contact list, while one is on
+    results: Rc<VecModel<ResultItem>>,
+    result_dtos: Vec<ResultDto>,
     /// unsent composer contents by thread key (`drafts.enc`)
     pub(crate) drafts: HashMap<String, drafts::Draft>,
     pub(crate) drafts_path: PathBuf,
@@ -122,6 +125,7 @@ pub(crate) fn bind_models(app: &AppWindow) {
     });
     UI.with_borrow(|ui| {
         app.set_threads(ModelRc::from(ui.threads.clone()));
+        app.global::<SearchData>().set_results(ModelRc::from(ui.results.clone()));
         app.set_messages(ModelRc::from(ui.messages.clone()));
         app.set_packs(ModelRc::from(ui.sticker.packs.clone()));
         app.set_stickers(ModelRc::from(ui.sticker.stickers.clone()));
@@ -243,6 +247,15 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             show_total_unread(app, ui);
             drafts::show_threads(ui);
             header_avatar(app, ui);
+        }),
+        Event::Results(list) => UI.with_borrow_mut(|ui| {
+            // a late answer to a search the user already left
+            if !app.global::<SearchData>().get_active() {
+                return;
+            }
+            let items: Vec<ResultItem> = list.iter().map(|r| result_item(r, &ui.avatars)).collect();
+            ui.results.set_vec(items);
+            ui.result_dtos = list;
         }),
         Event::RecentReactions(list) => {
             let list: Vec<SharedString> = list.iter().map(|e| e.as_str().into()).collect();

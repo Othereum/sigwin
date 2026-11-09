@@ -63,7 +63,8 @@ export component ThreadRow inherits Rectangle {
                     horizontal-stretch: 0;
                 }
             }
-            HorizontalLayout {
+            // nothing to put on the second line (a contact without a number): the name alone, centered
+            if item.snippet != "" || item.draft || item.unread > 0 || item.readers.length > 0: HorizontalLayout {
                 spacing: 6px;
                 HorizontalLayout {
                     spacing: 3px;

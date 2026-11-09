@@ -29,6 +29,17 @@ pub fn parse_thread_key(key: &str) -> Option<Thread> {
     }
 }
 
+/// A row of the sidebar's search, or of its contact list.
+#[derive(Debug, Clone)]
+pub enum ResultDto {
+    /// a section's title
+    Header(String),
+    /// a thread from the list
+    Thread(ThreadDto),
+    /// someone to start (or go on with) a 1:1 conversation; `snippet` is their number
+    Contact(ThreadDto),
+}
+
 #[derive(Debug, Clone)]
 pub struct ThreadDto {
     pub key: String,
@@ -513,6 +524,8 @@ pub enum Event {
     LinkStatus(String),
     Ready,
     Threads(Vec<ThreadDto>),
+    /// the sidebar's search or contact list (sent while one is on)
+    Results(Vec<ResultDto>),
     Header { name: String, sub: String },
     /// who can be @mentioned in the open thread: (uuid, name); empty outside groups
     Members(Vec<crate::mention::Member>),
@@ -619,7 +632,8 @@ pub enum Command {
     SaveViewed { id: String, index: usize, owner: isize },
     /// "더 읽기" on a row: show more of its text
     ReadMore(String),
-    Search(String),
+    /// the sidebar's search; `contacts`: the contact list the ✎ button opens
+    Search { query: String, contacts: bool },
     /// the user is working in the window: it has the focus and they are not away. Otherwise
     /// notifications show and nothing is read.
     WindowFocus(bool),

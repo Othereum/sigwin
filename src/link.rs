@@ -104,14 +104,21 @@ pub fn domain(url: &str) -> String {
 /// Text from a preview, which anyone can make say anything: one line, no control or direction
 /// characters, at most `max` characters.
 pub fn clean_preview_text(text: &str, max: usize) -> String {
-    let hidden = |c: char| c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}');
-    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut out: String = line.chars().filter(|c| !hidden(*c)).take(max + 1).collect();
+    let mut out: String = one_line(text).chars().take(max + 1).collect();
     if out.chars().count() > max {
         out = out.chars().take(max).collect::<String>().trim_end().to_string();
         out.push('…');
     }
     out
+}
+
+/// Text from someone else (a page title, a name) as one plain line: whitespace runs become one
+/// space, and control and direction marks go. Android wraps synced contact names in direction
+/// isolates, which would otherwise lead the name: its initial, its place in a sorted list.
+pub fn one_line(text: &str) -> String {
+    let hidden = |c: char| (c.is_control() && !c.is_whitespace()) || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}');
+    let kept: String = text.chars().filter(|c| !hidden(*c)).collect();
+    kept.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub fn open(url: &str) {

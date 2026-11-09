@@ -3,6 +3,24 @@
 use super::window::{fetch_rows, is_incoming, newly_read};
 use super::*;
 
+pub(super) const NOTE_TO_SELF: &str = "나에게 쓰는 메모";
+
+/// A number as people write it: "+82 10-1234-5678".
+pub(super) fn show_number(p: &presage::libsignal_service::prelude::phonenumber::PhoneNumber) -> String {
+    p.format().mode(presage::libsignal_service::prelude::phonenumber::Mode::International).to_string()
+}
+
+/// A group's title as shown; "그룹" without one.
+pub(super) fn group_name(title: &str) -> String {
+    let t = crate::link::one_line(title);
+    if t.is_empty() { "그룹".into() } else { t }
+}
+
+/// What someone is called when there's no name, profile or number to go by.
+pub(super) fn unknown_name(uuid: Uuid) -> String {
+    format!("알 수 없음 ({})", &uuid.to_string()[..8])
+}
+
 impl App {
     pub(super) async fn name(&mut self, uuid: Uuid) -> String {
         if let Some(n) = self.names.get(&uuid) {
@@ -10,7 +28,7 @@ impl App {
         }
         let sid = ServiceId::Aci(uuid.into());
         let contact = self.store.contact_by_id(&sid).await.ok().flatten();
-        let mut name = contact.as_ref().map(|c| c.name.trim().to_string()).unwrap_or_default();
+        let mut name = contact.as_ref().map(|c| crate::link::one_line(&c.name)).unwrap_or_default();
         if name.is_empty() {
             if let Ok(Some(key)) = self.store.profile_key(&sid).await {
                 if let Ok(Some(p)) = self.store.profile(uuid, key).await {
@@ -36,8 +54,8 @@ impl App {
         if name.is_empty() {
             name = contact
                 .and_then(|c| c.phone_number)
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| format!("알 수 없음 ({})", &uuid.to_string()[..8]));
+                .map(|p| show_number(&p))
+                .unwrap_or_else(|| unknown_name(uuid));
         }
         self.names.insert(uuid, name.clone());
         name
@@ -45,11 +63,11 @@ impl App {
 
     pub(super) async fn thread_name(&mut self, thread: &Thread) -> String {
         match thread {
-            Thread::Contact(id) if id.raw_uuid() == self.me => "나에게 쓰는 메모".into(),
+            Thread::Contact(id) if id.raw_uuid() == self.me => NOTE_TO_SELF.into(),
             Thread::Contact(id) => self.name(id.raw_uuid()).await,
             Thread::Group(key) => match self.store.group(*key).await {
-                Ok(Some(g)) if !g.title.is_empty() => g.title,
-                _ => "그룹".into(),
+                Ok(Some(g)) => group_name(&g.title),
+                _ => group_name(""),
             },
         }
     }
@@ -119,7 +137,7 @@ impl App {
                         prefs: self.prefs(&key),
                         phone_mentions: self.phone_mentions(&key),
                         key,
-                        name: if g.title.is_empty() { "그룹".into() } else { g.title },
+                        name: group_name(&g.title),
                         snippet: String::new(),
                         time: String::new(),
                         ts: 0,
@@ -364,43 +382,8 @@ impl App {
     }
 
     pub(super) async fn emit_threads(&mut self) {
-        let q = self.search.trim().to_lowercase();
-        if q.is_empty() {
-            (self.emit)(Event::Threads(self.threads.clone()));
-            return;
-        }
-        let mut out: Vec<ThreadDto> =
-            self.threads.iter().filter(|t| t.name.to_lowercase().contains(&q)).cloned().collect();
-        // contacts without a conversation yet, so new chats can be started
-        if let Ok(contacts) = self.store.contacts().await {
-            for c in contacts.flatten() {
-                let key = format!("c:{}", c.uuid);
-                if out.iter().any(|t| t.key == key) || self.threads.iter().any(|t| t.key == key) {
-                    continue;
-                }
-                let phone = c.phone_number.as_ref().map(|p| p.to_string()).unwrap_or_default();
-                if c.name.to_lowercase().contains(&q) || (!phone.is_empty() && phone.contains(&q)) {
-                    out.push(ThreadDto {
-                        mute: self.mute(&key),
-                        prefs: self.prefs(&key),
-                        phone_mentions: None,
-                        key,
-                        name: if c.name.is_empty() { phone } else { c.name },
-                        snippet: "새 대화 시작".into(),
-                        time: String::new(),
-                        ts: 0,
-                        unread: 0,
-                        is_group: false,
-                        readers: Vec::new(),
-                        readers_more: 0,
-                    });
-                }
-                if out.len() > 200 {
-                    break;
-                }
-            }
-        }
-        (self.emit)(Event::Threads(out));
+        (self.emit)(Event::Threads(self.threads.clone()));
+        self.emit_results().await;
     }
 
     pub(super) fn mark_read(&mut self, key: &str) {
@@ -506,7 +489,8 @@ pub(super) async fn newest_shown(
 /// Profile display name like the official apps: CJK names are family first with no space
 /// ("홍길동"), everything else "given family".
 pub(super) fn combine_names(given: &str, family: &str) -> String {
-    let (given, family) = (given.trim(), family.trim());
+    let (given, family) = (crate::link::one_line(given), crate::link::one_line(family));
+    let (given, family) = (given.as_str(), family.as_str());
     if given.is_empty() || family.is_empty() {
         return format!("{given}{family}");
     }
@@ -566,5 +550,8 @@ mod tests {
         assert_eq!(combine_names("길동", "Hong"), "길동 Hong");
         assert_eq!(combine_names(" 홍길동 ", ""), "홍길동");
         assert_eq!(combine_names("", "홍"), "홍");
+        // synced names come wrapped in direction isolates
+        assert_eq!(combine_names("\u{2068}길동\u{2069}", "\u{2068}홍\u{2069}"), "홍길동");
+        assert_eq!(group_name(" \u{2068}\u{2069} "), "그룹");
     }
 }
