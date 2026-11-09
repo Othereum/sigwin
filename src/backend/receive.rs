@@ -49,31 +49,18 @@ impl App {
         });
     }
 
-    /// One-time: index receipts presage stored before we kept our own receipt index.
-    pub(super) fn backfill_receipts(&self) {
+    /// One-time: receipts presage stored before they were dropped as they came and went are
+    /// indexed and removed (`move_receipts_out`).
+    pub(super) fn move_receipts_out(&self) {
         let (store, index, me, tx) = (self.store.clone(), self.index.clone(), self.me, self.tx.clone());
         tokio::task::spawn_local(async move {
-            let Ok(threads) = index.threads().await else { return };
-            let mut n = 0usize;
-            for row in threads {
-                // receipts are always filed under the sender's 1:1 thread
-                if !matches!(row.thread, Thread::Contact(_)) {
-                    continue;
+            match move_receipts_out(store, &index, me).await {
+                Ok(n) => {
+                    info!("receipts moved out of the message store: {n} rows");
+                    let _ = tx.send(Internal::ReceiptsMoved);
                 }
-                let Ok(msgs) = store.messages(&row.thread, ..).await else { continue };
-                for c in msgs.flatten() {
-                    if let Kind::Receipt { read, targets } = view::classify(&c, me) {
-                        let who = c.metadata.sender.raw_uuid();
-                        n += targets.len();
-                        if let Err(e) = index.record_receipts(who, targets, if read { 2 } else { 1 }).await {
-                            warn!("index receipts: {e:#}");
-                        }
-                    }
-                }
-                tokio::task::yield_now().await;
+                Err(e) => warn!("move receipts out: {e:#}"),
             }
-            info!("receipt index backfilled: {n} receipts");
-            let _ = tx.send(Internal::ReceiptsIndexed);
         });
     }
 
@@ -204,8 +191,9 @@ impl App {
         if let Kind::Receipt { read, targets } = view::classify(&c, self.me) {
             debug!("receipt from {who} for {targets:?} read={read}", who = c.metadata.sender.raw_uuid());
             let who = c.metadata.sender.raw_uuid();
-            if let Err(e) = self.index.record_receipts(who, targets, if read { 2 } else { 1 }).await {
-                warn!("record receipts: {e:#}");
+            match self.index.record_receipts(who, targets, if read { 2 } else { 1 }).await {
+                Ok(()) => self.drop_receipt(&c).await,
+                Err(e) => warn!("record receipts: {e:#}"),
             }
             if let Some(open) = &self.current {
                 if targets.iter().any(|t| open.window.iter().any(|(ts, _)| ts == t)) {
@@ -392,19 +380,24 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid) {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     };
+    let mut store = m.store().clone();
     for o in out {
         match o {
             Outgoing::Delivery { to, timestamps } => {
                 let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Delivery as i32), timestamp: timestamps };
-                if let Err(e) = Box::pin(m.send_message(to, receipt, now())).await {
-                    debug!("delivery receipt to {}: {e}", to.service_id_string());
+                let ts = now();
+                match Box::pin(m.send_message(to, receipt, ts)).await {
+                    Ok(()) => drop_sent_receipt(&mut store, to, ts).await,
+                    Err(e) => debug!("delivery receipt to {}: {e}", to.service_id_string()),
                 }
             }
             Outgoing::Read { to, timestamps } => {
                 debug!("read receipt to {} for {timestamps:?}", to.service_id_string());
                 let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Read as i32), timestamp: timestamps };
-                if let Err(e) = Box::pin(m.send_message(to, receipt, now())).await {
-                    debug!("read receipt to {}: {e}", to.service_id_string());
+                let ts = now();
+                match Box::pin(m.send_message(to, receipt, ts)).await {
+                    Ok(()) => drop_sent_receipt(&mut store, to, ts).await,
+                    Err(e) => debug!("read receipt to {}: {e}", to.service_id_string()),
                 }
             }
             Outgoing::ReadSync(read) => {
@@ -423,6 +416,72 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid) {
                     debug!("read sync: {e}");
                 }
             }
+        }
+    }
+}
+
+/// presage stores receipts as rows of a 1:1 thread, where nothing shows them: the ones we get
+/// under the sender's (also for group messages), the ones we send under the recipient's. They
+/// made most of the stored rows and each reader of rows had to look past them, so they don't
+/// stay: `ls_receipts` keeps what the ones we get say.
+fn is_receipt(c: &Content) -> bool {
+    matches!(c.body, ContentBody::ReceiptMessage(_))
+}
+
+/// Removes the row at `ts` in `thread` if it still is a receipt: rows are keyed by (sent
+/// timestamp, thread), so a message stored since at the same key has replaced it.
+async fn drop_stored(store: &mut SqliteStore, thread: &Thread, ts: u64) -> anyhow::Result<bool> {
+    match store.message(thread, ts).await? {
+        Some(row) if is_receipt(&row) => Ok(store.delete_message(thread, ts).await?),
+        _ => Ok(false),
+    }
+}
+
+/// The row presage stored for a receipt we sent.
+async fn drop_sent_receipt(store: &mut SqliteStore, to: ServiceId, ts: u64) {
+    if let Err(e) = drop_stored(store, &Thread::Contact(to), ts).await {
+        warn!("drop sent receipt: {e:#}");
+    }
+}
+
+/// Indexes the receipts we got, stored in 1:1 threads, and removes them and the ones we sent
+/// from the store. Returns the rows removed.
+pub(super) async fn move_receipts_out(mut store: SqliteStore, index: &Index, me: Uuid) -> anyhow::Result<usize> {
+    let mut n = 0usize;
+    for row in index.threads().await? {
+        if !matches!(row.thread, Thread::Contact(_)) {
+            continue;
+        }
+        let mut after = 0u64;
+        loop {
+            let tss = index.page_after(&row.thread, after, 200).await?;
+            let (Some(&first), Some(&last)) = (tss.first(), tss.last()) else { break };
+            after = last;
+            let found: Vec<Content> = store.messages(&row.thread, first..=last).await?.flatten().filter(is_receipt).collect();
+            for c in &found {
+                if let Kind::Receipt { read, targets } = view::classify(c, me) {
+                    index.record_receipts(c.metadata.sender.raw_uuid(), targets, if read { 2 } else { 1 }).await?;
+                }
+                let ts = c.metadata.client_timestamp.timestamp_millis() as u64;
+                if drop_stored(&mut store, &row.thread, ts).await? {
+                    n += 1;
+                }
+            }
+            if (tss.len() as u32) < 200 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+    Ok(n)
+}
+
+impl App {
+    async fn drop_receipt(&mut self, c: &Content) {
+        let Ok(thread) = Thread::try_from(c) else { return };
+        let ts = c.metadata.client_timestamp.timestamp_millis() as u64;
+        if let Err(e) = drop_stored(&mut self.store, &thread, ts).await {
+            warn!("drop stored receipt: {e:#}");
         }
     }
 }

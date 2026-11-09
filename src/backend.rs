@@ -114,9 +114,9 @@ struct Persist {
     unread: HashMap<String, u32>,
     /// key -> (db last_ts, display ts, text)
     snippets: HashMap<String, (u64, u64, String)>,
-    /// receipts already stored before the receipt index existed have been indexed
+    /// receipts stored before they were dropped as they came and went are gone (indexed first)
     #[serde(default)]
-    receipts_indexed: bool,
+    receipts_dropped: bool,
     /// the phone's "typing indicators" setting (configuration sync); None = not received yet
     #[serde(default)]
     typing_indicators: Option<bool>,
@@ -210,7 +210,7 @@ enum Internal {
     Saved(String, PathBuf),
     ProgressDone,
     PackInstalled(Result<String, String>),
-    ReceiptsIndexed,
+    ReceiptsMoved,
     PinsIndexed,
     Swept { sweep: HashMap<String, SweepState>, changed: Vec<String> },
     Avatars(crate::avatar::Done),
@@ -633,8 +633,8 @@ impl App {
             }
         }
         self.start_receiving();
-        if !self.persist.receipts_indexed {
-            self.backfill_receipts();
+        if !self.persist.receipts_dropped {
+            self.move_receipts_out();
         }
         if !self.persist.pins_indexed
             || !self.persist.edits_indexed
@@ -873,10 +873,11 @@ impl App {
                 self.persist_dirty = true;
                 self.current_dirty = true;
             }
-            Internal::ReceiptsIndexed => {
-                self.persist.receipts_indexed = true;
+            Internal::ReceiptsMoved => {
+                self.persist.receipts_dropped = true;
                 self.persist_dirty = true;
                 self.current_dirty = true;
+                self.threads_dirty = true;
             }
             Internal::PackInstalled(Err(e)) => self.notice(format!("스티커 팩 추가 실패: {e}")),
             Internal::Avatars(done) => {

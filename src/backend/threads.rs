@@ -80,8 +80,8 @@ impl App {
                     (ts, s)
                 }
             };
-            // receipts file under the sender's 1:1 thread, also for group messages: one that holds
-            // only those is someone we never talked with
+            // nothing to show: someone we never talked with (whose receipts were stored here
+            // before they were moved out), or whose messages have all gone
             if display_ts == 0 && matches!(row.thread, Thread::Contact(_)) {
                 continue;
             }
@@ -313,9 +313,8 @@ impl App {
     }
 
     /// What the thread list shows for a thread whose last stored row is now `tail_ts`:
-    /// (sent timestamp, text). Receipts file under 1:1 threads and each one moves that row, so
-    /// this looks only at the rows since the last time. Without any it searches the whole thread,
-    /// once: a thread's last message can be thousands of receipts back.
+    /// (sent timestamp, text). Rows that don't show (reactions, edits) move that row too, so this
+    /// looks only at the rows since the last time. Without any it searches the whole thread, once.
     pub(super) async fn refresh_snippet(&mut self, key: &str, thread: &Thread, tail_ts: u64) -> (u64, String) {
         let cached = self.persist.snippets.get(key).filter(|(_, _, s)| !s.contains('\u{FFFC}')).cloned();
         let after = match &cached {

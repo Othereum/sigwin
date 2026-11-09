@@ -224,6 +224,29 @@ fn news_in_another_thread_is_counted() {
 }
 
 #[test]
+fn receipts_leave_the_message_store() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=2").await;
+        h.op("receipts who=2 n=3").await;
+        assert_eq!(h.op("query rows who=2").await, "0", "receipts arriving now are dropped");
+        // stored before that: moved out once, nothing of them lost
+        h.op("receipts who=3 n=4 old=1").await;
+        let thread = Thread::Contact(ServiceId::Aci(super::fixture::contact(3).into()));
+        let targets: Vec<u64> = h.app.index.page(&thread, i64::MAX, 100).await.unwrap().iter().map(|r| r.1).collect();
+        // and the ones we sent, which presage stores too
+        h.op("receipts who=3 n=2 mine=1").await;
+        assert_eq!(h.op("query rows who=3").await, "6");
+        let (store, me) = (h.app.store.clone(), h.app.me);
+        let moved = super::receive::move_receipts_out(store, &h.app.index, me).await.unwrap();
+        assert_eq!(moved, 6);
+        assert_eq!(h.op("query rows who=3").await, "0");
+        assert_eq!(h.op("query rows who=1").await, "2", "messages stay");
+        assert_eq!(h.app.index.receipts_for(&targets).await.unwrap().len(), 4);
+    });
+}
+
+#[test]
 fn someone_who_only_sent_receipts_is_not_listed() {
     scenario(|| async {
         let mut h = Harness::new().await;

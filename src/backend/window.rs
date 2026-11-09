@@ -364,7 +364,7 @@ impl App {
     pub(super) async fn jump_to_day(&mut self, day: i32) -> anyhow::Result<()> {
         let Some(start) = crate::view::time::day_start_ms(day) else { return Ok(()) };
         let Some(thread) = self.current.as_ref().map(|o| o.thread.clone()) else { return Ok(()) };
-        // a 1:1 thread is mostly receipts: look page by page until a message shows
+        // rows that don't show can come first: look page by page until a message shows
         let mut after = match self.index.seq_from_ts(&thread, start).await? {
             Some(seq) => seq - 1,
             None => return Ok(()),
@@ -448,7 +448,7 @@ impl App {
     pub(super) async fn reload_window(&mut self) -> anyhow::Result<()> {
         let Some(open) = self.current.as_ref() else { return Ok(()) };
         let thread = open.thread.clone();
-        // the rows it has, and what's new: not the stretch they span, which can be mostly receipts
+        // the rows it has, and what's new: not the stretch they span, which can hold rows that don't show
         let tss: Vec<u64> = open.window.iter().map(|(t, _)| *t).collect();
         let mut rows = self.index.rows_at(&thread, &tss).await?;
         if open.end_seq.is_none() {

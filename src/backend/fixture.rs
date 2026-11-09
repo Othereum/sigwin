@@ -40,9 +40,10 @@ pub(crate) enum FxOp {
     Big { who: u32, gif: bool },
     /// the phone read `who`'s thread up to its newest message
     PhoneRead { who: u32 },
-    /// `n` read receipts from `who` for messages of ours elsewhere (a group): they file under
-    /// `who`'s 1:1 thread, which then holds nothing to show
-    Receipts { who: u32, n: u32 },
+    /// `n` read receipts from `who` for messages of ours elsewhere (a group), filed under `who`'s
+    /// 1:1 thread. `old`: only stored, as before they were dropped as they came; `mine`: ours to
+    /// `who`, stored as presage stores what it sends (no sending offline)
+    Receipts { who: u32, n: u32, old: bool, mine: bool },
     /// a value to check: `unread`, `read_upto`, `sent`, `toasts`, `window`
     Query { what: String, who: u32 },
 }
@@ -54,11 +55,13 @@ impl FxOp {
         let cmd = words.next().ok_or_else(|| anyhow::anyhow!("empty fixture op"))?;
         let mut what = String::new();
         let (mut who, mut n, mut unread, mut name) = (1u32, 1u32, 0u32, String::new());
-        let (mut same, mut gif) = (false, false);
+        let (mut same, mut gif, mut old, mut mine) = (false, false, false, false);
         for w in words {
             match w.split_once('=') {
                 Some(("same", v)) => same = v != "0",
                 Some(("gif", v)) => gif = v != "0",
+                Some(("old", v)) => old = v != "0",
+                Some(("mine", v)) => mine = v != "0",
                 Some(("who", v)) => who = v.parse()?,
                 Some(("n", v)) => n = v.parse()?,
                 Some(("unread", v)) => unread = v.parse()?,
@@ -73,7 +76,7 @@ impl FxOp {
             "gifs" => Self::Gifs { who, n, same },
             "big" => Self::Big { who, gif },
             "phone-read" => Self::PhoneRead { who },
-            "receipts" => Self::Receipts { who, n },
+            "receipts" => Self::Receipts { who, n, old, mine },
             "query" => Self::Query { what, who },
             _ => anyhow::bail!("unknown fixture op: {cmd}"),
         })
@@ -168,7 +171,7 @@ impl App {
         self.me = Uuid::from_u128(ME);
         let _ = TX.set(self.tx.clone());
         // a fresh dir has nothing to index
-        self.persist.receipts_indexed = true;
+        self.persist.receipts_dropped = true;
         self.persist.pins_indexed = true;
         self.persist.edits_indexed = true;
         self.persist.reactions_indexed = true;
@@ -271,14 +274,24 @@ impl App {
                 let ts = rows.first().map(|r| r.1).ok_or_else(|| anyhow::anyhow!("thread {who} is empty"))?;
                 self.content(read_sync(who, ts, me)).await;
             }
-            FxOp::Receipts { who, n } => {
+            FxOp::Receipts { who, n, old, mine } => {
                 let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));
                 for _ in 0..n {
                     let ts = self.fx_ts();
-                    let c = read_receipt(who, ts, me);
+                    let mut c = read_receipt(who, ts, me);
+                    if mine {
+                        c.metadata.sender = ServiceId::Aci(me.into());
+                        c.metadata.destination = ServiceId::Aci(contact(who).into());
+                    }
                     self.store.save_message(&thread, c.clone()).await?;
-                    self.content(c).await;
+                    if !old && !mine {
+                        self.content(c).await;
+                    }
                 }
+            }
+            FxOp::Query { what, who } if what == "rows" => {
+                let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));
+                return Ok(self.index.page(&thread, i64::MAX, 10_000).await?.len().to_string());
             }
             FxOp::Query { what, who } => return Ok(self.fixture_query(&what, who)),
         }
