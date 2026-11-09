@@ -47,7 +47,7 @@ impl Inner {
 }
 
 /// Masks what identifies people or groups in a log line: UUIDs, phone numbers and long hex (a
-/// group's master key in a thread key, digests). A safety net for what libraries log too: code
+/// group's master key in a thread key, digests), and the path of URLs. A safety net for what libraries log too: code
 /// here shouldn't log these in the first place.
 fn scrub(line: &[u8]) -> Cow<'_, [u8]> {
     let word = |b: u8| b.is_ascii_alphanumeric();
@@ -57,20 +57,26 @@ fn scrub(line: &[u8]) -> Cow<'_, [u8]> {
         let rest = &line[i..];
         let at_start = i == 0 || !word(line[i - 1]);
         let ends_at = |n: usize| rest.len() == n || !word(rest[n]);
-        let found: Option<(usize, &[u8])> = if !at_start {
+        let found: Option<(usize, Cow<'_, [u8]>)> = if !at_start {
             None
+        } else if let Some(scheme) = [&b"https://"[..], b"http://"].into_iter().find(|s| rest.starts_with(s)) {
+            // a URL keeps its host: its path and query can hold a token or an id (network errors
+            // quote the URL of the request)
+            let end = rest.iter().position(|b| b.is_ascii_whitespace() || matches!(b, b')' | b']' | b'>' | b'"' | b'\'')).unwrap_or(rest.len());
+            let host = scheme.len() + rest[scheme.len()..end].iter().position(|b| matches!(b, b'/' | b'?' | b'#')).unwrap_or(end - scheme.len());
+            (host < end).then(|| (end, Cow::Owned([&rest[..host], b"/<path>"].concat())))
         } else if rest[0] == b'+' {
             let digits = rest[1..].iter().take_while(|b| b.is_ascii_digit()).count();
-            ((9..=15).contains(&digits) && ends_at(digits + 1)).then_some((digits + 1, b"<phone>"))
+            ((9..=15).contains(&digits) && ends_at(digits + 1)).then_some((digits + 1, Cow::Borrowed(&b"<phone>"[..])))
         } else if rest[0].is_ascii_hexdigit() {
             let hex = rest.iter().take_while(|b| b.is_ascii_hexdigit()).count();
             let uuid = rest.len() >= 36
                 && ends_at(36)
                 && rest[..36].iter().enumerate().all(|(n, b)| if matches!(n, 8 | 13 | 18 | 23) { *b == b'-' } else { b.is_ascii_hexdigit() });
             if uuid {
-                Some((36, b"<uuid>"))
+                Some((36, Cow::Borrowed(&b"<uuid>"[..])))
             } else {
-                (hex >= 32 && ends_at(hex)).then_some((hex, b"<hex>"))
+                (hex >= 32 && ends_at(hex)).then_some((hex, Cow::Borrowed(&b"<hex>"[..])))
             }
         } else {
             None
@@ -78,7 +84,7 @@ fn scrub(line: &[u8]) -> Cow<'_, [u8]> {
         if let Some((len, mask)) = found {
             let out = out.get_or_insert_with(|| Vec::with_capacity(line.len()));
             out.extend_from_slice(&line[kept..i]);
-            out.extend_from_slice(mask);
+            out.extend_from_slice(&mask);
             i += len;
             kept = i;
         } else {
@@ -176,12 +182,18 @@ mod tests {
         assert_eq!(s(&format!("c:{id}")), "c:<uuid>");
         assert_eq!(s(&format!("key=g:{}!", "ab".repeat(32))), "key=g:<hex>!");
         assert_eq!(s("to +821012345678, ok"), "to <phone>, ok");
+        assert_eq!(
+            s("error sending request for url (https://cdn3.example.org/upload/attachments/aB3x?sig=Zz9), retry"),
+            "error sending request for url (https://cdn3.example.org/<path>), retry"
+        );
+        assert_eq!(s("at http://example.org:8080/a/b c"), "at http://example.org:8080/<path> c");
         // what logs are made of stays
         for keep in [
             "2026-11-05T23:22:48.669398Z DEBUG sigwin::backend: mem: rust heap 4.8MB (peak 19.1MB)",
             "send 1762383768123 failed: HTTP 400 +09:00",
             "index.crates.io-1949cf8c6b5b557f\\euclid-0.22.13\\src\\point.rs:12:5",
             "한글은 그대로 abcdef",
+            "connecting to https://chat.signal.org",
             &"a".repeat(31),
         ] {
             assert!(matches!(scrub(keep.as_bytes()), Cow::Borrowed(_)), "{keep}");
