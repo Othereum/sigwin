@@ -9,11 +9,11 @@ use i_slint_core::styled_text::{sigwin_clear_plain_styles, sigwin_set_plain_styl
 use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::types::{ClickedMedia, Command, Event, MsgDto, Paging, ResultDto, Scroll, ThreadDto};
+use crate::types::{ClickedMedia, Command, Event, Find, MsgDto, Paging, ResultDto, Scroll, ThreadDto};
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
     AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, NoteLine, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem,
-    ResultItem, ResultKind, SearchData, SettingsData, StickerItem, Theme, ThreadItem, ThreadMenuData,
+    FindKind, ResultItem, ResultKind, SearchData, SettingsData, StickerItem, Theme, ThreadItem, ThreadMenuData,
 };
 
 pub(crate) mod anim;

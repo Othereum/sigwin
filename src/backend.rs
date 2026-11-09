@@ -51,6 +51,7 @@ mod receive;
 #[cfg(test)]
 mod scenarios;
 mod search;
+pub(crate) use search::Lead;
 mod send;
 mod stickers;
 mod storage;
@@ -220,6 +221,8 @@ enum Internal {
     Swept { sweep: HashMap<String, SweepState>, changed: Vec<String> },
     Avatars(crate::avatar::Done),
     PhoneStorage(Result<Option<storage::PhoneStorage>, String>),
+    /// what a lookup from the search found
+    Found(search::Found),
     /// a fixture operation (`fixture.rs`); the sender hears back once it and the flush after it are done
     Fixture(fixture::FxOp, std::sync::mpsc::Sender<String>),
 }
@@ -704,7 +707,8 @@ impl App {
                     self.emit_messages(Scroll::Keep).await;
                 }
             }
-            Command::Search { query, contacts } => self.set_search(query, contacts).await,
+            Command::Search { query, contacts, find } => self.set_search(query, contacts, find).await,
+            Command::StartChat(target) => self.start_chat(target),
             Command::WindowFocus(f) => {
                 self.focused = f;
                 if f {
@@ -895,6 +899,7 @@ impl App {
                 self.run_avatars();
             }
             Internal::PhoneStorage(res) => self.phone_storage(res).await,
+            Internal::Found(found) => self.found(found).await,
             Internal::Fixture(op, ack) => {
                 let out = self.fixture_op(op).await;
                 // what the op queued goes out now, so the ack means "done and shown"

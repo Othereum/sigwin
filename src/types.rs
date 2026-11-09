@@ -29,6 +29,16 @@ pub fn parse_thread_key(key: &str) -> Option<Thread> {
     }
 }
 
+/// What the contact list's search box is for: anything, or a number or username to look up
+/// (picked from its "찾기" rows).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum Find {
+    #[default]
+    Any,
+    Phone,
+    Username,
+}
+
 /// A row of the sidebar's search, or of its contact list.
 #[derive(Debug, Clone)]
 pub enum ResultDto {
@@ -38,6 +48,11 @@ pub enum ResultDto {
     Thread(ThreadDto),
     /// someone to start (or go on with) a 1:1 conversation; `snippet` is their number
     Contact(ThreadDto),
+    /// look up a number or username to start with: `target` goes back in `Command::StartChat`;
+    /// not `ready` while what's typed isn't whole yet (shown dim, `sub` says what's missing)
+    Start { label: String, sub: String, target: String, ready: bool, phone: bool },
+    /// "전화번호로 찾기" / "사용자 이름으로 찾기": sets the search box to that
+    Find(Find),
 }
 
 #[derive(Debug, Clone)]
@@ -633,7 +648,9 @@ pub enum Command {
     /// "더 읽기" on a row: show more of its text
     ReadMore(String),
     /// the sidebar's search; `contacts`: the contact list the ✎ button opens
-    Search { query: String, contacts: bool },
+    Search { query: String, contacts: bool, find: Find },
+    /// look up whom a `ResultDto::Start` row names and open the conversation with them
+    StartChat(String),
     /// the user is working in the window: it has the focus and they are not away. Otherwise
     /// notifications show and nothing is read.
     WindowFocus(bool),

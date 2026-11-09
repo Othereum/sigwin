@@ -443,9 +443,33 @@ pub(crate) fn thread_item(t: &ThreadDto, avatars: &HashMap<String, Image>) -> Th
 
 pub(crate) fn result_item(r: &ResultDto, avatars: &HashMap<String, Image>) -> ResultItem {
     match r {
-        ResultDto::Header(text) => ResultItem { kind: ResultKind::Header, text: text.as_str().into(), thread: ThreadItem::default() },
-        ResultDto::Thread(t) => ResultItem { kind: ResultKind::Thread, text: SharedString::new(), thread: thread_item(t, avatars) },
-        ResultDto::Contact(t) => ResultItem { kind: ResultKind::Contact, text: SharedString::new(), thread: thread_item(t, avatars) },
+        ResultDto::Header(text) => ResultItem { kind: ResultKind::Header, text: text.as_str().into(), ready: true, thread: ThreadItem::default() },
+        ResultDto::Thread(t) => ResultItem { kind: ResultKind::Thread, text: SharedString::new(), ready: true, thread: thread_item(t, avatars) },
+        ResultDto::Contact(t) => ResultItem { kind: ResultKind::Contact, text: SharedString::new(), ready: true, thread: thread_item(t, avatars) },
+        ResultDto::Find(f) => {
+            let (name, initial, key) = match f {
+                Find::Username => ("사용자 이름으로 찾기", "@", "username"),
+                _ => ("전화번호로 찾기", "+", "phone"),
+            };
+            ResultItem {
+                kind: ResultKind::Find,
+                text: key.into(),
+                ready: true,
+                thread: ThreadItem { name: name.into(), initial: initial.into(), color: tint(key), ..Default::default() },
+            }
+        }
+        ResultDto::Start { label, sub, target, ready, phone } => ResultItem {
+            kind: ResultKind::Start,
+            text: target.as_str().into(),
+            ready: *ready,
+            thread: ThreadItem {
+                name: label.as_str().into(),
+                snippet: sub.as_str().into(),
+                initial: if *phone { "+".into() } else { "@".into() },
+                color: tint(if *phone { "phone" } else { "username" }),
+                ..Default::default()
+            },
+        },
     }
 }
 

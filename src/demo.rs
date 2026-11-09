@@ -447,8 +447,8 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                         .collect();
                     emit(Event::Replies(list));
                 }
-                if let Command::Search { query, contacts } = &c {
-                    emit(Event::Results(demo_results(&threads, query, *contacts)));
+                if let Command::Search { query, contacts, find } = &c {
+                    emit(Event::Results(demo_results(&threads, query, *contacts, *find)));
                 }
                 if let Command::SetMute { key, set } = &c {
                     demo_mute(&mut threads, key, *set);
@@ -605,7 +605,7 @@ fn demo_link_fetch(emit: &backend::Emit, url: &str) {
 }
 
 /// The sidebar's search over the demo threads and a few made-up contacts (by name only).
-fn demo_results(threads: &[ThreadDto], query: &str, contacts: bool) -> Vec<ResultDto> {
+fn demo_results(threads: &[ThreadDto], query: &str, contacts: bool, find: types::Find) -> Vec<ResultDto> {
     let q = query.trim().to_lowercase();
     let hit = |name: &str| q.is_empty() || name.to_lowercase().contains(&q);
     let person = |i: usize, name: &str, phone: &str| ThreadDto {
@@ -628,16 +628,17 @@ fn demo_results(threads: &[ThreadDto], query: &str, contacts: bool) -> Vec<Resul
         .filter(|(i, (name, _))| hit(name) && (contacts || *i > 0))
         .map(|(i, (name, phone))| person(i, name, phone))
         .collect();
-    let mut rows = Vec::new();
+    let kr = Some(presage::libsignal_service::prelude::phonenumber::country::Id::KR);
+    let mut rows = crate::backend::Lead::of(query, find, contacts, kr).rows();
     if !contacts {
         let found: Vec<ResultDto> = threads.iter().filter(|t| hit(&t.name)).cloned().map(ResultDto::Thread).collect();
         if !found.is_empty() {
             rows.push(ResultDto::Header("대화".into()));
             rows.extend(found);
         }
-        if !people.is_empty() {
-            rows.push(ResultDto::Header("연락처".into()));
-        }
+    }
+    if !people.is_empty() && (!contacts || !rows.is_empty()) {
+        rows.push(ResultDto::Header("연락처".into()));
     }
     rows.extend(people.into_iter().map(ResultDto::Contact));
     rows

@@ -232,7 +232,7 @@ fn searching_leaves_the_thread_list_whole() {
         h.op("seed who=2 name=영희 n=2").await;
         h.settle().await;
         h.take_events();
-        h.cmd(Command::Search { query: "철수".into(), contacts: false }).await;
+        h.cmd(Command::Search { query: "철수".into(), contacts: false, find: Default::default() }).await;
         let ev = h.take_events();
         let results = ev.iter().rev().find_map(|e| match e {
             Event::Results(r) => Some(r),

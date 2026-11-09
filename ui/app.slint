@@ -11,7 +11,7 @@ import { WhatsNewPage } from "whatsnew.slint";
 import { ThreadMenu, ThreadMenuData, ThreadPrefsDialog } from "thread_menu.slint";
 import { LinkPage } from "link.slint";
 import { RepliesData, RepliesDialog } from "replies.slint";
-import { ResultRow, ResultKind, SearchData } from "search.slint";
+import { FindKind, ResultRow, ResultKind, SearchData } from "search.slint";
 
 // Structs and globals the Rust side uses.
 export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, ReplyItem, MentionItem, PackItem, StickerItem } from "types.slint";
@@ -19,7 +19,7 @@ export { Anim, Links, Theme } from "theme.slint";
 export { ImageViewer } from "viewer.slint";
 export { SettingsData } from "settings.slint";
 export { ThreadMenuData } from "thread_menu.slint";
-export { ResultItem, ResultKind, SearchData } from "search.slint";
+export { FindKind, ResultItem, ResultKind, SearchData } from "search.slint";
 export { RepliesData } from "replies.slint";
 
 export component AppWindow inherits Window {
@@ -341,7 +341,7 @@ export component AppWindow inherits Window {
                     if SearchData.contacts: IconButton {
                         y: (parent.height - self.height) / 2;
                         label: "←";
-                        clicked => { SearchData.leave-contacts(); }
+                        clicked => { SearchData.step-back(); }
                     }
                     if !SearchData.contacts: Rectangle {
                         width: 32px;
@@ -387,7 +387,10 @@ export component AppWindow inherits Window {
                         }
                     }
                     search-edit := LineEdit {
-                        placeholder-text: SearchData.contacts ? "이름, 전화번호" : "검색";
+                        placeholder-text: !SearchData.contacts ? "검색"
+                            : SearchData.find == FindKind.phone ? "전화번호 입력"
+                            : SearchData.find == FindKind.username ? "사용자 이름 (예: name.42)"
+                            : "이름, 전화번호, 사용자 이름";
                         text <=> SearchData.query;
                         edited => { SearchData.changed(); }
                         accepted => { SearchData.accept(); }
@@ -395,12 +398,7 @@ export component AppWindow inherits Window {
                             if (event.text != Key.Escape) {
                                 return reject;
                             }
-                            if (SearchData.query != "") {
-                                SearchData.query = "";
-                                SearchData.changed();
-                            } else {
-                                SearchData.leave-contacts();
-                            }
+                            SearchData.back();
                             accept
                         }
                     }
@@ -447,9 +445,16 @@ export component AppWindow inherits Window {
                     if SearchData.active: ListView {
                         for r in SearchData.results: ResultRow {
                             item: r;
-                            selected: r.kind != ResultKind.header && r.thread.key == root.current-key;
+                            selected: (r.kind == ResultKind.thread || r.kind == ResultKind.contact) && r.thread.key == root.current-key;
                             clicked => {
-                                if (r.kind != ResultKind.header) {
+                                if (r.kind == ResultKind.find) {
+                                    SearchData.pick-find(r.text);
+                                    search-edit.focus();
+                                } else if (r.kind == ResultKind.start) {
+                                    if (r.ready) {
+                                        SearchData.start(r.text);
+                                    }
+                                } else if (r.kind != ResultKind.header) {
                                     root.settings-open = false;
                                     root.open-thread(r.thread.key);
                                     SearchData.leave-contacts();

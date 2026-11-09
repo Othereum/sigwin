@@ -5,12 +5,17 @@ import { ThreadItem } from "types.slint";
 import { Theme } from "theme.slint";
 import { ThreadRow } from "thread_row.slint";
 
-export enum ResultKind { header, thread, contact }
+export enum ResultKind { header, thread, contact, start, find }
+
+// what the contact list's search box is for (its "찾기" rows pick one)
+export enum FindKind { any, phone, username }
 
 export struct ResultItem {
     kind: ResultKind,
-    // a header's title
+    // a header's title; what a start row looks up; a find row's kind ("phone", "username")
     text: string,
+    // a start row whose text is whole (a dim one can't be clicked yet)
+    ready: bool,
     thread: ThreadItem,
 }
 
@@ -18,6 +23,7 @@ export global SearchData {
     in-out property <string> query;
     // the contact list (✎) instead of the search over everything
     in-out property <bool> contacts;
+    in-out property <FindKind> find;
     in property <[ResultItem]> results;
     // the list shows the results instead of the threads
     out property <bool> active: query != "" || contacts;
@@ -25,13 +31,46 @@ export global SearchData {
     callback changed();
     // Enter: the first row that opens something
     callback accept();
+    // a start row: look up whom it names (its `text`) and open the conversation
+    callback start(string);
 
     public function leave-contacts() {
         if (contacts) {
             contacts = false;
+            find = FindKind.any;
             query = "";
             changed();
         }
+    }
+
+    // Esc: what's typed, then the "찾기" kind, then the contact list
+    public function back() {
+        if (query != "") {
+            query = "";
+            changed();
+        } else if (find != FindKind.any) {
+            find = FindKind.any;
+            changed();
+        } else {
+            leave-contacts();
+        }
+    }
+
+    // the ← button: out of a "찾기" kind, then out of the contact list
+    public function step-back() {
+        if (find != FindKind.any) {
+            find = FindKind.any;
+            query = "";
+            changed();
+        } else {
+            leave-contacts();
+        }
+    }
+
+    public function pick-find(kind: string) {
+        find = kind == "username" ? FindKind.username : FindKind.phone;
+        query = "";
+        changed();
     }
 }
 
@@ -40,7 +79,8 @@ export component ResultRow inherits Rectangle {
     in property <bool> selected;
     callback clicked;
     callback menu(length, length);
-    height: item.kind == ResultKind.header ? 30px : 64px;
+    height: item.kind == ResultKind.header ? 30px : item.kind == ResultKind.find ? 48px : 64px;
+    opacity: item.kind == ResultKind.start && !item.ready ? 0.5 : 1;
     if item.kind == ResultKind.header: Text {
         x: 12px;
         y: 0;
@@ -52,7 +92,42 @@ export component ResultRow inherits Rectangle {
         font-weight: 600;
         vertical-alignment: center;
     }
-    if item.kind != ResultKind.header: ThreadRow {
+    // an action, not someone: one line in the accent color beside a small round icon
+    if item.kind == ResultKind.find: Rectangle {
+        background: find-ta.has-hover ? Theme.hover : transparent;
+        find-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.clicked(); }
+        }
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 12px;
+            spacing: 14px;
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                width: 32px;
+                height: 32px;
+                border-radius: 16px;
+                background: find-ta.has-hover ? Theme.selected : Theme.hover;
+                Text {
+                    text: root.item.thread.initial;
+                    color: Theme.text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            Text {
+                text: root.item.thread.name;
+                color: Theme.text;
+                font-size: 14px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+    if item.kind != ResultKind.header && item.kind != ResultKind.find: ThreadRow {
         x: 0;
         y: 0;
         width: parent.width;

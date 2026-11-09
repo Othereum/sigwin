@@ -7,7 +7,7 @@ description = "A lightweight Signal-compatible desktop client (unofficial)"
 
 [dependencies]
 presage = { git = "https://github.com/whisperfish/presage", rev = "4b81740610c301cbd54d95f4dbd4cadd692af95e" }
-presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "4b81740610c301cbd54d95f4dbd4cadd692af95e" }
+presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "4b81740610c301cbd54d95f4dbd4cadd692af95e", features = ["cdsi"] }
 
 slint = { version = "1.18.1", default-features = false, features = [
     "std",

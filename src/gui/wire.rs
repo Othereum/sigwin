@@ -115,21 +115,44 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
                 ui.result_dtos.clear();
             });
         }
-        s(Command::Search { query: d.get_query().to_string(), contacts: d.get_contacts() });
+        let find = match d.get_find() {
+            FindKind::Phone => Find::Phone,
+            FindKind::Username => Find::Username,
+            FindKind::Any => Find::Any,
+        };
+        s(Command::Search { query: d.get_query().to_string(), contacts: d.get_contacts(), find });
     });
     let weak = app.as_weak();
     app.global::<SearchData>().on_accept(move || {
         let Some(app) = weak.upgrade() else { return };
-        let key = UI.with_borrow(|ui| {
-            ui.result_dtos.iter().find_map(|r| match r {
-                ResultDto::Thread(t) | ResultDto::Contact(t) => Some(t.key.clone()),
-                ResultDto::Header(_) => None,
-            })
+        let first = UI.with_borrow(|ui| {
+            ui.result_dtos
+                .iter()
+                .find(|r| matches!(r, ResultDto::Thread(_) | ResultDto::Contact(_) | ResultDto::Start { ready: true, .. }))
+                .cloned()
         });
-        let Some(key) = key else { return };
+        let d = app.global::<SearchData>();
+        match first {
+            Some(ResultDto::Thread(t) | ResultDto::Contact(t)) => {
+                app.set_settings_open(false);
+                app.invoke_open_thread(t.key.into());
+                d.invoke_leave_contacts();
+            }
+            Some(ResultDto::Start { target, .. }) => d.invoke_start(target.into()),
+            _ => {}
+        }
+    });
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.global::<SearchData>().on_start(move |target| {
+        let Some(app) = weak.upgrade() else { return };
         app.set_settings_open(false);
-        app.invoke_open_thread(key.into());
-        app.global::<SearchData>().invoke_leave_contacts();
+        let d = app.global::<SearchData>();
+        d.set_contacts(false);
+        d.set_find(FindKind::Any);
+        d.set_query("".into());
+        d.invoke_changed();
+        s(Command::StartChat(target.to_string()));
     });
 
     let weak = app.as_weak();
