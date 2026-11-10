@@ -36,6 +36,11 @@ pub enum ParseContactError {
     Uuid(#[from] uuid::Error),
     #[error("missing UUID")]
     MissingUuid,
+    // sigwin patch: contact avatar past the buffer end (receiver.rs)
+    #[error(
+        "contact avatar needs {needed} bytes, but only {remaining} remain"
+    )]
+    Truncated { needed: usize, remaining: usize },
     #[error("missing profile key")]
     MissingProfileKey,
     #[error("missing avatar content-type")]

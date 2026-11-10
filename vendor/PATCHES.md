@@ -4,8 +4,10 @@ Every hunk is marked `// sigwin patch: <why>` in the source; search for "sigwin 
 
 ## `vendor/libsignal-service`
 Same rev presage pins, wired via `[patch."https://github.com/whisperfish/libsignal-service-rs"]`. Re-vendor at the new rev when bumping presage.
+Its own unit tests can't run from our workspace (a patched non-member with dev-dependencies). Copy the crate out, append `[workspace]` to its `Cargo.toml`, and run `cargo test --lib` there with a short `CARGO_TARGET_DIR` (boring-sys's CMake build fails on long paths). Set `LIBCLANG_PATH` as `.cargo/config.toml` does.
 - `send_message_to_group` sends to up to `GROUP_SEND_CONCURRENCY` (16) members at once; upstream awaited them one by one (members x RTT).
 - **Session lock**: `cipher.rs` adds `SESSION_LOCK`, taken in `ServiceCipher::decrypt` and `encrypt` (now `pub`, for the test) and around both `process_prekey_bundle` calls in `sender.rs`. libsignal loads a session, awaits the store, then saves it, with nothing stopping another task from overlapping. A receive overlapping a send lost the send's update and the peer couldn't read our next message ("invalid Whisper message", shown there as an undeliverable message); two sends reused a counter, so one message key. Upstream bug. `tests/session_lock.rs` fails if this hunk is missed.
+- **Contact sync parsing**: `receiver.rs` `DeviceContactsIterator::next` (+ `ParseContactError::Truncated` in `models.rs`). A contact whose avatar length ran past the end of the decrypted list panicked in `copy_to_bytes`; with `panic = "abort"` that closed the app right after linking and lost the contact sync. Now the list ends with `Truncated`, keeping the contacts read so far (presage skips `Err`s). Also strips the attachment padding to `AttachmentPointer.size`, as Signal-Desktop does. Upstream bug; this is upstream PR whisperfish/libsignal-service-rs#483 as is (competing: #500). Drop the hunk once presage pins a rev with either. Unit tests in `receiver.rs` `mod tests`.
 
 ## `vendor/i-slint-renderer-software` (Slint 1.18.1, via `[patch.crates-io]`)
 Re-vendor the matching version together with `i-slint-core` when upgrading Slint, then re-apply:
