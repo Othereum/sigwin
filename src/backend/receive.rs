@@ -417,20 +417,14 @@ pub(crate) fn receipts_to_send(
     out
 }
 
-/// `tx` hears of an answer that didn't reach our other devices.
-pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid, tx: UnboundedSender<Internal>) {
-    let now = || {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
-    };
+/// Each goes out at its timestamp from `App::next_send_ts`. `tx` hears of an answer that didn't
+/// reach our other devices.
+pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<(u64, Outgoing)>, me: Uuid, tx: UnboundedSender<Internal>) {
     let mut store = m.store().clone();
-    for o in out {
+    for (ts, o) in out {
         match o {
             Outgoing::Delivery { to, timestamps } => {
                 let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Delivery as i32), timestamp: timestamps };
-                let ts = now();
                 match Box::pin(m.send_message(to, receipt, ts)).await {
                     Ok(()) => drop_sent_receipt(&mut store, to, ts).await,
                     Err(e) => debug!("delivery receipt: {e}"),
@@ -439,7 +433,6 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid, tx: 
             Outgoing::Read { to, timestamps } => {
                 debug!("read receipt for {timestamps:?}");
                 let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Read as i32), timestamp: timestamps };
-                let ts = now();
                 match Box::pin(m.send_message(to, receipt, ts)).await {
                     Ok(()) => drop_sent_receipt(&mut store, to, ts).await,
                     Err(e) => debug!("read receipt: {e}"),
@@ -457,7 +450,7 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid, tx: 
                         .collect(),
                     ..Default::default()
                 };
-                if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, now())).await {
+                if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, ts)).await {
                     debug!("read sync: {e}");
                 }
             }
@@ -478,13 +471,12 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid, tx: 
                     })),
                     ..Default::default()
                 };
-                if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, now())).await {
+                if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, ts)).await {
                     warn!("request answer sync: {e}");
                     let _ = tx.send(Internal::Notice("휴대폰에 알리지 못했습니다. 휴대폰에서도 같은 선택을 할 수 있습니다".into()));
                 }
             }
             Outgoing::ProfileKey(uuid) => {
-                let ts = now();
                 let dm = DataMessage {
                     profile_key: Some(m.registration_data().profile_key().get_bytes().to_vec()),
                     flags: Some(presage::proto::data_message::Flags::ProfileKeyUpdate as u32),

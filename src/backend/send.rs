@@ -226,10 +226,13 @@ impl App {
         (self.send_tail.insert(key.to_string(), tail), done)
     }
 
-    /// Unique, increasing send timestamps (they are the message ids).
+    /// Unique, increasing timestamps for everything we send. They are the message ids, and
+    /// presage stores rows by (thread, timestamp), replacing what is there: a receipt sent in the
+    /// same ms as a message to the same person would take its row.
     pub(super) fn next_send_ts(&self) -> u64 {
-        let last = self.pending.iter().map(|p| p.ts).chain(self.ops.iter().map(|o| o.ts)).max().unwrap_or(0);
-        now_ms().max(last + 1)
+        let ts = now_ms().max(self.last_send_ts.get() + 1);
+        self.last_send_ts.set(ts);
+        ts
     }
 }
 

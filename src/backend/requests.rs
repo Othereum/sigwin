@@ -243,6 +243,7 @@ impl App {
         }
         match (self.manager.clone(), self.offline.as_mut()) {
             (Some(m), _) => {
+                let out = out.into_iter().map(|o| (self.next_send_ts(), o)).collect();
                 tokio::task::spawn_local(receive::send_outgoing(m, out, self.me, self.tx.clone()));
             }
             (None, Some(o)) => o.sent.extend(out),

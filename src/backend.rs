@@ -366,6 +366,8 @@ struct App {
     /// per thread: resolves when the last message queued for sending is done
     send_tail: HashMap<String, oneshot::Receiver<()>>,
     ops: Vec<PendingOp>,
+    /// the last timestamp `next_send_ts` gave out
+    last_send_ts: std::cell::Cell<u64>,
     /// who is typing in the open thread
     typing: HashMap<Uuid, Instant>,
     typing_shown: String,
@@ -536,6 +538,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         link_seq: 0,
         send_tail: HashMap::new(),
         ops: Vec::new(),
+        last_send_ts: Default::default(),
         typing: HashMap::new(),
         typing_shown: String::new(),
         composing: None,

@@ -624,3 +624,14 @@ fn blocking_or_deleting_a_request_closes_it() {
         assert!(listed(&h.take_events(), 2).is_some());
     });
 }
+
+/// Everything we send gets its own timestamp, also with nothing pending: presage stores rows by
+/// (thread, timestamp), so a receipt in the same ms as a message would replace it.
+#[test]
+fn send_timestamps_never_repeat() {
+    scenario(|| async {
+        let h = Harness::new().await;
+        let tss: Vec<u64> = (0..100).map(|_| h.app.next_send_ts()).collect();
+        assert!(tss.windows(2).all(|w| w[0] < w[1]));
+    });
+}
