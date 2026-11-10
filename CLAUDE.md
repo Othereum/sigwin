@@ -57,7 +57,7 @@ UI thread (Slint) sends `Command`s to a backend thread (tokio current_thread + `
 
 ## Vendor patches: last resort
 Every hunk under `vendor/` has to be re-applied by hand on each Slint / presage upgrade, and a missed one fails silently. Keep the count down:
-- **Ask the user before adding a vendor patch or a new hunk to an existing one.** Say what it fixes, the best patch-free alternative, and what that alternative costs (a lost feature, worse looks, more app code). Don't patch first and explain afterwards.
+- **Ask the user before adding a vendor patch or a new hunk to an existing one.** Say what it fixes, the best patch-free alternative, and what that alternative costs (a lost feature, worse looks, more app code). Don't patch first and explain afterwards. Check upstream before proposing (its default branch, open issues and PRs): if a fix is merged or in flight, say so, and shape the hunk after it so it goes away when that lands.
 - Patch-free first: app-side code, public Slint API, layout tricks, or accepting a small UX loss. A patch is justified only for a real bug in the dependency (glyphs missing, wrong rendering) or a feature that's impossible otherwise **and** that the user wants.
 - Prefer patches that fix upstream bugs (they can go upstream and disappear) over app-specific hooks into dependency internals. Never use a patch only to save app code or for a cosmetic detail.
 - Keep each hunk small, marked `// sigwin patch: <why>`, and listed in `vendor/PATCHES.md` with its reason and files, so the next upgrade knows what to re-apply.
