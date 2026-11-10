@@ -548,7 +548,9 @@ pub enum Event {
     ThreadMoved { from: String, to: String },
     /// the sidebar's search or contact list (sent while one is on)
     Results(Vec<ResultDto>),
-    Header { name: String, sub: String },
+    /// `request`: a message request (someone not accepted yet wrote first): no composer, the
+    /// request bar instead
+    Header { name: String, sub: String, request: bool },
     /// who can be @mentioned in the open thread: (uuid, name); empty outside groups
     Members(Vec<crate::mention::Member>),
     Messages { key: String, items: Vec<MsgDto>, paging: Paging, scroll: Scroll },
@@ -600,6 +602,16 @@ pub enum Event {
     Account { name: String, number: String, device: String, receipts: Option<bool>, typing: Option<bool> },
     /// bytes on disk
     Storage { db: u64, attachments: u64, thumbs: u64 },
+}
+
+/// What the user did with a message request.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RequestAnswer {
+    Accept,
+    /// the chat and everything in it goes
+    Delete,
+    /// their messages are dropped from now on and the chat leaves the list (its messages stay)
+    Block,
 }
 
 pub enum Command {
@@ -658,6 +670,8 @@ pub enum Command {
     Search { query: String, contacts: bool, find: Find },
     /// look up whom a `ResultDto::Start` row names and open the conversation with them
     StartChat(String),
+    /// the request bar of message request `key`
+    AnswerRequest { key: String, answer: RequestAnswer },
     /// the user is working in the window: it has the focus and they are not away. Otherwise
     /// notifications show and nothing is read.
     WindowFocus(bool),

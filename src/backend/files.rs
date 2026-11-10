@@ -14,7 +14,8 @@ pub(super) enum ThumbShape {
 
 impl App {
     /// `key` is what the UI knows the result by, `file_key` the attachment's files on disk.
-    pub(super) fn request_thumb(&self, key: String, file_key: String, ptr: AttachmentPointer, shape: ThumbShape) {
+    /// Not `auto`: it waits for a click whatever its size (a message request's).
+    pub(super) fn request_thumb(&self, key: String, file_key: String, ptr: AttachmentPointer, shape: ThumbShape, auto: bool) {
         let thumb_path = self.paths.thumbs.join(format!("{file_key}.enc"));
         let orig_path = attachment_path(&self.paths.attachments, &file_key);
         let manager = self.manager.clone();
@@ -38,7 +39,7 @@ impl App {
                         return;
                     }
                     // stopped by a click: it stays so until the next one; a big one waits for it
-                    if downloads.was_stopped(&file_key) || (!downloads.is_allowed(&file_key) && !view::media::auto_fetches_image(&ptr)) {
+                    if downloads.was_stopped(&file_key) || (!downloads.is_allowed(&file_key) && !(auto && view::media::auto_fetches_image(&ptr))) {
                         tracing::debug!(stopped = downloads.was_stopped(&file_key), "picture waits for a click");
                         return;
                     }
@@ -79,7 +80,7 @@ impl App {
     /// A video's picture, cut to `size` (logical px): its blurhash right away, its first frame once
     /// that can be had. Videos are downloaded one at a time, newest first, and only while the row
     /// is still in the window.
-    pub(super) fn request_video_thumb(&self, key: String, file_key: String, ptr: AttachmentPointer, size: (u32, u32)) {
+    pub(super) fn request_video_thumb(&self, key: String, file_key: String, ptr: AttachmentPointer, size: (u32, u32), auto: bool) {
         let thumb_path = self.paths.thumbs.join(format!("{file_key}.enc"));
         let no_frame = no_frame_path(&self.paths.thumbs, &file_key);
         let length_path = length_path(&self.paths.thumbs, &file_key);
@@ -106,7 +107,7 @@ impl App {
                 if !orig_path.exists() {
                     // what a click asked for goes past the limits on what is fetched by itself
                     let asked = downloads.is_allowed(&file_key);
-                    if !asked && !view::media::auto_fetches_video(&ptr) {
+                    if !asked && !(auto && view::media::auto_fetches_video(&ptr)) {
                         return;
                     }
                     // by itself, videos take turns; a click doesn't wait for them

@@ -512,3 +512,115 @@ fn a_pni_thread_joins_its_person_when_they_answer() {
         assert_eq!(items.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["안녕하세요", "보셨나요", "네 반가워요"]);
     });
 }
+
+/// The thread list's row of fixture contact `who`, as last sent.
+fn listed(events: &[Event], who: u32) -> Option<ThreadDto> {
+    let key = thread_key(&Thread::Contact(ServiceId::Aci(super::fixture::contact(who).into())));
+    events.iter().rev().find_map(|e| match e {
+        Event::Threads(list) => Some(list.iter().find(|t| t.key == key).cloned()),
+        _ => None,
+    })?
+}
+
+/// Whether the last header said the open thread is a message request.
+fn header_request(events: &[Event]) -> Option<bool> {
+    events.iter().rev().find_map(|e| match e {
+        Event::Header { request, .. } => Some(*request),
+        _ => None,
+    })
+}
+
+fn key_of(who: u32) -> String {
+    thread_key(&Thread::Contact(ServiceId::Aci(super::fixture::contact(who).into())))
+}
+
+#[test]
+fn a_message_request_tells_its_sender_nothing_until_accepted() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        // the phone's storage has been read: 2 is a contact, 1 a stranger
+        h.op("phone-storage who=2 accepted=1").await;
+        h.op("recv who=1 n=2").await;
+        h.op("recv who=2 n=1").await;
+        assert_eq!(h.query("request", 1), "true");
+        assert_eq!(h.query("request", 2), "false");
+        assert_eq!(h.query("sent", 1), "delivery=1 read=0 sync=0", "only the contact hears it arrived");
+        let ev = h.take_events();
+        assert_eq!(listed(&ev, 1).expect("listed").snippet, "메시지 요청", "the text doesn't show");
+        assert_ne!(listed(&ev, 2).expect("listed").snippet, "메시지 요청");
+
+        // read on screen: our other devices hear it, the sender doesn't
+        h.open(1).await;
+        assert_eq!(header_request(&h.take_events()), Some(true), "the request bar instead of the composer");
+        h.cmd(Command::ReadUpTo(h.row(1))).await;
+        assert_eq!(h.query("sent", 1), "delivery=1 read=0 sync=2");
+        // nothing goes to them before it's accepted: a reaction would say it was read
+        h.cmd(Command::React { id: h.row(1), emoji: "👍".into(), remove: false }).await;
+        h.cmd(Command::Composing(true)).await;
+        assert!(h.app.ops.is_empty() && h.app.composing.is_none(), "refused");
+        assert_eq!(h.query("request", 1), "true");
+
+        h.cmd(Command::AnswerRequest { key: key_of(1), answer: crate::types::RequestAnswer::Accept }).await;
+        assert_eq!(h.query("answers", 1), "Accept,ProfileKey");
+        assert_eq!(h.query("request", 1), "false");
+        assert_eq!(h.query("sent", 1), "delivery=1 read=2 sync=2", "what was on screen counts as read");
+        assert_eq!(header_request(&h.take_events()), Some(false), "the composer comes back");
+        h.op("recv who=1 n=1").await;
+        assert_eq!(h.query("sent", 1), "delivery=2 read=2 sync=2", "an accepted chat answers as any other");
+    });
+}
+
+#[test]
+fn nothing_is_a_request_before_the_phone_storage_is_read() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("recv who=1 n=1").await;
+        assert_eq!(h.query("request", 1), "false");
+        assert_eq!(h.query("sent", 1), "delivery=1 read=0 sync=0");
+    });
+}
+
+#[test]
+fn a_blocked_persons_messages_are_dropped() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("phone-storage who=1 blocked=1").await;
+        h.op("recv who=1 n=2").await;
+        assert_eq!(h.op("query rows who=1").await, "0", "nothing kept");
+        assert_eq!(h.query("sent", 1), "delivery=0 read=0 sync=0");
+        assert!(listed(&h.take_events(), 1).is_none());
+    });
+}
+
+#[test]
+fn blocking_or_deleting_a_request_closes_it() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("phone-storage who=9 accepted=1").await;
+        h.op("recv who=1 n=3").await;
+        h.op("recv who=2 n=1").await;
+        h.open(1).await;
+        h.take_events();
+        h.cmd(Command::AnswerRequest { key: key_of(1), answer: crate::types::RequestAnswer::Delete }).await;
+        assert_eq!(h.op("query rows who=1").await, "0");
+        assert_eq!(h.query("unread", 1), "0");
+        assert_eq!(h.query("window", 1), "closed");
+        let ev = h.take_events();
+        assert!(ev.iter().any(|e| matches!(e, Event::Messages { key, .. } if key.is_empty())), "the UI shows nothing open");
+        assert!(listed(&ev, 1).is_none(), "gone from the list");
+
+        // blocked: the chat leaves the list but its messages stay, and new ones are dropped
+        h.open(2).await;
+        h.cmd(Command::AnswerRequest { key: key_of(2), answer: crate::types::RequestAnswer::Block }).await;
+        assert_eq!(h.query("answers", 1), "Delete,Block");
+        assert_eq!(h.query("window", 1), "closed");
+        assert!(listed(&h.take_events(), 2).is_none());
+        h.op("recv who=2 n=1").await;
+        assert_eq!(h.op("query rows who=2").await, "1");
+        // the phone's storage shows the block now; unblocking there brings the chat back
+        h.op("phone-storage who=2 blocked=1").await;
+        h.op("phone-storage who=2").await;
+        assert_eq!(h.query("request", 2), "true");
+        assert!(listed(&h.take_events(), 2).is_some());
+    });
+}

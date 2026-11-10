@@ -157,6 +157,14 @@ impl App {
             }
         }
 
+        if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::MessageRequestResponse(r)), .. }) = &c.body {
+            // it deletes and blocks: only our own devices get a say
+            if c.metadata.sender.raw_uuid() == self.me {
+                self.answered_elsewhere(r).await;
+            }
+            return;
+        }
+
         if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Configuration(cfg)), .. }) = &c.body {
             if let Some(on) = cfg.read_receipts {
                 info!(on, "read receipts setting");
@@ -214,6 +222,15 @@ impl App {
             self.pni_proved(pni.into(), aci.into()).await;
         }
         let Ok(thread) = Thread::try_from(&c) else { return };
+        let from = c.metadata.sender.raw_uuid();
+        if from != self.me && self.is_blocked(&format!("c:{from}")) {
+            // like the official apps: nothing of a blocked person's is kept, shown or answered
+            let ts = c.metadata.client_timestamp.timestamp_millis() as u64;
+            if let Err(e) = self.store.delete_message(&thread, ts).await {
+                warn!("drop blocked: {e:#}");
+            }
+            return;
+        }
         if let Thread::Contact(ServiceId::Pni(p)) = &thread {
             let e164 = match &c.body {
                 ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(s)), .. }) => s.destination_e164.clone(),
@@ -249,8 +266,15 @@ impl App {
                 if is_open && self.typing.remove(&c.metadata.sender.raw_uuid()).is_some() {
                     self.emit_typing().await;
                 }
-                if c.metadata.needs_receipt {
+                // a request doesn't tell its sender it arrived (Signal Desktop doesn't either)
+                let was_request = self.is_request(&key);
+                let request = self.check_request(&thread).await;
+                if c.metadata.needs_receipt && !request {
                     self.pending_receipts.entry(c.metadata.sender).or_default().push(c.timestamp());
+                }
+                if request && !was_request && is_open {
+                    // the first message made the open (empty) chat a request
+                    self.emit_header(&thread).await;
                 }
                 if !(is_open && self.focused && self.sees_latest()) {
                     let n = self.persist.unread.entry(key.clone()).or_default();
@@ -269,7 +293,12 @@ impl App {
                 }
             }
             Kind::Msg { outgoing: true, .. } => {
-                // we replied from another device: consider the thread read
+                // we replied from another device: consider the thread read, and accepted
+                let was_request = self.is_request(&key);
+                self.wrote(&key);
+                if was_request && is_open {
+                    self.request_changed().await;
+                }
                 self.notes.remove(notify::By::Thread(&key));
                 if self.persist.unread.remove(&key).is_some() {
                     self.persist_dirty = true;
@@ -335,14 +364,10 @@ impl App {
             if self.online() {
                 let delivered = std::mem::take(&mut self.pending_receipts);
                 let read = std::mem::take(&mut self.pending_reads);
-                let out = receipts_to_send(delivered, read, self.persist.read_receipts != Some(false));
-                match (self.manager.clone(), self.offline.as_mut()) {
-                    (Some(m), _) => {
-                        tokio::task::spawn_local(send_outgoing(m, out, self.me));
-                    }
-                    (None, Some(o)) => o.sent.extend(out),
-                    (None, None) => {}
-                }
+                let requests = &self.requests;
+                let quiet = |to: &ServiceId| requests.contains(&format!("c:{}", to.raw_uuid()));
+                let out = receipts_to_send(delivered, read, self.persist.read_receipts != Some(false), &quiet);
+                self.send_now(out);
             }
         }
     }
@@ -362,14 +387,20 @@ pub(crate) enum Outgoing {
     Read { to: ServiceId, timestamps: Vec<u64> },
     /// one sync to our other devices that these were read
     ReadSync(Vec<(ServiceId, u64)>),
+    /// tells our other devices how a message request with `uuid` was answered
+    RequestAnswer { uuid: Uuid, answer: crate::types::RequestAnswer },
+    /// our profile key to `uuid`, whose request was accepted: they see our name and photo
+    ProfileKey(Uuid),
 }
 
-/// Delivery receipts, then read receipts (unless turned off on the phone) and one read sync
-/// to our other devices so they clear their unread state too.
+/// Delivery receipts, then read receipts (unless turned off on the phone, and not to `quiet`
+/// senders: message requests) and one read sync to our other devices so they clear their
+/// unread state too.
 pub(crate) fn receipts_to_send(
     delivered: HashMap<ServiceId, Vec<u64>>,
     read: Vec<(ServiceId, u64)>,
     read_receipts: bool,
+    quiet: &dyn Fn(&ServiceId) -> bool,
 ) -> Vec<Outgoing> {
     let mut out: Vec<Outgoing> = delivered.into_iter().map(|(to, timestamps)| Outgoing::Delivery { to, timestamps }).collect();
     if read.is_empty() {
@@ -377,7 +408,7 @@ pub(crate) fn receipts_to_send(
     }
     if read_receipts {
         let mut by_sender: HashMap<ServiceId, Vec<u64>> = HashMap::new();
-        for (to, ts) in &read {
+        for (to, ts) in read.iter().filter(|(to, _)| !quiet(to)) {
             by_sender.entry(*to).or_default().push(*ts);
         }
         out.extend(by_sender.into_iter().map(|(to, timestamps)| Outgoing::Read { to, timestamps }));
@@ -386,7 +417,8 @@ pub(crate) fn receipts_to_send(
     out
 }
 
-pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid) {
+/// `tx` hears of an answer that didn't reach our other devices.
+pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid, tx: UnboundedSender<Internal>) {
     let now = || {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -427,6 +459,40 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<Outgoing>, me: Uuid) {
                 };
                 if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, now())).await {
                     debug!("read sync: {e}");
+                }
+            }
+            Outgoing::RequestAnswer { uuid, answer } => {
+                use crate::types::RequestAnswer;
+                use presage::proto::sync_message::message_request_response::Type;
+                let r#type = match answer {
+                    RequestAnswer::Accept => Type::Accept,
+                    RequestAnswer::Delete => Type::Delete,
+                    RequestAnswer::Block => Type::Block,
+                };
+                let sync = SyncMessage {
+                    content: Some(SyncContent::MessageRequestResponse(presage::proto::sync_message::MessageRequestResponse {
+                        thread_aci: Some(uuid.to_string()),
+                        thread_aci_binary: Some(uuid.as_bytes().to_vec()),
+                        group_id: None,
+                        r#type: Some(r#type as i32),
+                    })),
+                    ..Default::default()
+                };
+                if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, now())).await {
+                    warn!("request answer sync: {e}");
+                    let _ = tx.send(Internal::Notice("휴대폰에 알리지 못했습니다. 휴대폰에서도 같은 선택을 할 수 있습니다".into()));
+                }
+            }
+            Outgoing::ProfileKey(uuid) => {
+                let ts = now();
+                let dm = DataMessage {
+                    profile_key: Some(m.registration_data().profile_key().get_bytes().to_vec()),
+                    flags: Some(presage::proto::data_message::Flags::ProfileKeyUpdate as u32),
+                    timestamp: Some(ts),
+                    ..Default::default()
+                };
+                if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(uuid.into()), dm, ts)).await {
+                    warn!("profile key: {e}");
                 }
             }
         }

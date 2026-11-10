@@ -773,6 +773,36 @@ impl Index {
         Ok(out)
     }
 
+    /// Whether the thread holds anything `me` sent (from here or another device); None: it holds
+    /// nothing at all. Goes through `ls_order`'s thread index: `thread_messages` has none by thread.
+    pub async fn wrote_in(&self, thread: &Thread, me: uuid::Uuid) -> anyhow::Result<Option<bool>> {
+        let (gk, rid) = unzip(thread);
+        let found: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(m.sender_service_id = ?) FROM ls_order o
+             JOIN thread_messages m ON m.thread_id = o.thread_id AND m.ts = o.ts
+             WHERE o.thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)",
+        )
+        .bind(me.to_string())
+        .bind(gk)
+        .bind(rid)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(found.map(|n| n != 0))
+    }
+
+    /// Forgets what the indexes hold about thread `key` (its messages are being deleted).
+    pub async fn forget_thread(&self, key: &str) -> anyhow::Result<()> {
+        for sql in [
+            "DELETE FROM ls_pins WHERE thread = ?",
+            "DELETE FROM ls_edits WHERE thread = ?",
+            "DELETE FROM ls_reactions WHERE thread = ?",
+            "DELETE FROM ls_replies WHERE thread = ?",
+        ] {
+            sqlx::query(sql).bind(key).execute(&self.pool).await?;
+        }
+        Ok(())
+    }
+
     /// Timestamps of up to `limit` messages strictly newer than `after`, oldest first.
     pub async fn page_after(&self, thread: &Thread, after: u64, limit: u32) -> anyhow::Result<Vec<u64>> {
         let (gk, rid) = unzip(thread);

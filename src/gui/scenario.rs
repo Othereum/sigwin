@@ -93,6 +93,8 @@ fn probe(app: &AppWindow, name: &str) -> anyhow::Result<String> {
         "near-bottom" => app.get_near_bottom().to_string(),
         "rows" => app.get_messages().row_count().to_string(),
         "current-key" => app.get_current_key().to_string(),
+        // the request bar shows instead of the composer
+        "current-request" => app.get_current_request().to_string(),
         "cells" => app.get_messages().iter().map(|m| m.cells.row_count()).sum::<usize>().to_string(),
         // cells that play in place when the pointer is on them, and those playing now
         "gif-cells" => app.get_messages().iter().flat_map(|m| m.cells.iter().collect::<Vec<_>>()).filter(|c| c.gif).count().to_string(),

@@ -278,7 +278,9 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         photo(avatar::ME_SIDEBAR.into(), 4, avatar::ME_SIDEBAR_SIZE);
         photo(avatar::ME_CARD.into(), 4, avatar::ME_CARD_SIZE);
     }
-    emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
+    // SIGWIN_DEMO_REQUEST: the open chat is a message request (the request bar, no composer)
+    let request = std::env::var_os("SIGWIN_DEMO_REQUEST").is_some();
+    emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into(), request });
     let names = ["김민준", "이서연", "박지훈", "Alice Kim", "Bob", "김지원", "최유나"];
     emit(Event::Members(names.iter().enumerate().map(|(i, n)| (format!("00000000-0000-0000-0000-00000000000{i}"), n.to_string())).collect()));
     for m in items.iter_mut().filter(|m| m.attachment.is_empty() && m.quote.is_empty() && !m.sticker) {
@@ -1134,7 +1136,7 @@ fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiv
     view::mark_runs(&mut items, false);
     emit(Event::Ready);
     emit(Event::Threads(threads));
-    emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into() });
+    emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into(), request: false });
     emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
     emit(Event::Pins(Vec::new()));
     emit(Event::Account { name: "홍길동".into(), number: "+821012345678".into(), device: "Sigwin".into(), receipts: Some(true), typing: None });

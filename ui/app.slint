@@ -1,7 +1,7 @@
 import { LineEdit, Button, ListView, Palette, Spinner } from "std-widgets.slint";
 import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, NoteLine, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, IconButton, MenuRow, Notice, StickerIcon, TextButton } from "widgets.slint";
+import { Avatar, DangerButton, IconButton, MenuRow, Notice, PrimaryButton, StickerIcon, TextButton } from "widgets.slint";
 import { Bubble, MediaLabel, QuoteBox } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
@@ -54,6 +54,10 @@ export component AppWindow inherits Window {
     in property <image> current-photo;
     in property <bool> current-has-photo;
     in property <string> current-sub;
+    // the open thread is a message request: the request bar instead of the composer
+    in property <bool> current-request;
+    // the request bar's buttons: 0 accept, 1 delete, 2 block
+    callback answer-request(int);
     in property <[MsgItem]> messages;
     in property <bool> can-load-older;
     in property <bool> can-load-newer;
@@ -1081,8 +1085,30 @@ export component AppWindow inherits Window {
                     IconButton { label: "✕"; width: 28px; height: 28px; clicked => { root.link-dismiss(); } }
                 }
             }
+            if root.current-key != "" && root.current-request: Rectangle {
+                Rectangle { height: 1px; y: 0; background: Theme.border; }
+                VerticalLayout {
+                    padding: 16px;
+                    padding-top: 14px;
+                    spacing: 12px;
+                    Text {
+                        text: "\{root.current-name}님이 메시지를 보냈습니다. 수락하면 상대가 내 이름과 사진을 볼 수 있고, 메시지를 읽었는지도 알 수 있습니다.";
+                        color: Theme.subtle;
+                        font-size: 12.5px;
+                        wrap: word-wrap;
+                        horizontal-alignment: center;
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+                        DangerButton { text: "차단"; clicked => { root.answer-request(2); } }
+                        DangerButton { text: "삭제"; clicked => { root.answer-request(1); } }
+                        PrimaryButton { text: "수락"; clicked => { root.answer-request(0); } }
+                    }
+                }
+            }
             composer-bar := Rectangle {
-                visible: root.current-key != "";
+                visible: root.current-key != "" && !root.current-request;
                 min-height: self.visible ? 48px : 0px;
                 max-height: self.visible ? 400px : 0px;
                 Rectangle { height: 1px; y: 0; background: Theme.border; }

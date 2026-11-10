@@ -44,7 +44,10 @@ pub(crate) enum FxOp {
     /// 1:1 thread. `old`: only stored, as before they were dropped as they came; `mine`: ours to
     /// `who`, stored as presage stores what it sends (no sending offline)
     Receipts { who: u32, n: u32, old: bool, mine: bool },
-    /// a value to check: `unread`, `read_upto`, `sent`, `toasts`, `window`
+    /// the phone's storage was read, saying of `who` only whether it accepts (address book) or
+    /// blocks them
+    PhoneStorage { who: u32, accepted: bool, blocked: bool },
+    /// a value to check: `unread`, `read_upto`, `sent`, `answers`, `request`, `toasts`, `window`
     Query { what: String, who: u32 },
 }
 
@@ -56,12 +59,15 @@ impl FxOp {
         let mut what = String::new();
         let (mut who, mut n, mut unread, mut name) = (1u32, 1u32, 0u32, String::new());
         let (mut same, mut gif, mut old, mut mine) = (false, false, false, false);
+        let (mut accepted, mut blocked) = (false, false);
         for w in words {
             match w.split_once('=') {
                 Some(("same", v)) => same = v != "0",
                 Some(("gif", v)) => gif = v != "0",
                 Some(("old", v)) => old = v != "0",
                 Some(("mine", v)) => mine = v != "0",
+                Some(("accepted", v)) => accepted = v != "0",
+                Some(("blocked", v)) => blocked = v != "0",
                 Some(("who", v)) => who = v.parse()?,
                 Some(("n", v)) => n = v.parse()?,
                 Some(("unread", v)) => unread = v.parse()?,
@@ -77,6 +83,7 @@ impl FxOp {
             "big" => Self::Big { who, gif },
             "phone-read" => Self::PhoneRead { who },
             "receipts" => Self::Receipts { who, n, old, mine },
+            "phone-storage" => Self::PhoneStorage { who, accepted, blocked },
             "query" => Self::Query { what, who },
             _ => anyhow::bail!("unknown fixture op: {cmd}"),
         })
@@ -289,6 +296,20 @@ impl App {
                     }
                 }
             }
+            FxOp::PhoneStorage { who, accepted, blocked } => {
+                let key = thread_key(&Thread::Contact(ServiceId::Aci(contact(who).into())));
+                self.persist.storage_format = super::storage::STORAGE_FORMAT;
+                let (mut acc, mut blk) = (self.persist.phone_accepted.clone(), self.persist.phone_blocked.clone());
+                acc.remove(&key);
+                blk.remove(&key);
+                if accepted {
+                    acc.insert(key.clone());
+                }
+                if blocked {
+                    blk.insert(key);
+                }
+                self.phone_answers(acc, blk);
+            }
             FxOp::Query { what, who } if what == "rows" => {
                 let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));
                 return Ok(self.index.page(&thread, i64::MAX, 10_000).await?.len().to_string());
@@ -310,10 +331,24 @@ impl App {
                         Outgoing::Delivery { timestamps, .. } => delivery += timestamps.len(),
                         Outgoing::Read { timestamps, .. } => read += timestamps.len(),
                         Outgoing::ReadSync(v) => sync += v.len(),
+                        Outgoing::RequestAnswer { .. } | Outgoing::ProfileKey(_) => {}
                     }
                 }
                 format!("delivery={delivery} read={read} sync={sync}")
             }
+            // message request answers and profile keys that went out, in order
+            "answers" => self
+                .offline
+                .iter()
+                .flat_map(|o| &o.sent)
+                .filter_map(|o| match o {
+                    Outgoing::RequestAnswer { answer, .. } => Some(format!("{answer:?}")),
+                    Outgoing::ProfileKey(_) => Some("ProfileKey".into()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+            "request" => self.is_request(&key).to_string(),
             "toasts" => crate::toast::shown().join(","),
             // pictures a click asked for
             "allowed" => self.attachment_downloads.allowed_count().to_string(),

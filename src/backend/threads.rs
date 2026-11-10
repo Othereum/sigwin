@@ -86,9 +86,14 @@ impl App {
         }
         let mut list: Vec<(i64, ThreadDto)> = Vec::with_capacity(rows.len());
         let mut seen = HashSet::new();
+        let open_was_request = self.current.as_ref().is_some_and(|o| self.is_request(&o.key));
         for row in rows {
             let key = thread_key(&row.thread);
             seen.insert(key.clone());
+            // a blocked person's chat leaves the list (its messages stay, unblocking brings it back)
+            if self.is_blocked(&key) {
+                continue;
+            }
             let (display_ts, snippet) = match self.persist.snippets.get(&key) {
                 // cached before mentions were resolved: recompute
                 Some((last, ts, s)) if *last == row.tail_ts && !s.contains('\u{FFFC}') => (*ts, s.clone()),
@@ -105,6 +110,8 @@ impl App {
                 continue;
             }
             let name = self.thread_name(&row.thread).await;
+            // what a stranger wrote doesn't show before it's accepted
+            let snippet = if self.check_request(&row.thread).await { "메시지 요청".to_string() } else { snippet };
             list.push((
                 self.index.seq_of(&row.thread, display_ts).await.ok().flatten().unwrap_or(0),
                 ThreadDto {
@@ -159,6 +166,19 @@ impl App {
             t.ts = floor;
         }
         self.threads = list.into_iter().map(|(_, t)| t).collect();
+        let requests = self.requests.len();
+        if self.logged_requests != Some(requests) {
+            info!(requests, "message requests");
+            self.logged_requests = Some(requests);
+        }
+        // the phone accepted or blocked the open chat meanwhile
+        if let Some(key) = self.current.as_ref().map(|o| o.key.clone()) {
+            if self.is_blocked(&key) {
+                self.close_thread();
+            } else if open_was_request != self.is_request(&key) {
+                self.request_changed().await;
+            }
+        }
         self.mute_due = self.next_mute_change();
         self.emit_threads().await;
         self.load_avatars();

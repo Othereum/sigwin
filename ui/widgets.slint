@@ -169,6 +169,27 @@ export component DangerButton inherits Rectangle {
     }
 }
 
+// the main choice next to `DangerButton`s: filled with the accent
+export component PrimaryButton inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+    height: 32px;
+    min-width: lbl.preferred-width + 32px;
+    border-radius: 6px;
+    background: ta.pressed ? Theme.accent.darker(0.2) : (ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent);
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    lbl := Text {
+        text: root.text;
+        color: white;
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
 export component TextButton inherits Rectangle {
     in property <string> text;
     in property <bool> active;

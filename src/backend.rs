@@ -49,6 +49,7 @@ pub(crate) mod notify;
 mod ops;
 mod pni;
 mod receive;
+mod requests;
 #[cfg(test)]
 mod scenarios;
 mod search;
@@ -179,6 +180,19 @@ struct Persist {
     /// thread keys of the people the phone lists as contacts (Storage Service); empty until read
     #[serde(default)]
     listed: HashSet<String>,
+    /// thread keys of the people whose messages the phone accepts: in the address book or
+    /// accepted (Storage Service, `requests.rs`)
+    #[serde(default)]
+    phone_accepted: HashSet<String>,
+    /// thread keys of the people the phone has blocked (Storage Service)
+    #[serde(default)]
+    phone_blocked: HashSet<String>,
+    /// thread keys accepted here, or where we wrote: never a message request again
+    #[serde(default)]
+    accepted_here: HashSet<String>,
+    /// thread keys blocked here that the phone's storage doesn't show as blocked yet
+    #[serde(default)]
+    blocked_here: HashSet<String>,
     /// thread key -> its own notification settings (only threads with any)
     #[serde(default)]
     thread_prefs: HashMap<String, crate::types::ThreadPrefs>,
@@ -394,6 +408,12 @@ struct App {
     /// a thread's "notifications off" runs out then (the list shows it)
     mute_due: Option<u64>,
     storage_syncing: bool,
+    /// thread keys that are message requests now (`requests.rs`)
+    requests: HashSet<String>,
+    /// request threads found to hold nothing of ours (asked of the DB once per session)
+    not_written: HashSet<String>,
+    /// how many `requests` the log last said there were
+    logged_requests: Option<usize>,
     /// stops the GIF that plays (`gif.rs`)
     gif_stop: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
@@ -542,6 +562,9 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         notes: Default::default(),
         mute_due: None,
         storage_syncing: false,
+        requests: HashSet::new(),
+        not_written: HashSet::new(),
+        logged_requests: None,
         gif_stop: None,
     };
     if sealed_now {
@@ -656,6 +679,18 @@ impl App {
     }
 
     async fn command(&mut self, cmd: Command) {
+        // nothing goes to a message request's sender before it's accepted: a reaction would say
+        // it was read, and what we send would accept it without the answer reaching the phone
+        let to_open = matches!(
+            cmd,
+            Command::Send { .. } | Command::SendSticker { .. } | Command::React { .. } | Command::Pin { .. } | Command::Unpin(_) | Command::Composing(true)
+        );
+        if to_open && self.current.as_ref().is_some_and(|o| self.is_request(&o.key)) {
+            if !matches!(cmd, Command::Composing(_)) {
+                self.notice("메시지 요청을 수락한 뒤에 보낼 수 있습니다");
+            }
+            return;
+        }
         match cmd {
             Command::StartLink(name) => self.start_link(name),
             Command::LinkPreview(url) => self.link_preview(url),
@@ -711,6 +746,7 @@ impl App {
             }
             Command::Search { query, contacts, find } => self.set_search(query, contacts, find).await,
             Command::StartChat(target) => self.start_chat(target),
+            Command::AnswerRequest { key, answer } => self.answer_request(&key, answer).await,
             Command::WindowFocus(f) => {
                 self.focused = f;
                 if f {
@@ -1025,6 +1061,8 @@ impl App {
         self.avatars_done.clear();
         self.last_outgoing.clear();
         self.avatar_queue.clear();
+        self.requests.clear();
+        self.not_written.clear();
         self.persist = Persist::default();
         self.save_persist();
         let _ = std::fs::remove_dir_all(&self.paths.attachments);

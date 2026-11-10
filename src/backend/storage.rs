@@ -1,7 +1,7 @@
 //! What the phone keeps in the Storage Service, read only (never written back): notifications
-//! off per thread (`mute.rs` resolves them), and the people the phone lists as contacts, whom
-//! the contact list shows and whose names the threads use. The contact sync the phone sends
-//! after linking holds only a few of them.
+//! off per thread (`mute.rs` resolves them), the people the phone lists as contacts, whom
+//! the contact list shows and whose names the threads use, and whom it accepts or blocks
+//! (`requests.rs`). The contact sync the phone sends after linking holds only a few of them.
 
 use presage::libsignal_service::configuration::ServiceCredentials;
 use presage::libsignal_service::master_key::StorageServiceKey;
@@ -21,8 +21,9 @@ use super::*;
 /// items per Storage Service read (presage reads groups 100 at a time too)
 const READ_CHUNK: usize = 100;
 
-/// bumped when a read collects more (2: group mention settings, 3: contacts)
-pub(super) const STORAGE_FORMAT: u32 = 3;
+/// bumped when a read collects more (2: group mention settings, 3: contacts, 4: accepted and
+/// blocked, which message requests go by)
+pub(super) const STORAGE_FORMAT: u32 = 4;
 
 /// What one Storage Service manifest says.
 pub(super) struct PhoneStorage {
@@ -44,6 +45,9 @@ struct Person {
     listed: bool,
     /// why not, for the log
     unlisted: Option<&'static str>,
+    /// their messages are no message request: in the address book or accepted, and not hidden
+    accepted: bool,
+    blocked: bool,
 }
 
 impl Person {
@@ -68,7 +72,10 @@ impl Person {
         } else {
             None
         };
-        Self { uuid, name, e164: c.e164.clone(), listed: unlisted.is_none(), unlisted }
+        // Signal Desktop's `isTrustedContact`: in the address book or sharing our profile
+        // (`whitelisted`); a contact removed on the phone (`hidden`) writes as a request again
+        let accepted = !c.hidden && (!system.is_empty() || c.whitelisted);
+        Self { uuid, name, e164: c.e164.clone(), listed: unlisted.is_none(), unlisted, accepted, blocked: c.blocked }
     }
 }
 
@@ -99,12 +106,18 @@ impl App {
                 for why in people.iter().filter_map(|p| p.unlisted) {
                     *unlisted.entry(why).or_default() += 1;
                 }
-                info!(version, muted = mutes.len(), no_mentions = no_mentions.len(), people = people.len(), listed, ?unlisted, "phone storage");
+                let accepted = people.iter().filter(|p| p.accepted).count();
+                let blocked = people.iter().filter(|p| p.blocked).count();
+                info!(version, muted = mutes.len(), no_mentions = no_mentions.len(), people = people.len(), listed, ?unlisted, accepted, blocked, "phone storage");
                 self.persist.storage_version = version;
                 self.persist.storage_format = STORAGE_FORMAT;
                 self.persist.mute_phone = mutes;
                 self.persist.phone_no_mentions = no_mentions;
                 self.persist.listed = people.iter().filter(|p| p.listed).map(|p| format!("c:{}", p.uuid)).collect();
+                self.phone_answers(
+                    people.iter().filter(|p| p.accepted).map(|p| format!("c:{}", p.uuid)).collect(),
+                    people.iter().filter(|p| p.blocked).map(|p| format!("c:{}", p.uuid)).collect(),
+                );
                 if let Err(e) = self.save_people(&people).await {
                     warn!("contacts from the phone: {e:#}");
                 }

@@ -260,6 +260,24 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let weak = app.as_weak();
+    app.on_answer_request(move |which| {
+        use crate::types::RequestAnswer;
+        let Some(app) = weak.upgrade() else { return };
+        let key = app.get_current_key().to_string();
+        let name = app.get_current_name().to_string();
+        let answer = match which {
+            0 => return send_cmd(Command::AnswerRequest { key, answer: RequestAnswer::Accept }),
+            1 => RequestAnswer::Delete,
+            _ => RequestAnswer::Block,
+        };
+        let (title, text) = match answer {
+            RequestAnswer::Delete => ("대화 삭제", format!("{name}님과의 대화를 삭제할까요? 이 PC의 메시지와 첨부파일이 지워지고, 휴대폰에도 삭제를 알립니다.")),
+            _ => ("차단", format!("{name}님을 차단할까요? 이 사람이 보내는 메시지를 받지 않고, 휴대폰에도 차단을 알립니다.")),
+        };
+        super::window::ask(&app, super::window::Ask::YesNo, title, text, move || send_cmd(Command::AnswerRequest { key, answer }));
+    });
+
+    let weak = app.as_weak();
     app.on_link_dismiss(move || {
         if let Some(app) = weak.upgrade() {
             linkcard::dismiss(&app);

@@ -142,6 +142,9 @@ impl App {
                 }
             }
         }
+        if let Some(key) = self.pending.iter().find(|p| p.ts == ts).map(|p| p.thread_key.clone()) {
+            self.wrote(&key);
+        }
         self.pending.retain(|p| p.ts != ts);
         self.op_sent(ts).await;
         if let Err(e) = self.reload_window().await {

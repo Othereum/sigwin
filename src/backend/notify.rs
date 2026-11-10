@@ -162,9 +162,12 @@ impl App {
             return;
         }
         let expiring = dm.expire_timer.unwrap_or(0) > 0;
-        let message = self.snippet(c).await.unwrap_or_default();
+        // a stranger's text and pictures don't show before the request is accepted (Signal
+        // Desktop shows the same words)
+        let request = self.is_request(key);
+        let message = if request { "메시지 요청".into() } else { self.snippet(c).await.unwrap_or_default() };
         let sender_title = self.sender_title(thread, c.metadata.sender.raw_uuid()).await;
-        let picture = self.toast_picture(thread, key, preview).await;
+        let picture = if request { None } else { self.toast_picture(thread, key, preview).await };
         self.notes.add(Queued { key: key.into(), msg: c.timestamp(), sender_title, message, expiring, reaction: None, picture, preview, sound: n.sound });
     }
 
