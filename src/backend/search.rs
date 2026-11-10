@@ -142,7 +142,7 @@ impl Lead {
 pub(super) enum Found {
     Aci { uuid: Uuid, phone: Option<PhoneNumber>, username: Option<String> },
     /// the number is on Signal, but only its PNI is given: we've never talked
-    PniOnly,
+    PniOnly { pni: Uuid, phone: PhoneNumber },
     Nobody { phone: bool },
     Failed(String),
 }
@@ -225,7 +225,7 @@ impl App {
                     Ok(p) => match Box::pin(m.discover_contacts_by_phone_number([p.clone()])).await {
                         Ok(v) => match v.into_iter().find_map(|(_, sid)| sid) {
                             Some(ServiceId::Aci(a)) => Found::Aci { uuid: a.into(), phone: Some(p), username: None },
-                            Some(ServiceId::Pni(_)) => Found::PniOnly,
+                            Some(ServiceId::Pni(n)) => Found::PniOnly { pni: n.into(), phone: p },
                             None => Found::Nobody { phone: true },
                         },
                         Err(e) => Found::Failed(format!("{e}")),
@@ -248,9 +248,17 @@ impl App {
         (self.emit)(Event::ProgressDone);
         let (uuid, phone, username) = match found {
             Found::Aci { uuid, phone, username } => (uuid, phone, username),
-            Found::PniOnly => {
+            Found::PniOnly { pni, phone } => {
                 info!("lookup: only a PNI");
-                return self.notice("이 번호로는 아직 대화를 시작할 수 없습니다. 휴대폰에서 먼저 대화를 시작하면 여기서도 이어갈 수 있습니다");
+                let e164 = phone.format().mode(Mode::E164).to_string();
+                if let Err(e) = self.index.pni_put(pni, Some(&e164)).await {
+                    return self.notice(format!("대화를 열지 못했습니다: {e:#}"));
+                }
+                self.names.remove(&pni);
+                if let Err(e) = self.open_thread(&thread_key(&super::pni::pni_thread(pni))).await {
+                    self.notice(format!("대화를 열지 못했습니다: {e:#}"));
+                }
+                return;
             }
             Found::Nobody { phone: true } => return self.notice("이 번호로 찾을 수 있는 Signal 사용자가 없습니다"),
             Found::Nobody { phone: false } => return self.notice("이 사용자 이름을 찾을 수 없습니다"),
@@ -270,7 +278,7 @@ impl App {
         }
     }
 
-    async fn file_found(&mut self, uuid: Uuid, phone: Option<PhoneNumber>, username: Option<String>) -> anyhow::Result<()> {
+    pub(super) async fn file_found(&mut self, uuid: Uuid, phone: Option<PhoneNumber>, username: Option<String>) -> anyhow::Result<()> {
         let id = ServiceId::Aci(uuid.into());
         let mut c = match self.store.contact_by_id(&id).await? {
             Some(c) if c.phone_number.is_some() || phone.is_none() => return Ok(()),

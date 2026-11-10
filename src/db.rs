@@ -265,6 +265,19 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        // people we write to by PNI (a number never talked with): presage keeps their thread
+        // under the bare uuid like any other, so this is what tells it apart. `e164` names them
+        // (no contact or profile yet); `aci` is set once a reply proved whose PNI it is, until
+        // the thread has moved over (`pni_merging`)
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_pni (
+                pni BLOB PRIMARY KEY,
+                e164 TEXT,
+                aci BLOB
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
         ensure_order(&pool).await?;
         migrate(&pool).await?;
         Ok(Self { pool })
@@ -293,6 +306,94 @@ impl Index {
         .bind(at as i64)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    /// Files `pni` as someone we write to by PNI, with the number we looked them up by, if any.
+    pub async fn pni_put(&self, pni: uuid::Uuid, e164: Option<&str>) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO ls_pni (pni, e164) VALUES (?, ?) ON CONFLICT (pni) DO UPDATE SET e164 = COALESCE(excluded.e164, e164)")
+            .bind(pni.as_bytes().as_slice())
+            .bind(e164)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Whether `pni` is filed (`pni_put`), and its number if known.
+    pub async fn pni_number(&self, pni: uuid::Uuid) -> anyhow::Result<Option<Option<String>>> {
+        Ok(sqlx::query_scalar("SELECT e164 FROM ls_pni WHERE pni = ?")
+            .bind(pni.as_bytes().as_slice())
+            .fetch_optional(&self.pool)
+            .await?)
+    }
+
+    /// `pni` turned out to be `aci`'s: its thread is to move over (`pni_merging` until done).
+    pub async fn pni_proved(&self, pni: uuid::Uuid, aci: uuid::Uuid) -> anyhow::Result<()> {
+        sqlx::query("UPDATE ls_pni SET aci = ? WHERE pni = ?")
+            .bind(aci.as_bytes().as_slice())
+            .bind(pni.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// PNI threads proved to be someone's whose move didn't finish: `(pni, aci)`.
+    pub async fn pni_merging(&self) -> anyhow::Result<Vec<(uuid::Uuid, uuid::Uuid)>> {
+        let rows = sqlx::query("SELECT pni, aci FROM ls_pni WHERE aci IS NOT NULL").fetch_all(&self.pool).await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let pni = uuid::Uuid::from_slice(&r.try_get::<Vec<u8>, _>("pni").ok()?).ok()?;
+                let aci = uuid::Uuid::from_slice(&r.try_get::<Vec<u8>, _>("aci").ok()?).ok()?;
+                Some((pni, aci))
+            })
+            .collect())
+    }
+
+    pub async fn pni_forget(&self, pni: uuid::Uuid) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM ls_pni WHERE pni = ?").bind(pni.as_bytes().as_slice()).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Before `from`'s messages are stored again under `to`: their display order moves along,
+    /// so they stay before what `to` already holds (the reply that proved who it is).
+    /// `to` must exist in presage's `threads`; without it nothing moves and the copies are
+    /// ordered as they're stored.
+    pub async fn move_order(&self, from: &Thread, to: &Thread) -> anyhow::Result<()> {
+        let ((fg, fr), (tg, tr)) = (unzip(from), unzip(to));
+        sqlx::query(
+            "UPDATE OR IGNORE ls_order SET thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND EXISTS (SELECT 1 FROM threads WHERE group_master_key = ? OR recipient_id = ?)",
+        )
+        .bind(&tg)
+        .bind(&tr)
+        .bind(fg)
+        .bind(fr)
+        .bind(&tg)
+        .bind(&tr)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Our per-thread rows of `from` become `to`'s; any `to` already has wins.
+    pub async fn rekey_thread(&self, from: &str, to: &str) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        // one pair per table keyed by thread (sqlx wants the strings static)
+        const TABLES: [(&str, &str); 5] = [
+            ("UPDATE OR IGNORE ls_pins SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_pins WHERE thread = ?1"),
+            ("UPDATE OR IGNORE ls_edits SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_edits WHERE thread = ?1"),
+            ("UPDATE OR IGNORE ls_reactions SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_reactions WHERE thread = ?1"),
+            ("UPDATE OR IGNORE ls_replies SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_replies WHERE thread = ?1"),
+            ("UPDATE OR IGNORE ls_uploads SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_uploads WHERE thread = ?1"),
+        ];
+        for (update, delete) in TABLES {
+            sqlx::query(update).bind(to).bind(from).execute(&mut *tx).await?;
+            // what `to` already had at the same place
+            sqlx::query(delete).bind(from).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -639,7 +740,8 @@ impl Index {
     pub async fn threads(&self) -> anyhow::Result<Vec<ThreadRow>> {
         let rows = sqlx::query(
             "SELECT t.group_master_key AS gk, t.recipient_id AS rid, MAX(m.ts) AS last_ts,
-                (SELECT o.ts FROM ls_order o WHERE o.thread_id = t.id ORDER BY o.seq DESC LIMIT 1) AS tail_ts
+                (SELECT o.ts FROM ls_order o WHERE o.thread_id = t.id ORDER BY o.seq DESC LIMIT 1) AS tail_ts,
+                EXISTS (SELECT 1 FROM ls_pni p WHERE p.pni = t.recipient_id) AS pni
              FROM threads t JOIN thread_messages m ON m.thread_id = t.id
              GROUP BY t.id ORDER BY last_ts DESC",
         )
@@ -651,13 +753,14 @@ impl Index {
             let rid: Option<Vec<u8>> = row.try_get("rid")?;
             let last_ts: i64 = row.try_get("last_ts")?;
             let tail_ts: Option<i64> = row.try_get("tail_ts")?;
+            let pni: bool = row.try_get("pni")?;
             let thread = match (gk, rid) {
                 (Some(gk), _) => match gk.try_into() {
                     Ok(key) => Thread::Group(key),
                     Err(_) => continue,
                 },
                 (None, Some(rid)) => match uuid::Uuid::from_slice(&rid) {
-                    Ok(u) => match crate::types::parse_thread_key(&format!("c:{u}")) {
+                    Ok(u) => match crate::types::parse_thread_key(&format!("{}:{u}", if pni { "p" } else { "c" })) {
                         Some(t) => t,
                         None => continue,
                     },

@@ -257,6 +257,15 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             ui.results.set_vec(items);
             ui.result_dtos = list;
         }),
+        Event::ThreadMoved { from, to } => UI.with_borrow_mut(|ui| {
+            drafts::rekey(ui, &from, &to);
+            ui.places.remove(&from);
+            // the composer stays as it is: the messages for `to` don't count as a switch
+            if ui.open_key == from {
+                ui.open_key = to.clone();
+                app.set_current_key(to.into());
+            }
+        }),
         Event::RecentReactions(list) => {
             let list: Vec<SharedString> = list.iter().map(|e| e.as_str().into()).collect();
             app.set_recent_emoji(ModelRc::new(VecModel::from(list)));

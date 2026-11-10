@@ -64,6 +64,7 @@ impl App {
     pub(super) async fn thread_name(&mut self, thread: &Thread) -> String {
         match thread {
             Thread::Contact(id) if id.raw_uuid() == self.me => NOTE_TO_SELF.into(),
+            Thread::Contact(ServiceId::Pni(p)) => self.pni_name((*p).into()).await,
             Thread::Contact(id) => self.name(id.raw_uuid()).await,
             Thread::Group(key) => match self.store.group(*key).await {
                 Ok(Some(g)) => group_name(&g.title),

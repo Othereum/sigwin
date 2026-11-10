@@ -58,7 +58,11 @@ impl App {
             return;
         }
         let Some(open) = self.current.as_ref() else { return };
-        if open.members.len() > TYPING_MAX_GROUP || matches!(&open.thread, Thread::Contact(id) if id.raw_uuid() == self.me) {
+        // nor to a number that hasn't answered yet: their message request shouldn't type
+        if open.members.len() > TYPING_MAX_GROUP
+            || matches!(&open.thread, Thread::Contact(ServiceId::Pni(_)))
+            || matches!(&open.thread, Thread::Contact(id) if id.raw_uuid() == self.me)
+        {
             return;
         }
         let now = Instant::now();

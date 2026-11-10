@@ -3,13 +3,16 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use presage::libsignal_service::protocol::{Aci, ServiceId};
+use presage::libsignal_service::protocol::{Aci, Pni, ServiceId};
 use presage::libsignal_service::zkgroup::GroupMasterKeyBytes;
 use presage::store::Thread;
 
 /// Stable string form of a [`Thread`], used as UI key and in persisted state.
+/// `p:` is someone we write to by PNI (a number never talked with), until a reply says who
+/// they are and the thread moves to their `c:` (`backend::pni`).
 pub fn thread_key(thread: &Thread) -> String {
     match thread {
+        Thread::Contact(ServiceId::Pni(p)) => format!("p:{}", uuid::Uuid::from(*p)),
         Thread::Contact(id) => format!("c:{}", id.raw_uuid()),
         Thread::Group(key) => format!("g:{}", hex::encode(key)),
     }
@@ -17,10 +20,11 @@ pub fn thread_key(thread: &Thread) -> String {
 
 pub fn parse_thread_key(key: &str) -> Option<Thread> {
     if let Some(uuid) = key.strip_prefix("c:") {
-        let uuid = uuid.parse().ok()?;
-        Some(Thread::Contact(ServiceId::Aci(Aci::from_uuid_bytes(
-            *uuid::Uuid::as_bytes(&uuid),
-        ))))
+        let uuid: uuid::Uuid = uuid.parse().ok()?;
+        Some(Thread::Contact(ServiceId::Aci(Aci::from_uuid_bytes(*uuid.as_bytes()))))
+    } else if let Some(uuid) = key.strip_prefix("p:") {
+        let uuid: uuid::Uuid = uuid.parse().ok()?;
+        Some(Thread::Contact(ServiceId::Pni(Pni::from_uuid_bytes(*uuid.as_bytes()))))
     } else if let Some(hexkey) = key.strip_prefix("g:") {
         let bytes: GroupMasterKeyBytes = hex::decode(hexkey).ok()?.try_into().ok()?;
         Some(Thread::Group(bytes))
@@ -539,6 +543,9 @@ pub enum Event {
     LinkStatus(String),
     Ready,
     Threads(Vec<ThreadDto>),
+    /// thread `from` is now `to` (a PNI thread joined its person's): what the UI keeps by key
+    /// (draft, place) moves along, and an open `from` stays open as `to`
+    ThreadMoved { from: String, to: String },
     /// the sidebar's search or contact list (sent while one is on)
     Results(Vec<ResultDto>),
     Header { name: String, sub: String },

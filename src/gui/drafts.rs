@@ -130,6 +130,13 @@ pub(crate) fn switch(app: &AppWindow, ui: &mut Ui, next: &str) -> Draft {
     d
 }
 
+/// Thread `from` became `to`: its draft goes along unless `to` has one of its own.
+pub(crate) fn rekey(ui: &mut Ui, from: &str, to: &str) {
+    let Some(d) = ui.drafts.remove(from) else { return };
+    ui.drafts.entry(to.to_string()).or_insert(d);
+    save(ui);
+}
+
 /// Puts a draft from [`switch`] into the composer. Outside `UI` borrows: moving the cursor runs
 /// the composer's callbacks.
 pub(crate) fn restore(app: &AppWindow, d: Draft) {

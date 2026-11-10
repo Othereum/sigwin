@@ -439,3 +439,76 @@ fn jumping_to_a_day_lands_on_its_first_message() {
         assert!(first.day_sep && first.day == day);
     });
 }
+
+/// A message `from` sent to `to` at `ts`, with `pni_verified` as given.
+fn dm_between(from: ServiceId, to: ServiceId, ts: u64, body: &str, pni_verified: Option<Uuid>) -> Content {
+    let at = chrono::DateTime::from_timestamp_millis(ts as i64).unwrap();
+    Content::from_body(
+        DataMessage { body: Some(body.into()), timestamp: Some(ts), ..Default::default() },
+        presage::libsignal_service::content::Metadata {
+            sender: from,
+            destination: to,
+            sender_device: 1u32.try_into().unwrap(),
+            pni_verified: pni_verified.map(Into::into),
+            client_timestamp: at,
+            server_timestamp: at,
+            needs_receipt: false,
+            unidentified_sender: false,
+            was_plaintext: false,
+            server_guid: None,
+        },
+    )
+}
+
+#[test]
+fn a_pni_thread_joins_its_person_when_they_answer() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        let me = ServiceId::Aci(h.app.me.into());
+        let pni = Uuid::from_u128(0xA0_0001);
+        let aci = super::fixture::contact(1);
+        let (pk, ck) = (thread_key(&super::pni::pni_thread(pni)), thread_key(&Thread::Contact(ServiceId::Aci(aci.into()))));
+        assert!(pk.starts_with("p:") && parse_thread_key(&pk) == Some(super::pni::pni_thread(pni)));
+
+        // found by number, written to twice before any answer
+        h.app.index.pni_put(pni, Some("+821012345678")).await.unwrap();
+        let t0 = 1_700_000_000_000u64;
+        for (i, text) in ["안녕하세요", "보셨나요"].into_iter().enumerate() {
+            let c = dm_between(me, ServiceId::Pni(pni.into()), t0 + i as u64 * 1_000, text, None);
+            h.app.store.save_message(&super::pni::pni_thread(pni), c).await.unwrap();
+        }
+        h.app.persist.mute_override.insert(pk.clone(), 1);
+        h.app.threads_dirty = true;
+        h.cmd(Command::OpenThread(pk.clone())).await;
+        let ev = h.take_events();
+        let listed = ev.iter().rev().find_map(|e| match e {
+            Event::Threads(list) => Some(list.clone()),
+            _ => None,
+        });
+        assert!(listed.expect("a thread list").iter().any(|t| t.key == pk), "listed under its p: key");
+        let header = ev.iter().rev().find_map(|e| match e {
+            Event::Header { name, .. } => Some(name.clone()),
+            _ => None,
+        });
+        assert!(header.expect("a header").contains("10-1234-5678"), "named by its number");
+
+        // their answer: stored by presage under their ACI, signed with the PNI we wrote to
+        let reply = dm_between(ServiceId::Aci(aci.into()), me, t0 + 5_000, "네 반가워요", Some(pni));
+        let to = Thread::Contact(ServiceId::Aci(aci.into()));
+        h.app.store.save_message(&to, reply.clone()).await.unwrap();
+        h.app.content(reply).await;
+        h.settle().await;
+        let ev = h.take_events();
+        assert!(ev.iter().any(|e| matches!(e, Event::ThreadMoved { from, to } if *from == pk && *to == ck)));
+        assert_eq!(h.app.current.as_ref().map(|o| o.key.clone()), Some(ck.clone()), "the open thread followed");
+        assert_eq!(h.app.index.pni_number(pni).await.unwrap(), None, "forgotten once moved");
+        assert!(h.app.index.page(&super::pni::pni_thread(pni), i64::MAX, 10).await.unwrap().is_empty());
+        assert_eq!(h.app.persist.mute_override.get(&ck), Some(&1));
+        // what we wrote stays before their answer
+        let mut rows = h.app.index.page(&to, i64::MAX, 10).await.unwrap();
+        rows.reverse();
+        assert_eq!(rows.iter().map(|r| r.1).collect::<Vec<_>>(), vec![t0, t0 + 1_000, t0 + 5_000]);
+        let (items, _) = last_list(&ev).expect("the thread reopened");
+        assert_eq!(items.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["안녕하세요", "보셨나요", "네 반가워요"]);
+    });
+}

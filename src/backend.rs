@@ -47,6 +47,7 @@ mod gif;
 mod mute;
 pub(crate) mod notify;
 mod ops;
+mod pni;
 mod receive;
 #[cfg(test)]
 mod scenarios;
@@ -640,6 +641,7 @@ impl App {
                 }
             }
         }
+        self.resume_pni_merges().await;
         self.start_receiving();
         if !self.persist.receipts_dropped {
             self.move_receipts_out();

@@ -209,7 +209,18 @@ impl App {
             return;
         }
 
+        // their answer to what we wrote to their PNI
+        if let (Some(pni), ServiceId::Aci(aci)) = (c.metadata.pni_verified, c.metadata.sender) {
+            self.pni_proved(pni.into(), aci.into()).await;
+        }
         let Ok(thread) = Thread::try_from(&c) else { return };
+        if let Thread::Contact(ServiceId::Pni(p)) = &thread {
+            let e164 = match &c.body {
+                ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::Sent(s)), .. }) => s.destination_e164.clone(),
+                _ => None,
+            };
+            self.note_pni_thread((*p).into(), e164.as_deref()).await;
+        }
         let key = thread_key(&thread);
         let is_open = self.current.as_ref().is_some_and(|o| o.key == key);
         // replaced in place, so the thread's last row doesn't say it changed
