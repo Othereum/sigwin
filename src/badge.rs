@@ -56,11 +56,11 @@ fn label(n: u32) -> String {
     if n > 99 { "99+".into() } else { n.to_string() }
 }
 
-/// Text in the tray badge: only one character stays readable in its small circle, so it
-/// stops at 9. The tooltip has the exact count.
+/// Text in the tray badge: two digits don't stay readable in its small circle, so it
+/// stops at "9+". The tooltip has the exact count.
 #[cfg(windows)]
 fn tray_label(n: u32) -> String {
-    n.min(9).to_string()
+    if n > 9 { "9+".into() } else { n.to_string() }
 }
 
 #[cfg(windows)]
@@ -220,10 +220,14 @@ pub(crate) mod win {
 
     /// A memory DC and a 32bpp top-down DIB section (zeroed).
     unsafe fn dib(size: i32) -> (HDC, HBITMAP, *mut u8) {
+        unsafe { dib_wh(size, size) }
+    }
+
+    unsafe fn dib_wh(w: i32, h: i32) -> (HDC, HBITMAP, *mut u8) {
         let mut bi: BITMAPINFO = unsafe { std::mem::zeroed() };
         bi.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as u32;
-        bi.bmiHeader.biWidth = size;
-        bi.bmiHeader.biHeight = -size;
+        bi.bmiHeader.biWidth = w;
+        bi.bmiHeader.biHeight = -h;
         bi.bmiHeader.biPlanes = 1;
         bi.bmiHeader.biBitCount = 32;
         bi.bmiHeader.biCompression = BI_RGB;
@@ -239,11 +243,16 @@ pub(crate) mod win {
     /// Grayscale coverage (0..=255, `size`x`size`) of `text`, centered: the largest font up to
     /// `frac` of the size whose text fits the circle's width.
     pub(crate) fn text_coverage(text: &str, size: usize, face: &str, weight: i32, frac: f32) -> Vec<u8> {
-        let s = size as i32;
-        let mut out = vec![0u8; size * size];
+        text_coverage_wh(text, size, size, face, weight, frac)
+    }
+
+    /// `text_coverage` in a `w`x`h` pill: the text may use the extra width of its straight part.
+    pub(crate) fn text_coverage_wh(text: &str, w: usize, h: usize, face: &str, weight: i32, frac: f32) -> Vec<u8> {
+        let (wi, hi) = (w as i32, h as i32);
+        let mut out = vec![0u8; w * h];
         // SAFETY: GDI objects are created, used and released locally
         unsafe {
-            let (dc, bmp, bits) = dib(s);
+            let (dc, bmp, bits) = dib_wh(wi, hi);
             if bmp.is_null() {
                 DeleteDC(dc);
                 return out;
@@ -251,30 +260,30 @@ pub(crate) mod win {
             let old_bmp = SelectObject(dc, bmp);
             let face: Vec<u16> = face.encode_utf16().chain(Some(0)).collect();
             let t: Vec<u16> = text.encode_utf16().collect();
-            let max_w = (s as f32 * 0.76).round() as i32;
-            let mut h = (s as f32 * frac).round() as i32;
+            let max_w = (wi as f32 - hi as f32 * 0.24).round() as i32;
+            let mut fh = (hi as f32 * frac).round() as i32;
             let (font, old_font) = loop {
                 let font = CreateFontW(
-                    -h, 0, 0, 0, weight, 0, 0, 0,
+                    -fh, 0, 0, 0, weight, 0, 0, 0,
                     DEFAULT_CHARSET as u32, OUT_TT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32,
                     ANTIALIASED_QUALITY as u32, 0, face.as_ptr(),
                 );
                 let old = SelectObject(dc, font);
                 let mut ext = windows_sys::Win32::Foundation::SIZE { cx: 0, cy: 0 };
                 GetTextExtentPoint32W(dc, t.as_ptr(), t.len() as i32, &mut ext);
-                if ext.cx <= max_w || h <= 6 {
+                if ext.cx <= max_w || fh <= 6 {
                     break (font, old);
                 }
                 SelectObject(dc, old);
                 DeleteObject(font);
-                h -= 1;
+                fh -= 1;
             };
             SetTextColor(dc, 0x00ff_ffff);
             SetBkMode(dc, TRANSPARENT as i32);
-            let mut rc = RECT { left: 0, top: 0, right: s, bottom: s };
+            let mut rc = RECT { left: 0, top: 0, right: wi, bottom: hi };
             DrawTextW(dc, t.as_ptr(), t.len() as i32, &mut rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
             GdiFlush();
-            let px = std::slice::from_raw_parts(bits, size * size * 4);
+            let px = std::slice::from_raw_parts(bits, w * h * 4);
             for (o, p) in out.iter_mut().zip(px.chunks_exact(4)) {
                 *o = p[0].max(p[1]).max(p[2]);
             }
@@ -284,16 +293,16 @@ pub(crate) mod win {
             DeleteObject(bmp);
             DeleteDC(dc);
         }
-        center_ink(&mut out, size);
+        center_ink(&mut out, w, h);
         out
     }
 
     /// Shifts the coverage so its ink box is centered (whole pixels).
-    fn center_ink(cov: &mut [u8], size: usize) {
-        let (mut x0, mut y0, mut x1, mut y1) = (size, size, 0, 0);
-        for y in 0..size {
-            for x in 0..size {
-                if cov[y * size + x] > 40 {
+    fn center_ink(cov: &mut [u8], w: usize, h: usize) {
+        let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+        for y in 0..h {
+            for x in 0..w {
+                if cov[y * w + x] > 40 {
                     x0 = x0.min(x);
                     y0 = y0.min(y);
                     x1 = x1.max(x);
@@ -304,18 +313,18 @@ pub(crate) mod win {
         if x0 > x1 {
             return;
         }
-        let dx = ((size - 1) as i32 - (x0 + x1) as i32) / 2;
-        let dy = ((size - 1) as i32 - (y0 + y1) as i32) / 2;
+        let dx = ((w - 1) as i32 - (x0 + x1) as i32) / 2;
+        let dy = ((h - 1) as i32 - (y0 + y1) as i32) / 2;
         if dx == 0 && dy == 0 {
             return;
         }
         let src = cov.to_vec();
         cov.fill(0);
-        for y in 0..size as i32 {
-            for x in 0..size as i32 {
+        for y in 0..h as i32 {
+            for x in 0..w as i32 {
                 let (sx, sy) = (x - dx, y - dy);
-                if sx >= 0 && sy >= 0 && (sx as usize) < size && (sy as usize) < size {
-                    cov[y as usize * size + x as usize] = src[sy as usize * size + sx as usize];
+                if sx >= 0 && sy >= 0 && (sx as usize) < w && (sy as usize) < h {
+                    cov[y as usize * w + x as usize] = src[sy as usize * w + sx as usize];
                 }
             }
         }
@@ -331,19 +340,28 @@ const BRIGHT_RED: [f32; 3] = [0xff as f32, 0x3b as f32, 0x30 as f32]; // r, g, b
 /// Straight-alpha BGRA pixels of the badge: red circle, white text.
 #[cfg(windows)]
 fn render(text: &str, size: usize, color: [f32; 3]) -> Vec<u8> {
-    let cov = win::text_coverage(text, size, "Segoe UI", 700, 0.78);
-    let r = size as f32 / 2.0;
-    let mut out = vec![0u8; size * size * 4];
-    for y in 0..size {
-        for x in 0..size {
-            let (dx, dy) = (x as f32 + 0.5 - r, y as f32 + 0.5 - r);
+    render_pill(text, size, size, color)
+}
+
+/// `render` stretched to `w` wide: a pill, round ends of `h`'s diameter.
+#[cfg(windows)]
+fn render_pill(text: &str, w: usize, h: usize, color: [f32; 3]) -> Vec<u8> {
+    let cov = win::text_coverage_wh(text, w, h, "Segoe UI", 700, 0.78);
+    let r = h as f32 / 2.0;
+    let mut out = vec![0u8; w * h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            // distance to the pill's center line, from (r, r) to (w - r, r)
+            let px = x as f32 + 0.5;
+            let dx = px - px.clamp(r, w as f32 - r);
+            let dy = y as f32 + 0.5 - r;
             let a = (r - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0);
             if a == 0.0 {
                 continue;
             }
-            let t = cov[y * size + x] as f32 / 255.0;
+            let t = cov[y * w + x] as f32 / 255.0;
             let c = |i: usize| (color[i] + (255.0 - color[i]) * t).round() as u8;
-            let o = (y * size + x) * 4;
+            let o = (y * w + x) * 4;
             out[o..o + 4].copy_from_slice(&[c(2), c(1), c(0), (a * 255.0).round() as u8]);
         }
     }
@@ -354,11 +372,14 @@ fn render(text: &str, size: usize, color: [f32; 3]) -> Vec<u8> {
 #[cfg(windows)]
 fn add_badge(icon: &mut [u8], size: usize, n: u32) {
     let d = (size as f32 * 0.6875).round() as usize;
-    let badge = render(&tray_label(n), d, BRIGHT_RED);
-    let off = size - d;
+    let label = tray_label(n);
+    // "9+" in a circle shrinks below readable: widen the circle leftward instead
+    let w = if label.len() > 1 { ((d as f32 * 1.35).round() as usize).min(size) } else { d };
+    let badge = render_pill(&label, w, d, BRIGHT_RED);
+    let off = size - w;
     for y in 0..d {
-        for x in 0..d {
-            let b = &badge[(y * d + x) * 4..][..4];
+        for x in 0..w {
+            let b = &badge[(y * w + x) * 4..][..4];
             if b[3] == 0 {
                 continue;
             }

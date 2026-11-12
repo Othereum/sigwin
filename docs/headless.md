@@ -21,7 +21,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 - `SIGWIN_DEMO_UPDATE=<version>` (the sidebar "new version ready" bar), `SIGWIN_DEMO_UPDATE_AVAILABLE=<version>` ("new version available" bar, automatic download off), `SIGWIN_DEMO_WHATSNEW=1` (the "updated, what's new" bar)
 - `SIGWIN_NOTES_FILE=<path>` (dev builds only, any demo: the "what's new" notes to offer, since a dev build embeds none; the offer shows once per `SIGWIN_DATA`, so use a fresh scratch dir to see it again)
 - `SIGWIN_DEMO_NOTICE=<text>` (a notice over the conversation pane), `SIGWIN_DEMO_CONNECTION=<text>` (the connection banner, after its delay like a real drop), `SIGWIN_DEMO_STATUS=1` (loops through notices, progress, short and long connection drops)
-- `SIGWIN_DEMO_BADGE=<ms>` (the real tray and taskbar badges step through none and 1 to 10 every <ms>; needs a real window, so it's for the user; run it with a scratch `SIGWIN_DATA`)
+- `SIGWIN_DEMO_BADGE=<ms>` (the real tray and taskbar badges step through none and 1 to 12 every <ms>; needs a real window, so it's for the user; run it with a scratch `SIGWIN_DATA`)
 - `SIGWIN_DEMO_TICK=1` (periodic updates, for the minimize/restore repro)
 - `SIGWIN_DEMO_NOTIFY=<secs>` (a fake incoming message every <secs>, through the real `Notifier` and real toasts: 1:1 with photo, group, reaction, disappearing; needs a real window and an unfocused app, so it's for the user; run it with a scratch `SIGWIN_DATA`)
 - `SIGWIN_SELFTEST=1` (with `SIGWIN_DEMO=1`: measures the file dialog and notification memory cost)

@@ -20,12 +20,12 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         });
     }
     if let Ok(v) = std::env::var("SIGWIN_DEMO_BADGE") {
-        // the real tray and taskbar badges, stepping through none and 1 to 10
+        // the real tray and taskbar badges, stepping through none and 1 to 12
         let weak = app.as_weak();
         let n = std::cell::Cell::new(0u32);
         let timer = Box::leak(Box::new(slint::Timer::default()));
         timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(v.parse().unwrap_or(2000)), move || {
-            n.set((n.get() + 1) % 11);
+            n.set((n.get() + 1) % 13);
             if let Some(app) = weak.upgrade() {
                 app.set_total_unread(n.get() as i32);
             }
