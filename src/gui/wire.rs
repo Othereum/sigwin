@@ -416,6 +416,18 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
     });
 
+    app.on_drop_selection({
+        let weak = app.as_weak();
+        move |text, anchor, cursor| {
+            let Some(app) = weak.upgrade() else { return };
+            let (a, b) = (anchor.max(0) as usize, cursor.max(0) as usize);
+            let (lo, hi) = (a.min(b), a.max(b));
+            let (Some(head), Some(tail)) = (text.get(..lo), text.get(hi..)) else { return };
+            app.set_draft([head, tail].concat().into());
+            app.invoke_composer_cursor(lo as i32);
+        }
+    });
+
     app.on_mention_pick(move |row, text, cursor| {
         let Some(app) = weak.upgrade() else { return };
         app.set_mention_items(ModelRc::default());

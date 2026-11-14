@@ -144,6 +144,8 @@ export component AppWindow inherits Window {
     callback mention-pick(int, string, int);
     // style shortcut (view::STYLE_*), composer text, selection anchor and cursor (bytes)
     callback format-toggle(int, string, int, int);
+    // composer text, selection anchor and cursor (bytes): remove the selection, cursor where it began
+    callback drop-selection(string, int, int);
 
     // pinned messages of the open thread (newest first); the bar shows pins[pin-index]
     in property <[PinItem]> pins;
@@ -1373,6 +1375,12 @@ export component AppWindow inherits Window {
                                         }
                                         // IME composition (Hangul) changes neither text nor cursor: follow it too
                                         changed preedit-text => {
+                                            // Slint deletes the selection only when the composition commits
+                                            // (not when it starts, like other apps), so typing Hangul over
+                                            // selected text showed both until then
+                                            if (self.preedit-text != "" && self.anchor-position-byte-offset != self.cursor-position-byte-offset) {
+                                                root.drop-selection(self.text, self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+                                            }
                                             root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
                                         }
                                         single-line: false;
