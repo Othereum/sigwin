@@ -1,0 +1,13 @@
+# Renders assets/icon*.svg into the .ico/.png files the app embeds. Not part of the app build:
+#   cargo run --release --manifest-path build-support/icongen/Cargo.toml
+[package]
+name = "icongen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+resvg = "0.50.0"
+ico = "0.6.0"
