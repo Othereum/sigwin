@@ -1,6 +1,7 @@
-// Reaction picker: the message menu's emoji grid (the "＋" after the quick reactions).
+// Reaction picker: the message menu's emoji grid (the plus after the quick reactions).
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
 
 export global PickerLayout {
     out property <length> cell: 36px;
@@ -12,6 +13,8 @@ export global PickerLayout {
 // one emoji button: the quick row, the recent row and the grid
 export component ReactionCell inherits Rectangle {
     in property <string> emoji;
+    // drawn instead of an emoji (one of `Icons`)
+    in property <string> icon;
     // our own reaction on the message
     in property <bool> mine;
     callback picked();
@@ -19,9 +22,13 @@ export component ReactionCell inherits Rectangle {
     height: PickerLayout.cell;
     border-radius: PickerLayout.cell / 2;
     background: root.mine ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
-    // emoji glyphs sit high in their line box: 1px below the centre (plain symbols like "＋": 0)
-    in property <length> nudge: 1px;
-    Text { text: root.emoji; font-size: 20px; y: (parent.height - self.height) / 2 + root.nudge; }
+    // emoji glyphs sit high in their line box: 1px below the centre
+    if root.icon == "": Text { text: root.emoji; font-size: 20px; y: (parent.height - self.height) / 2 + 1px; }
+    if root.icon != "": Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        icon: root.icon;
+    }
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.picked(); }

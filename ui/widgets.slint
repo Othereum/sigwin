@@ -1,6 +1,7 @@
 // Small shared widgets.
 
 import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
 
 // a short message over the content; clicks go through it. Fixed dark look: the image viewer uses it
 // too, and globals aren't shared between windows.
@@ -70,7 +71,7 @@ export component Avatar inherits Rectangle {
         text: initial;
         color: white;
         font-size: size * 0.42;
-        font-weight: 600;
+        font-weight: 700;
     }
     Image {
         visible: has-photo;
@@ -82,51 +83,78 @@ export component Avatar inherits Rectangle {
 }
 
 export component IconButton inherits Rectangle {
-    in property <string> label;
+    // one of `Icons`
+    in property <string> icon;
+    in property <length> icon-size: 20px;
     in property <bool> enabled: true;
+    // drawn in the accent (a panel it opens is showing)
+    in property <bool> active;
+    in property <color> hover-color: Theme.hover;
     callback clicked;
     width: 36px;
     height: 36px;
-    border-radius: 18px;
-    background: ta.has-hover && enabled ? Theme.hover : transparent;
+    border-radius: 8px;
+    background: ta.has-hover && enabled ? root.hover-color : transparent;
     ta := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
-    Text {
-        text: label;
-        // the UI font (Malgun Gothic) lacks symbols like ✕ ➤, and the software renderer
-        // does not fall back per glyph: use the symbol font for icons
-        font-family: "Segoe UI Symbol";
-        font-size: 18px;
-        color: enabled ? Theme.subtle : Theme.border;
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        icon: root.icon;
+        size: root.icon-size;
+        tint: !root.enabled ? Theme.border : root.active ? Theme.accent : Theme.subtle;
     }
 }
 
-// A peeling sticker: the sticker panel's icon, drawn as a vector so it doesn't depend
-// on a font. Put it inside an `IconButton` with an empty label; it centers itself.
-export component StickerIcon inherits Rectangle {
-    in property <color> tint: Theme.subtle;
-    Path {
-        width: 22px;
-        height: 22px;
-        x: (parent.width - self.width) / 2;
+// one-line text field on a grey ground, no border; the accent ring while it has the focus
+export component SearchBox inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> text;
+    callback edited();
+    callback accepted();
+    callback key-pressed(KeyEvent) -> EventResult;
+    forward-focus: input;
+    height: 34px;
+    border-radius: 8px;
+    background: input.has-focus ? Theme.pane : Theme.field;
+    border-width: input.has-focus ? 1.5px : 0px;
+    border-color: Theme.accent;
+    Icon {
+        x: 10px;
         y: (parent.height - self.height) / 2;
-        viewbox-width: 22;
-        viewbox-height: 22;
-        // the sticker (a corner cut away) and the curled flap
-        commands: "M 6 3 H 16 A 3 3 0 0 1 19 6 V 12 L 12 19 H 6 A 3 3 0 0 1 3 16 V 6 A 3 3 0 0 1 6 3 Z M 19 12 H 15 A 3 3 0 0 0 12 15 V 19";
-        fill: transparent;
-        stroke: root.tint;
-        stroke-width: 1.5px;
-        stroke-line-cap: round;
-        stroke-line-join: round;
+        size: 16px;
+        icon: Icons.search;
+    }
+    input := TextInput {
+        x: 34px;
+        width: parent.width - 44px;
+        height: parent.height;
+        single-line: true;
+        vertical-alignment: center;
+        text <=> root.text;
+        color: Theme.text;
+        font-size: 13px;
+        edited => { root.edited(); }
+        accepted => { root.accepted(); }
+        key-pressed(e) => { return root.key-pressed(e); }
+    }
+    if root.text == "" && input.preedit-text == "": Text {
+        x: input.x;
+        height: parent.height;
+        text: root.placeholder;
+        color: Theme.subtle;
+        font-size: 13px;
+        vertical-alignment: center;
     }
 }
 
 export component MenuRow inherits Rectangle {
     in property <string> text;
+    // before the text (one of `Icons`)
+    in property <string> icon;
     in property <bool> danger;
     callback clicked;
     height: 32px;
@@ -136,10 +164,17 @@ export component MenuRow inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
-    Text {
+    if root.icon != "": Icon {
         x: 10px;
+        y: (parent.height - self.height) / 2;
+        size: 18px;
+        icon: root.icon;
+        tint: root.danger ? Theme.danger : Theme.text;
+    }
+    Text {
+        x: root.icon != "" ? 38px : 10px;
         text: root.text;
-        color: root.danger ? #e5484d : Theme.text;
+        color: root.danger ? Theme.danger : Theme.text;
         font-size: 13px;
         vertical-alignment: center;
     }
@@ -162,7 +197,7 @@ export component DangerButton inherits Rectangle {
     }
     lbl := Text {
         text: root.text;
-        color: Theme.dark ? #ff6369 : #e5484d;
+        color: Theme.danger;
         font-size: 13px;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -192,10 +227,13 @@ export component PrimaryButton inherits Rectangle {
 
 export component TextButton inherits Rectangle {
     in property <string> text;
+    // before the text (one of `Icons`)
+    in property <string> icon;
     in property <bool> active;
     callback clicked;
+    property <length> icon-w: root.icon != "" ? 20px : 0px;
     height: 28px;
-    min-width: lbl.preferred-width + 20px;
+    min-width: lbl.preferred-width + 20px + icon-w;
     max-width: 160px;
     border-radius: 14px;
     background: active ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
@@ -203,12 +241,19 @@ export component TextButton inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
+    if root.icon != "": Icon {
+        x: 8px;
+        y: (parent.height - self.height) / 2;
+        size: 16px;
+        icon: root.icon;
+        tint: Theme.text;
+    }
     lbl := Text {
-        x: 10px;
-        width: parent.width - 20px;
+        x: 10px + root.icon-w;
+        width: parent.width - 20px - root.icon-w;
         text: root.text;
         color: Theme.text;
-        font-size: 12.5px;
+        font-size: 13px;
         overflow: elide;
         vertical-alignment: center;
     }
@@ -246,8 +291,8 @@ export component Segmented inherits Rectangle {
             seg-label := Text {
                 text: o;
                 color: Theme.text;
-                font-size: 12.5px;
-                font-weight: i == root.current ? 600 : 400;
+                font-size: 13px;
+                font-weight: i == root.current ? 700 : 400;
             }
         }
     }

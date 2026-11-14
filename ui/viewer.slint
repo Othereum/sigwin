@@ -3,26 +3,33 @@
 import { Notice } from "widgets.slint";
 import { MediaLabel, VideoMark } from "bubble.slint";
 import { MediaState } from "types.slint";
+import { Icon, Icons } from "icons.slint";
 
 component ViewerButton inherits Rectangle {
     in property <string> text;
-    in property <length> font-size: 13px;
-    in property <string> font-family;
+    // one of `Icons`, before the text or alone
+    in property <string> icon;
     out property <bool> hovered: ta.has-hover;
     callback clicked();
     min-height: 30px;
-    border-radius: 6px;
+    border-radius: 7px;
     background: ta.has-hover ? #ffffff30 : transparent;
     HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        Text {
+        padding-left: root.text != "" ? 8px : 0px;
+        padding-right: root.text != "" ? 10px : 0px;
+        spacing: 6px;
+        alignment: center;
+        if root.icon != "": Icon {
+            y: (parent.height - self.height) / 2;
+            size: root.text != "" ? 16px : 18px;
+            icon: root.icon;
+            tint: white;
+        }
+        if root.text != "": Text {
             text: root.text;
             color: white;
-            font-size: root.font-size;
-            font-family: root.font-family;
+            font-size: 13px;
             vertical-alignment: center;
-            horizontal-alignment: center;
         }
     }
     ta := TouchArea {
@@ -31,7 +38,7 @@ component ViewerButton inherits Rectangle {
     }
 }
 
-// round previous / next button with a drawn chevron (no font glyph involved)
+// round previous / next button
 component NavButton inherits Rectangle {
     in property <bool> forward;
     callback clicked();
@@ -41,18 +48,12 @@ component NavButton inherits Rectangle {
     background: ta.has-hover ? #000000e0 : #000000a0;
     border-width: 1px;
     border-color: ta.has-hover ? #ffffff60 : #ffffff28;
-    Path {
-        width: 12px;
-        height: 20px;
-        x: (parent.width - self.width) / 2 + (root.forward ? 1px : -1px);
+    Icon {
+        x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        viewbox-width: 12;
-        viewbox-height: 20;
-        commands: root.forward ? "M 2 2 L 10 10 L 2 18" : "M 10 2 L 2 10 L 10 18";
-        stroke: white;
-        stroke-width: 2.5px;
-        stroke-line-cap: round;
-        stroke-line-join: round;
+        size: 24px;
+        icon: root.forward ? Icons.chevron-right : Icons.chevron-left;
+        tint: white;
     }
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -258,7 +259,7 @@ export component ImageViewer inherits Window {
             y: 12px;
             width: bar.preferred-width;
             height: bar.preferred-height;
-            border-radius: 8px;
+            border-radius: 10px;
             background: #000000c0;
             // clicks between the buttons don't close the window
             TouchArea {}
@@ -267,10 +268,12 @@ export component ImageViewer inherits Window {
                 spacing: 2px;
                 ViewerButton {
                     text: "저장";
+                    icon: Icons.download;
                     clicked => { root.save(); }
                 }
                 ViewerButton {
                     text: "기본 앱으로 열기";
+                    icon: Icons.open-outside;
                     clicked => { root.open-outside(); }
                 }
             }
@@ -280,8 +283,8 @@ export component ImageViewer inherits Window {
             y: 12px;
             width: 36px;
             height: 36px;
-            text: "✕";
-            font-family: "Segoe UI Symbol";
+            border-radius: 10px;
+            icon: Icons.close;
             background: self.hovered ? #c42b1c : #00000090;
             clicked => { root.dismiss(); }
         }

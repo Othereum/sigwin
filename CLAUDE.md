@@ -13,6 +13,7 @@
 - `docs/headless.md`: demo modes and headless UI verification (steps, syntax).
 - `docs/release.md`: version rules (which part to bump), publishing a release, the update signing key.
 - `docs/decisions.md`: measurements and rejected approaches (renderer comparison, DirectWrite emoji).
+- `docs/design.md`: how the UI looks: icons, colors, type, shapes. Read before changing `ui/`.
 - `vendor/PATCHES.md`: every vendor hunk and how to re-apply it.
 - `.claude/rules/presage.md`, `.claude/rules/slint.md`: gotchas, loaded automatically when you work on the matching files. Read them before changing backend/view/db or `ui/`.
 

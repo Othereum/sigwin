@@ -3,6 +3,7 @@
 import { MsgItem } from "types.slint";
 import { Anim, Links, Theme } from "theme.slint";
 import { Avatar } from "widgets.slint";
+import { Icon, Icons } from "icons.slint";
 import { RepliesData } from "replies.slint";
 
 // time + delivery status of a message; clicking either shows who has it
@@ -11,11 +12,21 @@ export component MsgMeta inherits HorizontalLayout {
     callback info(string);
     spacing: 4px;
     property <bool> bare: m.has-image && m.text == "" && m.quote == "" && m.attachment == "";
+    property <color> on-bubble: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted && !root.bare ? #ffffffb0 : Theme.subtle;
+    if m.pinned: Rectangle {
+        width: 12px;
+        Icon {
+            y: parent.height - self.height - 1px;
+            size: 12px;
+            icon: Icons.pin;
+            tint: root.on-bubble;
+        }
+    }
     Text {
         text: m.time;
-        font-size: 10.5px;
+        font-size: 11px;
         vertical-alignment: bottom;
-        color: m.outgoing && !m.sticker && !m.big-emoji && !m.deleted && !root.bare ? #ffffffb0 : Theme.subtle;
+        color: root.on-bubble;
         TouchArea {
             enabled: m.outgoing;
             mouse-cursor: m.outgoing ? pointer : default;
@@ -23,13 +34,15 @@ export component MsgMeta inherits HorizontalLayout {
         }
     }
     // failed: said in red below the bubble, red text wouldn't read on the blue bubble
-    if m.outgoing && m.status != "" && !m.failed: Text {
-        text: m.status;
-        // ✓ is missing from the UI font; Hangul ("읽음") is missing from the symbol font
-        font-family: m.status == "✓" || m.status == "✓✓" ? "Segoe UI Symbol" : "Malgun Gothic";
-        font-size: 12px;
-        vertical-alignment: bottom;
-        color: m.sticker || m.big-emoji || root.bare ? Theme.subtle : #ffffffd0;
+    // sent ("✓"), delivered or read ("✓✓"): marks the backend sets, drawn as icons
+    if m.outgoing && m.status != "" && !m.failed: Rectangle {
+        width: 16px;
+        Icon {
+            y: parent.height - self.height + 1px;
+            size: 16px;
+            icon: m.status == "✓✓" ? Icons.check-double : Icons.check;
+            tint: m.sticker || m.big-emoji || root.bare ? Theme.subtle : #ffffffd0;
+        }
         TouchArea {
             mouse-cursor: pointer;
             clicked => { root.info(m.receipt-info); }
@@ -54,45 +67,34 @@ export component VideoMark inherits Rectangle {
         source: ring;
         image-fit: fill;
     }
-    if !undownloaded: Text {
-        // the triangle's weight sits left of its box
-        x: 14px;
-        y: 0px;
-        height: 100%;
-        text: "▶";
-        font-family: "Segoe UI Symbol";
-        font-size: 16px;
-        color: white;
-        vertical-alignment: center;
+    // the triangle's weight sits left of its box: 1px right of the centre
+    if !undownloaded: Icon {
+        x: (parent.width - self.width) / 2 + 1px;
+        y: (parent.height - self.height) / 2;
+        icon: Icons.play;
+        filled: true;
+        tint: white;
     }
-    if undownloaded && progress < 0: Text {
-        width: 100%;
-        height: 100%;
-        // "Download" of Segoe MDL2 Assets (Windows 10+): an arrow into a tray
-        text: "\u{E896}";
-        font-family: "Segoe MDL2 Assets";
-        font-size: 18px;
-        color: white;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    if undownloaded && progress < 0: Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        icon: Icons.download;
+        tint: white;
     }
     // while it downloads, a click stops that
-    if undownloaded && progress >= 0: Text {
-        width: 100%;
-        height: 100%;
-        text: "✕";
-        font-family: "Segoe UI Symbol";
-        font-size: 14px;
-        color: white;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    if undownloaded && progress >= 0: Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        size: 16px;
+        icon: Icons.close;
+        tint: white;
     }
 }
 
 // a video's length or a file's size, in a corner of its picture
 export component MediaLabel inherits Rectangle {
     in property <string> text;
-    // what it is, before the text: a glyph of Segoe MDL2 Assets
+    // what it is, before the text: one of `Icons`
     in property <string> icon;
     width: row.preferred-width;
     height: row.preferred-height;
@@ -104,12 +106,11 @@ export component MediaLabel inherits Rectangle {
         padding-top: 1px;
         padding-bottom: 1px;
         spacing: root.icon != "" && root.text != "" ? 4px : 0px;
-        if root.icon != "": Text {
-            text: root.icon;
-            font-family: "Segoe MDL2 Assets";
-            font-size: 11px;
-            color: white;
-            vertical-alignment: center;
+        if root.icon != "": Icon {
+            y: (parent.height - self.height) / 2;
+            size: 14px;
+            icon: root.icon;
+            tint: white;
         }
         if root.text != "": Text {
             text: root.text;
@@ -199,8 +200,7 @@ export component MsgImage inherits Rectangle {
         // what it is (a video's mark, "GIF") and its size or length: the mark in the middle is
         // only what a click does, the same for all of them while they aren't here
         if cell.more == 0 && (cell.state[0].label != "" || cell.video || (cell.gif && cell.frames.length == 0)): MediaLabel {
-            // "Video" of Segoe MDL2 Assets
-            icon: cell.video ? "\u{E714}" : "";
+            icon: cell.video ? Icons.video : "";
             text: !cell.gif ? cell.state[0].label : cell.state[0].label == "" ? "GIF" : "GIF · " + cell.state[0].label;
             x: 6px;
             y: parent.height - self.height - 6px;
@@ -310,21 +310,20 @@ component LinkPreview inherits Rectangle {
 }
 
 component ToolButton inherits Rectangle {
+    // one of `Icons`
     in property <string> icon;
-    in property <string> font: "Segoe UI Symbol";
-    in property <length> size: 16px;
+    in property <bool> filled;
     out property <bool> hovered: ta.has-hover;
     callback clicked(length, length);
     width: 28px;
     border-radius: 14px;
     background: ta.has-hover ? Theme.hover : transparent;
-    Text {
-        text: root.icon;
-        font-family: root.font;
-        font-size: root.size;
-        color: Theme.subtle;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        size: 18px;
+        icon: root.icon;
+        filled: root.filled;
     }
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -332,45 +331,50 @@ component ToolButton inherits Rectangle {
     }
 }
 
-// hover toolbar beside a bubble: reply, save (a message with pictures, videos or files), more (the menu has the reactions)
+// hover toolbar beside a bubble: react, reply, save (a message with pictures, videos or files), more
 export component MsgTools inherits Rectangle {
     in property <bool> shown;
     in property <bool> can-save;
     in property <bool> mirrored;
-    out property <bool> hovered: b-reply.hovered || b-save.hovered || b-more.hovered || gap.has-hover;
+    out property <bool> hovered: b-react.hovered || b-reply.hovered || b-save.hovered || b-more.hovered || gap.has-hover;
+    callback react(length, length);
     callback reply();
     callback save();
     callback more(length, length);
-    width: (root.can-save ? 3 : 2) * 28px + 8px;
+    width: (root.can-save ? 4 : 3) * 28px + 8px;
     height: 28px;
     opacity: shown || hovered ? 1.0 : 0.0;
     // 4px transparent gap next to the bubble keeps the hover from dropping while crossing to the buttons
     gap := TouchArea { }
-    // slot 0 is next to the bubble: reply, save, more in that order; mirrored (our own bubbles, tools on the left) flips the sides
+    // slot 0 is next to the bubble: react, reply, save, more in that order; mirrored (our own bubbles, tools on the left) flips the sides
     function slot-x(i: int) -> length {
         return root.mirrored ? root.width - 4px - 28px * (i + 1) : 4px + 28px * i;
     }
     Rectangle {
-        b-reply := ToolButton {
+        b-react := ToolButton {
             x: root.slot-x(0);
             height: 28px;
-            icon: "↩";
+            icon: Icons.react;
+            clicked(x, y) => { root.react(x, y); }
+        }
+        b-reply := ToolButton {
+            x: root.slot-x(1);
+            height: 28px;
+            icon: Icons.reply;
             clicked(x, y) => { root.reply(); }
         }
         b-save := ToolButton {
-            x: root.slot-x(1);
+            x: root.slot-x(2);
             height: 28px;
             visible: root.can-save;
-            // the video's download glyph (Segoe MDL2 Assets)
-            icon: "\u{E896}";
-            font: "Segoe MDL2 Assets";
-            size: 15px;
+            icon: Icons.download;
             clicked(x, y) => { root.save(); }
         }
         b-more := ToolButton {
-            x: root.slot-x(root.can-save ? 2 : 1);
+            x: root.slot-x(root.can-save ? 3 : 2);
             height: 28px;
-            icon: "⋯";
+            icon: Icons.more;
+            filled: true;
             clicked(x, y) => { root.more(x, y); }
         }
     }
@@ -468,6 +472,8 @@ export component Bubble inherits VerticalLayout {
     callback show-reactors(string);
     // right click: message menu at (x, y) in window coordinates
     callback menu(string, length, length);
+    // the hover tools' reaction button: the menu's reactions alone
+    callback react-menu(string, length, length);
     padding-left: 16px;
     padding-right: 16px;
     // Signal's spacing: 6px above and below a run, 1px between rows of one run
@@ -512,7 +518,7 @@ export component Bubble inherits VerticalLayout {
                 padding: 4px;
                 padding-left: 10px;
                 padding-right: 10px;
-                Text { text: root.day-label(m.day); color: Theme.subtle; font-size: 11.5px; }
+                Text { text: root.day-label(m.day); color: Theme.subtle; font-size: 12px; }
             }
         }
     }
@@ -527,7 +533,7 @@ export component Bubble inherits VerticalLayout {
         Text {
             text: "안 읽은 메시지";
             color: Theme.accent;
-            font-size: 11.5px;
+            font-size: 12px;
             font-weight: 700;
             vertical-alignment: center;
         }
@@ -618,6 +624,7 @@ export component Bubble inherits VerticalLayout {
                 save => { root.save-clicked(m.id); }
                 reply => { root.reply(m.id); }
                 more(x, y) => { root.menu(m.id, x, y + 28px); }
+                react(x, y) => { root.react-menu(m.id, x, y + 28px); }
             }
             // TouchArea is the parent of the content (not a sibling below it): it sees hover even over
             // the TextInput, and still takes the clicks the content ignores. It forwards the layout's size.
@@ -703,7 +710,7 @@ export component Bubble inherits VerticalLayout {
                             height: 40px;
                             y: 0px;
                             border-radius: 6px;
-                            background: m.file-danger ? #d97706 : m.outgoing ? #ffffff40 : Theme.accent;
+                            background: m.file-danger ? Theme.warning : m.outgoing ? #ffffff40 : Theme.accent;
                             // on its way: the picture's mark, a ring and the stop it takes
                             if root.file-loading: VideoMark {
                                 undownloaded: true;
@@ -737,7 +744,7 @@ export component Bubble inherits VerticalLayout {
                             }
                             if !root.file-loading && (m.file-size != "" || m.file-danger): Text {
                                 text: m.file-danger ? (m.file-size != "" ? m.file-size + " · " : "") + "위험할 수 있음" : m.file-size;
-                                color: m.file-danger ? (m.outgoing ? #ffe2a8 : #f0a030) : m.outgoing ? #ffffffc0 : Theme.subtle;
+                                color: m.file-danger ? (m.outgoing ? #ffe2a8 : Theme.warning-text) : m.outgoing ? #ffffffc0 : Theme.subtle;
                                 font-size: 12px;
                             }
                         }
@@ -805,7 +812,7 @@ export component Bubble inherits VerticalLayout {
                             text: m.rich;
                             default-color: m.outgoing && !m.sticker ? white : Theme.text;
                             default-font-size: 14px;
-                            link-color: m.outgoing ? white : Theme.dark ? #7aa7ff : #1f5fd6;
+                            link-color: m.outgoing ? white : Theme.link;
                             link-clicked(url) => { Links.open(url); }
                         }
                         if with-time: MsgMeta {
@@ -824,7 +831,7 @@ export component Bubble inherits VerticalLayout {
                         text: "더 읽기";
                         font-size: 13px;
                         font-weight: 700;
-                        color: m.outgoing ? white : Theme.dark ? #7aa7ff : #1f5fd6;
+                        color: m.outgoing ? white : Theme.link;
                         TouchArea {
                             mouse-cursor: pointer;
                             clicked => { Links.open("sigwin-more:" + m.id); }
@@ -904,12 +911,10 @@ export component Bubble inherits VerticalLayout {
                             padding-left: 7px;
                             padding-right: 7px;
                             spacing: 3px;
-                            Text {
-                                text: "↩";
-                                font-family: "Segoe UI Symbol";
-                                font-size: 12px;
-                                color: Theme.subtle;
-                                vertical-alignment: center;
+                            Icon {
+                                y: (parent.height - self.height) / 2;
+                                size: 14px;
+                                icon: Icons.reply;
                             }
                             Text {
                                 text: m.replies;
@@ -992,7 +997,7 @@ export component Bubble inherits VerticalLayout {
             text: "전송 실패";
             font-size: 12px;
             font-weight: 700;
-            color: Theme.dark ? #ff6b6b : #d32f2f;
+            color: Theme.failed;
             TouchArea {
                 mouse-cursor: pointer;
                 clicked => { root.show-info(m.receipt-info); }
@@ -1002,7 +1007,7 @@ export component Bubble inherits VerticalLayout {
             text: "다시 보내기";
             font-size: 12px;
             font-weight: 700;
-            color: Theme.dark ? #7aa7ff : #1f5fd6;
+            color: Theme.link;
             TouchArea {
                 mouse-cursor: pointer;
                 clicked => { Links.open("sigwin-retry:" + m.id); }

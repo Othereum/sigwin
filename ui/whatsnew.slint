@@ -4,6 +4,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { NoteLine } from "types.slint";
 import { IconButton } from "widgets.slint";
+import { Icons } from "icons.slint";
 
 export component WhatsNewPage inherits Rectangle {
     in property <[NoteLine]> lines;
@@ -27,7 +28,7 @@ export component WhatsNewPage inherits Rectangle {
                 }
                 IconButton {
                     y: (parent.height - self.height) / 2;
-                    label: "✕";
+                    icon: Icons.close;
                     clicked => { root.close(); }
                 }
             }
@@ -49,7 +50,7 @@ export component WhatsNewPage inherits Rectangle {
                         y: top;
                         text: "•";
                         color: Theme.subtle;
-                        font-size: 13.5px;
+                        font-size: 14px;
                     }
                     txt := Text {
                         x: line.kind == 1 ? 14px : 0px;

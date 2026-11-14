@@ -88,6 +88,8 @@ export struct MsgItem {
     has-avatar: bool,
     initial: string,
     status: string,
+    // pinned in this thread: a pin before the time
+    pinned: bool,
     // photos of those who read it (outgoing; replaces the status text) and how many more there are
     readers: [ReaderItem],
     readers-more: int,

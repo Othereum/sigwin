@@ -3,34 +3,48 @@
 import { Button, ListView, Switch } from "std-widgets.slint";
 import { Links, Theme } from "theme.slint";
 import { Avatar, DangerButton, IconButton, Segmented } from "widgets.slint";
+import { Icons } from "icons.slint";
 
+// a heading over its rows, which sit together on one rounded card
 export component SettingSection inherits VerticalLayout {
     in property <string> title;
-    spacing: 2px;
-    padding-top: 18px;
-    Text {
-        text: root.title;
-        color: Theme.accent;
-        font-size: 12.5px;
-        font-weight: 700;
+    spacing: 8px;
+    padding-top: 20px;
+    HorizontalLayout {
+        padding-left: 4px;
+        Text {
+            text: root.title;
+            color: Theme.subtle;
+            font-size: 12px;
+            font-weight: 700;
+        }
     }
-    Rectangle { height: 4px; }
-    @children
+    Rectangle {
+        border-radius: 12px;
+        background: Theme.group;
+        VerticalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 6px;
+            padding-bottom: 6px;
+            @children
+        }
+    }
 }
 
 // label (+ optional hint) on the left, a control on the right
 export component SettingRow inherits HorizontalLayout {
     in property <string> label;
     in property <string> hint;
-    spacing: 12px;
-    padding-top: 6px;
-    padding-bottom: 6px;
+    spacing: 16px;
+    padding-top: 8px;
+    padding-bottom: 8px;
     VerticalLayout {
         alignment: center;
         horizontal-stretch: 1;
         spacing: 2px;
-        Text { text: root.label; color: Theme.text; font-size: 13.5px; wrap: word-wrap; }
-        if root.hint != "": Text { text: root.hint; color: Theme.subtle; font-size: 11.5px; wrap: word-wrap; }
+        Text { text: root.label; color: Theme.text; font-size: 14px; wrap: word-wrap; }
+        if root.hint != "": Text { text: root.hint; color: Theme.subtle; font-size: 12px; wrap: word-wrap; }
     }
     VerticalLayout {
         alignment: center;
@@ -45,8 +59,8 @@ export component SettingGroup inherits VerticalLayout {
     in property <string> hint;
     padding-top: 12px;
     spacing: 2px;
-    Text { text: root.title; color: Theme.text; font-size: 13.5px; font-weight: 600; }
-    if root.hint != "": Text { text: root.hint; color: Theme.subtle; font-size: 11.5px; wrap: word-wrap; }
+    Text { text: root.title; color: Theme.text; font-size: 14px; font-weight: 700; }
+    if root.hint != "": Text { text: root.hint; color: Theme.subtle; font-size: 12px; wrap: word-wrap; }
     HorizontalLayout {
         padding-top: 2px;
         padding-left: 16px;
@@ -127,7 +141,7 @@ export component SettingsPage inherits Rectangle {
                 }
                 IconButton {
                     y: (parent.height - self.height) / 2;
-                    label: "✕";
+                    icon: Icons.close;
                     clicked => { root.close(); }
                 }
             }
@@ -143,13 +157,16 @@ export component SettingsPage inherits Rectangle {
                 alignment: center;
                 body := VerticalLayout {
                     width: min(560px, root.width - 48px);
+                    padding-top: 20px;
                     padding-bottom: 24px;
+                    Rectangle {
+                    border-radius: 12px;
+                    background: Theme.group;
                     HorizontalLayout {
-                        padding-top: 20px;
-                        padding-bottom: 4px;
+                        padding: 16px;
                         spacing: 16px;
                         Avatar {
-                            size: 64px;
+                            size: 56px;
                             y: 0px;
                             initial: SettingsData.account-initial;
                             tint: SettingsData.account-tint;
@@ -166,14 +183,15 @@ export component SettingsPage inherits Rectangle {
                                 font-weight: 700;
                                 overflow: elide;
                             }
-                            Text { text: SettingsData.account-number; color: Theme.subtle; font-size: 12.5px; overflow: elide; }
+                            Text { text: SettingsData.account-number; color: Theme.subtle; font-size: 13px; overflow: elide; }
                             if SettingsData.account-device != "": Text {
                                 text: "이 기기: " + SettingsData.account-device;
                                 color: Theme.subtle;
-                                font-size: 12.5px;
+                                font-size: 13px;
                                 overflow: elide;
                             }
                         }
+                    }
                     }
                     SettingSection {
                         title: "알림";

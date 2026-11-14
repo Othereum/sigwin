@@ -33,4 +33,18 @@ export global Theme {
     out property <color> bubble-out: accent;
     out property <color> selected: dark ? #2c2c31 : #dfe7fb;
     out property <color> hover: dark ? #232326 : #ececf0;
+    // input fields without a border (search box, composer), and a button that can't be used on one
+    out property <color> field: dark ? #242427 : #eeeff2;
+    out property <color> field-off: dark ? #33333a : #dcdde2;
+    // a card of related rows on the pane (settings sections)
+    out property <color> group: dark ? #1b1b1d : #f4f5f7;
+    // destructive actions (delete, block)
+    out property <color> danger: dark ? #ff6369 : #e5484d;
+    // a message that failed to send
+    out property <color> failed: dark ? #ff6b6b : #d32f2f;
+    // links in incoming bubbles and in text on the pane
+    out property <color> link: dark ? #7aa7ff : #1f5fd6;
+    // a file that may be unsafe to open: its mark, and the warning text beside it
+    out property <color> warning: #d97706;
+    out property <color> warning-text: #f0a030;
 }

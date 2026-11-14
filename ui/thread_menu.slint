@@ -52,7 +52,7 @@ component PrefRow inherits HorizontalLayout {
         horizontal-stretch: 1;
         spacing: 2px;
         Text { text: root.label; color: Theme.text; font-size: 13px; wrap: word-wrap; }
-        Text { text: "기본값: " + root.hint; color: Theme.subtle; font-size: 11.5px; wrap: word-wrap; }
+        Text { text: "기본값: " + root.hint; color: Theme.subtle; font-size: 12px; wrap: word-wrap; }
     }
     Segmented {
         y: (parent.height - self.height) / 2;
@@ -79,7 +79,7 @@ export component ThreadMenu inherits Rectangle {
         height: tmenu-col.preferred-height;
         x: max(8px, min(ThreadMenuData.menu-x, root.width - w - 8px));
         y: max(8px, min(ThreadMenuData.menu-y, root.height - self.height - 8px));
-        border-radius: 10px;
+        border-radius: 12px;
         background: Theme.pane;
         border-width: 1px;
         border-color: Theme.border;
@@ -140,7 +140,7 @@ export component ThreadMenu inherits Rectangle {
                     padding-bottom: 6px;
                     spacing: 1px;
                     Text { text: "휴대폰 설정 따르기"; color: Theme.text; font-size: 13px; }
-                    Text { text: ThreadMenuData.phone; color: Theme.subtle; font-size: 11.5px; overflow: elide; }
+                    Text { text: ThreadMenuData.phone; color: Theme.subtle; font-size: 12px; overflow: elide; }
                 }
             }
             Rectangle { height: 1px; background: Theme.border; }
@@ -193,7 +193,7 @@ export component ThreadPrefsDialog inherits Rectangle {
             }
             VerticalLayout {
                 spacing: 10px;
-                Text { text: "알림을 끈 동안"; color: Theme.text; font-size: 13px; font-weight: 600; }
+                Text { text: "알림을 끈 동안"; color: Theme.text; font-size: 13px; font-weight: 700; }
                 HorizontalLayout {
                     padding-left: 16px;
                     VerticalLayout {

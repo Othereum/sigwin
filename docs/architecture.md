@@ -39,7 +39,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/gui/scroll.rs` | message list scrolling and jumps |
 | `src/gui/anim.rs` | animated stickers: frames under a memory budget, the timer that flips them; the one GIF playing in the message list |
 | `src/gui/drafts.rs` | per-thread composer drafts |
-| `src/gui/linkcard.rs` | the link preview above the composer |
+| `src/gui/linkcard.rs` | the link preview card in the composer |
 | `src/gui/viewer.rs` | image viewer window |
 | `src/gui/window.rs` | theme, zoom, native window handle, releasing memory while hidden |
 | `src/away.rs` | whether the user is away (no input for a while, screen locked or off) and whether the window can be seen (not covered) |
@@ -112,6 +112,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `ui/reactions.slint` | reaction buttons and the emoji picker of the message menu |
 | `ui/viewer.slint` | image viewer window |
 | `ui/widgets.slint` | small shared widgets |
+| `ui/icons.slint` | the icon set: paths on a 24-unit grid and the `Icon` that draws them |
 | `ui/thread_row.slint`, `ui/stickers.slint`, `ui/link.slint` | thread list row, sticker panel, linking page |
 | `ui/settings.slint` | settings page, and `SettingsData`: what it shows and edits (Rust: `app.global::<SettingsData>()`) |
 | `ui/thread_menu.slint` | a chat's notification menu and settings dialog, and their `ThreadMenuData` |

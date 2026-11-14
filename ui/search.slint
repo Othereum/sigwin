@@ -4,6 +4,7 @@
 import { ThreadItem } from "types.slint";
 import { Theme } from "theme.slint";
 import { ThreadRow } from "thread_row.slint";
+import { Icon, Icons } from "icons.slint";
 
 export enum ResultKind { header, thread, contact, start, find }
 
@@ -82,40 +83,45 @@ export component ResultRow inherits Rectangle {
     height: item.kind == ResultKind.header ? 30px : item.kind == ResultKind.find ? 48px : 64px;
     opacity: item.kind == ResultKind.start && !item.ready ? 0.5 : 1;
     if item.kind == ResultKind.header: Text {
-        x: 12px;
+        x: 18px;
         y: 0;
-        width: parent.width - 24px;
+        width: parent.width - 36px;
         height: parent.height;
         text: item.text;
         color: Theme.subtle;
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 700;
         vertical-alignment: center;
     }
     // an action, not someone: one line in the accent color beside a small round icon
     if item.kind == ResultKind.find: Rectangle {
+        x: 8px;
+        y: 1px;
+        width: parent.width - 16px;
+        height: parent.height - 2px;
+        border-radius: 10px;
         background: find-ta.has-hover ? Theme.hover : transparent;
         find-ta := TouchArea {
             mouse-cursor: pointer;
             clicked => { root.clicked(); }
         }
         HorizontalLayout {
-            padding-left: 16px;
-            padding-right: 12px;
-            spacing: 14px;
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 12px;
             Rectangle {
                 y: (parent.height - self.height) / 2;
                 width: 32px;
                 height: 32px;
                 border-radius: 16px;
                 background: find-ta.has-hover ? Theme.selected : Theme.hover;
-                Text {
-                    text: root.item.thread.initial;
-                    color: Theme.text;
-                    font-size: 15px;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                // the backend marks the kind with "@" (username) or "+" (phone number)
+                Icon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    size: 18px;
+                    icon: root.item.thread.initial == "@" ? Icons.at : Icons.phone;
+                    tint: Theme.text;
                 }
             }
             Text {

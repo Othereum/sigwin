@@ -97,7 +97,6 @@ pub(crate) fn refresh_times(ui: &Ui) {
     for (i, m) in ui.last.iter().enumerate().rev().take(100) {
         let Ok(ts) = m.id.parse::<u64>() else { continue };
         let t = view::time::bubble_time(ts, &m.time);
-        let t = if m.pinned { format!("📌 {t}") } else { t };
         if let Some(mut row) = ui.messages.row_data(i) {
             if row.time.as_str() != t {
                 row.time = t.into();
@@ -371,10 +370,8 @@ pub(crate) fn to_item(
         text: m.text.as_str().into(),
         has_rich,
         rich: if has_rich { rich_text(m, &links, &spoilers, dark) } else { Default::default() },
-        time: {
-            let t = m.id.parse::<u64>().map_or(m.time.clone(), |ts| view::time::bubble_time(ts, &m.time));
-            if m.pinned { format!("📌 {t}").into() } else { t.into() }
-        },
+        time: m.id.parse::<u64>().map_or(m.time.clone(), |ts| view::time::bubble_time(ts, &m.time)).into(),
+        pinned: m.pinned,
         outgoing: m.outgoing,
         show_sender: m.show_sender,
         avatar_col: m.avatar_col,
