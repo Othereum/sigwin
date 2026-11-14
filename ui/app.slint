@@ -960,6 +960,10 @@ export component AppWindow inherits Window {
                 send-sticker(p, i) => { root.send-sticker(p, i); }
                 install-pack(id) => { root.install-pack(id); }
                 add-pack-url(u) => { root.add-pack-url(u); }
+                close => {
+                    root.toggle-stickers();
+                    root.focus-composer();
+                }
             }
             // in place of the composer, the same inset
             if root.current-key != "" && root.current-request: HorizontalLayout {
@@ -1321,6 +1325,11 @@ export component AppWindow inherits Window {
                                     }
                                     if (event.text == Key.Return && !event.modifiers.shift && SettingsData.enter-sends != event.modifiers.control) {
                                         root.send(composer.text);
+                                        return accept;
+                                    }
+                                    // the panel floats over the composer: Esc closes it before edit/reply
+                                    if (event.text == Key.Escape && root.sticker-open) {
+                                        root.toggle-stickers();
                                         return accept;
                                     }
                                     if (event.text == Key.Escape && root.edit-preview != "") {
