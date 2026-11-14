@@ -12,7 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::types::{ClickedMedia, Command, Event, Find, MsgDto, Paging, ResultDto, Scroll, ThreadDto};
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
-    AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, NoteLine, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem,
+    AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem,
     FindKind, ResultItem, ResultKind, SearchData, SettingsData, StickerItem, Theme, ThreadItem, ThreadMenuData,
 };
 

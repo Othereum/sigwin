@@ -1,5 +1,5 @@
 import { ListView, Palette, Spinner } from "std-widgets.slint";
-import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, NoteLine, PackItem, StickerItem } from "types.slint";
+import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
 import { Avatar, DangerButton, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
@@ -8,7 +8,6 @@ import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
 import { SettingsData, SettingsPage } from "settings.slint";
 import { EmojiPicker, PickerLayout, ReactionCell } from "reactions.slint";
-import { WhatsNewPage } from "whatsnew.slint";
 import { ThreadMenu, ThreadMenuData, ThreadPrefsDialog } from "thread_menu.slint";
 import { LinkPage } from "link.slint";
 import { RepliesData, RepliesDialog } from "replies.slint";
@@ -121,11 +120,9 @@ export component AppWindow inherits Window {
     // our own photo in the sidebar header (the card on the settings page has its own)
     in property <image> me-photo;
     in property <bool> me-has-photo;
-    // "what's new": the notes exist, the sidebar offers them (until opened or dismissed), the page
-    in property <bool> whatsnew-has;
+    // "what's new" after an update: the sidebar offers the release notes until opened or dismissed
     in-out property <bool> whatsnew-offer;
-    in-out property <bool> whatsnew-open;
-    in property <[NoteLine]> whatsnew-lines;
+    // opens the release notes on GitHub
     callback open-whatsnew();
     callback dismiss-whatsnew();
     callback open-settings();
@@ -1508,18 +1505,9 @@ export component AppWindow inherits Window {
         x: 300px;
         width: root.width - 300px;
         height: root.height;
-        whatsnew-has: root.whatsnew-has;
         open-whatsnew => { root.open-whatsnew(); }
         close => { root.settings-open = false; }
         unlink => { root.unlink(); }
-    }
-
-    if page == "main" && root.whatsnew-open: WhatsNewPage {
-        x: 300px;
-        width: root.width - 300px;
-        height: root.height;
-        lines: root.whatsnew-lines;
-        close => { root.whatsnew-open = false; }
     }
 
     // @mention popup, just above the composer

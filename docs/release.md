@@ -40,39 +40,25 @@ app restarts, so each running app downloads a broken release at most once per la
 Written per release from `git log <last tag>..HEAD` and the actual changes, not kept in a file along
 the way: several commits often make one change for users, and a bug made and fixed between two
 releases was never seen by anyone. GitHub releases are the record; the repository has no changelog
-file (the one on each release is an asset, see "In the app").
+file.
 - In the app's languages, from the user's side: what they can now do or what no longer goes wrong.
   No function names or internals.
 - `## 새 기능` and `## 수정`, leaving out an empty one. Only what differs from the last release.
 - A MINOR release (no going back to older versions) says so first.
 - No account data, and nothing about a conversation it was found in.
-- With more than one language, the app would need to pick its own (the current parser takes every
-  `##` as a section). Notes of past releases stay as they are.
+- Notes of past releases stay as they are.
 
 ### In the app
-`scripts\release.ps1` embeds the notes of every version in the exe (`SIGWIN_NOTES` → `build.rs`),
-so the signed exe carries them and nothing is fetched. After an update the sidebar offers them
-once as a "what's new" panel (`src/whatsnew.rs`, `gui/whatsnew.rs`), covering every version since
-the one last seen, newest first, so an update that skipped versions loses nothing. With no version
-recorded it shows all of them. Settings > 정보 shows all again. The script refuses notes without a
-`## ` heading and `- ` bullets, or with a `# ` line.
-
-The history is a `changelog.md` asset on every release: one `# <version>` block per release,
-newest first. The script downloads the previous release's, puts this version on top, embeds the
-result and uploads it with the new release. A previous release without the asset stops the
-script (the history would restart); a release made without the script needs the asset added by
-hand. History starts at 0.2.3, the first release with notes.
-- Format: `##` headings (any text) are sections, `- ` lines are bullets, anything else is plain
-  text; links, images and HTML are never rendered. The parser is lenient, so a new heading needs
-  no app change. Notes and parser are built together, so an older app never reads a newer format.
-- Shown when `last_seen_version` in `settings.json` is older than the running version. An app
-  from before the feature recorded nothing: no value but an existing account means it was updated
-  (show), no account means a fresh install (record, show nothing). It records when the panel is
-  opened or dismissed, never for a dev build without notes.
-- Only the running version's notes are in the exe: a user who skipped releases sees the last one's.
-  Write the notes for someone who didn't read the earlier ones if that matters for the change.
-- If notes from outside the exe are ever shown (GitHub's body, older releases), they are not
-  signed: plain text only, and give the format a version marker first (no marker = version 1).
+After an update the sidebar offers "what's new" once (`gui/whatsnew.rs`); it and Settings > 정보
+open the GitHub releases page, which lists every version newest first, so an update that skipped
+versions loses nothing. The app carries no notes: embedding them took a history asset chained
+across releases, which one release made without the script would break (releases up to 0.2.11
+still carry a `changelog.md` asset and embed it; nothing reads it now).
+- Offered when `last_seen_version` in `settings.json` is older than the running version. An app
+  from before the offer recorded nothing: no value but an existing account means it was updated
+  (offer), no account means a fresh install (record, offer nothing). It records when the offer is
+  opened or dismissed. Dev builds neither offer nor record: they carry the next version's number
+  before its release exists.
 
 ## License notices
 `scripts\release.ps1` generates third-party notices with `cargo about`

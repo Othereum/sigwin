@@ -118,7 +118,6 @@ export global SettingsData {
 }
 
 export component SettingsPage inherits Rectangle {
-    in property <bool> whatsnew-has;
     callback open-whatsnew();
     callback close();
     callback unlink();
@@ -401,9 +400,9 @@ export component SettingsPage inherits Rectangle {
                             label: SettingsData.version;
                             hint: "Signal과 무관한 비공식 클라이언트입니다. \"Signal\"은 Signal Technology Foundation의 상표입니다.";
                         }
-                        if root.whatsnew-has: SettingRow {
+                        SettingRow {
                             label: "새로운 점";
-                            hint: "이 버전에서 달라진 점을 볼 수 있습니다.";
+                            hint: "버전마다 달라진 점을 GitHub에서 볼 수 있습니다.";
                             PlainButton {
                                 text: "보기";
                                 clicked => { root.open-whatsnew(); }

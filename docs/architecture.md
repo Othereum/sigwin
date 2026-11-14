@@ -42,6 +42,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/gui/linkcard.rs` | the link preview card in the composer |
 | `src/gui/viewer.rs` | image viewer window |
 | `src/gui/window.rs` | theme, zoom, native window handle, releasing memory while hidden |
+| `src/gui/whatsnew.rs` | the "what's new" offer after an update, which opens the GitHub releases page |
 | `src/away.rs` | whether the user is away (no input for a while, screen locked or off) and whether the window can be seen (not covered) |
 | `src/winhook.rs` | window-proc subclass: repaint on restore, focus events, close to tray |
 | `src/format.rs` | composing text styles with markers |
@@ -90,7 +91,6 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/instance.rs` | one process per data dir |
 | `src/install.rs` | self-install and uninstall |
 | `src/update.rs` | self-update from GitHub Releases (process: `docs/release.md`) |
-| `src/whatsnew.rs` | the release notes embedded in the exe, their parser, when to offer them (`gui/whatsnew.rs` shows) |
 | `src/autostart.rs` | start with Windows |
 | `src/logfile.rs` | log file and panic hook |
 | `src/notices.rs` | embedded third-party license notices |
