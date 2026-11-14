@@ -541,6 +541,8 @@ pub enum Event {
     /// the preview of the composer's link; None: there is none to show
     LinkPreview { url: String, card: Option<LinkCard> },
     Loading(String),
+    /// the loading screen offers to skip the history transfer
+    HistorySkippable(bool),
     NeedLink,
     LinkQr(String),
     LinkStatus(String),
@@ -619,6 +621,8 @@ pub enum RequestAnswer {
 
 pub enum Command {
     StartLink(String),
+    /// go on without the history the phone is sending
+    SkipHistory,
     OpenThread(String),
     /// sent just before `OpenThread`: when the thread has nothing unread, open it around row
     /// `id` (where the user left off) instead of at the bottom

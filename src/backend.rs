@@ -44,6 +44,7 @@ pub(crate) mod files;
 pub(crate) mod fixture;
 pub(crate) mod linkpreview;
 mod gif;
+mod history;
 mod mute;
 pub(crate) mod notify;
 mod ops;
@@ -62,6 +63,7 @@ mod typing;
 mod window;
 
 use files::*;
+use history::History;
 use linkpreview::*;
 use ops::*;
 use send::*;
@@ -99,6 +101,8 @@ pub struct Paths {
     pub thumbs: PathBuf,
     /// plain copies of attachments handed to other apps
     pub open: PathBuf,
+    /// the history archive the phone sends when linking, while it is imported
+    pub history: PathBuf,
 }
 
 impl Paths {
@@ -110,6 +114,7 @@ impl Paths {
             attachments: dir.join("attachments"),
             thumbs: dir.join("thumbs"),
             open: dir.join("open"),
+            history: dir.join("history.tmp"),
         }
     }
 }
@@ -220,7 +225,7 @@ enum Internal {
     Manager(Mgr),
     /// the phone renamed this device and the stored name follows
     DeviceRenamed,
-    Linked(Result<Mgr, String>),
+    Linked(Result<(Mgr, Option<History>), String>),
     Sent(u64, Result<(), String>),
     LinkFetched(String, Option<Box<(Fetched, Vec<crate::types::Thumb>)>>),
     ThumbFailed(String),
@@ -395,6 +400,10 @@ struct App {
     synced: bool,
     tx: UnboundedSender<Internal>,
     link_task: Option<JoinHandle<()>>,
+    /// skips the history transfer of the link in progress
+    history_skip: Option<oneshot::Sender<()>>,
+    /// the device name of the last link, for linking again when the phone asks
+    link_name: String,
     recv_task: Option<JoinHandle<()>>,
     /// the stored registration data changed: the receive loop reloads the manager before it reconnects
     reload_mgr: Rc<std::cell::Cell<bool>>,
@@ -481,6 +490,8 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
 
     let pass = unlock(dir)?;
     clear_dir(&paths.open);
+    // left by a crash; useless anyway, its key lived only in memory
+    let _ = std::fs::remove_file(&paths.history);
     let options = SqliteConnectOptions::new()
         .filename(&paths.db)
         .create_if_missing(true)
@@ -560,6 +571,8 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         synced: false,
         tx,
         link_task: None,
+        history_skip: None,
+        link_name: String::new(),
         recv_task: None,
         reload_mgr: Default::default(),
         pending_receipts: HashMap::new(),
@@ -703,6 +716,11 @@ impl App {
         }
         match cmd {
             Command::StartLink(name) => self.start_link(name),
+            Command::SkipHistory => {
+                if let Some(skip) = self.history_skip.take() {
+                    let _ = skip.send(());
+                }
+            }
             Command::LinkPreview(url) => self.link_preview(url),
             Command::OpenThread(key) => {
                 self.link_preview(None);
@@ -862,31 +880,62 @@ impl App {
         let tx = self.tx.clone();
         let emit = self.emit.clone();
         let name = if name.trim().is_empty() { "Sigwin".to_string() } else { name.trim().to_string() };
+        self.link_name = name.clone();
+        let archive = self.paths.history.clone();
+        let index = self.index.clone();
+        let (skip_tx, skip_rx) = oneshot::channel();
+        self.history_skip = Some(skip_tx);
         (self.emit)(Event::LinkStatus("QR 코드 생성 중…".into()));
         self.link_task = Some(tokio::task::spawn_local(async move {
             let (url_tx, url_rx) = oneshot::channel::<url::Url>();
+            let show_emit = emit.clone();
             let show = async move {
-                if let Ok(url) = url_rx.await {
-                    emit(Event::LinkQr(url.to_string()));
-                    emit(Event::LinkStatus("휴대폰으로 QR 코드를 스캔하세요.".into()));
+                if let Ok(mut url) = url_rx.await {
+                    url.query_pairs_mut().append_pair("capabilities", history::LINK_CAPABILITY);
+                    show_emit(Event::LinkQr(url.to_string()));
+                    show_emit(Event::LinkStatus("휴대폰으로 QR 코드를 스캔하세요.".into()));
                 }
             };
-            let link = Manager::link_secondary_device(store, SignalServers::Production, name, url_tx);
+            let link = Manager::link_secondary_device(store.clone(), SignalServers::Production, name, url_tx);
             let (res, _) = futures::join!(Box::pin(link), show);
-            let _ = tx.send(Internal::Linked(res.map_err(|e| e.to_string())));
+            let res = match res {
+                // no key: the phone didn't offer the history, or the user declined it there
+                Ok(m) => match m.registration_data().ephemeral_backup_key() {
+                    Some(key) => {
+                        let mut store = store;
+                        let got = Box::pin(history::run(m.registration_data(), key, &archive, &mut store, &index, &emit, skip_rx)).await;
+                        Ok((m, Some(got)))
+                    }
+                    None => Ok((m, None)),
+                },
+                Err(e) => Err(e.to_string()),
+            };
+            let _ = tx.send(Internal::Linked(res));
         }));
     }
 
     async fn internal(&mut self, ev: Internal) {
         match ev {
-            Internal::Linked(Ok(m)) => {
+            Internal::Linked(Ok((m, got))) => {
                 info!("linked");
                 self.link_task = None;
+                self.history_skip = None;
+                (self.emit)(Event::HistorySkippable(false));
+                if matches!(got, Some(History::Relink)) {
+                    self.manager = Some(m);
+                    self.unlink().await;
+                    (self.emit)(Event::LinkStatus("휴대폰에서 다시 연결하도록 요청했습니다. 새 QR 코드를 스캔하세요.".into()));
+                    return;
+                }
                 (self.emit)(Event::Loading("연결 완료! 대화를 동기화하는 중…".into()));
                 self.on_registered(m, true).await;
+                if let Some(History::Failed(e)) = got {
+                    self.notice(format!("대화 기록을 가져오지 못했습니다: {e}"));
+                }
             }
             Internal::Linked(Err(e)) => {
                 self.link_task = None;
+                self.history_skip = None;
                 (self.emit)(Event::LinkStatus(format!("연결 실패: {e}. 다시 시도하세요.")));
             }
             Internal::Received(r) => self.received(r).await,
@@ -1090,5 +1139,6 @@ impl App {
         (self.emit)(Event::Threads(Vec::new()));
         (self.emit)(Event::NeedLink);
         (self.emit)(Event::LinkStatus("연결이 해제되었습니다.".into()));
+        self.start_link(self.link_name.clone());
     }
 }

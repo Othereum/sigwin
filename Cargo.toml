@@ -56,6 +56,12 @@ sigwin-thumb = { path = "crates/thumb" }
 sigwin-vault = { path = "crates/vault" }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
 minisign-verify = "0.3.0"
+# Signal's backup format, for the history the phone sends when linking. Not the latest tag: it
+# must be the libsignal presage pins (Cargo.lock), whose key and id types it shares; bump them
+# together. `test-util` is what makes its `proto` module public.
+libsignal-message-backup = { git = "https://github.com/signalapp/libsignal", tag = "v0.99.0", features = ["test-util"] }
+libsignal-account-keys = { git = "https://github.com/signalapp/libsignal", tag = "v0.99.0" }
+protobuf = "3.7" # the version libsignal-message-backup's generated code uses
 
 [workspace]
 members = ["crates/thumb", "crates/vault", "crates/ui"]

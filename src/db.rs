@@ -145,6 +145,83 @@ fn unzip(thread: &Thread) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
 }
 
 impl Index {
+    /// presage's `save_message` for many messages, in one transaction: presage commits, and so
+    /// flushes the disk, per message (about 1.7 ms each), which made a link-time history import
+    /// take minutes. Same statements as presage's; `history::tests` reads the result back
+    /// through presage, so a schema change there fails a test. Like the history import, a
+    /// message at a thread and millisecond taken by someone else's is skipped; returns how many.
+    pub async fn save_messages(&self, messages: Vec<(Thread, presage::libsignal_service::content::Content)>) -> anyhow::Result<usize> {
+        use presage::libsignal_service::prelude::ProtobufMessage as _;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut skipped = 0;
+        for (thread, presage::libsignal_service::content::Content { metadata: m, body }) in messages {
+            let thread_id: i64 = match &thread {
+                Thread::Contact(id) => {
+                    sqlx::query_scalar(
+                        "INSERT INTO threads(recipient_id, group_master_key) VALUES (?1, NULL)
+                         ON CONFLICT DO UPDATE SET recipient_id = ?1 RETURNING id",
+                    )
+                    .bind(id.raw_uuid())
+                    .fetch_one(&mut *tx)
+                    .await?
+                }
+                Thread::Group(key) => {
+                    sqlx::query_scalar(
+                        "INSERT INTO threads(recipient_id, group_master_key) VALUES (NULL, ?1)
+                         ON CONFLICT DO UPDATE SET group_master_key = ?1 RETURNING id",
+                    )
+                    .bind(key.as_slice())
+                    .fetch_one(&mut *tx)
+                    .await?
+                }
+            };
+            let ts = m.client_timestamp.timestamp_millis();
+            let sender = m.sender.service_id_string();
+            let holder: Option<String> = sqlx::query_scalar("SELECT sender_service_id FROM thread_messages WHERE thread_id = ? AND ts = ?")
+                .bind(thread_id)
+                .bind(ts)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if holder.is_some_and(|h| h != sender) {
+                skipped += 1;
+                continue;
+            }
+            let device: u8 = m.sender_device.into();
+            sqlx::query(
+                "INSERT OR REPLACE INTO thread_messages (ts, thread_id, sender_service_id, sender_device_id,
+                    destination_service_id, needs_receipt, unidentified_sender, content_body, was_plaintext, pni_verified)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(ts)
+            .bind(thread_id)
+            .bind(sender)
+            .bind(device)
+            .bind(m.destination.service_id_string())
+            .bind(m.needs_receipt)
+            .bind(m.unidentified_sender)
+            .bind(body.into_proto().encode_to_vec())
+            .bind(m.was_plaintext)
+            .bind(m.pni_verified.as_ref().map(|p| p.service_id_string()))
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(skipped)
+    }
+
+    /// Renumbers the display order by sent time. For the link-time history only: its archive
+    /// isn't in time order, and it is imported into an empty store before anything is received,
+    /// so nothing else has an order to keep.
+    pub async fn order_by_sent(&self) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query("CREATE TEMP TABLE ls_order_new AS SELECT thread_id, ts FROM ls_order ORDER BY ts, seq").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM ls_order").execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO ls_order (thread_id, ts) SELECT thread_id, ts FROM ls_order_new ORDER BY rowid").execute(&mut *tx).await?;
+        sqlx::query("DROP TABLE ls_order_new").execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn open(options: SqliteConnectOptions) -> anyhow::Result<Self> {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)

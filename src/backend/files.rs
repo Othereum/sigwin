@@ -546,6 +546,11 @@ const VIEW_MAX_PIXELS: u64 = 100_000_000;
 /// something else would stand out for no reason.
 const PRESAGE_USER_AGENT: &str = "presage-rs-0.8.0-dev";
 
+/// For downloads: the CDN takes no credentials.
+pub(super) fn cdn_service() -> presage::libsignal_service::push_service::PushService {
+    presage::libsignal_service::push_service::PushService::new(SignalServers::Production, None, PRESAGE_USER_AGENT)
+}
+
 /// Where a download shows how far it is.
 pub(super) enum Show {
     /// on these pictures (their keys in the UI): a size and a ring, and what they were when it ends
@@ -745,11 +750,13 @@ impl AttachmentDownloads {
 /// `progress` gets the bytes so far and their percent, each time that goes up.
 async fn download(ptr: &AttachmentPointer, mut progress: impl FnMut(u64, u8)) -> anyhow::Result<Vec<u8>> {
     use futures::AsyncReadExt;
-    let digest = ptr.digest.clone().context("attachment without a digest")?;
+    // history imported at link time has none for media the phone had downloaded: the MAC
+    // checked on decrypting still authenticates it
+    let digest = ptr.digest.clone();
     let key: [u8; 64] = ptr.key().try_into().context("attachment key")?;
     // no credentials: the CDN doesn't take any. Not kept: downloads are rare, and an idle client
     // and its connections would stay in memory.
-    let mut service = presage::libsignal_service::push_service::PushService::new(SignalServers::Production, None, PRESAGE_USER_AGENT);
+    let mut service = cdn_service();
     let mut download = service.get_attachment(ptr).await?;
     let total = download.content_length.or(ptr.size.map(u64::from));
     let mut data = Vec::with_capacity(total.unwrap_or(0) as usize);
@@ -768,7 +775,7 @@ async fn download(ptr: &AttachmentPointer, mut progress: impl FnMut(u64, u8)) ->
         }
     }
     let size = ptr.size.and_then(|s| usize::try_from(s).ok());
-    tokio::task::spawn_blocking(move || open_download(data, &digest, key, size)).await.context("decrypt attachment")?
+    tokio::task::spawn_blocking(move || open_download(data, digest.as_deref(), key, size)).await.context("decrypt attachment")?
 }
 
 /// How much of `total` bytes `got` is. An unknown total stays at 0.
@@ -777,9 +784,11 @@ fn percent(got: u64, total: Option<u64>) -> u8 {
 }
 
 /// Checks a downloaded attachment against its message and decrypts it.
-fn open_download(mut data: Vec<u8>, digest: &[u8], key: [u8; 64], size: Option<usize>) -> anyhow::Result<Vec<u8>> {
+fn open_download(mut data: Vec<u8>, digest: Option<&[u8]>, key: [u8; 64], size: Option<usize>) -> anyhow::Result<Vec<u8>> {
     use sha2::Digest;
-    anyhow::ensure!(sha2::Sha256::digest(&data)[..] == *digest, "attachment digest doesn't match");
+    if let Some(digest) = digest {
+        anyhow::ensure!(sha2::Sha256::digest(&data)[..] == *digest, "attachment digest doesn't match");
+    }
     presage::libsignal_service::attachment_cipher::decrypt_in_place(key, &mut data)?;
     // what's past the size is padding
     if let Some(size) = size.filter(|s| *s < data.len()) {
@@ -1117,12 +1126,12 @@ mod tests {
         encrypt_in_place([9; 16], key, &mut cipher);
         let digest = sha2::Sha256::digest(&cipher).to_vec();
 
-        assert_eq!(open_download(cipher.clone(), &digest, key, Some(11)).unwrap(), b"hello video");
-        assert_eq!(open_download(cipher.clone(), &digest, key, None).unwrap().len(), 16);
+        assert_eq!(open_download(cipher.clone(), Some(&digest), key, Some(11)).unwrap(), b"hello video");
+        assert_eq!(open_download(cipher.clone(), Some(&digest), key, None).unwrap().len(), 16);
         // a size past the end doesn't pad
-        assert_eq!(open_download(cipher.clone(), &digest, key, Some(99)).unwrap().len(), 16);
-        assert!(open_download(cipher.clone(), &[0; 32], key, None).is_err());
-        assert!(open_download(cipher, &digest, [6; 64], None).is_err());
+        assert_eq!(open_download(cipher.clone(), Some(&digest), key, Some(99)).unwrap().len(), 16);
+        assert!(open_download(cipher.clone(), Some(&[0; 32]), key, None).is_err());
+        assert!(open_download(cipher, Some(&digest), [6; 64], None).is_err());
     }
 
     #[test]

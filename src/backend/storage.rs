@@ -174,7 +174,7 @@ impl App {
 
 /// presage keeps its authenticated `PushService` crate-private, so one is built here from the
 /// stored registration. The password is crate-private too, but `RegistrationData` serializes it.
-fn push_service(reg: &RegistrationData) -> anyhow::Result<PushService> {
+pub(super) fn push_service(reg: &RegistrationData) -> anyhow::Result<PushService> {
     let json = serde_json::to_value(reg)?;
     let password = json.get("password").and_then(|p| p.as_str()).context("no password in the registration")?.to_string();
     let phonenumber: E164 = reg.phone_number.to_string().parse().ok().context("phone number")?;

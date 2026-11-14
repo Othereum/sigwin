@@ -39,6 +39,8 @@ fn reply_thumb(src: &Image) -> Option<Image> {
 fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let s = send.clone();
     app.on_start_link(move |name| s(Command::StartLink(name.to_string())));
+    let s = send.clone();
+    app.on_skip_history(move || s(Command::SkipHistory));
 
     let s = send.clone();
     app.on_open_thread(move |key| {

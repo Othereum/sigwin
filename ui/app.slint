@@ -94,6 +94,9 @@ export component AppWindow inherits Window {
     in-out property <string> draft;
 
     callback start-link(string);
+    // the loading screen offers to go on without the history the phone is sending
+    in property <bool> history-skippable;
+    callback skip-history();
     callback open-thread(string);
     callback send(string);
     // the composer text changed: cut it to the message size limit; the new cursor offset, or -1 if it fit
@@ -334,6 +337,13 @@ export component AppWindow inherits Window {
                 Spinner { indeterminate: true; width: 36px; height: 36px; }
             }
             Text { text: loading-text; color: Theme.subtle; horizontal-alignment: center; }
+            if root.history-skippable: HorizontalLayout {
+                alignment: center;
+                PlainButton {
+                    text: "기록 없이 계속";
+                    clicked => { root.skip-history(); }
+                }
+            }
         }
     }
 

@@ -237,6 +237,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             }
         }
         Event::LinkStatus(s) => app.set_link_status(s.into()),
+        Event::HistorySkippable(on) => app.set_history_skippable(on),
         Event::Ready => {
             app.set_page("main".into());
             whatsnew::on_ready(app);
