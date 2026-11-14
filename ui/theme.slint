@@ -44,6 +44,20 @@ export global Theme {
     out property <color> failed: dark ? #ff6b6b : #d32f2f;
     // links in incoming bubbles and in text on the pane
     out property <color> link: dark ? #7aa7ff : #1f5fd6;
+    // under what floats over the rest: menus, popups, the jump button
+    out property <color> shadow: #00000040;
+    // behind a dialog, over the whole window
+    out property <color> scrim: #00000080;
+    // marks and buttons on photos and videos, dark in either theme (white on top)
+    out property <color> on-media: #00000090;
+    out property <color> on-media-hover: #000000c8;
+    // where a picture goes until it arrives
+    out property <color> loading: #80808030;
+    // a box set into a bubble (quote, link preview), on an incoming bubble and on our own
+    out property <color> inset: dark ? #ffffff14 : #00000010;
+    out property <color> inset-hover: dark ? #ffffff22 : #0000001c;
+    out property <color> inset-out: #ffffff30;
+    out property <color> inset-out-hover: #ffffff48;
     // a file that may be unsafe to open: its mark, and the warning text beside it
     out property <color> warning: #d97706;
     out property <color> warning-text: #f0a030;

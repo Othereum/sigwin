@@ -24,4 +24,5 @@ How Sigwin's UI looks and why. The values (colors, sizes) live in `ui/theme.slin
 - **What goes with a message being written** (reply, edit, link preview, files) is a card inside the composer pill, above the text, with its own close button.
 - **A run of bubbles from one sender reads as one block**: rows of a run sit close, and the corners where two bubbles meet are tighter (4px) than the outer ones. Only the last row of a run shows the time.
 - Hover must show on whatever the button sits on: inside the grey pill it uses `Theme.field-off`, not the usual hover color.
+- **Buttons and switches are ours** (`ui/widgets.slint`): `PrimaryButton` for the main choice, `DangerButton` for a destructive one, `PlainButton` for the rest, `Toggle` for on/off. The std `Button` and `Switch` take the style's own colors, which don't follow `Theme`.
 - Menus are a card with a border and a shadow. Rows that are actions carry their icon; choices of a value (durations, options) don't.

@@ -1,9 +1,8 @@
 // Sticker picker panel.
 
-import { LineEdit, Button } from "std-widgets.slint";
 import { PackItem, StickerItem } from "types.slint";
 import { Anim, Theme } from "theme.slint";
-import { TextButton } from "widgets.slint";
+import { Field, PlainButton, TextButton } from "widgets.slint";
 import { Icons } from "icons.slint";
 
 export component StickerPanel inherits Rectangle {
@@ -124,7 +123,7 @@ export component StickerPanel inherits Rectangle {
                         horizontal-stretch: 1;
                         overflow: elide;
                     }
-                    Button {
+                    PlainButton {
                         text: "추가";
                         clicked => { root.install-pack(p.id); }
                     }
@@ -133,12 +132,13 @@ export component StickerPanel inherits Rectangle {
                 Text { text: "signal.art 스티커 링크로 추가"; color: Theme.subtle; font-size: 12px; }
                 HorizontalLayout {
                     spacing: 6px;
-                    LineEdit {
-                        placeholder-text: "https://signal.art/addstickers/#pack_id=…&pack_key=…";
+                    Field {
+                        height: 32px;
+                        placeholder: "https://signal.art/addstickers/#pack_id=…&pack_key=…";
                         text <=> root.url-text;
-                        accepted(t) => { root.add-pack-url(t); }
+                        accepted => { root.add-pack-url(root.url-text); }
                     }
-                    Button {
+                    PlainButton {
                         text: "추가";
                         clicked => { root.add-pack-url(root.url-text); }
                     }

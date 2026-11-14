@@ -110,27 +110,34 @@ export component IconButton inherits Rectangle {
 }
 
 // one-line text field on a grey ground, no border; the accent ring while it has the focus
-export component SearchBox inherits Rectangle {
+// a one-line text field (the search box with `icon: Icons.search`)
+export component Field inherits Rectangle {
     in property <string> placeholder;
+    // before the text (one of `Icons`)
+    in property <string> icon;
     in-out property <string> text;
     callback edited();
     callback accepted();
     callback key-pressed(KeyEvent) -> EventResult;
     forward-focus: input;
     height: 34px;
+    min-width: 80px;
+    horizontal-stretch: 1;
     border-radius: 8px;
+    // a long text scrolls inside instead of running past the edge
+    clip: true;
     background: input.has-focus ? Theme.pane : Theme.field;
     border-width: input.has-focus ? 1.5px : 0px;
     border-color: Theme.accent;
-    Icon {
+    if root.icon != "": Icon {
         x: 10px;
         y: (parent.height - self.height) / 2;
         size: 16px;
-        icon: Icons.search;
+        icon: root.icon;
     }
     input := TextInput {
-        x: 34px;
-        width: parent.width - 44px;
+        x: root.icon != "" ? 34px : 12px;
+        width: parent.width - self.x - 10px;
         height: parent.height;
         single-line: true;
         vertical-alignment: center;
@@ -219,6 +226,79 @@ export component PrimaryButton inherits Rectangle {
     lbl := Text {
         text: root.text;
         color: white;
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// on/off switch: std Switch takes the style's own blue in the dark theme, not the accent
+export component Toggle inherits FocusScope {
+    in-out property <bool> checked;
+    callback toggled;
+    width: 36px;
+    height: 20px;
+    // the keyboard reaches it with Tab; a click shouldn't leave a focus ring behind
+    focus-on-click: false;
+    accessible-role: switch;
+    accessible-checked: root.checked;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.flip(); }
+    function flip() {
+        if (root.enabled) {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+    key-pressed(e) => {
+        if (e.text == " " || e.text == Key.Return) {
+            root.flip();
+            return accept;
+        }
+        reject
+    }
+    Rectangle {
+        border-radius: 10px;
+        opacity: root.enabled ? 1.0 : 0.4;
+        background: root.checked ? Theme.accent : Theme.dark ? #48484e : #c9cad0;
+        border-width: root.has-focus ? 2px : 0px;
+        border-color: Theme.text;
+        Rectangle {
+            x: root.checked ? parent.width - self.width - 2px : 2px;
+            y: 2px;
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            background: white;
+            drop-shadow-blur: 2px;
+            drop-shadow-color: Theme.shadow;
+            animate x { duration: 120ms; easing: ease-out; }
+        }
+        TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: self.enabled ? pointer : default;
+            clicked => { root.flip(); }
+        }
+    }
+}
+
+// every other button with a label: grey like the input fields, the shape of `PrimaryButton`
+export component PlainButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: 32px;
+    min-width: lbl.preferred-width + 32px;
+    border-radius: 6px;
+    background: root.enabled && ta.has-hover ? Theme.field-off : Theme.field;
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    lbl := Text {
+        text: root.text;
+        color: root.enabled ? Theme.text : Theme.subtle;
         font-size: 13px;
         horizontal-alignment: center;
         vertical-alignment: center;

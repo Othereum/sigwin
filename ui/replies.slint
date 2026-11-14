@@ -1,7 +1,8 @@
 // The list of replies to a message, opened by the chip under it.
 
-import { Button, ListView } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
+import { PlainButton } from "widgets.slint";
 import { ReplyItem } from "types.slint";
 
 // The list's state; Rust fills it (`gui::wire`, `Event::Replies`).
@@ -16,7 +17,7 @@ export global RepliesData {
 }
 
 export component RepliesDialog inherits Rectangle {
-    background: #00000080;
+    background: Theme.scrim;
     TouchArea {
         clicked => { RepliesData.open = false; }
     }
@@ -80,7 +81,7 @@ export component RepliesDialog inherits Rectangle {
             }
             HorizontalLayout {
                 alignment: end;
-                Button {
+                PlainButton {
                     text: "닫기";
                     clicked => { RepliesData.open = false; }
                 }

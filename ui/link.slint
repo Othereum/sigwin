@@ -1,7 +1,7 @@
 // Device linking page (QR code).
 
-import { LineEdit, Button } from "std-widgets.slint";
 import { Theme } from "theme.slint";
+import { Field, PrimaryButton } from "widgets.slint";
 
 export component LinkPage inherits Rectangle {
     in property <image> qr;
@@ -50,11 +50,12 @@ export component LinkPage inherits Rectangle {
             alignment: center;
             spacing: 8px;
             Text { text: "기기 이름"; color: Theme.text; vertical-alignment: center; }
-            LineEdit {
+            Field {
                 width: 200px;
+                height: 32px;
                 text <=> root.device-name;
             }
-            Button {
+            PrimaryButton {
                 text: has-qr ? "QR 다시 만들기" : "연결 시작";
                 clicked => { root.start-link(root.device-name); }
             }

@@ -1,8 +1,8 @@
 // Settings page.
 
-import { Button, ListView, Switch } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
 import { Links, Theme } from "theme.slint";
-import { Avatar, DangerButton, IconButton, Segmented } from "widgets.slint";
+import { Avatar, DangerButton, IconButton, PlainButton, Segmented, Toggle } from "widgets.slint";
 import { Icons } from "icons.slint";
 
 // a heading over its rows, which sit together on one rounded card
@@ -198,7 +198,7 @@ export component SettingsPage inherits Rectangle {
                         SettingRow {
                             label: "새 메시지 알림";
                             hint: "Sigwin 창을 보고 있을 때는 알리지 않습니다";
-                            Switch {
+                            Toggle {
                                 checked <=> SettingsData.notify;
                                 toggled => { SettingsData.changed(); }
                             }
@@ -214,7 +214,7 @@ export component SettingsPage inherits Rectangle {
                         }
                         SettingRow {
                             label: "알림 소리";
-                            Switch {
+                            Toggle {
                                 enabled: SettingsData.notify;
                                 checked <=> SettingsData.sound;
                                 toggled => { SettingsData.changed(); }
@@ -234,7 +234,7 @@ export component SettingsPage inherits Rectangle {
                             hint: "대화를 오른쪽 클릭해서 끌 수 있고, \"알림 설정…\"에서 대화별로 설정할 수 있습니다";
                             SettingRow {
                                 label: "나를 멘션하면 알림";
-                                Switch {
+                                Toggle {
                                     enabled: SettingsData.notify;
                                     checked <=> SettingsData.muted-mentions;
                                     toggled => { SettingsData.changed(); }
@@ -242,7 +242,7 @@ export component SettingsPage inherits Rectangle {
                             }
                             SettingRow {
                                 label: "내 메시지에 답장하면 알림";
-                                Switch {
+                                Toggle {
                                     enabled: SettingsData.notify;
                                     checked <=> SettingsData.muted-replies;
                                     toggled => { SettingsData.changed(); }
@@ -250,7 +250,7 @@ export component SettingsPage inherits Rectangle {
                             }
                             SettingRow {
                                 label: "배지에 포함";
-                                Switch {
+                                Toggle {
                                     checked <=> SettingsData.badge-muted;
                                     toggled => { SettingsData.changed(); }
                                 }
@@ -262,7 +262,7 @@ export component SettingsPage inherits Rectangle {
                         SettingRow {
                             label: "컴퓨터 로그인 시 열기";
                             hint: "Windows에 로그인하면 Sigwin을 자동으로 실행합니다";
-                            Switch {
+                            Toggle {
                                 checked <=> SettingsData.autostart;
                                 toggled => { SettingsData.changed(); }
                             }
@@ -270,7 +270,7 @@ export component SettingsPage inherits Rectangle {
                         SettingRow {
                             label: "시스템 트레이로 최소화된 상태로 열기";
                             hint: "자동 실행할 때 창을 띄우지 않고 트레이에 둡니다";
-                            Switch {
+                            Toggle {
                                 enabled: SettingsData.autostart;
                                 checked <=> SettingsData.start-hidden;
                                 toggled => { SettingsData.changed(); }
@@ -326,7 +326,7 @@ export component SettingsPage inherits Rectangle {
                         SettingRow {
                             label: "링크 미리보기 만들기";
                             hint: "보내는 메시지에 링크의 제목과 이미지를 붙입니다. 이를 위해 그 사이트에 접속하므로 사이트에 내 IP 주소가 보입니다.";
-                            Switch {
+                            Toggle {
                                 checked <=> SettingsData.link-previews;
                                 toggled => { SettingsData.changed(); }
                             }
@@ -356,7 +356,7 @@ export component SettingsPage inherits Rectangle {
                         SettingRow {
                             label: "썸네일 캐시 비우기";
                             hint: "이미지 미리보기와 프로필 사진 캐시를 지웁니다. 필요할 때 다시 만듭니다.";
-                            Button {
+                            PlainButton {
                                 text: "비우기";
                                 clicked => { SettingsData.clear-thumbs(); }
                             }
@@ -367,7 +367,7 @@ export component SettingsPage inherits Rectangle {
                         SettingRow {
                             label: "로그 폴더";
                             hint: "문제를 알릴 때 이 폴더의 파일을 함께 보내 주세요. 메시지 내용은 기록하지 않습니다.";
-                            Button {
+                            PlainButton {
                                 text: "열기";
                                 clicked => { SettingsData.open-logs(); }
                             }
@@ -378,7 +378,7 @@ export component SettingsPage inherits Rectangle {
                         SettingRow {
                             label: "자동으로 업데이트 다운로드";
                             hint: "새 버전을 백그라운드에서 내려받아 설치합니다. 다음에 시작할 때 적용됩니다.";
-                            Switch {
+                            Toggle {
                                 checked <=> SettingsData.auto-update;
                                 toggled => { SettingsData.changed(); }
                             }
@@ -388,7 +388,7 @@ export component SettingsPage inherits Rectangle {
                             hint: SettingsData.version + (SettingsData.update-version != "" ? "  ·  새 버전이 준비되었습니다. 왼쪽 아래에서 다시 시작하세요."
                                 : SettingsData.update-available != "" ? "  ·  새 버전 " + SettingsData.update-available + "이(가) 있습니다. 왼쪽 아래에서 업데이트하세요."
                                 : SettingsData.update-status != "" ? "  ·  " + SettingsData.update-status : "");
-                            Button {
+                            PlainButton {
                                 text: SettingsData.update-checking ? "확인 중…" : "지금 확인";
                                 enabled: !SettingsData.update-checking && SettingsData.update-version == "" && SettingsData.update-available == "";
                                 clicked => { SettingsData.check-update(); }
@@ -404,7 +404,7 @@ export component SettingsPage inherits Rectangle {
                         if root.whatsnew-has: SettingRow {
                             label: "새로운 점";
                             hint: "이 버전에서 달라진 점을 볼 수 있습니다.";
-                            Button {
+                            PlainButton {
                                 text: "보기";
                                 clicked => { root.open-whatsnew(); }
                             }
@@ -414,11 +414,11 @@ export component SettingsPage inherits Rectangle {
                             hint: "© 2026 Othereum. AGPL-3.0 라이선스로 공개된 자유 소프트웨어이며, 어떠한 보증도 하지 않습니다.";
                             HorizontalLayout {
                                 spacing: 6px;
-                                Button {
+                                PlainButton {
                                     text: "GitHub";
                                     clicked => { Links.open("https://github.com/Othereum/sigwin"); }
                                 }
-                                Button {
+                                PlainButton {
                                     text: "라이선스";
                                     clicked => { Links.open("https://www.gnu.org/licenses/agpl-3.0.html"); }
                                 }
@@ -427,7 +427,7 @@ export component SettingsPage inherits Rectangle {
                         SettingRow {
                             label: "오픈소스 라이선스";
                             hint: "Sigwin에 포함된 라이브러리의 저작권과 라이선스 고지";
-                            Button {
+                            PlainButton {
                                 text: "보기";
                                 clicked => { Links.open("sigwin-licenses:"); }
                             }
