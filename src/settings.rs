@@ -42,6 +42,9 @@ pub struct Settings {
     /// the newest version whose "what's new" was seen or dismissed ("" = never recorded; not a
     /// preference, kept here for lack of a better file)
     pub last_seen_version: String,
+    /// the image viewer was once closed by a click or Esc, so its hint about that is no longer
+    /// shown (not a preference)
+    pub viewer_click_closed: bool,
     /// where the window was last (not a preference; restored at start)
     pub window: Option<WindowGeom>,
 }
@@ -75,6 +78,7 @@ impl Default for Settings {
             link_previews: true,
             photo_quality: 0,
             last_seen_version: String::new(),
+            viewer_click_closed: false,
             window: None,
         }
     }

@@ -49,6 +49,11 @@ const HOLD_AT_ORIGINAL: Duration = Duration::from_millis(120);
 const SCALE_SHOWN: Duration = Duration::from_secs(1);
 /// The thumbnail strip stays this long after going to an image.
 const STRIP_SHOWN: Duration = Duration::from_secs(1);
+/// The buttons at the top stay this long after opening: the window has no frame, and the ✕ would
+/// show only near it.
+const TOP_SHOWN: Duration = Duration::from_millis(1000);
+/// The hint on how to close stays this long after opening.
+const HINT_SHOWN: Duration = Duration::from_secs(3);
 /// From this scale the original's pixels show as they are.
 const SMOOTH_BELOW: f64 = 3.0;
 
@@ -67,6 +72,8 @@ struct Viewer {
     wheel_held: Cell<Option<Instant>>,
     hide_scale: slint::Timer,
     hide_strip: slint::Timer,
+    /// only held: dropping them would stop them
+    _hide_intro: [slint::Timer; 2],
     refit: slint::Timer,
     /// Pans and zooms only resample the visible part of `pixels.original`. Kept until the image or
     /// the window goes, and shared with `source` once that shows it, not a copy.
@@ -253,6 +260,21 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
     win.on_prev(|| step(-1));
     win.on_next(|| step(1));
     win.on_dismiss(close);
+    win.on_quick_closed(|| {
+        UI.with_borrow_mut(|ui| {
+            if !ui.settings.viewer_click_closed {
+                ui.settings.viewer_click_closed = true;
+                ui.settings.save(&ui.settings_path);
+            }
+        });
+    });
+    win.set_hint_on(!UI.with_borrow(|ui| ui.settings.viewer_click_closed));
+    win.set_top_on(true);
+    win.set_intro_on(true);
+    let hide_top = slint::Timer::default();
+    hide_top.start(slint::TimerMode::SingleShot, TOP_SHOWN, || with_current(|v| v.win.set_top_on(false)));
+    let hide_hint = slint::Timer::default();
+    hide_hint.start(slint::TimerMode::SingleShot, HINT_SHOWN, || with_current(|v| v.win.set_intro_on(false)));
     win.on_toggle_download(toggle_download);
     win.on_notice_action_clicked(super::notice::reveal);
     win.on_save(|| {
@@ -332,6 +354,7 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
             wheel_held: Cell::new(None),
             hide_scale: slint::Timer::default(),
             hide_strip: slint::Timer::default(),
+            _hide_intro: [hide_top, hide_hint],
             refit: slint::Timer::default(),
             pixels: img.pixels,
             animated: Cell::new(img.animated),

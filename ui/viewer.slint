@@ -79,6 +79,12 @@ export component ImageViewer inherits Window {
     callback notice-action-clicked();
     // the thumbnail strip is showing wherever the cursor is: for a moment after going to an image
     in property <bool> strip-on;
+    // for a moment after opening: the buttons at the top show wherever the cursor is
+    in property <bool> top-on;
+    // for a moment after opening, a bit longer: the hint shows, if it's on
+    in property <bool> intro-on;
+    // how to close without the ✕, until the user once has
+    in property <bool> hint-on;
     // wanted offset of the image from the center when it is bigger than the window, physical px
     in-out property <float> pan-x;
     in-out property <float> pan-y;
@@ -100,6 +106,8 @@ export component ImageViewer inherits Window {
     callback save();
     callback open-outside();
     callback dismiss();
+    // closed by a click or Esc, before `dismiss`
+    callback quick-closed();
     // the picture on screen is on its way: how far (one), and its mark stops or restarts that
     in property <[MediaState]> loading;
     callback toggle-download();
@@ -136,10 +144,15 @@ export component ImageViewer inherits Window {
     // the strip shows when the cursor is about where it appears
     property <bool> near-strip: hover.has-hover && hover.mouse-y > root.height - 100px && abs(hover.mouse-x - root.width / 2) < strip-w / 2 + 40px;
     property <bool> strip-shown: root.has-strip && (root.near-strip || root.strip-on);
+    // what sits above the strip moves along with its fade; only this animates, not their `y`,
+    // which must follow the window as the wheel resizes it
+    property <length> strip-lift: root.strip-shown ? 58px : 0px;
+    animate strip-lift { duration: root.strip-shown ? 100ms : 250ms; }
     // height of the cursor where the previous and next buttons may show
     property <bool> near-side: hover.has-hover && root.has-strip && abs(hover.mouse-y - root.height / 2) < 130px;
     // the buttons at the top right show when the cursor is about where they appear
     property <bool> near-top: hover.has-hover && hover.mouse-y < 100px && hover.mouse-x > root.width - 300px;
+    property <bool> top-shown: root.near-top || root.top-on;
     property <bool> dragged;
     property <bool> panning;
     property <float> pan-start-x;
@@ -166,6 +179,7 @@ export component ImageViewer inherits Window {
     keys := FocusScope {
         key-pressed(e) => {
             if (e.text == Key.Escape) {
+                root.quick-closed();
                 root.dismiss();
                 return accept;
             }
@@ -217,6 +231,7 @@ export component ImageViewer inherits Window {
         }
         clicked => {
             if (!root.dragged) {
+                root.quick-closed();
                 root.dismiss();
             }
         }
@@ -253,7 +268,7 @@ export component ImageViewer inherits Window {
                 }
             }
         }
-        if root.near-top: Rectangle {
+        Rectangle {
             // apart from ✕, which closes the window
             x: root.width - self.width - 56px;
             y: 12px;
@@ -261,6 +276,9 @@ export component ImageViewer inherits Window {
             height: bar.preferred-height;
             border-radius: 10px;
             background: #000000c0;
+            opacity: root.top-shown ? 1 : 0;
+            visible: self.opacity > 0;
+            animate opacity { duration: root.top-shown ? 100ms : 250ms; }
             // clicks between the buttons don't close the window
             TouchArea {}
             bar := HorizontalLayout {
@@ -278,12 +296,15 @@ export component ImageViewer inherits Window {
                 }
             }
         }
-        if root.near-top: ViewerButton {
+        ViewerButton {
             x: root.width - self.width - 12px;
             y: 12px;
             width: 36px;
             height: 36px;
             border-radius: 10px;
+            opacity: root.top-shown ? 1 : 0;
+            visible: self.opacity > 0;
+            animate opacity { duration: root.top-shown ? 100ms : 250ms; }
             icon: Icons.close;
             background: self.hovered ? #c42b1c : #00000090;
             clicked => { root.dismiss(); }
@@ -299,13 +320,16 @@ export component ImageViewer inherits Window {
             y: (root.height - self.height) / 2;
             clicked => { root.next(); }
         }
-        if root.strip-shown: Rectangle {
+        if root.has-strip: Rectangle {
             x: (root.width - self.width) / 2;
             y: root.height - self.height - 12px;
             width: root.strip-w + 8px;
             height: 52px;
             border-radius: 8px;
             background: #000000c0;
+            opacity: root.strip-shown ? 1 : 0;
+            visible: self.opacity > 0;
+            animate opacity { duration: root.strip-shown ? 100ms : 250ms; }
             // clicks between the thumbnails don't close the window. The wheel over the strip
             // scrolls it instead of zooming: the horizontal Flickable rejects the wheel and it
             // bubbles to this parent.
@@ -317,12 +341,19 @@ export component ImageViewer inherits Window {
                 }
                 strip := Flickable {
                     property <int> at: root.current;
+                    property <bool> shown: root.strip-shown;
                     function reveal() {
                         // the current one in the middle, as far as the row goes
                         self.content-x = -clamp(at * 48px - (self.width - 44px) / 2, 0px, max(0px, self.content-width - self.width));
                     }
                     init => { self.reveal(); }
                     changed at => { self.reveal(); }
+                    // a row scrolled away while it showed comes back around the current one
+                    changed shown => {
+                        if (self.shown) {
+                            self.reveal();
+                        }
+                    }
                     x: 4px;
                     y: 4px;
                     width: root.strip-w;
@@ -360,7 +391,7 @@ export component ImageViewer inherits Window {
     // above the strip if it's showing; clicks go through it
     if root.scale-on: Rectangle {
         x: (root.width - self.width) / 2;
-        y: root.height - self.height - (root.strip-shown ? 70px : 12px);
+        y: root.height - self.height - 12px - root.strip-lift;
         width: scale-text.preferred-width + 24px;
         height: 30px;
         border-radius: 8px;
@@ -381,6 +412,16 @@ export component ImageViewer inherits Window {
         action-clicked => { root.notice-action-clicked(); }
         max-text-width: root.width - 64px;
         x: (root.width - self.width) / 2;
-        y: root.height - self.height - (root.strip-shown ? 108px : 50px);
+        y: root.height - self.height - 50px - root.strip-lift;
+    }
+    // where the notice would be, which comes first
+    if root.notice-text == "" && root.hint-on: Notice {
+        text: "이미지를 클릭하거나 Esc를 눌러 닫을 수 있습니다";
+        opacity: root.intro-on ? 1 : 0;
+        visible: self.opacity > 0;
+        animate opacity { duration: 250ms; }
+        max-text-width: root.width - 64px;
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - 50px - root.strip-lift;
     }
 }
