@@ -216,6 +216,10 @@ enum Internal {
     /// the connection is back: the queued messages come next
     Reconnected,
     ReceiveStopped(String),
+    /// the receive loop reloaded the manager (its registration data changed): sends use it too
+    Manager(Mgr),
+    /// the phone renamed this device and the stored name follows
+    DeviceRenamed,
     Linked(Result<Mgr, String>),
     Sent(u64, Result<(), String>),
     LinkFetched(String, Option<Box<(Fetched, Vec<crate::types::Thumb>)>>),
@@ -392,6 +396,8 @@ struct App {
     tx: UnboundedSender<Internal>,
     link_task: Option<JoinHandle<()>>,
     recv_task: Option<JoinHandle<()>>,
+    /// the stored registration data changed: the receive loop reloads the manager before it reconnects
+    reload_mgr: Rc<std::cell::Cell<bool>>,
     /// delivery receipts to send, batched per sender
     pending_receipts: HashMap<ServiceId, Vec<u64>>,
     /// incoming messages seen in the focused open thread: read receipts + read sync to our devices
@@ -555,6 +561,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         tx,
         link_task: None,
         recv_task: None,
+        reload_mgr: Default::default(),
         pending_receipts: HashMap::new(),
         pending_reads: Vec::new(),
         avatars_done: HashSet::new(),
@@ -812,9 +819,13 @@ impl App {
 
     async fn emit_account(&mut self) {
         let Some(m) = self.manager.as_ref() else { return };
-        let reg = m.registration_data();
-        let number = reg.phone_number.to_string();
-        let device = reg.device_name().unwrap_or_default().to_string();
+        let number = m.registration_data().phone_number.to_string();
+        // the store, not the manager: a rename waits there until the next reconnect
+        let device = match self.store.load_registration_data().await {
+            Ok(Some(reg)) => reg.device_name,
+            _ => m.registration_data().device_name.clone(),
+        }
+        .unwrap_or_default();
         let mut name = self.name(self.me).await;
         if name == number || name.starts_with("알 수 없음") {
             name.clear();
@@ -880,6 +891,8 @@ impl App {
             }
             Internal::Received(r) => self.received(r).await,
             Internal::Reconnected => self.connection("동기화 중…", false),
+            Internal::Manager(m) => self.manager = Some(m),
+            Internal::DeviceRenamed => self.emit_account().await,
             Internal::ReceiveStopped(msg) => {
                 self.synced = false;
                 self.connection(msg, false);
