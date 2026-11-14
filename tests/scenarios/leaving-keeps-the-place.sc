@@ -11,7 +11,7 @@ wheel 650 350 5
 settle
 expect ui near-bottom = false
 expect ui top-off = -25
-expect ui bottom-gap = 585
+expect ui bottom-gap = 521
 open 2
 settle
 expect ui near-bottom = true
@@ -20,7 +20,7 @@ open 1
 settle
 expect ui near-bottom = false
 expect ui top-off = -25
-expect ui bottom-gap = 585
+expect ui bottom-gap = 521
 # back at the bottom, it is forgotten
 wheel 650 350 -40
 settle

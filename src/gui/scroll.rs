@@ -110,7 +110,7 @@ pub(crate) fn seek_row(app: &AppWindow, id: String, anchor: Anchor) {
                 app.set_jump_probe(app.get_jump_probe() + 1);
                 return;
             }
-            let vh = app.invoke_list_visible_height();
+            let vh = app.invoke_list_open_height();
             let mut done = ticks >= 60;
             if app.get_jump_found() {
                 let pos = app.get_jump_pos();

@@ -478,10 +478,13 @@ export component Bubble inherits VerticalLayout {
     padding-right: 16px;
     // Signal's spacing: 6px above and below a run, 1px between rows of one run
     padding-top: m.day-sep || m.unread-divider || m.typing ? 8px : m.collapse-above ? 1px : 6px;
-    // the newest row gets extra room below so it doesn't touch the composer
+    // the newest row gets extra room below so it doesn't touch the composer, plus `tail`: the
+    // height of what floats over the list's bottom, so the list can scroll the row out from under it
     in property <bool> last;
+    in property <length> tail;
+    out property <length> below: last ? 10px + tail : 0px;
     // the chips and the readers hang below the bubble: room for the part under its edge
-    padding-bottom: (m.typing ? 8px : (has-chips ? (under-time ? 10px : no-bubble && !photo-only ? 30px : 19px) : m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 15px) : m.collapse-below ? 1px : 6px)) + (last ? 10px : 0px);
+    padding-bottom: (m.typing ? 8px : (has-chips ? (under-time ? 10px : no-bubble && !photo-only ? 30px : 19px) : m.outgoing && m.readers.length > 0 ? (no-bubble ? 22px : 15px) : m.collapse-below ? 1px : 6px)) + below;
     // bubble corners: 18px, 4px on the side that joins a neighbour of the same run
     out property <length> r-tl: !m.outgoing && m.collapse-above ? 4px : 18px;
     out property <length> r-tr: m.outgoing && m.collapse-above ? 4px : 18px;

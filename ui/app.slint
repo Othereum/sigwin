@@ -280,6 +280,12 @@ export component AppWindow inherits Window {
     public function list-visible-height() -> length {
         return msg-list.visible-height;
     }
+    // the part of the list not under the composer: where a row can be read
+    public function list-open-height() -> length {
+        return msg-list.visible-height - root.float-h;
+    }
+    // what floats over the message list's bottom (composer, sticker panel, request bar)
+    property <length> float-h: pane-col.height - list-box.y - list-box.height;
     // a switched-to thread at the bottom from its first frame: the ListView lays out only when
     // drawing, and the Flickable first clamps content-y to the (old thread's) content height.
     // A huge content height avoids the clamp; past the end, the layout puts the last row at the
@@ -636,7 +642,7 @@ export component AppWindow inherits Window {
             Rectangle { x: parent.width - 1px; width: 1px; background: Theme.border; }
         }
         // conversation pane
-        VerticalLayout {
+        pane-col := VerticalLayout {
             if root.current-key == "": Rectangle {
                 vertical-stretch: 1;
                 VerticalLayout {
@@ -741,12 +747,27 @@ export component AppWindow inherits Window {
                 }
                 Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
             }
-            Rectangle {
+            list-box := Rectangle {
                 visible: root.current-key != "";
                 vertical-stretch: 1;
+                // The list runs on behind the composer (and the sticker panel or request bar),
+                // which float over its bottom. The newest row carries their height as room below
+                // it, so the list's own end is still where the last message sits above them.
                 msg-list := ListView {
+                    // taller than its parent: without a y it would be centered, half of it over the header
+                    y: 0px;
                     width: parent.width;
-                    height: parent.height;
+                    height: parent.height + root.float-h;
+                    // what floats over the bottom growing (a reply card, a second line, the
+                    // sticker panel): if the list was at the bottom, keep the last message above it.
+                    // The rows lay out only when drawing, so the content height is still the old
+                    // one here: seek-end lets the layout put the last row at the bottom.
+                    changed tail => {
+                        if (!root.off-bottom) {
+                            root.seek-end();
+                        }
+                    }
+                    property <length> tail: root.float-h;
                     // the composer growing (or a resize) shrinks the list: if it was at the
                     // bottom before, keep it there so the last message isn't hidden
                     property <length> last-vh;
@@ -784,6 +805,7 @@ export component AppWindow inherits Window {
                     for m[idx] in root.messages: Bubble {
                         m: m;
                         last: idx == root.messages.length - 1;
+                        tail: root.float-h;
                         max-w: min(560px, msg-list.visible-width * 0.75);
                         flash: m.id == root.flash-id;
                         property <int> probe: root.jump-probe;
@@ -808,9 +830,10 @@ export component AppWindow inherits Window {
                             if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; root.top-day = self.top-day; }
                         }
                         changed is-divider => { if (self.is-divider) { root.divider-top = self.screen-top; } }
-                        // reading as the user goes: a row whose bottom edge is on screen. The
-                        // id, not a bool: the ListView gives rows old instances with new data.
-                        property <string> seen-id: !root.reading-hold && !root.inactive && !m.typing && self.y + self.height + msg-list.content-y <= msg-list.visible-height + 1px ? m.id : "";
+                        // reading as the user goes: a row whose bottom edge is on screen, above
+                        // the composer floating over the list. The id, not a bool: the ListView
+                        // gives rows old instances with new data.
+                        property <string> seen-id: !root.reading-hold && !root.inactive && !m.typing && self.y + self.height - self.below + msg-list.content-y <= msg-list.visible-height - root.float-h + 1px ? m.id : "";
                         changed seen-id => {
                             if (self.seen-id != "") {
                                 root.row-seen(self.seen-id);
@@ -833,6 +856,20 @@ export component AppWindow inherits Window {
                             root.open-menu(id, x, y);
                         }
                     }
+                }
+                // Under what floats: the software renderer can't blur, so messages behind it are
+                // dimmed instead, fading in above the pill and evenly dimmed around it. A fully
+                // opaque ground looked walled off; none at all, busy.
+                Rectangle {
+                    y: parent.height - 12px;
+                    height: 36px;
+                    visible: root.float-h > 0;
+                    background: @linear-gradient(180deg, Theme.pane.transparentize(1) 0%, Theme.pane.transparentize(0.35) 100%);
+                }
+                Rectangle {
+                    y: parent.height + 24px;
+                    height: max(0px, root.float-h - 24px);
+                    background: Theme.pane.transparentize(0.35);
                 }
                 // the date of the messages at the top, while the user scrolls
                 date-pill := Rectangle {

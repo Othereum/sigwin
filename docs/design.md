@@ -20,6 +20,7 @@ How Sigwin's UI looks and why. The values (colors, sizes) live in `ui/theme.slin
 ## Shapes and surfaces
 - Things are rounded: rows of the thread list are inset cards, menus and settings sections are cards, the composer is a pill.
 - **Input fields have no border**: a grey ground (`Theme.field`), and the accent ring only while they have the focus.
+- **The composer floats over the message list**, as do the sticker panel and the request bar in its place: messages scroll on behind it, dimmed by a semi-transparent pane ground that fades in above the pill (no blur in the software renderer), and nothing walls off the list's bottom.
 - **What goes with a message being written** (reply, edit, link preview, files) is a card inside the composer pill, above the text, with its own close button.
 - **A run of bubbles from one sender reads as one block**: rows of a run sit close, and the corners where two bubbles meet are tighter (4px) than the outer ones. Only the last row of a run shows the time.
 - Hover must show on whatever the button sits on: inside the grey pill it uses `Theme.field-off`, not the usual hover color.
