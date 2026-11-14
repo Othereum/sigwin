@@ -13,7 +13,9 @@
    along with the version. This comes before the push: writing them can turn up a missed fix.
 2. Bump `version` in `Cargo.toml` (and `Cargo.lock` via `cargo build`), commit as `Release <version>`, push `main`.
 3. The user runs `scripts\release.ps1` (in a terminal: it asks for the key password and the publish
-   confirmation). An agent never runs it, only tells the user to. It refuses missing or
+   confirmation). An agent only opens it in a new window for the user
+   (`Start-Process pwsh -WorkingDirectory <repo> -ArgumentList '-NoExit','-File','scripts\release.ps1'`);
+   the password and the confirmation stay with the user. It refuses missing or
    empty notes, checks the tree is
    clean and equals `origin/main` and the release is new, builds `--release`, signs `sigwin.exe`
    with minisign (trusted comment `sigwin <version>`), verifies the signature against
