@@ -78,8 +78,11 @@ $env:SIGWIN_RELEASE = "1"
 # so the repo comes after the home dir
 $repo = (Get-Location).Path
 $env:CARGO_ENCODED_RUSTFLAGS = @("--remap-path-prefix=$env:USERPROFILE=~", "--remap-path-prefix=$repo=sigwin") -join [char]0x1f
-# same for C code (aws-lc's __FILE__; cc and CMake both take CFLAGS): MSVC's /d1trimfile
+# same for C and C++ code (__FILE__ in aws-lc, BoringSSL's .cc files; cc and CMake take
+# CFLAGS / CXXFLAGS): MSVC's /d1trimfile. boring-sys doesn't rebuild when these change, so a
+# leak from it needs `cargo clean --release -p boring-sys`
 $env:CFLAGS = "/d1trimfile:$env:USERPROFILE\ /d1trimfile:$repo\"
+$env:CXXFLAGS = $env:CFLAGS
 
 cargo build --release --locked; Run "cargo build"
 # a dev build (build.rs puts SpecialBuild in its version info) or a leaked path must not ship
