@@ -5,6 +5,45 @@ import { Icon, Icons } from "icons.slint";
 
 // a short message over the content; clicks go through it. Fixed dark look: the image viewer uses it
 // too, and globals aren't shared between windows.
+// Indeterminate spinner. std-widgets' Spinner grows and shrinks its arc from a steadily turning
+// start, so its head runs backwards half the time; here head and tail take turns moving ahead.
+export component BusySpinner {
+    in property <brush> stroke: Theme.accent;
+    width: 36px;
+    height: 36px;
+    private property <duration> cycle: 1.4s;
+    private property <float> phase: mod(animation-tick(), cycle) / cycle;
+    // each cycle leaves the arc 0.75 turn further on, and the whole turns slowly besides
+    private property <float> base: floor(animation-tick() / cycle) * 0.75 + animation-tick() / 3s;
+    private property <float> h: clamp(phase * 2, 0, 1);
+    private property <float> t: clamp(phase * 2 - 1, 0, 1);
+    private property <float> head: 0.08 + 0.7 * h * h * (3 - 2 * h);
+    private property <float> tail: 0.7 * t * t * (3 - 2 * t);
+    private property <float> from: base + tail;
+    private property <float> to: base + head;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        stroke: root.stroke;
+        stroke-width: 3.5px;
+        stroke-line-cap: round;
+        MoveTo {
+            x: 50 + 44 * sin(root.from * 360deg);
+            y: 50 - 44 * cos(root.from * 360deg);
+        }
+        ArcTo {
+            radius-x: 44;
+            radius-y: 44;
+            x: 50 + 44 * sin(root.to * 360deg);
+            y: 50 - 44 * cos(root.to * 360deg);
+            sweep: true;
+            large-arc: root.to - root.from > 0.5;
+        }
+    }
+}
+
 export component Notice inherits Rectangle {
     in property <string> text;
     in property <length> max-text-width;

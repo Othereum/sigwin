@@ -13,6 +13,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 - `SIGWIN_DEMO_TALL=<row>:<chars>[,...]` (very long messages at those rows, a line per 20 characters)
 - `SIGWIN_DEMO_MENU=1|edit|pin|picker[<tab 0-7>]` (`picker`: the emoji picker on that tab, with a few recent emoji)
 - `SIGWIN_DEMO_SETTINGS=1`
+- `SIGWIN_DEMO_LOADING=1` (the loading screen with its spinner, as while waiting for the phone's history at link time)
 - `SIGWIN_DEMO_REQUEST=1` (the open chat is a message request: the request bar instead of the composer)
 - `SIGWIN_DEMO_VIDEO=1|<path>` (the newest rows show videos: blurhash and size label replaced by a frame and length after 2s, downloading, nothing, in a grid; with a path the frame is that file's first, through the encrypted file and the decoding child, and the blurhash is the one that file would be sent with)
 - `SIGWIN_DEMO_VIEWER=1|<width>x<height>` (a photo on the newest row; clicking it opens the image viewer with three fake images, the first of the given size; `SIGWIN_DEMO_VIEWER_COUNT=<n>` for a longer album)

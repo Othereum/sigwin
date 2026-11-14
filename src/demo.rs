@@ -88,6 +88,16 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         // the "updated, what's new" offer bar
         app.set_whatsnew_offer(true);
     }
+    if std::env::var_os("SIGWIN_DEMO_LOADING").is_some() {
+        // the loading screen as while waiting for the phone's history, which a real start passes in a blink
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
+            if let Some(app) = weak.upgrade() {
+                apply(&app, Event::Loading("휴대폰에서 대화 기록을 보내기를 기다리는 중…".into()));
+                apply(&app, Event::HistorySkippable(true));
+            }
+        });
+    }
     if std::env::var_os("SIGWIN_DEMO_SETTINGS").is_some() {
         let weak = app.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {

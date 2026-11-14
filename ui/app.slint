@@ -1,7 +1,7 @@
-import { ListView, Palette, Spinner } from "std-widgets.slint";
+import { ListView, Palette } from "std-widgets.slint";
 import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, DangerButton, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton } from "widgets.slint";
+import { Avatar, BusySpinner, DangerButton, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
 import { Bubble, MediaLabel, QuoteBox } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
@@ -334,7 +334,7 @@ export component AppWindow inherits Window {
             spacing: 12px;
             HorizontalLayout {
                 alignment: center;
-                Spinner { indeterminate: true; width: 36px; height: 36px; }
+                BusySpinner { }
             }
             Text { text: loading-text; color: Theme.subtle; horizontal-alignment: center; }
             if root.history-skippable: HorizontalLayout {
