@@ -110,8 +110,50 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
 }
 
 
+type Thumbs = Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<types::Thumb>>>>;
+
+/// Every thumbnail the demo sends, kept so a thread switch can send its rows' again: the UI drops
+/// those of rows that leave the list, and the real backend resends them.
+fn keep_thumbs(emit: backend::Emit) -> (backend::Emit, Thumbs) {
+    let thumbs = Thumbs::default();
+    let kept = thumbs.clone();
+    let emit: backend::Emit = Arc::new(move |e| {
+        if let Event::Thumb(t) = &e {
+            kept.lock().unwrap().insert(t.key.clone(), t.clone());
+        }
+        emit(e)
+    });
+    (emit, thumbs)
+}
+
+/// The conversation header of a demo thread, as `App::emit_header` sends it on every open.
+fn header(emit: &backend::Emit, threads: &[ThreadDto], key: &str, request: bool) {
+    let Some(t) = threads.iter().find(|t| t.key == key) else { return };
+    let sub = if t.is_group { "멤버 5명" } else { "+82 10-0000-0000" };
+    emit(Event::Header { name: t.name.clone(), sub: sub.into(), request });
+}
+
+fn resend_thumbs(emit: &backend::Emit, thumbs: &Thumbs, items: &[types::MsgDto]) {
+    // collected first: `emit` takes the same lock to keep them
+    let found: Vec<_> = {
+        let thumbs = thumbs.lock().unwrap();
+        items
+            .iter()
+            .flat_map(|m| {
+                let link = m.link.as_ref().map(|l| l.image_key.as_str());
+                [m.image_key.as_str(), m.quote_image_key.as_str()].into_iter().chain(link).chain(m.cells.iter().map(|c| c.key.as_str()))
+            })
+            .filter_map(|k| thumbs.get(k).cloned())
+            .collect()
+    };
+    for t in found {
+        emit(Event::Thumb(t));
+    }
+}
+
 /// Synthetic data for checking layout and memory without a Signal account.
 pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Command>) {
+    let (emit, thumbs) = keep_thumbs(emit);
     if std::env::var_os("SIGWIN_DEMO_REAL").is_some() {
         return demo_real(emit, cmd_rx);
     }
@@ -283,7 +325,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     }
     // SIGWIN_DEMO_REQUEST: the open chat is a message request (the request bar, no composer)
     let request = std::env::var_os("SIGWIN_DEMO_REQUEST").is_some();
-    emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into(), request });
+    header(&emit, &threads, "c:demo-1", request);
     let names = ["김민준", "이서연", "박지훈", "Alice Kim", "Bob", "김지원", "최유나"];
     emit(Event::Members(names.iter().enumerate().map(|(i, n)| (format!("00000000-0000-0000-0000-00000000000{i}"), n.to_string())).collect()));
     for m in items.iter_mut().filter(|m| m.attachment.is_empty() && m.quote.is_empty() && !m.sticker) {
@@ -476,7 +518,9 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                     let items = if n == 1 { items.clone() } else { items[items.len() - (10 + n * 7).min(items.len())..].to_vec() };
                     // pins only in the first thread, sent after the rows like App::emit_messages
                     let pins = if key == "c:demo-1" { all_pins.clone() } else { Vec::new() };
-                    emit(Event::Messages { key, items, paging: Paging::default(), scroll: Scroll::Bottom });
+                    header(&emit, &threads, &key, request && key == "c:demo-1");
+                    emit(Event::Messages { key, items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
+                    resend_thumbs(&emit, &thumbs, &items);
                     emit(Event::Pins(pins));
                     if let Some(m) = msg {
                         emit(Event::JumpTo(m.to_string()));
@@ -1139,14 +1183,15 @@ fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiv
     }
     view::mark_runs(&mut items, false);
     emit(Event::Ready);
-    emit(Event::Threads(threads));
-    emit(Event::Header { name: "이서연".into(), sub: "+82 10-0000-0000".into(), request: false });
+    emit(Event::Threads(threads.clone()));
+    header(&emit, &threads, "c:demo-1", false);
     emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
     emit(Event::Pins(Vec::new()));
     emit(Event::Account { name: "홍길동".into(), number: "+821012345678".into(), device: "Sigwin".into(), receipts: Some(true), typing: None });
     std::thread::spawn(move || {
         while let Some(c) = cmd_rx.blocking_recv() {
             if let Command::OpenThread(key) = c {
+                header(&emit, &threads, &key, false);
                 emit(Event::Messages { key, items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
                 emit(Event::Pins(Vec::new()));
             }
