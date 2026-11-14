@@ -266,6 +266,21 @@ impl App {
         self.run_avatars();
     }
 
+    /// The scale changed: photos and pictures on screen are asked for again, resampled to the new
+    /// physical size (the renderer would scale the old ones nearest-neighbor). Disk caches are
+    /// size-independent or keyed by size, so this costs no downloads.
+    pub(super) async fn rescale(&mut self) {
+        self.avatars_done.clear();
+        self.avatar_queue.clear();
+        self.load_avatars();
+        self.load_list_reader_avatars();
+        if self.current.is_some() {
+            self.thumbs_requested.borrow_mut().clear();
+            // also asks for the message list's avatars again
+            self.emit_messages(crate::types::Scroll::Keep).await;
+        }
+    }
+
     /// Photos of the senders shown next to group messages; ahead of the thread list.
     pub(super) fn load_sender_avatars(&mut self, items: &[MsgDto]) {
         for m in items.iter().filter(|m| m.show_avatar) {

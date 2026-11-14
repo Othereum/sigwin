@@ -28,7 +28,7 @@ pub(crate) fn apply_zoom(app: &AppWindow) {
     }
     let h = hwnd(app);
     if h == 0 {
-        types::set_ui_scale(app.window().scale_factor());
+        scale_set(app.window().scale_factor());
         return;
     }
     let zoom = UI.with_borrow(|ui| ui.settings.zoom) as f32 / 100.0;
@@ -40,8 +40,21 @@ pub(crate) fn apply_zoom(app: &AppWindow) {
         w.dispatch_event(slint::platform::WindowEvent::Resized { size: size.to_logical(sf) });
         winhook::repaint_all(app);
     }
-    // thumbnails are pre-scaled to physical pixels: the renderer samples images nearest-neighbor
-    types::set_ui_scale(sf);
+    scale_set(sf);
+}
+
+/// Thumbnails and photos are pre-scaled to physical pixels (the renderer samples images
+/// nearest-neighbor), so a new scale asks for them again.
+fn scale_set(sf: f32) {
+    if !types::set_ui_scale(sf) {
+        return;
+    }
+    UI.with_borrow_mut(|ui| {
+        // frames come at the old size; the new stills report their rows again
+        anim::stop_gif(ui);
+        ui.anims.clear_list();
+    });
+    send_cmd(Command::ScaleChanged);
 }
 
 #[cfg(windows)]

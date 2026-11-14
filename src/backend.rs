@@ -804,6 +804,7 @@ impl App {
                 self.thumbs_requested.borrow_mut().clear();
                 self.emit_storage();
             }
+            Command::ScaleChanged => self.rescale().await,
             Command::SetMute { key, set } => self.set_mute(&key, set),
             Command::SetPref { key, pref } => self.set_pref(&key, pref),
         }

@@ -329,10 +329,13 @@ pub const FILE_LINE_PREFIX: &str = "files:";
 /// Window scale factor x1000, set by the UI once the window exists.
 static UI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1000);
 
-pub fn set_ui_scale(scale: f32) {
-    if scale.is_finite() && scale > 0.0 {
-        UI_SCALE.store((scale * 1000.0).round() as u32, std::sync::atomic::Ordering::Relaxed);
+/// Whether the scale changed.
+pub fn set_ui_scale(scale: f32) -> bool {
+    if !(scale.is_finite() && scale > 0.0) {
+        return false;
     }
+    let s = (scale * 1000.0).round() as u32;
+    UI_SCALE.swap(s, std::sync::atomic::Ordering::Relaxed) != s
 }
 
 /// Logical length -> physical pixels.
@@ -723,6 +726,8 @@ pub enum Command {
     SettingsOpened,
     /// empty the thumbnail cache (rebuilt from attachments and stored photos on demand)
     ClearThumbs,
+    /// the window's scale factor changed: every picture shown was sized for the old one
+    ScaleChanged,
     /// turn a thread's notifications off / on, or follow the phone again
     SetMute { key: String, set: MuteSet },
     /// change one of a thread's own notification settings
