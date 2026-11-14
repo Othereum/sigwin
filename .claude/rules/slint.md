@@ -18,6 +18,8 @@ paths:
 - Don't use `EmbedResourcesKind::EmbedForSoftwareRenderer`: it bakes only glyphs that appear in `.slint` files, so runtime Korean text loses characters.
 - A `Flickable`'s max size defaults to its content size and propagates up through layouts, which can shrink the window. Set `max-width: 100000px` on Flickables inside layouts.
 - **Keep `AppWindow`'s property list for what the main window itself uses.** An area with its own state (a page, a dialog) keeps it in an `export global` in its own file, like `SettingsData`, instead of properties passed through `AppWindow` with `<=>`. Re-export the global from `app.slint`, or Rust can't reach it (`app.global::<X>()`).
+- **A child with a set size is centered in its parent** unless it has `x`/`y`: one taller than its parent spills over both edges. Give it `y: 0px` (see `msg-list`).
+- **A `visible: false` child still takes its share of a layout's stretch.** Set its stretch and max size to 0 while hidden (see `list-box`).
 - Elements inside `if` can't be referenced by id from outside. Use `visible` and min/max sizes instead (see `composer-bar`).
 - **Never build UI that only works by touch drag.** This is a PC app: anything that scrolls or pans must move with the mouse wheel (or another mouse-reachable control). A Flickable only takes the wheel along an axis it overflows, so a horizontal one ignores it. Wrap it in a `TouchArea` whose `scroll-event` moves `content-x` (clamped) and accepts; the Flickable rejects the event first and it bubbles to the parent. The `TouchArea` must be the Flickable's parent: as a sibling below it never sees the event (see the pack tabs in `stickers.slint`, the strip in `viewer.slint`).
 - Use `content-y` / `content-height` (the `viewport-*` names are deprecated).
