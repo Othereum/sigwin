@@ -155,7 +155,10 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             // a group: runs from two senders
             sender: if outgoing { String::new() } else if i % 5 < 3 { "이서연".into() } else { "박지훈".into() },
             sender_key: if outgoing { String::new() } else if i % 5 < 3 { "demo-a".into() } else { "demo-b".into() },
-            text: if i % 7 == 0 {
+            // stickers carry no text, as in real messages
+            text: if i == 297 || i == 298 {
+                String::new()
+            } else if i % 7 == 0 {
                 "긴 메시지 테스트입니다. 한글 줄바꿈이 제대로 되는지, 말풍선 최대 폭이 적당한지 확인하기 위한 문장입니다. 🙂".into()
             } else {
                 if i == 295 { "기호·이모지 테스트: ✓ ✕ ➤ ★ ♥ → 😀🎉👍❤️🇰🇷".to_string() } else if i == 296 { "🎉🥳👍🏽".to_string() } else { format!("메시지 {i}") }
@@ -520,6 +523,10 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         typing: None,
     });
     emit(Event::Storage { db: 23 * 1024 * 1024, attachments: 148 * 1024 * 1024, thumbs: 3_400_000 });
+    // the sticker rows near the bottom
+    for i in 0..2u8 {
+        emit(Event::Thumb(Arc::new(demo_blob(&format!("demo-st-{i}"), 200, 60 + i * 120))));
+    }
     if std::env::var_os("SIGWIN_DEMO_VIDEO").is_some() {
         let emit = emit.clone();
         std::thread::spawn(move || demo_videos(&emit));
@@ -1040,9 +1047,6 @@ fn demo_grids(emit: &backend::Emit) {
 }
 
 pub(crate) fn demo_stickers(emit: backend::Emit) {
-    for i in 0..2u8 {
-        emit(Event::Thumb(Arc::new(demo_blob(&format!("demo-st-{i}"), 200, 60 + i * 120))));
-    }
     let packs: Vec<types::PackDto> = (0..3)
         .map(|i| types::PackDto {
             id: format!("p{i}"),
