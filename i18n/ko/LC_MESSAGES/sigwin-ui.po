@@ -279,7 +279,7 @@ msgstr "휴대폰의 Signal 앱 → 설정 → 연결된 기기 → '+' 를 눌�
 msgid "Open"
 msgstr "열기"
 
-msgid "Open at login"
+msgid "Open at computer login"
 msgstr "컴퓨터 로그인 시 열기"
 
 msgid "Open in default app"
@@ -378,7 +378,7 @@ msgstr "표준"
 msgid "Start linking"
 msgstr "연결 시작"
 
-msgid "Start minimized to the tray"
+msgid "Start minimized to tray"
 msgstr "시스템 트레이로 최소화된 상태로 열기"
 
 msgid "Starts Sigwin when you sign in to Windows"
@@ -417,7 +417,7 @@ msgstr "읽지 않은 대화"
 msgid "Unread messages"
 msgstr "읽지 않은 메시지"
 
-msgid "Until unpinned"
+msgid "Forever"
 msgstr "해제할 때까지"
 
 msgid "Update"

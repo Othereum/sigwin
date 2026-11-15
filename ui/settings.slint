@@ -263,7 +263,7 @@ export component SettingsPage inherits Rectangle {
                     SettingSection {
                         title: @tr("Startup");
                         SettingRow {
-                            label: @tr("Open at login");
+                            label: @tr("Open at computer login");
                             hint: @tr("Starts Sigwin when you sign in to Windows");
                             Toggle {
                                 checked <=> SettingsData.autostart;
@@ -271,7 +271,7 @@ export component SettingsPage inherits Rectangle {
                             }
                         }
                         SettingRow {
-                            label: @tr("Start minimized to the tray");
+                            label: @tr("Start minimized to tray");
                             hint: @tr("When started at login, stays in the tray without a window");
                             Toggle {
                                 enabled: SettingsData.autostart;
