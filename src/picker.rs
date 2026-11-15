@@ -22,7 +22,7 @@ pub fn run_if_child() -> bool {
     };
     let owner = args.get(2).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
     // the parent passes its language as SIGWIN_LANG
-    crate::i18n::init(false);
+    crate::i18n::init(false, "");
     let mut dialog = rfd::FileDialog::new();
     if owner != 0 {
         dialog = dialog.set_parent(&Owner(owner));

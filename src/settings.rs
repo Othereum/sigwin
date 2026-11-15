@@ -19,6 +19,8 @@ pub struct Settings {
     pub badge_count: u8,
     /// 0 = follow the system, 1 = light, 2 = dark
     pub theme: u8,
+    /// the UI language, one of `LANGUAGES` ("" = the system's); applies at the next start
+    pub language: String,
     /// UI size in percent, on top of the monitor's scaling
     pub zoom: u32,
     /// Enter sends (Shift+Enter: new line); otherwise Ctrl+Enter sends and Enter is a new line
@@ -67,6 +69,7 @@ impl Default for Settings {
             sound: true,
             badge_count: 0,
             theme: 0,
+            language: String::new(),
             zoom: 100,
             enter_sends: true,
             autostart: true,
@@ -86,6 +89,9 @@ impl Default for Settings {
 
 pub const ZOOMS: [u32; 5] = [90, 100, 110, 125, 150];
 
+/// The language choices, in the order of the settings page's buttons (`ui/settings.slint`).
+pub const LANGUAGES: [&str; 3] = ["", "en", "ko"];
+
 impl Settings {
     pub fn load(path: &Path) -> Self {
         let mut s: Self = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
@@ -93,6 +99,9 @@ impl Settings {
         s.theme = s.theme.min(2);
         s.badge_count = s.badge_count.min(1);
         s.photo_quality = s.photo_quality.min(1);
+        if !LANGUAGES.contains(&s.language.as_str()) {
+            s.language.clear();
+        }
         if !ZOOMS.contains(&s.zoom) {
             s.zoom = 100;
         }

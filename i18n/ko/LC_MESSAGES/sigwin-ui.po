@@ -1010,3 +1010,9 @@ msgstr "📞 통화"
 msgctxt "notification title"
 msgid "{0} in {1}"
 msgstr "{1}의 {0} 님"
+
+msgid "Language"
+msgstr "언어"
+
+msgid "Applies after Sigwin restarts"
+msgstr "Sigwin을 다시 시작하면 적용됩니다"

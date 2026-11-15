@@ -21,10 +21,14 @@ include!(concat!(env!("OUT_DIR"), "/i18n.rs"));
 static CURRENT: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 /// Picks the language for this run: `SIGWIN_LANG` (any run, for checks), else English for
-/// headless runs (shots and scenarios look the same on every PC), else the system's. Returns
-/// its code for `slint::select_bundled_translation`.
-pub fn init(headless: bool) -> &'static str {
-    let wanted = std::env::var("SIGWIN_LANG").ok().or_else(|| if headless { None } else { sys_locale::get_locale() });
+/// headless runs (shots and scenarios look the same on every PC), else `chosen` (the setting),
+/// else the system's. Returns its code for `slint::select_bundled_translation`.
+pub fn init(headless: bool, chosen: &str) -> &'static str {
+    let wanted = std::env::var("SIGWIN_LANG").ok().or_else(|| match () {
+        _ if headless => None,
+        _ if !chosen.is_empty() => Some(chosen.to_string()),
+        _ => sys_locale::get_locale(),
+    });
     let idx = wanted.as_deref().and_then(catalog_for).unwrap_or(usize::MAX);
     CURRENT.store(idx, Ordering::Relaxed);
     CATALOGS.get(idx).map_or("en", |c| c.lang)

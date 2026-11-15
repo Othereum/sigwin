@@ -78,6 +78,10 @@ export global SettingsData {
     in-out property <bool> sound: true;
     in-out property <int> badge-count: 0;
     in-out property <int> theme;
+    // index into settings::LANGUAGES, and the one this run started with
+    in-out property <int> language;
+    in property <int> language-at-start;
+    callback restart-app();
     // index into the zoom steps (see settings::ZOOMS)
     in-out property <int> zoom: 1;
     in-out property <bool> enter-sends: true;
@@ -284,6 +288,23 @@ export component SettingsPage inherits Rectangle {
                                 options: [@tr("System"), @tr("Light"), @tr("Dark")];
                                 current <=> SettingsData.theme;
                                 changed => { SettingsData.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: @tr("Language");
+                            hint: SettingsData.language != SettingsData.language-at-start ? @tr("Applies after Sigwin restarts") : "";
+                            HorizontalLayout {
+                                spacing: 8px;
+                                if SettingsData.language != SettingsData.language-at-start: PlainButton {
+                                    text: @tr("Restart");
+                                    clicked => { SettingsData.restart-app(); }
+                                }
+                                Segmented {
+                                    // names in their own language, so anyone finds theirs
+                                    options: [@tr("System"), "English", "한국어"];
+                                    current <=> SettingsData.language;
+                                    changed => { SettingsData.changed(); }
+                                }
                             }
                         }
                         SettingRow {

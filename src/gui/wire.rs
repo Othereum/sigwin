@@ -833,6 +833,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             sound: d.get_sound(),
             badge_count: d.get_badge_count().clamp(0, 1) as u8,
             theme: d.get_theme().clamp(0, 2) as u8,
+            language: settings::LANGUAGES.get(d.get_language().max(0) as usize).unwrap_or(&"").to_string(),
             zoom: settings::ZOOMS.get(d.get_zoom().max(0) as usize).copied().unwrap_or(100),
             enter_sends: d.get_enter_sends(),
             autostart: d.get_autostart(),
@@ -878,6 +879,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
 /// The update buttons on the settings page.
 fn wire_update(app: &AppWindow) {
     app.global::<SettingsData>().on_restart_for_update(update::restart);
+    app.global::<SettingsData>().on_restart_app(update::restart);
     let weak = app.as_weak();
     app.global::<SettingsData>().on_install_update(move || {
         let Some(app) = weak.upgrade() else { return };

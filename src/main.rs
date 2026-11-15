@@ -136,6 +136,9 @@ fn load_ui_state(app: &AppWindow, cmd_tx: UnboundedSender<Command>) {
         autostart::apply(true, prefs.start_hidden, false);
     }
     show_settings(app, &prefs);
+    // the language this run started with: picking another one asks for a restart
+    let lang = settings::LANGUAGES.iter().position(|l| *l == prefs.language).unwrap_or(0) as i32;
+    app.global::<SettingsData>().set_language_at_start(lang);
     app.global::<SettingsData>().set_version(version_label().into());
     // dev builds: commit hash in the title (the icon: `gui::window::set_dev_icon`, tray)
     #[cfg(sigwin_dev)]
@@ -160,7 +163,8 @@ fn main() -> anyhow::Result<()> {
     // the uninstaller may delete the data folder, so it must not hold a file open in it
     let uninstall = std::env::args().any(|a| a == "--uninstall");
     init_logging(!uninstall)?;
-    let lang = i18n::init(std::env::var_os("SIGWIN_HEADLESS").is_some());
+    let chosen = settings::Settings::load(&settings::path(&data_dir())).language;
+    let lang = i18n::init(std::env::var_os("SIGWIN_HEADLESS").is_some(), &chosen);
     if uninstall {
         install::uninstall(&data_dir());
         return Ok(());
