@@ -378,6 +378,81 @@ export component TextButton inherits Rectangle {
     }
 }
 
+// one value of a list that may grow (languages), where `Segmented` would run out of room: the
+// look of `PlainButton`, opening a menu card under it
+export component Dropdown inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> current;
+    callback changed(int);
+    height: 32px;
+    min-width: max(160px, lbl.preferred-width + 48px);
+    border-radius: 6px;
+    background: ta.has-hover ? Theme.field-off : Theme.field;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { popup.show(); }
+    }
+    lbl := Text {
+        x: 12px;
+        text: root.options[root.current];
+        color: Theme.text;
+        font-size: 13px;
+        vertical-alignment: center;
+    }
+    Icon {
+        x: parent.width - self.width - 10px;
+        y: (parent.height - self.height) / 2;
+        size: 16px;
+        icon: Icons.chevron-down;
+        tint: Theme.subtle;
+    }
+    popup := PopupWindow {
+        x: 0px;
+        y: root.height + 4px;
+        width: root.width;
+        height: drop-col.preferred-height;
+        // the rows close it themselves: closing on any click dropped the row's click
+        close-policy: close-on-click-outside;
+        Rectangle {
+            border-radius: 12px;
+            background: Theme.pane;
+            border-width: 1px;
+            border-color: Theme.border;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: Theme.shadow;
+            drop-col := VerticalLayout {
+                padding: 6px;
+                spacing: 2px;
+                for o[i] in root.options: Rectangle {
+                    height: 32px;
+                    border-radius: 6px;
+                    background: i == root.current ? Theme.selected : (dta.has-hover ? Theme.hover : transparent);
+                    dta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            if (root.current != i) {
+                                root.current = i;
+                                root.changed(i);
+                            }
+                            // last: closing ends the popup, and what came after it in this
+                            // handler did nothing
+                            popup.close();
+                        }
+                    }
+                    Text {
+                        x: 10px;
+                        text: o;
+                        color: Theme.text;
+                        font-size: 13px;
+                        font-weight: i == root.current ? 700 : 400;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
 // a row of mutually exclusive choices
 export component Segmented inherits Rectangle {
     in property <[string]> options;

@@ -2,7 +2,7 @@
 
 import { ListView } from "std-widgets.slint";
 import { Links, Theme } from "theme.slint";
-import { Avatar, DangerButton, IconButton, PlainButton, Segmented, Toggle } from "widgets.slint";
+import { Avatar, DangerButton, Dropdown, IconButton, PlainButton, Segmented, Toggle } from "widgets.slint";
 import { Icons } from "icons.slint";
 
 // a heading over its rows, which sit together on one rounded card
@@ -299,7 +299,7 @@ export component SettingsPage inherits Rectangle {
                                     text: @tr("Restart");
                                     clicked => { SettingsData.restart-app(); }
                                 }
-                                Segmented {
+                                Dropdown {
                                     // names in their own language, so anyone finds theirs
                                     options: [@tr("System"), "English", "Deutsch", "한국어"];
                                     current <=> SettingsData.language;
