@@ -69,7 +69,7 @@ export component StickerPanel inherits Rectangle {
                     }
                     TextButton {
                         y: 6px;
-                        text: "팩 추가";
+                        text: @tr("Add pack");
                         icon: Icons.plus;
                         active: root.suggest;
                         clicked => { root.pick-pack("+"); }
@@ -111,7 +111,7 @@ export component StickerPanel inherits Rectangle {
             content-height: sug.preferred-height;
             sug := VerticalLayout {
                 spacing: 4px;
-                Text { text: "추천 스티커 팩"; color: Theme.subtle; font-size: 12px; }
+                Text { text: @tr("Featured sticker packs"); color: Theme.subtle; font-size: 12px; }
                 for p in root.packs: HorizontalLayout {
                     visible: !p.installed;
                     height: p.installed ? 0px : 34px;
@@ -125,12 +125,12 @@ export component StickerPanel inherits Rectangle {
                         overflow: elide;
                     }
                     PlainButton {
-                        text: "추가";
+                        text: @tr("Add");
                         clicked => { root.install-pack(p.id); }
                     }
                 }
                 Rectangle { height: 8px; }
-                Text { text: "signal.art 스티커 링크로 추가"; color: Theme.subtle; font-size: 12px; }
+                Text { text: @tr("Add from a signal.art sticker link"); color: Theme.subtle; font-size: 12px; }
                 HorizontalLayout {
                     spacing: 6px;
                     Field {
@@ -147,7 +147,7 @@ export component StickerPanel inherits Rectangle {
                         }
                     }
                     PlainButton {
-                        text: "추가";
+                        text: @tr("Add");
                         clicked => { root.add-pack-url(root.url-text); }
                     }
                 }

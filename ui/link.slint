@@ -22,7 +22,7 @@ export component LinkPage inherits Rectangle {
             horizontal-alignment: center;
         }
         Text {
-            text: "휴대폰의 Signal 앱 → 설정 → 연결된 기기 → '+' 를 눌러 아래 QR 코드를 스캔하세요.";
+            text: @tr("On your phone, open Signal → Settings → Linked devices → '+' and scan the QR code below.");
             color: Theme.subtle;
             wrap: word-wrap;
             horizontal-alignment: center;
@@ -41,7 +41,7 @@ export component LinkPage inherits Rectangle {
                     image-rendering: pixelated;
                 }
                 if !has-qr: Text {
-                    text: "QR 코드 대기 중";
+                    text: @tr("Waiting for the QR code");
                     color: #888;
                 }
             }
@@ -49,14 +49,14 @@ export component LinkPage inherits Rectangle {
         HorizontalLayout {
             alignment: center;
             spacing: 8px;
-            Text { text: "기기 이름"; color: Theme.text; vertical-alignment: center; }
+            Text { text: @tr("Device name"); color: Theme.text; vertical-alignment: center; }
             Field {
                 width: 200px;
                 height: 32px;
                 text <=> root.device-name;
             }
             PrimaryButton {
-                text: has-qr ? "QR 다시 만들기" : "연결 시작";
+                text: has-qr ? @tr("New QR code") : @tr("Start linking");
                 clicked => { root.start-link(root.device-name); }
             }
         }

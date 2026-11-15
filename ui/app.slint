@@ -24,7 +24,7 @@ export { RepliesData } from "replies.slint";
 
 export component AppWindow inherits Window {
     in property <int> total-unread;
-    // dev builds (no SIGWIN_RELEASE): commit hash, else "개발"; empty for releases
+    // dev builds (no SIGWIN_RELEASE): commit hash, else "dev"; empty for releases
     in property <string> dev-tag;
     title: (dev-tag != "" ? "Sigwin [" + dev-tag + "]" : "Sigwin") + (total-unread > 0 ? " (" + total-unread + ")" : "");
     preferred-width: 1000px;
@@ -40,7 +40,7 @@ export component AppWindow inherits Window {
 
     // "loading" | "link" | "main"
     in property <string> page: "loading";
-    in property <string> loading-text: "불러오는 중…";
+    in property <string> loading-text: @tr("Loading…");
 
     in property <image> qr;
     in property <bool> has-qr: false;
@@ -179,7 +179,7 @@ export component AppWindow inherits Window {
     in-out property <length> view-top-off;
     // the message list moved: the hover is brought up to date for the cursor (gui::anim)
     callback gif-scrolled();
-    // the date shown at the top while scrolling: "오늘", "어제", "11월 7일 (토)" for a day number
+    // the date shown at the top while scrolling: "Today", "Yesterday", "Sat, Nov 7" for a day number
     pure callback day-label(int) -> string;
     // scroll to the first message of a day (a day number, as in `Message.day`)
     callback show-day(int);
@@ -201,7 +201,7 @@ export component AppWindow inherits Window {
     in property <bool> menu-can-edit;
     in property <bool> menu-can-delete;
     in property <bool> menu-pinned;
-    // what the message's "정보" shows; "" hides the row (incoming messages have none)
+    // what the message's "Info" shows; "" hides the row (incoming messages have none)
     in property <string> menu-info;
     // the menu shows the pin durations instead of the actions
     in-out property <bool> menu-pin-step;
@@ -245,7 +245,7 @@ export component AppWindow inherits Window {
     in-out property <string> pack-url;
     callback toggle-stickers();
     in-out property <string> info-text;
-    in-out property <string> info-title: "메시지 정보";
+    in-out property <string> info-title: @tr("Message info");
     callback pick-pack(string);
     callback send-sticker(string, int);
     callback install-pack(string);
@@ -340,7 +340,7 @@ export component AppWindow inherits Window {
             if root.history-skippable: HorizontalLayout {
                 alignment: center;
                 PlainButton {
-                    text: "기록 없이 계속";
+                    text: @tr("Continue without history");
                     clicked => { root.skip-history(); }
                 }
             }
@@ -414,10 +414,10 @@ export component AppWindow inherits Window {
                     search-edit := Field {
                         y: (parent.height - self.height) / 2;
                         icon: Icons.search;
-                        placeholder: !SearchData.contacts ? "검색"
-                            : SearchData.find == FindKind.phone ? "전화번호 입력"
-                            : SearchData.find == FindKind.username ? "사용자 이름 (예: name.42)"
-                            : "이름, 전화번호, 사용자 이름";
+                        placeholder: !SearchData.contacts ? @tr("Search")
+                            : SearchData.find == FindKind.phone ? @tr("Enter a phone number")
+                            : SearchData.find == FindKind.username ? @tr("Username (e.g. name.42)")
+                            : @tr("Name, phone number, username");
                         text <=> SearchData.query;
                         edited => { SearchData.changed(); }
                         accepted => { SearchData.accept(); }
@@ -504,7 +504,7 @@ export component AppWindow inherits Window {
                         y: 24px;
                         width: parent.width;
                         horizontal-alignment: center;
-                        text: SearchData.contacts && SearchData.query == "" ? "연락처가 없습니다" : "결과가 없습니다";
+                        text: SearchData.contacts && SearchData.query == "" ? @tr("No contacts") : @tr("No results");
                         color: Theme.subtle;
                         font-size: 13px;
                     }
@@ -529,7 +529,7 @@ export component AppWindow inherits Window {
                             tint: Theme.accent;
                         }
                         Text {
-                            text: "업데이트 완료";
+                            text: @tr("Updated");
                             color: Theme.text;
                             font-size: 13px;
                             vertical-alignment: center;
@@ -537,7 +537,7 @@ export component AppWindow inherits Window {
                             overflow: elide;
                         }
                         Text {
-                            text: "새로운 점";
+                            text: @tr("What's new");
                             color: Theme.accent;
                             font-size: 13px;
                             font-weight: 700;
@@ -574,7 +574,7 @@ export component AppWindow inherits Window {
                             tint: Theme.accent;
                         }
                         Text {
-                            text: "새 버전 " + SettingsData.update-available + " 있음";
+                            text: @tr("Version {} available", SettingsData.update-available);
                             color: Theme.text;
                             font-size: 13px;
                             vertical-alignment: center;
@@ -582,7 +582,7 @@ export component AppWindow inherits Window {
                             overflow: elide;
                         }
                         Text {
-                            text: SettingsData.update-installing ? "받는 중…" : "업데이트";
+                            text: SettingsData.update-installing ? @tr("Downloading…") : @tr("Update");
                             color: SettingsData.update-installing ? Theme.subtle : Theme.accent;
                             font-size: 13px;
                             font-weight: 700;
@@ -609,7 +609,7 @@ export component AppWindow inherits Window {
                             tint: Theme.accent;
                         }
                         Text {
-                            text: "새 버전 " + SettingsData.update-version + " 준비됨";
+                            text: @tr("Version {} ready", SettingsData.update-version);
                             color: Theme.text;
                             font-size: 13px;
                             vertical-alignment: center;
@@ -617,7 +617,7 @@ export component AppWindow inherits Window {
                             overflow: elide;
                         }
                         Text {
-                            text: "다시 시작";
+                            text: @tr("Restart");
                             color: Theme.accent;
                             font-size: 13px;
                             font-weight: 700;
@@ -640,7 +640,7 @@ export component AppWindow inherits Window {
                         Icon { icon: Icons.chat; size: 48px; }
                     }
                     Text {
-                        text: "대화를 선택하세요";
+                        text: @tr("Select a chat");
                         color: Theme.subtle;
                         font-size: 15px;
                         horizontal-alignment: center;
@@ -708,7 +708,7 @@ export component AppWindow inherits Window {
                         alignment: center;
                         horizontal-stretch: 1;
                         Text {
-                            text: root.pins.length > 1 ? "고정된 메시지 " + (idx + 1) + "/" + root.pins.length : "고정된 메시지";
+                            text: root.pins.length > 1 ? @tr("Pinned message {}/{}", idx + 1, root.pins.length) : @tr("Pinned message");
                             color: Theme.accent;
                             font-size: 12px;
                             font-weight: 700;
@@ -834,8 +834,8 @@ export component AppWindow inherits Window {
                         save-clicked(id) => { root.save-clicked(id); }
                         quote-clicked(id) => { root.show-message(id); }
                         reply(id) => { root.reply(id); }
-                        show-info(t) => { root.info-title = "메시지 정보"; root.info-text = t; }
-                        show-reactors(t) => { root.info-title = "반응"; root.info-text = t; }
+                        show-info(t) => { root.info-title = @tr("Message info"); root.info-text = t; }
+                        show-reactors(t) => { root.info-title = @tr("Reactions"); root.info-text = t; }
                         menu(id, x, y) => {
                             root.menu-reacts = false;
                             root.open-menu(id, x, y);
@@ -965,7 +965,7 @@ export component AppWindow inherits Window {
                     padding-top: 14px;
                     spacing: 12px;
                     Text {
-                        text: "\{root.current-name}님이 메시지를 보냈습니다. 수락하면 상대가 내 이름과 사진을 볼 수 있고, 메시지를 읽었는지도 알 수 있습니다.";
+                        text: @tr("{} sent you a message. If you accept, they can see your name and photo, and whether you've read their messages.", root.current-name);
                         color: Theme.subtle;
                         font-size: 13px;
                         wrap: word-wrap;
@@ -974,9 +974,9 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         alignment: center;
                         spacing: 8px;
-                        DangerButton { text: "차단"; clicked => { root.answer-request(2); } }
-                        DangerButton { text: "삭제"; clicked => { root.answer-request(1); } }
-                        PrimaryButton { text: "수락"; clicked => { root.answer-request(0); } }
+                        DangerButton { text: @tr("Block"); clicked => { root.answer-request(2); } }
+                        DangerButton { text: @tr("Delete"); clicked => { root.answer-request(1); } }
+                        PrimaryButton { text: @tr("Accept"); clicked => { root.answer-request(0); } }
                     }
                 }
                 }
@@ -1013,7 +1013,7 @@ export component AppWindow inherits Window {
                                         alignment: center;
                                         horizontal-stretch: 1;
                                         spacing: 1px;
-                                        Text { text: "수정 중"; color: Theme.accent; font-size: 12px; font-weight: 700; }
+                                        Text { text: @tr("Editing"); color: Theme.accent; font-size: 12px; font-weight: 700; }
                                         Text { text: root.edit-preview; color: Theme.subtle; font-size: 12px; overflow: elide; }
                                     }
                                     IconButton { y: (parent.height - self.height) / 2; icon: Icons.close; icon-size: 16px; width: 28px; height: 28px; clicked => { root.cancel-edit(); } }
@@ -1036,7 +1036,7 @@ export component AppWindow inherits Window {
                                         horizontal-stretch: 1;
                                         spacing: 1px;
                                         Text {
-                                            text: root.reply-author == "" ? "답장" : root.reply-author == "나" ? "내 메시지에 답장" : root.reply-author + "에게 답장";
+                                            text: root.reply-author == "" ? @tr("Reply") : root.reply-author == @tr("You") ? @tr("Replying to yourself") : @tr("Replying to {}", root.reply-author);
                                             color: Theme.accent;
                                             font-size: 12px;
                                             font-weight: 700;
@@ -1095,7 +1095,7 @@ export component AppWindow inherits Window {
                             overflow: elide;
                         }
                         Text {
-                            text: root.pending-files[0].danger ? root.pending-files[0].size + " · 위험할 수 있음" : root.pending-files[0].size;
+                            text: root.pending-files[0].danger ? root.pending-files[0].size + " · " + @tr("May be dangerous") : root.pending-files[0].size;
                             color: root.pending-files[0].danger ? Theme.warning-text : Theme.subtle;
                             font-size: 12px;
                         }
@@ -1380,7 +1380,7 @@ export component AppWindow inherits Window {
                                     if root.draft == "" && composer.preedit-text == "": Text {
                                         x: 0;
                                         y: 0;
-                                        text: root.edit-preview != "" ? "수정할 내용 입력 (Esc 취소)" : "메시지 입력";
+                                        text: root.edit-preview != "" ? @tr("Edit message (Esc to cancel)") : @tr("Message");
                                         color: Theme.subtle;
                                         font-size: 14px;
                                     }
@@ -1463,7 +1463,7 @@ export component AppWindow inherits Window {
                                 hd-tip := Text {
                                     x: 10px;
                                     y: 7px;
-                                    text: SettingsData.photo-quality == 1 ? "높은 화질로 보냅니다\n눌러서 표준으로 바꿀 수 있습니다" : "표준 화질로 보냅니다\n눌러서 높은 화질로 바꿀 수 있습니다";
+                                    text: SettingsData.photo-quality == 1 ? @tr("Sending in high quality\nClick to switch to standard") : @tr("Sending in standard quality\nClick to switch to high");
                                     color: Theme.text;
                                     font-size: 12px;
                                 }
@@ -1616,17 +1616,17 @@ export component AppWindow inherits Window {
                     padding-left: 10px;
                     Text {
                         height: 28px;
-                        text: "고정할 기간";
+                        text: @tr("Pin for");
                         color: Theme.subtle;
                         font-size: 12px;
                         vertical-alignment: center;
                     }
                 }
                 for d in root.menu-pin-step && !root.menu-picker ? [
-                    { label: "24시간", secs: 86400 },
-                    { label: "7일", secs: 604800 },
-                    { label: "30일", secs: 2592000 },
-                    { label: "해제할 때까지", secs: 0 },
+                    { label: @tr("24 hours"), secs: 86400 },
+                    { label: @tr("7 days"), secs: 604800 },
+                    { label: @tr("30 days"), secs: 2592000 },
+                    { label: @tr("Until unpinned"), secs: 0 },
                 ] : []: MenuRow {
                     text: d.label;
                     clicked => {
@@ -1636,7 +1636,7 @@ export component AppWindow inherits Window {
                 }
                 if !root.menu-pin-step && !root.menu-picker && !root.menu-reacts: MenuRow {
                     icon: Icons.reply;
-                    text: "답장";
+                    text: @tr("Reply");
                     clicked => {
                         root.reply(root.menu-id);
                         root.menu-id = "";
@@ -1644,7 +1644,7 @@ export component AppWindow inherits Window {
                 }
                 if !root.menu-pin-step && !root.menu-picker && !root.menu-reacts: MenuRow {
                     icon: Icons.pin;
-                    text: root.menu-pinned ? "고정 해제" : "고정";
+                    text: root.menu-pinned ? @tr("Unpin") : @tr("Pin");
                     clicked => {
                         if (root.menu-pinned) {
                             root.unpin(root.menu-id);
@@ -1656,7 +1656,7 @@ export component AppWindow inherits Window {
                 }
                 if root.menu-can-edit && !root.menu-pin-step && !root.menu-picker && !root.menu-reacts: MenuRow {
                     icon: Icons.edit;
-                    text: "수정";
+                    text: @tr("Edit");
                     clicked => {
                         root.edit-message(root.menu-id);
                         root.menu-id = "";
@@ -1664,16 +1664,16 @@ export component AppWindow inherits Window {
                 }
                 if root.menu-info != "" && !root.menu-pin-step && !root.menu-picker && !root.menu-reacts: MenuRow {
                     icon: Icons.info;
-                    text: "정보";
+                    text: @tr("Info");
                     clicked => {
-                        root.info-title = "메시지 정보";
+                        root.info-title = @tr("Message info");
                         root.info-text = root.menu-info;
                         root.menu-id = "";
                     }
                 }
                 if root.menu-can-delete && !root.menu-pin-step && !root.menu-picker && !root.menu-reacts: MenuRow {
                     icon: Icons.trash;
-                    text: "모두에게서 삭제";
+                    text: @tr("Delete for everyone");
                     danger: true;
                     clicked => {
                         root.delete-message(root.menu-id);
@@ -1712,14 +1712,14 @@ export component AppWindow inherits Window {
                 padding: 6px;
                 spacing: 2px;
                 MenuRow {
-                    text: "메시지로 이동";
+                    text: @tr("Go to message");
                     clicked => {
                         root.pin-menu-open = false;
                         root.show-message(root.pins[idx].id);
                     }
                 }
                 MenuRow {
-                    text: "고정 해제";
+                    text: @tr("Unpin");
                     clicked => {
                         root.pin-menu-open = false;
                         root.unpin(root.pins[idx].id);
@@ -1756,7 +1756,7 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     alignment: end;
                     PlainButton {
-                        text: "닫기";
+                        text: @tr("Close");
                         clicked => { root.info-text = ""; }
                     }
                 }
@@ -1774,7 +1774,7 @@ export component AppWindow inherits Window {
         border-width: 3px;
         border-color: Theme.accent;
         Text {
-            text: "여기에 놓아서 첨부합니다";
+            text: @tr("Drop here to attach");
             color: Theme.accent;
             font-size: 18px;
             font-weight: 700;

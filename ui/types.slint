@@ -19,7 +19,7 @@ export struct ThreadItem {
     is-group: bool,
     photo: image,
     has-photo: bool,
-    // snippet is the unsent draft: shown after an italic "작성 중:"
+    // snippet is the unsent draft: shown after an italic "Draft:"
     draft: bool,
     // notifications are off: a crossed-out bell, a grey unread count
     muted: bool,
@@ -66,7 +66,7 @@ export struct ReactionItem {
     count: int,
     // our own reaction: the chip is highlighted
     mine: bool,
-    // names of who reacted, joined by ", " ("나" for us)
+    // names of who reacted, joined by ", " ("You" for us)
     who: string,
 }
 
@@ -142,14 +142,14 @@ export struct MsgItem {
     sticker: bool,
     receipt-info: string,
     pending: bool,
-    // the send failed: "다시 보내기" / "삭제" below the bubble
+    // the send failed: "Retry" / "Delete" below the bubble
     failed: bool,
     // collapsed with the next row: no time / status footer
     hide-time: bool,
     // same run as the row above / below: flatter corners on that side, tighter spacing
     collapse-above: bool,
     collapse-below: bool,
-    // the text is cut short: "더 읽기" under it
+    // the text is cut short: "Read more" under it
     more: bool,
     // the "someone is typing" bubble at the end of the list
     typing: bool,

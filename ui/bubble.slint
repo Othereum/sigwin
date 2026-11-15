@@ -465,7 +465,7 @@ export component Bubble inherits VerticalLayout {
     // the quote in a reply: the quoted message's sent timestamp
     callback quote-clicked(string);
     callback reply(string);
-    // "오늘", "어제", "11월 7일 (토)": the day separator's text
+    // "Today", "Yesterday", "Sat, Nov 7": the day separator's text
     pure callback day-label(int) -> string;
     callback show-info(string);
     // click on a reaction chip: "emoji  names"
@@ -534,7 +534,7 @@ export component Bubble inherits VerticalLayout {
             Rectangle { y: parent.height / 2; height: 1px; background: Theme.accent; opacity: 0.5; }
         }
         Text {
-            text: "안 읽은 메시지";
+            text: @tr("Unread messages");
             color: Theme.accent;
             font-size: 12px;
             font-weight: 700;
@@ -746,7 +746,7 @@ export component Bubble inherits VerticalLayout {
                                 font-size: 12px;
                             }
                             if !root.file-loading && (m.file-size != "" || m.file-danger): Text {
-                                text: m.file-danger ? (m.file-size != "" ? m.file-size + " · " : "") + "위험할 수 있음" : m.file-size;
+                                text: m.file-danger ? (m.file-size != "" ? m.file-size + " · " : "") + @tr("May be dangerous") : m.file-size;
                                 color: m.file-danger ? (m.outgoing ? #ffe2a8 : Theme.warning-text) : m.outgoing ? #ffffffc0 : Theme.subtle;
                                 font-size: 12px;
                             }
@@ -831,7 +831,7 @@ export component Bubble inherits VerticalLayout {
                 if m.more: HorizontalLayout {
                     alignment: start;
                     Text {
-                        text: "더 읽기";
+                        text: @tr("Read more");
                         font-size: 13px;
                         font-weight: 700;
                         color: m.outgoing ? white : Theme.link;
@@ -997,7 +997,7 @@ export component Bubble inherits VerticalLayout {
         alignment: end;
         spacing: 12px;
         Text {
-            text: "전송 실패";
+            text: @tr("Send failed");
             font-size: 12px;
             font-weight: 700;
             color: Theme.failed;
@@ -1007,7 +1007,7 @@ export component Bubble inherits VerticalLayout {
             }
         }
         Text {
-            text: "다시 보내기";
+            text: @tr("Retry");
             font-size: 12px;
             font-weight: 700;
             color: Theme.link;
@@ -1017,7 +1017,7 @@ export component Bubble inherits VerticalLayout {
             }
         }
         Text {
-            text: "삭제";
+            text: @tr("Delete");
             font-size: 12px;
             color: Theme.subtle;
             TouchArea {

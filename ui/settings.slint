@@ -176,7 +176,7 @@ export component SettingsPage inherits Rectangle {
                             alignment: center;
                             spacing: 2px;
                             Text {
-                                text: SettingsData.account-name != "" ? SettingsData.account-name : "내 계정";
+                                text: SettingsData.account-name != "" ? SettingsData.account-name : @tr("My account");
                                 color: Theme.text;
                                 font-size: 17px;
                                 font-weight: 700;
@@ -193,26 +193,26 @@ export component SettingsPage inherits Rectangle {
                     }
                     }
                     SettingSection {
-                        title: "알림";
+                        title: @tr("Notifications");
                         SettingRow {
-                            label: "새 메시지 알림";
-                            hint: "Sigwin 창을 보고 있을 때는 알리지 않습니다";
+                            label: @tr("New message notifications");
+                            hint: @tr("Not shown while you're looking at the Sigwin window");
                             Toggle {
                                 checked <=> SettingsData.notify;
                                 toggled => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
-                            label: "알림에 표시할 내용";
+                            label: @tr("Show in notifications");
                             Segmented {
                                 enabled: SettingsData.notify;
-                                options: ["이름과 내용", "이름만", "숨김"];
+                                options: [@tr("Name and message"), @tr("Name only"), @tr("Hidden")];
                                 current <=> SettingsData.preview;
                                 changed => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
-                            label: "알림 소리";
+                            label: @tr("Notification sound");
                             Toggle {
                                 enabled: SettingsData.notify;
                                 checked <=> SettingsData.sound;
@@ -220,19 +220,19 @@ export component SettingsPage inherits Rectangle {
                             }
                         }
                         SettingRow {
-                            label: "알림 배지";
-                            hint: "작업 표시줄과 알림 영역 아이콘에 표시합니다";
+                            label: @tr("Badge count");
+                            hint: @tr("Shows on the taskbar and notification area icons");
                             Segmented {
-                                options: ["읽지 않은 메시지", "읽지 않은 대화"];
+                                options: [@tr("Unread messages"), @tr("Unread chats")];
                                 current <=> SettingsData.badge-count;
                                 changed => { SettingsData.changed(); }
                             }
                         }
                         SettingGroup {
-                            title: "알림을 끈 대화";
-                            hint: "대화를 오른쪽 클릭해서 끌 수 있고, \"알림 설정…\"에서 대화별로 설정할 수 있습니다";
+                            title: @tr("Muted chats");
+                            hint: @tr("You can mute a chat by right-clicking it, and set each chat under \"Notification settings…\"");
                             SettingRow {
-                                label: "나를 멘션하면 알림";
+                                label: @tr("Notify when I'm mentioned");
                                 Toggle {
                                     enabled: SettingsData.notify;
                                     checked <=> SettingsData.muted-mentions;
@@ -240,7 +240,7 @@ export component SettingsPage inherits Rectangle {
                                 }
                             }
                             SettingRow {
-                                label: "내 메시지에 답장하면 알림";
+                                label: @tr("Notify on replies to my messages");
                                 Toggle {
                                     enabled: SettingsData.notify;
                                     checked <=> SettingsData.muted-replies;
@@ -248,7 +248,7 @@ export component SettingsPage inherits Rectangle {
                                 }
                             }
                             SettingRow {
-                                label: "배지에 포함";
+                                label: @tr("Include in badge count");
                                 Toggle {
                                     checked <=> SettingsData.badge-muted;
                                     toggled => { SettingsData.changed(); }
@@ -257,18 +257,18 @@ export component SettingsPage inherits Rectangle {
                         }
                     }
                     SettingSection {
-                        title: "시작";
+                        title: @tr("Startup");
                         SettingRow {
-                            label: "컴퓨터 로그인 시 열기";
-                            hint: "Windows에 로그인하면 Sigwin을 자동으로 실행합니다";
+                            label: @tr("Open at login");
+                            hint: @tr("Starts Sigwin when you sign in to Windows");
                             Toggle {
                                 checked <=> SettingsData.autostart;
                                 toggled => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
-                            label: "시스템 트레이로 최소화된 상태로 열기";
-                            hint: "자동 실행할 때 창을 띄우지 않고 트레이에 둡니다";
+                            label: @tr("Start minimized to the tray");
+                            hint: @tr("When started at login, stays in the tray without a window");
                             Toggle {
                                 enabled: SettingsData.autostart;
                                 checked <=> SettingsData.start-hidden;
@@ -277,18 +277,18 @@ export component SettingsPage inherits Rectangle {
                         }
                     }
                     SettingSection {
-                        title: "화면";
+                        title: @tr("Appearance");
                         SettingRow {
-                            label: "테마";
+                            label: @tr("Theme");
                             Segmented {
-                                options: ["시스템", "밝게", "어둡게"];
+                                options: [@tr("System"), @tr("Light"), @tr("Dark")];
                                 current <=> SettingsData.theme;
                                 changed => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
-                            label: "크기";
-                            hint: "Windows 배율에 곱해서 적용합니다";
+                            label: @tr("Zoom");
+                            hint: @tr("Applied on top of the Windows scale");
                             Segmented {
                                 options: ["90%", "100%", "110%", "125%", "150%"];
                                 current <=> SettingsData.zoom;
@@ -297,10 +297,10 @@ export component SettingsPage inherits Rectangle {
                         }
                     }
                     SettingSection {
-                        title: "입력";
+                        title: @tr("Typing");
                         SettingRow {
-                            label: "메시지 보내기";
-                            hint: SettingsData.enter-sends ? "Shift+Enter로 줄을 바꿉니다" : "Enter로 줄을 바꿉니다";
+                            label: @tr("Send message");
+                            hint: SettingsData.enter-sends ? @tr("Shift+Enter starts a new line") : @tr("Enter starts a new line");
                             Segmented {
                                 options: ["Enter", "Ctrl+Enter"];
                                 current: SettingsData.enter-sends ? 0 : 1;
@@ -311,10 +311,10 @@ export component SettingsPage inherits Rectangle {
                             }
                         }
                         SettingRow {
-                            label: "사진 전송 품질";
-                            hint: ["사진을 줄여서 보냅니다. 위치 같은 정보는 지워집니다.", "큰 해상도로 보냅니다. 위치 같은 정보는 지워집니다."][SettingsData.photo-quality];
+                            label: @tr("Sent photo quality");
+                            hint: [@tr("Sends photos downsized. Details like location are removed."), @tr("Sends photos at a higher resolution. Details like location are removed.")][SettingsData.photo-quality];
                             Segmented {
-                                options: ["표준", "높음"];
+                                options: [@tr("Standard"), @tr("High")];
                                 current: SettingsData.photo-quality;
                                 changed(i) => {
                                     SettingsData.photo-quality = i;
@@ -323,8 +323,8 @@ export component SettingsPage inherits Rectangle {
                             }
                         }
                         SettingRow {
-                            label: "링크 미리보기 만들기";
-                            hint: "보내는 메시지에 링크의 제목과 이미지를 붙입니다. 이를 위해 그 사이트에 접속하므로 사이트에 내 IP 주소가 보입니다.";
+                            label: @tr("Generate link previews");
+                            hint: @tr("Adds the title and image of a link to messages you send. Sigwin visits the site to get them, so the site sees your IP address.");
                             Toggle {
                                 checked <=> SettingsData.link-previews;
                                 toggled => { SettingsData.changed(); }
@@ -332,85 +332,85 @@ export component SettingsPage inherits Rectangle {
                         }
                     }
                     SettingSection {
-                        title: "계정";
+                        title: @tr("Account");
                         SettingRow {
-                            label: "읽음 확인 · 입력 중 표시";
+                            label: @tr("Read receipts · Typing indicators");
                             hint: SettingsData.account-phone;
                         }
                         SettingRow {
-                            label: "데이터 삭제";
-                            hint: "이 PC의 연결을 끊고 메시지와 파일을 모두 지웁니다";
+                            label: @tr("Delete data");
+                            hint: @tr("Unlinks this PC and deletes all messages and files");
                             DangerButton {
-                                text: "데이터 삭제";
+                                text: @tr("Delete data");
                                 clicked => { root.unlink(); }
                             }
                         }
                     }
                     SettingSection {
-                        title: "저장 공간";
+                        title: @tr("Storage");
                         SettingRow {
-                            label: "사용 중";
+                            label: @tr("In use");
                             hint: SettingsData.storage;
                         }
                         SettingRow {
-                            label: "썸네일 캐시 비우기";
-                            hint: "이미지 미리보기와 프로필 사진 캐시를 지웁니다. 필요할 때 다시 만듭니다.";
+                            label: @tr("Clear thumbnail cache");
+                            hint: @tr("Deletes cached image previews and profile photos. They are made again when needed.");
                             PlainButton {
-                                text: "비우기";
+                                text: @tr("Clear");
                                 clicked => { SettingsData.clear-thumbs(); }
                             }
                         }
                     }
                     SettingSection {
-                        title: "문제 해결";
+                        title: @tr("Troubleshooting");
                         SettingRow {
-                            label: "로그 폴더";
-                            hint: "문제를 알릴 때 이 폴더의 파일을 함께 보내 주세요. 메시지 내용은 기록하지 않습니다.";
+                            label: @tr("Log folder");
+                            hint: @tr("When reporting a problem, please include the files in this folder. Message contents are never logged.");
                             PlainButton {
-                                text: "열기";
+                                text: @tr("Open");
                                 clicked => { SettingsData.open-logs(); }
                             }
                         }
                     }
                     SettingSection {
-                        title: "업데이트";
+                        title: @tr("Updates");
                         SettingRow {
-                            label: "자동으로 업데이트 다운로드";
-                            hint: "새 버전을 백그라운드에서 내려받아 설치합니다. 다음에 시작할 때 적용됩니다.";
+                            label: @tr("Download updates automatically");
+                            hint: @tr("Downloads and installs new versions in the background. They apply the next time Sigwin starts.");
                             Toggle {
                                 checked <=> SettingsData.auto-update;
                                 toggled => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {
-                            label: "업데이트 확인";
-                            hint: SettingsData.version + (SettingsData.update-version != "" ? "  ·  새 버전이 준비되었습니다. 왼쪽 아래에서 다시 시작하세요."
-                                : SettingsData.update-available != "" ? "  ·  새 버전 " + SettingsData.update-available + "이(가) 있습니다. 왼쪽 아래에서 업데이트하세요."
+                            label: @tr("Check for updates");
+                            hint: SettingsData.version + (SettingsData.update-version != "" ? "  ·  " + @tr("A new version is ready. Restart from the bottom left.")
+                                : SettingsData.update-available != "" ? "  ·  " + @tr("Version {} is available. Update from the bottom left.", SettingsData.update-available)
                                 : SettingsData.update-status != "" ? "  ·  " + SettingsData.update-status : "");
                             PlainButton {
-                                text: SettingsData.update-checking ? "확인 중…" : "지금 확인";
+                                text: SettingsData.update-checking ? @tr("Checking…") : @tr("Check now");
                                 enabled: !SettingsData.update-checking && SettingsData.update-version == "" && SettingsData.update-available == "";
                                 clicked => { SettingsData.check-update(); }
                             }
                         }
                     }
                     SettingSection {
-                        title: "정보";
+                        title: @tr("About");
                         SettingRow {
                             label: SettingsData.version;
-                            hint: "Signal과 무관한 비공식 클라이언트입니다. \"Signal\"은 Signal Technology Foundation의 상표입니다.";
+                            hint: @tr("An unofficial client, not affiliated with Signal. \"Signal\" is a trademark of the Signal Technology Foundation.");
                         }
                         SettingRow {
-                            label: "새로운 점";
-                            hint: "버전마다 달라진 점을 GitHub에서 볼 수 있습니다.";
+                            label: @tr("What's new");
+                            hint: @tr("You can see what changed in each version on GitHub.");
                             PlainButton {
-                                text: "보기";
+                                text: @tr("View");
                                 clicked => { root.open-whatsnew(); }
                             }
                         }
                         SettingRow {
-                            label: "소스 코드";
-                            hint: "© 2026 Othereum. AGPL-3.0 라이선스로 공개된 자유 소프트웨어이며, 어떠한 보증도 하지 않습니다.";
+                            label: @tr("Source code");
+                            hint: @tr("© 2026 Othereum. Free software under the AGPL-3.0 license, with no warranty.");
                             HorizontalLayout {
                                 spacing: 6px;
                                 PlainButton {
@@ -418,16 +418,16 @@ export component SettingsPage inherits Rectangle {
                                     clicked => { Links.open("https://github.com/Othereum/sigwin"); }
                                 }
                                 PlainButton {
-                                    text: "라이선스";
+                                    text: @tr("License");
                                     clicked => { Links.open("https://www.gnu.org/licenses/agpl-3.0.html"); }
                                 }
                             }
                         }
                         SettingRow {
-                            label: "오픈소스 라이선스";
-                            hint: "Sigwin에 포함된 라이브러리의 저작권과 라이선스 고지";
+                            label: @tr("Open source licenses");
+                            hint: @tr("Copyright and license notices of the libraries in Sigwin");
                             PlainButton {
-                                text: "보기";
+                                text: @tr("View");
                                 clicked => { Links.open("sigwin-licenses:"); }
                             }
                         }

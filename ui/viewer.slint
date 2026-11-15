@@ -115,7 +115,7 @@ export component ImageViewer inherits Window {
     callback drag-window();
     // wheel notches (+ = up) and the cursor in physical px
     callback zoom(float, float, float);
-    title: "이미지 보기";
+    title: @tr("Image viewer");
     icon: @image-url("../assets/icon.png");
     default-font-family: "Malgun Gothic";
     // flipped to force a full repaint: the two colors look the same (see `viewer::repaint`)
@@ -285,12 +285,12 @@ export component ImageViewer inherits Window {
                 padding: 3px;
                 spacing: 2px;
                 ViewerButton {
-                    text: "저장";
+                    text: @tr("Save");
                     icon: Icons.download;
                     clicked => { root.save(); }
                 }
                 ViewerButton {
-                    text: "기본 앱으로 열기";
+                    text: @tr("Open in default app");
                     icon: Icons.open-outside;
                     clicked => { root.open-outside(); }
                 }
@@ -416,7 +416,7 @@ export component ImageViewer inherits Window {
     }
     // where the notice would be, which comes first
     if root.notice-text == "" && root.hint-on: Notice {
-        text: "이미지를 클릭하거나 Esc를 눌러 닫을 수 있습니다";
+        text: @tr("Click the image or press Esc to close");
         opacity: root.intro-on ? 1 : 0;
         visible: self.opacity > 0;
         animate opacity { duration: 250ms; }

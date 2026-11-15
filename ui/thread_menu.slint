@@ -9,9 +9,9 @@ export global ThreadMenuData {
     in-out property <string> key;
     in property <length> menu-x;
     in property <length> menu-y;
-    // "오후 3:00까지 알림 꺼짐" while off, else ""
+    // "Muted until 3:00 PM" while off, else ""
     in property <string> status;
-    // Sigwin's own choice: "휴대폰 설정 따르기" is offered, with the phone's state
+    // Sigwin's own choice: "Follow phone setting" is offered, with the phone's state
     in property <bool> overridden;
     in property <string> phone;
     // thread key and where: Rust fills the menu, then opens it
@@ -40,7 +40,7 @@ export global ThreadMenuData {
 // a row of the chat notification settings dialog: label + the default, choices on the right
 component PrefRow inherits HorizontalLayout {
     in property <string> label;
-    // what "기본값" means right now
+    // what "Default" means right now
     in property <string> hint;
     in property <[string]> options;
     in property <int> current;
@@ -51,7 +51,7 @@ component PrefRow inherits HorizontalLayout {
         horizontal-stretch: 1;
         spacing: 2px;
         Text { text: root.label; color: Theme.text; font-size: 13px; wrap: word-wrap; }
-        Text { text: "기본값: " + root.hint; color: Theme.subtle; font-size: 12px; wrap: word-wrap; }
+        Text { text: @tr("Default: {}", root.hint); color: Theme.subtle; font-size: 12px; wrap: word-wrap; }
     }
     Segmented {
         y: (parent.height - self.height) / 2;
@@ -93,7 +93,7 @@ export component ThreadMenu inherits Rectangle {
                 padding-right: 10px;
                 Text {
                     height: 28px;
-                    text: ThreadMenuData.status != "" ? ThreadMenuData.status : "알림 끄기";
+                    text: ThreadMenuData.status != "" ? ThreadMenuData.status : @tr("Mute notifications");
                     color: Theme.subtle;
                     font-size: 12px;
                     vertical-alignment: center;
@@ -101,18 +101,18 @@ export component ThreadMenu inherits Rectangle {
                 }
             }
             if ThreadMenuData.status != "": MenuRow {
-                text: "알림 켜기";
+                text: @tr("Unmute");
                 clicked => {
                     ThreadMenuData.set-mute(ThreadMenuData.key, 0);
                     ThreadMenuData.key = "";
                 }
             }
             for d in ThreadMenuData.status == "" ? [
-                { label: "1시간", secs: 3600 },
-                { label: "8시간", secs: 28800 },
-                { label: "1일", secs: 86400 },
-                { label: "1주", secs: 604800 },
-                { label: "항상", secs: -1 },
+                { label: @tr("1 hour"), secs: 3600 },
+                { label: @tr("8 hours"), secs: 28800 },
+                { label: @tr("1 day"), secs: 86400 },
+                { label: @tr("1 week"), secs: 604800 },
+                { label: @tr("Always"), secs: -1 },
             ] : []: MenuRow {
                 text: d.label;
                 clicked => {
@@ -138,13 +138,13 @@ export component ThreadMenu inherits Rectangle {
                     padding-top: 6px;
                     padding-bottom: 6px;
                     spacing: 1px;
-                    Text { text: "휴대폰 설정 따르기"; color: Theme.text; font-size: 13px; }
+                    Text { text: @tr("Follow phone setting"); color: Theme.text; font-size: 13px; }
                     Text { text: ThreadMenuData.phone; color: Theme.subtle; font-size: 12px; overflow: elide; }
                 }
             }
             Rectangle { height: 1px; background: Theme.border; }
             MenuRow {
-                text: "알림 설정…";
+                text: @tr("Notification settings…");
                 clicked => {
                     ThreadMenuData.open-prefs(ThreadMenuData.key);
                     ThreadMenuData.key = "";
@@ -161,7 +161,8 @@ export component ThreadPrefsDialog inherits Rectangle {
         clicked => { ThreadMenuData.prefs-key = ""; }
     }
     Rectangle {
-        width: min(460px, parent.width - 40px);
+        // wide enough for English's four preview choices beside their label
+        width: min(560px, parent.width - 40px);
         height: tprefs-col.preferred-height;
         border-radius: 12px;
         background: Theme.pane;
@@ -173,38 +174,38 @@ export component ThreadPrefsDialog inherits Rectangle {
             spacing: 14px;
             VerticalLayout {
                 spacing: 2px;
-                Text { text: "알림 설정"; font-weight: 700; font-size: 15px; color: Theme.text; }
+                Text { text: @tr("Notification settings"); font-weight: 700; font-size: 15px; color: Theme.text; }
                 Text { text: ThreadMenuData.prefs-name; color: Theme.subtle; font-size: 12px; overflow: elide; }
             }
             PrefRow {
-                label: "알림에 표시할 내용";
+                label: @tr("Show in notifications");
                 hint: ThreadMenuData.prefs-preview-default;
-                options: ["기본값", "이름과 내용", "이름만", "숨김"];
+                options: [@tr("Default"), @tr("Name and message"), @tr("Name only"), @tr("Hidden")];
                 current: ThreadMenuData.prefs-preview;
                 changed(v) => { ThreadMenuData.set-pref(ThreadMenuData.prefs-key, 0, v); }
             }
             PrefRow {
-                label: "알림 소리";
+                label: @tr("Notification sound");
                 hint: ThreadMenuData.prefs-sound-default;
-                options: ["기본값", "켬", "끔"];
+                options: [@tr("Default"), @tr("On"), @tr("Off")];
                 current: ThreadMenuData.prefs-sound;
                 changed(v) => { ThreadMenuData.set-pref(ThreadMenuData.prefs-key, 4, v); }
             }
             VerticalLayout {
                 spacing: 10px;
-                Text { text: "알림을 끈 동안"; color: Theme.text; font-size: 13px; font-weight: 700; }
+                Text { text: @tr("While muted"); color: Theme.text; font-size: 13px; font-weight: 700; }
                 HorizontalLayout {
                     padding-left: 16px;
                     VerticalLayout {
                         spacing: 14px;
                         for row[i] in [
-                            { label: "나를 멘션하면 알림", hint: ThreadMenuData.prefs-mentions-default, current: ThreadMenuData.prefs-mentions },
-                            { label: "내 메시지에 답장하면 알림", hint: ThreadMenuData.prefs-replies-default, current: ThreadMenuData.prefs-replies },
-                            { label: "배지에 포함", hint: ThreadMenuData.prefs-badge-default, current: ThreadMenuData.prefs-badge },
+                            { label: @tr("Notify when I'm mentioned"), hint: ThreadMenuData.prefs-mentions-default, current: ThreadMenuData.prefs-mentions },
+                            { label: @tr("Notify on replies to my messages"), hint: ThreadMenuData.prefs-replies-default, current: ThreadMenuData.prefs-replies },
+                            { label: @tr("Include in badge count"), hint: ThreadMenuData.prefs-badge-default, current: ThreadMenuData.prefs-badge },
                         ]: PrefRow {
                             label: row.label;
                             hint: row.hint;
-                            options: ["기본값", "켬", "끔"];
+                            options: [@tr("Default"), @tr("On"), @tr("Off")];
                             current: row.current;
                             changed(v) => { ThreadMenuData.set-pref(ThreadMenuData.prefs-key, i + 1, v); }
                         }
@@ -214,7 +215,7 @@ export component ThreadPrefsDialog inherits Rectangle {
             HorizontalLayout {
                 alignment: end;
                 PlainButton {
-                    text: "닫기";
+                    text: @tr("Close");
                     clicked => { ThreadMenuData.prefs-key = ""; }
                 }
             }

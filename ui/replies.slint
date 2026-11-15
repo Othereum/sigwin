@@ -34,13 +34,13 @@ export component RepliesDialog inherits Rectangle {
             padding-bottom: 14px;
             spacing: 10px;
             Text {
-                text: RepliesData.items.length > 0 ? "답장 " + RepliesData.items.length + "개" : "답장";
+                text: RepliesData.items.length > 0 ? @tr("{n} reply" | "{n} replies" % RepliesData.items.length) : @tr("Replies");
                 font-weight: 700;
                 font-size: 15px;
                 color: Theme.text;
             }
             if RepliesData.items.length == 0: Text {
-                text: "답장이 없습니다";
+                text: @tr("No replies");
                 color: Theme.subtle;
                 font-size: 13px;
             }
@@ -82,7 +82,7 @@ export component RepliesDialog inherits Rectangle {
             HorizontalLayout {
                 alignment: end;
                 PlainButton {
-                    text: "닫기";
+                    text: @tr("Close");
                     clicked => { RepliesData.open = false; }
                 }
             }

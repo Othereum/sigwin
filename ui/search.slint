@@ -8,7 +8,7 @@ import { Icon, Icons } from "icons.slint";
 
 export enum ResultKind { header, thread, contact, start, find }
 
-// what the contact list's search box is for (its "찾기" rows pick one)
+// what the contact list's search box is for (its "Find by" rows pick one)
 export enum FindKind { any, phone, username }
 
 export struct ResultItem {
@@ -44,7 +44,7 @@ export global SearchData {
         }
     }
 
-    // Esc: what's typed, then the "찾기" kind, then the contact list
+    // Esc: what's typed, then the "Find by" kind, then the contact list
     public function back() {
         if (query != "") {
             query = "";
@@ -57,7 +57,7 @@ export global SearchData {
         }
     }
 
-    // the ← button: out of a "찾기" kind, then out of the contact list
+    // the ← button: out of a "Find by" kind, then out of the contact list
     public function step-back() {
         if (find != FindKind.any) {
             find = FindKind.any;
