@@ -90,6 +90,9 @@ msgstr "Jetzt suchen"
 msgid "Checking…"
 msgstr "Suche …"
 
+msgid "Checks GitHub for a new version."
+msgstr "Sucht auf GitHub nach einer neuen Version."
+
 msgid "Clear"
 msgstr "Leeren"
 

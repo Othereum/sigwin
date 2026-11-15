@@ -415,9 +415,10 @@ export component SettingsPage inherits Rectangle {
                         }
                         SettingRow {
                             label: @tr("Check for updates");
-                            hint: SettingsData.version + (SettingsData.update-version != "" ? "  ·  " + @tr("A new version is ready. Restart from the bottom left.")
-                                : SettingsData.update-available != "" ? "  ·  " + @tr("Version {} is available. Update from the bottom left.", SettingsData.update-available)
-                                : SettingsData.update-status != "" ? "  ·  " + SettingsData.update-status : "");
+                            hint: SettingsData.update-version != "" ? @tr("A new version is ready. Restart from the bottom left.")
+                                : SettingsData.update-available != "" ? @tr("Version {} is available. Update from the bottom left.", SettingsData.update-available)
+                                : SettingsData.update-status != "" ? SettingsData.update-status
+                                : @tr("Checks GitHub for a new version.");
                             PlainButton {
                                 text: SettingsData.update-checking ? @tr("Checking…") : @tr("Check now");
                                 enabled: !SettingsData.update-checking && SettingsData.update-version == "" && SettingsData.update-available == "";
