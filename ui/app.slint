@@ -188,6 +188,9 @@ export component AppWindow inherits Window {
     // the last non-zero `top-day`: what the label says while it fades out
     property <int> shown-day;
     changed top-day => { if (self.top-day != 0) { self.shown-day = self.top-day; } }
+    // a day separator is where the date label would cover it; separators are farther apart than
+    // that area, so one row at most sets it
+    property <bool> sep-near;
     // the date label is up; it goes `date-idle` ticks after the last scroll
     property <bool> date-show;
     property <int> date-idle;
@@ -775,7 +778,7 @@ export component AppWindow inherits Window {
                     // watched too, once the user has scrolled this thread
                     property <bool> user-scrolled;
                     property <string> key: root.current-key;
-                    changed key => { self.user-scrolled = false; root.date-show = false; }
+                    changed key => { self.user-scrolled = false; root.date-show = false; root.sep-near = false; }
                     scrolled => {
                         self.user-scrolled = true;
                         root.check-older();
@@ -817,10 +820,17 @@ export component AppWindow inherits Window {
                         property <string> top-id: self.screen-top <= 0px && self.screen-top + self.height > 0px ? m.id : "";
                         // the day of the top row, unless its own separator pill is still in view
                         property <int> top-day: !(m.day-sep && self.screen-top + self.lead > 0px) ? m.day : 0;
+                        // a day separator under the date pill or just below it: the pill would cover
+                        // it with the previous day, so it steps aside (14px: where the separator's
+                        // pill starts in the row)
+                        property <bool> sep-near: m.day-sep && self.screen-top + 14px < date-pill.y + date-pill.height + 8px && self.screen-top + 14px + 24px > date-pill.y - 8px;
+                        changed sep-near => { root.sep-near = self.sep-near; }
                         changed top-id => { if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; root.top-day = self.top-day; } }
                         changed screen-top => {
                             if (self.is-divider) { root.divider-top = self.screen-top; }
                             if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; root.top-day = self.top-day; }
+                            // a row scrolled in (or reused) already near never changes `sep-near`
+                            if (self.sep-near) { root.sep-near = true; }
                         }
                         changed is-divider => { if (self.is-divider) { root.divider-top = self.screen-top; } }
                         // reading as the user goes: a row whose bottom edge is on screen, above
@@ -860,7 +870,7 @@ export component AppWindow inherits Window {
                     background: date-ta.has-hover ? Theme.hover : Theme.sidebar;
                     border-width: 1px;
                     border-color: Theme.border;
-                    opacity: root.date-show && root.top-day != 0 ? 1.0 : 0.0;
+                    opacity: root.date-show && root.top-day != 0 && !root.sep-near ? 1.0 : 0.0;
                     visible: self.opacity > 0;
                     animate opacity { duration: 150ms; }
                     // a click goes to the first message of that day
