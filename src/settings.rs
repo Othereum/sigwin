@@ -21,6 +21,8 @@ pub struct Settings {
     pub theme: u8,
     /// the UI language, one of `LANGUAGES` ("" = the system's); applies at the next start
     pub language: String,
+    /// clock times: 0 = Windows' time format, 1 = 12-hour, 2 = 24-hour
+    pub clock: u8,
     /// UI size in percent, on top of the monitor's scaling
     pub zoom: u32,
     /// Enter sends (Shift+Enter: new line); otherwise Ctrl+Enter sends and Enter is a new line
@@ -70,6 +72,7 @@ impl Default for Settings {
             badge_count: 0,
             theme: 0,
             language: String::new(),
+            clock: 0,
             zoom: 100,
             enter_sends: true,
             autostart: true,
@@ -97,6 +100,7 @@ impl Settings {
         let mut s: Self = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         s.preview = s.preview.min(2);
         s.theme = s.theme.min(2);
+        s.clock = s.clock.min(2);
         s.badge_count = s.badge_count.min(1);
         s.photo_quality = s.photo_quality.min(1);
         if !LANGUAGES.contains(&s.language.as_str()) {

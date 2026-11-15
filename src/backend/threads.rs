@@ -268,6 +268,22 @@ impl App {
         self.run_avatars();
     }
 
+    /// Says the thread list's times again ("Now" -> "1m", or another clock format) and sends the
+    /// list if any changed.
+    pub(super) async fn retime_threads(&mut self) {
+        let mut changed = false;
+        for t in self.threads.iter_mut().filter(|t| t.ts != 0) {
+            let s = view::time::time_short(t.ts);
+            if s != t.time {
+                t.time = s;
+                changed = true;
+            }
+        }
+        if changed {
+            self.emit_threads().await;
+        }
+    }
+
     /// The scale changed: photos and pictures on screen are asked for again, resampled to the new
     /// physical size (the renderer would scale the old ones nearest-neighbor). Disk caches are
     /// size-independent or keyed by size, so this costs no downloads.

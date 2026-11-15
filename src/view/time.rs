@@ -3,6 +3,8 @@
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use crate::i18n;
 
 pub fn now_ms() -> u64 {
@@ -32,13 +34,50 @@ pub fn local(ts: u64) -> DateTime<Local> {
     Local.timestamp_millis_opt(ts as i64).single().unwrap_or_else(Local::now)
 }
 
+/// 0 = not set yet (tests): the language's usual clock; 1 = 12-hour, 2 = 24-hour
+static CLOCK: AtomicU8 = AtomicU8::new(0);
+
+/// Applies the clock setting (0 = Windows' time format, 1 = 12-hour, 2 = 24-hour). Headless runs
+/// don't read Windows' format, so their shots look the same on every PC.
+pub fn set_clock(choice: u8, headless: bool) {
+    let h24 = match choice {
+        1 => false,
+        2 => true,
+        _ if headless => lang_24(),
+        _ => system_24().unwrap_or_else(lang_24),
+    };
+    CLOCK.store(if h24 { 2 } else { 1 }, Ordering::Relaxed);
+}
+
+fn lang_24() -> bool {
+    i18n::lang() == "de"
+}
+
+/// Windows' short time pattern ("h:mm tt", "tt h:mm", "HH:mm"): an `H` hour is 24-hour.
+fn system_24() -> Option<bool> {
+    #[cfg(windows)]
+    return crate::reg::get_str(r"Control Panel\International", "sShortTime").map(|p| p.contains('H'));
+    #[cfg(not(windows))]
+    None
+}
+
+fn use_24() -> bool {
+    match CLOCK.load(Ordering::Relaxed) {
+        1 => false,
+        2 => true,
+        _ => lang_24(),
+    }
+}
+
 /// A clock time: "3:12 PM", "오후 3:12", "15:12".
 pub fn ampm(dt: &DateTime<Local>) -> String {
     let (pm, h12) = dt.hour12();
     let m = dt.minute();
+    if use_24() {
+        return format!("{:02}:{m:02}", dt.hour());
+    }
     match i18n::lang() {
         "ko" => format!("{} {h12}:{m:02}", if pm { "오후" } else { "오전" }),
-        "de" => format!("{:02}:{m:02}", dt.hour()),
         _ => format!("{h12}:{m:02} {}", if pm { "PM" } else { "AM" }),
     }
 }

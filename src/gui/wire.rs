@@ -834,6 +834,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             badge_count: d.get_badge_count().clamp(0, 1) as u8,
             theme: d.get_theme().clamp(0, 2) as u8,
             language: settings::LANGUAGES.get(d.get_language().max(0) as usize).unwrap_or(&"").to_string(),
+            clock: d.get_clock().clamp(0, 2) as u8,
             zoom: settings::ZOOMS.get(d.get_zoom().max(0) as usize).copied().unwrap_or(100),
             enter_sends: d.get_enter_sends(),
             autostart: d.get_autostart(),
@@ -864,6 +865,12 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
         if old.theme != new.theme {
             apply_theme(&app, false);
+        }
+        if old.clock != new.clock {
+            view::time::set_clock(new.clock, false);
+            send_cmd(Command::ClockChanged);
+        }
+        if (old.theme, old.clock) != (new.theme, new.clock) {
             refresh_rows(&app);
         }
         if old.zoom != new.zoom {

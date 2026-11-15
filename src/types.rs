@@ -732,6 +732,8 @@ pub enum Command {
     ClearThumbs,
     /// the window's scale factor changed: every picture shown was sized for the old one
     ScaleChanged,
+    /// the clock format changed: the thread list's times are said again
+    ClockChanged,
     /// turn a thread's notifications off / on, or follow the phone again
     SetMute { key: String, set: MuteSet },
     /// change one of a thread's own notification settings

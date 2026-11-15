@@ -327,6 +327,15 @@ msgstr "Antwort an {}"
 msgid "Restart"
 msgstr "Neu starten"
 
+msgid "Time format"
+msgstr "Uhrzeitformat"
+
+msgid "12-hour"
+msgstr "12 Stunden"
+
+msgid "24-hour"
+msgstr "24 Stunden"
+
 msgid "Retry"
 msgstr "Erneut versuchen"
 

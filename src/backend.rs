@@ -639,19 +639,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit, o
                 memticks = memticks.wrapping_add(1);
             }
             _ = sweeptick.tick() => app.sweep(),
-            _ = agetick.tick() => {
-                let mut changed = false;
-                for t in app.threads.iter_mut().filter(|t| t.ts != 0) {
-                    let s = view::time::time_short(t.ts);
-                    if s != t.time {
-                        t.time = s;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    app.emit_threads().await;
-                }
-            }
+            _ = agetick.tick() => app.retime_threads().await,
         }
     }
     app.save_persist();
@@ -825,6 +813,7 @@ impl App {
                 self.emit_storage();
             }
             Command::ScaleChanged => self.rescale().await,
+            Command::ClockChanged => self.retime_threads().await,
             Command::SetMute { key, set } => self.set_mute(&key, set),
             Command::SetPref { key, pref } => self.set_pref(&key, pref),
         }

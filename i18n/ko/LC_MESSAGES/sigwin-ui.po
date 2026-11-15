@@ -327,6 +327,15 @@ msgstr "{}에게 답장"
 msgid "Restart"
 msgstr "다시 시작"
 
+msgid "Time format"
+msgstr "시간 형식"
+
+msgid "12-hour"
+msgstr "12시간"
+
+msgid "24-hour"
+msgstr "24시간"
+
 msgid "Retry"
 msgstr "다시 보내기"
 

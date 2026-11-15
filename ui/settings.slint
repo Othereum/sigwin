@@ -80,6 +80,8 @@ export global SettingsData {
     in-out property <int> theme;
     // index into settings::LANGUAGES, and the one this run started with
     in-out property <int> language;
+    /// 0 = Windows' time format, 1 = 12-hour, 2 = 24-hour
+    in-out property <int> clock;
     in property <int> language-at-start;
     callback restart-app();
     // index into the zoom steps (see settings::ZOOMS)
@@ -305,6 +307,14 @@ export component SettingsPage inherits Rectangle {
                                     current <=> SettingsData.language;
                                     changed => { SettingsData.changed(); }
                                 }
+                            }
+                        }
+                        SettingRow {
+                            label: @tr("Time format");
+                            Segmented {
+                                options: [@tr("System"), @tr("12-hour"), @tr("24-hour")];
+                                current <=> SettingsData.clock;
+                                changed => { SettingsData.changed(); }
                             }
                         }
                         SettingRow {

@@ -163,8 +163,10 @@ fn main() -> anyhow::Result<()> {
     // the uninstaller may delete the data folder, so it must not hold a file open in it
     let uninstall = std::env::args().any(|a| a == "--uninstall");
     init_logging(!uninstall)?;
-    let chosen = settings::Settings::load(&settings::path(&data_dir())).language;
-    let lang = i18n::init(std::env::var_os("SIGWIN_HEADLESS").is_some(), &chosen);
+    let prefs = settings::Settings::load(&settings::path(&data_dir()));
+    let offscreen = std::env::var_os("SIGWIN_HEADLESS").is_some();
+    let lang = i18n::init(offscreen, &prefs.language);
+    view::time::set_clock(prefs.clock, offscreen);
     if uninstall {
         install::uninstall(&data_dir());
         return Ok(());
