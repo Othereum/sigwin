@@ -65,40 +65,15 @@ impl App {
     }
 
     pub(super) fn start_receiving(&mut self) {
-        let Some(m) = self.manager.clone() else { return };
+        let Some(mut m) = self.manager.clone() else { return };
         if let Some(t) = self.recv_task.take() {
             t.abort();
         }
-        let (tx, reload) = (self.tx.clone(), self.reload_mgr.clone());
+        let tx = self.tx.clone();
         self.connection("동기화 중…", true);
         self.recv_task = Some(tokio::task::spawn_local(async move {
-            let mut m = m;
             let mut backoff = 2u64;
-            // a rename made while we were away: its sync message comes only after the connect
-            // has already written the old name back
-            let mut check_name = true;
             loop {
-                if check_name {
-                    match sync_device_name(&m).await {
-                        Ok(changed) => {
-                            check_name = false;
-                            if changed {
-                                reload.set(true);
-                                let _ = tx.send(Internal::DeviceRenamed);
-                            }
-                        }
-                        Err(e) => warn!("device name: {e:#}"),
-                    }
-                }
-                if reload.take() {
-                    match Manager::load_registered(m.store().clone()).await {
-                        Ok(n) => {
-                            m = n;
-                            let _ = tx.send(Internal::Manager(m.clone()));
-                        }
-                        Err(e) => warn!("reload manager: {e}"),
-                    }
-                }
                 match Box::pin(m.receive_messages()).await {
                     Ok(stream) => {
                         info!("receiving");
@@ -130,11 +105,10 @@ impl App {
         if id != Some(u32::from(m.device_id())) {
             return;
         }
-        let (tx, reload) = (self.tx.clone(), self.reload_mgr.clone());
+        let tx = self.tx.clone();
         tokio::task::spawn_local(async move {
             match sync_device_name(&m).await {
                 Ok(true) => {
-                    reload.set(true);
                     let _ = tx.send(Internal::DeviceRenamed);
                 }
                 Ok(false) => {}
@@ -541,15 +515,13 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<(u64, Outgoing)>, me: Uui
     }
 }
 
-/// Stores this device's name as the server has it; true if it changed.
-/// presage writes the stored name back to the server on every connect, so a rename made on the
-/// phone that the store misses is undone by the next reconnect.
+/// Stores this device's name as the server has it, for showing it; true if it changed.
 async fn sync_device_name(m: &Mgr) -> anyhow::Result<bool> {
     let id = m.device_id();
     let Some(name) = m.devices().await?.into_iter().find(|d| d.id == id).and_then(|d| d.name) else {
         return Ok(false);
     };
-    // the store, not `m`: an earlier rename may still wait there for the reconnect
+    // the store, not `m`: the manager keeps the name it was loaded with
     let mut store = m.store().clone();
     let mut data = store.load_registration_data().await?.context("no registration data")?;
     if data.device_name.as_deref() == Some(name.as_str()) {

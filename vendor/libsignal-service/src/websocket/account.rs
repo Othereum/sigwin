@@ -175,12 +175,33 @@ impl SignalWebSocket<websocket::Identified> {
         Ok(devices.devices)
     }
 
+    // sigwin patch: presage sends the account attributes on every connect, also as a linked
+    // device. The server applies their registration lock, discoverability and access key to the
+    // whole account, so each connect cleared the registration lock and undid "find me by number:
+    // nobody", and their name reverted a rename made on the phone. Sigwin is always linked, so
+    // this sends only the capabilities, as Signal-Desktop does linked. Drop once presage pins
+    // whisperfish/presage#503 (with whisperfish/libsignal-service-rs#503, which adds
+    // `set_device_capabilities` below as is).
     pub async fn set_account_attributes(
         &mut self,
         attributes: AccountAttributes,
     ) -> Result<(), ServiceError> {
-        self.http_request(Method::PUT, "/v1/accounts/attributes")?
-            .send_json(&attributes)
+        match &attributes.capabilities {
+            Some(capabilities) => self.set_device_capabilities(capabilities).await,
+            None => Ok(()),
+        }
+    }
+
+    /// Replace this device's capabilities, leaving the account's attributes alone.
+    ///
+    /// A linked device uses this instead of `set_account_attributes`, whose
+    /// registration lock, discoverability and access key apply to the whole account.
+    pub async fn set_device_capabilities(
+        &mut self,
+        capabilities: &DeviceCapabilities,
+    ) -> Result<(), ServiceError> {
+        self.http_request(Method::PUT, "/v1/devices/capabilities")?
+            .send_json(capabilities)
             .await?
             .service_error_for_status()
             .await?;

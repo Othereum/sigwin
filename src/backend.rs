@@ -221,8 +221,6 @@ enum Internal {
     /// the connection is back: the queued messages come next
     Reconnected,
     ReceiveStopped(String),
-    /// the receive loop reloaded the manager (its registration data changed): sends use it too
-    Manager(Mgr),
     /// the phone renamed this device and the stored name follows
     DeviceRenamed,
     Linked(Result<(Mgr, Option<History>), String>),
@@ -405,8 +403,6 @@ struct App {
     /// the device name of the last link, for linking again when the phone asks
     link_name: String,
     recv_task: Option<JoinHandle<()>>,
-    /// the stored registration data changed: the receive loop reloads the manager before it reconnects
-    reload_mgr: Rc<std::cell::Cell<bool>>,
     /// delivery receipts to send, batched per sender
     pending_receipts: HashMap<ServiceId, Vec<u64>>,
     /// incoming messages seen in the focused open thread: read receipts + read sync to our devices
@@ -574,7 +570,6 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         history_skip: None,
         link_name: String::new(),
         recv_task: None,
-        reload_mgr: Default::default(),
         pending_receipts: HashMap::new(),
         pending_reads: Vec::new(),
         avatars_done: HashSet::new(),
@@ -838,7 +833,7 @@ impl App {
     async fn emit_account(&mut self) {
         let Some(m) = self.manager.as_ref() else { return };
         let number = m.registration_data().phone_number.to_string();
-        // the store, not the manager: a rename waits there until the next reconnect
+        // the store, not the manager: the manager keeps the name it was loaded with
         let device = match self.store.load_registration_data().await {
             Ok(Some(reg)) => reg.device_name,
             _ => m.registration_data().device_name.clone(),
@@ -940,7 +935,6 @@ impl App {
             }
             Internal::Received(r) => self.received(r).await,
             Internal::Reconnected => self.connection("동기화 중…", false),
-            Internal::Manager(m) => self.manager = Some(m),
             Internal::DeviceRenamed => self.emit_account().await,
             Internal::ReceiveStopped(msg) => {
                 self.synced = false;
