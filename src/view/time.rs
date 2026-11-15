@@ -28,12 +28,12 @@ pub fn timer_label(secs: u32) -> String {
     }
 }
 
-pub(super) fn local(ts: u64) -> DateTime<Local> {
+pub fn local(ts: u64) -> DateTime<Local> {
     Local.timestamp_millis_opt(ts as i64).single().unwrap_or_else(Local::now)
 }
 
 /// A clock time: "3:12 PM", "오후 3:12".
-pub(super) fn ampm(dt: &DateTime<Local>) -> String {
+pub fn ampm(dt: &DateTime<Local>) -> String {
     let (pm, h12) = dt.hour12();
     let m = dt.minute();
     match i18n::lang() {

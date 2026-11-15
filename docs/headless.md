@@ -4,7 +4,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 
 ## Demo modes (synthetic data, no backend)
 `SIGWIN_DEMO=1`, plus:
-- `SIGWIN_DEMO_REAL=1` (a believable chat list and conversation instead of test rows, for README screenshots)
+- `SIGWIN_DEMO_REAL=1` (a believable chat list and conversation instead of test rows, for README screenshots; Korean people and chat with `SIGWIN_LANG=ko`, English otherwise)
 - `SIGWIN_DEMO_STICKERS=1|add`
 - `SIGWIN_DEMO_UNREAD=<n>` (the thread opens with its last n rows unread: the line above the first, the list scrolled to it, the count on the jump button)
 - `SIGWIN_DEMO_INFO=1`
