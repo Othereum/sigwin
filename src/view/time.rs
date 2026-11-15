@@ -32,19 +32,27 @@ pub fn local(ts: u64) -> DateTime<Local> {
     Local.timestamp_millis_opt(ts as i64).single().unwrap_or_else(Local::now)
 }
 
-/// A clock time: "3:12 PM", "오후 3:12".
+/// A clock time: "3:12 PM", "오후 3:12", "15:12".
 pub fn ampm(dt: &DateTime<Local>) -> String {
     let (pm, h12) = dt.hour12();
     let m = dt.minute();
     match i18n::lang() {
         "ko" => format!("{} {h12}:{m:02}", if pm { "오후" } else { "오전" }),
+        "de" => format!("{:02}:{m:02}", dt.hour()),
         _ => format!("{h12}:{m:02} {}", if pm { "PM" } else { "AM" }),
     }
 }
 
-/// A day: "Nov 7" / "11월 7일", with the year and the weekday when asked.
+/// A day: "Nov 7" / "11월 7일" / "7. Nov.", with the year and the weekday when asked.
 fn date(d: NaiveDate, year: bool, weekday: bool) -> String {
     match i18n::lang() {
+        "de" => {
+            const WD: [&str; 7] = ["Mo.", "Di.", "Mi.", "Do.", "Fr.", "Sa.", "So."];
+            const MON: [&str; 12] = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sept.", "Okt.", "Nov.", "Dez."];
+            let wd = if weekday { format!("{}, ", WD[d.weekday().num_days_from_monday() as usize]) } else { String::new() };
+            let y = if year { format!(" {}", d.year()) } else { String::new() };
+            format!("{wd}{}. {}{y}", d.day(), MON[d.month0() as usize])
+        }
         "ko" => {
             const WD: [&str; 7] = ["월", "화", "수", "목", "금", "토", "일"];
             let y = if year { format!("{}년 ", d.year()) } else { String::new() };
@@ -75,10 +83,12 @@ pub fn time_short(ts: u64) -> String {
         tr!("Yesterday").into()
     } else if dt.year() == now.year() {
         date(dt.date_naive(), false, false)
-    } else if i18n::lang() == "ko" {
-        format!("{}. {}. {}.", dt.year(), dt.month(), dt.day())
     } else {
-        dt.format("%-m/%-d/%y").to_string()
+        match i18n::lang() {
+            "ko" => format!("{}. {}. {}.", dt.year(), dt.month(), dt.day()),
+            "de" => dt.format("%-d.%-m.%y").to_string(),
+            _ => dt.format("%-m/%-d/%y").to_string(),
+        }
     }
 }
 

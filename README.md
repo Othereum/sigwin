@@ -33,7 +33,7 @@
 - **Always on**: keeps running in the tray when the window is closed, opens at login, updates itself
 - **Getting started**: links to your phone as a **linked device** with a QR code, brings over your recent chat history from the phone
 - **Security**: local data is encrypted, with the key protected by Windows DPAPI
-- **Languages**: English, Korean
+- **Languages**: English, German, Korean
 
 ### Not supported
 Voice and video calls, stories, removing sticker packs, payments, view-once media, changing the disappearing message timer, notification profiles
@@ -69,7 +69,7 @@ target\fast\sigwin.exe
 | `SIGWIN_DATA` | data folder (default `%LOCALAPPDATA%\Sigwin\data`) |
 | `RUST_LOG` | log level (e.g. `info,sigwin=debug`) |
 | `SIGWIN_DEMO=1` | try the UI with fake data, no account |
-| `SIGWIN_LANG` | UI language for this run (`en`, `ko`), over the setting |
+| `SIGWIN_LANG` | UI language for this run (`en`, `de`, `ko`), over the setting |
 
 More demo and headless options: [`docs/headless.md`](docs/headless.md).
 

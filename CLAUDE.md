@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**Sigwin**: lightweight unofficial Signal desktop client. Never use "Signal" in its name (Signal brand guidelines). Rust + presage (Signal protocol) + Slint (software renderer). Windows-first. User-facing text is English with translations (Korean; German to come); older strings are still Korean literals until converted.
+**Sigwin**: lightweight unofficial Signal desktop client. Never use "Signal" in its name (Signal brand guidelines). Rust + presage (Signal protocol) + Slint (software renderer). Windows-first. User-facing text is English with translations (Korean, German).
 
 ## Goal
 - **Light is the promise.** A feature is judged by whether it fits the memory target below.
@@ -67,7 +67,7 @@ Every hunk under `vendor/` has to be re-applied by hand on each Slint / presage 
 
 ## Conventions
 - **This file holds rules, not a description of the code.** A rule stays true when the implementation changes. Don't put current values (sizes, budgets, caps) or how a feature works today here: they go stale unnoticed. They belong in the code and its comments. The same goes for `docs/architecture.md`: it explains structure and design, not implementation details. `.claude/rules/` holds what a dependency does that bites and the invariants our code must keep, each in a few lines; how our code handles it goes in that code's comments, which a rule may point to by name.
-- **UI strings are written in English** with `tr!` (Rust) or `@tr` (Slint), literals only, and translated in `i18n/<lang>/LC_MESSAGES/sigwin-ui.po`. When a Korean literal is touched, convert it. `cargo test --profile fast i18n` lists what each catalog is missing or no longer uses, in .po form. Code comments are short and English.
+- **UI strings are written in English** with `tr!` (Rust) or `@tr` (Slint), literals only, and translated in `i18n/<lang>/LC_MESSAGES/sigwin-ui.po`. `cargo test --profile fast i18n` lists what each catalog is missing or no longer uses, in .po form. Code comments are short and English.
 - In the Korean catalog, hints that tell the user how to do something end in "~할 수 있습니다" ("대화별로 설정할 수 있습니다"): a plain "~합니다" reads like what the app does, not an option they have. Hints about what the app itself does ("…를 표시합니다") stay as they are.
 - **Commit subjects are short**: one line, imperative, about 50 characters or less (hard cap 72), no trailing period. Put details in the body (blank line, then wrapped lines) only when the why isn't obvious. Don't cram the whole change list into the subject.
 - **Keep the READMEs current**: `README.md` (English) and `README.ko.md` (Korean) say the same. When a user-visible feature lands or changes, update both Features / Not supported sections in the same commit, if that changes what they say.

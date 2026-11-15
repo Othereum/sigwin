@@ -90,7 +90,7 @@ impl Default for Settings {
 pub const ZOOMS: [u32; 5] = [90, 100, 110, 125, 150];
 
 /// The language choices, in the order of the settings page's buttons (`ui/settings.slint`).
-pub const LANGUAGES: [&str; 3] = ["", "en", "ko"];
+pub const LANGUAGES: [&str; 4] = ["", "en", "de", "ko"];
 
 impl Settings {
     pub fn load(path: &Path) -> Self {

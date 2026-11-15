@@ -170,7 +170,7 @@ mod tests {
     }
 
     /// Catalogs every used string must be translated in; others may lag (English shows).
-    const COMPLETE: &[&str] = &["ko"];
+    const COMPLETE: &[&str] = &["de", "ko"];
 
     type Key = (String, String, Option<String>);
 

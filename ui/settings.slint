@@ -301,7 +301,7 @@ export component SettingsPage inherits Rectangle {
                                 }
                                 Segmented {
                                     // names in their own language, so anyone finds theirs
-                                    options: [@tr("System"), "English", "한국어"];
+                                    options: [@tr("System"), "English", "Deutsch", "한국어"];
                                     current <=> SettingsData.language;
                                     changed => { SettingsData.changed(); }
                                 }
