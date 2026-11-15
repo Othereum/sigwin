@@ -43,9 +43,15 @@ Written per release from `git log <last tag>..HEAD` and the actual changes, not 
 the way: several commits often make one change for users, and a bug made and fixed between two
 releases was never seen by anyone. GitHub releases are the record; the repository has no changelog
 file.
-- In the app's languages, from the user's side: what they can now do or what no longer goes wrong.
-  No function names or internals.
-- `## 새 기능` and `## 수정`, leaving out an empty one. Only what differs from the last release.
+- From the user's side: what they can now do or what no longer goes wrong. No function names or
+  internals.
+- English first, as `## New` and `## Fixes`, leaving out an empty one. Only what differs from the
+  last release.
+- Then every other UI language, each folded in `<details><summary>Language name</summary>` (a blank
+  line after the summary, so the Markdown inside renders), in alphabetical order of language name.
+  The releases page lists every version and the app can't point at one language, so folding keeps
+  the page as short as one language however many are added. Each language carries the same
+  content, with setting and screen names as its catalog spells them.
 - A MINOR release (no going back to older versions) says so first.
 - No account data, and nothing about a conversation it was found in.
 - Notes of past releases stay as they are.
