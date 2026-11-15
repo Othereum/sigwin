@@ -137,7 +137,7 @@ pub fn downloading_label(ptr: &AttachmentPointer, got: u64, percent: u8) -> crat
 /// The file line of a message: a name, how many more, and their size together. `bytes` is `None`
 /// if a size isn't known: a total of some of them would be wrong.
 pub fn file_line(first: &str, more: usize, bytes: Option<u64>) -> String {
-    let names = if more > 0 { format!("{first} 외 {more}개") } else { first.to_string() };
+    let names = if more > 0 { tr!("{} and {} more", first, more) } else { first.to_string() };
     match bytes {
         Some(b) => format!("{names} · {}", size_text(b)),
         None => names,
@@ -157,7 +157,7 @@ pub fn is_dangerous_file(name: &str) -> bool {
     name.rsplit_once('.').is_some_and(|(_, e)| KINDS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
-/// What a message's file card shows, taken from its [`file_line`]: the name (with "외 N개"), its
+/// What a message's file card shows, taken from its [`file_line`]: the name (with "and N more"), its
 /// size, and the extension of the first file for the badge.
 pub fn file_card(line: &str) -> (String, String, String) {
     let sized = |s: &str| {
@@ -168,10 +168,14 @@ pub fn file_card(line: &str) -> (String, String, String) {
         Some((n, s)) if sized(s) => (n, s),
         _ => (line, ""),
     };
-    let first = match names.rsplit_once(" 외 ") {
-        Some((f, n)) if n.strip_suffix('개').is_some_and(|d| d.parse::<u32>().is_ok()) => f,
-        _ => names,
-    };
+    // undo the "and N more" of `file_line`, in this run's language
+    let first = (|| {
+        let (pre, rest) = tr!("{} and {} more").split_once("{}")?;
+        let (mid, post) = rest.split_once("{}")?;
+        let (f, n) = names.strip_prefix(pre)?.strip_suffix(post)?.rsplit_once(mid)?;
+        n.parse::<u32>().is_ok().then_some(f)
+    })()
+    .unwrap_or(names);
     let ext = std::path::Path::new(first)
         .extension()
         .map(|e| e.to_string_lossy().to_uppercase().chars().take(4).collect())
@@ -201,13 +205,13 @@ pub(super) fn attachment_label(ptr: &AttachmentPointer) -> String {
         return name.to_string();
     }
     if ct.starts_with("image/") {
-        "사진".into()
+        tr!("Photo").into()
     } else if ct.starts_with("video/") {
-        "동영상".into()
+        tr!("Video").into()
     } else if ct.starts_with("audio/") {
-        if ptr.flags.unwrap_or(0) & 1 == 1 { "음성 메시지".into() } else { "오디오".into() }
+        if ptr.flags.unwrap_or(0) & 1 == 1 { tr!("Voice message").into() } else { tr!("Audio").into() }
     } else {
-        "파일".into()
+        tr!("File").into()
     }
 }
 
@@ -355,10 +359,10 @@ mod tests {
     fn file_card_takes_its_line_apart() {
         let card = |l: &str| file_card(l);
         assert_eq!(card("보고서.pdf · 2.4MB"), ("보고서.pdf".into(), "2.4MB".into(), "PDF".into()));
-        assert_eq!(card("a.zip 외 2개 · 13MB"), ("a.zip 외 2개".into(), "13MB".into(), "ZIP".into()));
+        assert_eq!(card("a.zip and 2 more · 13MB"), ("a.zip and 2 more".into(), "13MB".into(), "ZIP".into()));
         // no size known; a " · " in the name isn't a size
         assert_eq!(card("a · b.txt"), ("a · b.txt".into(), String::new(), "TXT".into()));
-        assert_eq!(card("파일"), ("파일".into(), String::new(), String::new()));
+        assert_eq!(card("File"),(tr!("File").into(), String::new(), String::new()));
     }
 
     #[test]
@@ -431,10 +435,10 @@ mod tests {
         let (a, b) = (file("a.pdf", Some(2 * 1024 * 1024)), file("b.pdf", Some(1024 * 1024)));
         assert_eq!(files_label(&[]), "");
         assert_eq!(files_label(&[&a]), "a.pdf · 2.0MB");
-        assert_eq!(files_label(&[&a, &b]), "a.pdf 외 1개 · 3.0MB");
+        assert_eq!(files_label(&[&a, &b]), "a.pdf and 1 more · 3.0MB");
         // one size missing: no total
         let unknown = file("c.pdf", None);
-        assert_eq!(files_label(&[&a, &unknown]), "a.pdf 외 1개");
+        assert_eq!(files_label(&[&a, &unknown]), "a.pdf and 1 more");
         assert_eq!(files_label(&[&file("d.pdf", Some(0))]), "d.pdf");
     }
 

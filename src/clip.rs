@@ -69,7 +69,7 @@ mod win {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
-            bail!("클립보드를 열 수 없습니다")
+            bail!(tr!("Couldn't open the clipboard"))
         }
     }
 
@@ -149,13 +149,13 @@ mod win {
             std::fs::write(&path, png.bytes())?;
             return Ok(path);
         }
-        let dib = Locked::get(CF_DIBV5).or_else(|| Locked::get(CF_DIB)).context("클립보드에 이미지가 없습니다")?;
+        let dib = Locked::get(CF_DIBV5).or_else(|| Locked::get(CF_DIB)).context(tr!("No image on the clipboard"))?;
         write_dib_png(dib.bytes(), &path)?;
         Ok(path)
     }
 
     fn u32_at(b: &[u8], o: usize) -> anyhow::Result<u32> {
-        Ok(u32::from_le_bytes(b.get(o..o + 4).context("잘린 이미지")?.try_into()?))
+        Ok(u32::from_le_bytes(b.get(o..o + 4).context(tr!("Truncated image"))?.try_into()?))
     }
 
     /// Streams a packed DIB (BITMAPINFOHEADER or V4/V5, 24 or 32 bpp) into a PNG file.
@@ -163,11 +163,11 @@ mod win {
         let hsize = u32_at(b, 0)? as usize;
         let w = u32_at(b, 4)? as i32;
         let h = u32_at(b, 8)? as i32;
-        let bpp = u16::from_le_bytes(b.get(14..16).context("잘린 이미지")?.try_into()?);
+        let bpp = u16::from_le_bytes(b.get(14..16).context(tr!("Truncated image"))?.try_into()?);
         let compression = u32_at(b, 16)?;
         let clr_used = u32_at(b, 32)? as usize;
         if hsize < 40 || w <= 0 || h == 0 || !matches!(bpp, 24 | 32) || !matches!(compression, 0 | 3) {
-            bail!("지원하지 않는 이미지 형식입니다 ({bpp}bpp)");
+            bail!(tr!("Unsupported image format ({}bpp)", bpp));
         }
         let (width, height, top_down) = (w as usize, h.unsigned_abs() as usize, h < 0);
         // BI_BITFIELDS: masks follow a plain 40-byte header, or are part of a V4/V5 header
@@ -178,7 +178,7 @@ mod win {
         };
         let offset = hsize + if compression == 3 && hsize == 40 { 12 } else { 0 } + clr_used * 4;
         let stride = (width * bpp as usize).div_ceil(32) * 4;
-        let pixels = b.get(offset..offset + stride * height).context("잘린 이미지")?;
+        let pixels = b.get(offset..offset + stride * height).context(tr!("Truncated image"))?;
         let [rm, gm, bm, am] = masks.unwrap_or([0x00ff_0000, 0x0000_ff00, 0x0000_00ff, 0]);
         let chan = |px: u32, m: u32| -> u8 { if m == 0 { 0 } else { ((px & m) >> m.trailing_zeros()) as u8 } };
         // BI_RGB 32bpp leaves alpha undefined (usually 0): only trust it if some pixel uses it

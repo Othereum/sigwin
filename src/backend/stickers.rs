@@ -207,7 +207,7 @@ impl App {
         let Ok(Some(pack)) = self.store.sticker_pack(&id).await else { return };
         let Some(sticker) = pack.manifest.stickers.into_iter().find(|s| s.id == sticker_id) else { return };
         let Some(bytes) = sticker.bytes else {
-            self.notice("스티커 데이터가 없습니다");
+            self.notice(tr!("No sticker data"));
             return;
         };
         let content_type = sticker.content_type.filter(|c| !c.is_empty()).unwrap_or_else(|| "image/webp".into());
@@ -249,7 +249,7 @@ impl App {
     pub(super) fn install_pack(&self, id: Vec<u8>, key: Vec<u8>) {
         let Some(mut m) = self.manager.clone() else { return };
         let tx = self.tx.clone();
-        self.progress("스티커 팩 내려받는 중…");
+        self.progress(tr!("Downloading sticker pack…"));
         tokio::task::spawn_local(async move {
             let res = Box::pin(m.install_sticker_pack(&id, &key)).await;
             let _ = tx.send(Internal::PackInstalled(res.map(|_| hex::encode(&id)).map_err(|e| e.to_string())));

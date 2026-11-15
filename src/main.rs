@@ -115,9 +115,7 @@ fn claim_instance() -> Option<instance::Instance> {
             tracing::error!("already running for {}: dev build not started", data_dir().display());
             // scratch-dir runs are automation: no modal box to block on
             if std::env::var_os("SIGWIN_DATA").is_none() {
-                install::error("Sigwin이 이미 실행 중이라 개발 빌드를 시작하지 않았습니다.
-
-실행 중인 Sigwin(설치본 또는 다른 빌드)을 종료한 뒤 다시 실행하세요.");
+                install::error(tr!("Sigwin is already running, so the dev build didn't start.\n\nQuit the running Sigwin (installed or another build) and start this one again."));
             }
         } else {
             tracing::info!("already running for {}: brought it to the front", data_dir().display());

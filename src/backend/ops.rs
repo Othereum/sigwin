@@ -38,23 +38,23 @@ impl App {
             return;
         }
         let Some((row, target, _, true, orig)) = self.target(id) else {
-            self.notice("이 메시지는 수정할 수 없습니다");
+            self.notice(tr!("This message can't be edited"));
             return;
         };
         if view::time::now_ms().saturating_sub(row) >= view::EDIT_WINDOW_MS {
-            self.notice("보낸 지 24시간이 지난 메시지는 수정할 수 없습니다");
+            self.notice(tr!("Messages sent more than 24 hours ago can't be edited"));
             return;
         }
         let (mut body, body_ranges) = crate::mention::encode(&text, mentions);
         if body.len() > view::text::MAX_LONG_TEXT_BYTES {
-            self.notice("메시지가 너무 깁니다 (최대 64KB)");
+            self.notice(tr!("Message too long (64KB max)"));
             return;
         }
         let Some(mut m) = self.manager.clone() else { return };
         let long = match long_body(&mut m, &mut body, &self.paths.attachments).await {
             Ok(l) => l,
             Err(e) => {
-                self.notice(format!("수정 실패: {e:#}"));
+                self.notice(tr!("Edit failed: {}", format!("{e:#}")));
                 return;
             }
         };
@@ -74,7 +74,7 @@ impl App {
     pub(super) async fn delete(&mut self, id: &str) {
         let Some((row, target, _, true, _)) = self.target(id) else { return };
         if view::time::now_ms().saturating_sub(row) >= view::EDIT_WINDOW_MS {
-            self.notice("보낸 지 24시간이 지난 메시지는 모두에게서 삭제할 수 없습니다");
+            self.notice(tr!("Messages sent more than 24 hours ago can't be deleted for everyone"));
             return;
         }
         let dm = DataMessage { delete: Some(Delete { target_sent_timestamp: Some(target) }), ..Default::default() };
@@ -179,9 +179,9 @@ impl App {
             for u in view::text::mentioned(&dm) {
                 self.name(u).await;
             }
-            let sender = if author == self.me { "나".to_string() } else { self.name(author).await };
+            let sender = if author == self.me { tr!("You").to_string() } else { self.name(author).await };
             let names = &self.names;
-            let text = view::text::one_line(&dm, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()));
+            let text = view::text::one_line(&dm, &|u| names.get(u).cloned().unwrap_or_else(|| tr!("Unknown").into()));
             out.push(PinDto { id: target.to_string(), sender, text });
         }
         out
@@ -218,9 +218,9 @@ impl App {
             for u in view::text::mentioned(&dm) {
                 self.name(u).await;
             }
-            let sender = if by == self.me { "나".to_string() } else { self.name(by).await };
+            let sender = if by == self.me { tr!("You").to_string() } else { self.name(by).await };
             let names = &self.names;
-            let text = view::text::one_line(&dm, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()));
+            let text = view::text::one_line(&dm, &|u| names.get(u).cloned().unwrap_or_else(|| tr!("Unknown").into()));
             out.push(ReplyDto { id: ts.to_string(), sender, text, time: view::time::time_short(ts) });
         }
         out.reverse();
@@ -281,23 +281,23 @@ impl App {
         // nothing to retry from: drop the optimistic change
         let op = self.ops.remove(i);
         let what = match op.op {
-            Op::React { .. } => "반응",
-            Op::Edit { .. } => "수정",
-            Op::Delete(_) => "삭제",
+            Op::React { .. } => tr!("Reaction"),
+            Op::Edit { .. } => tr!("Edit"),
+            Op::Delete(_) => tr!("Delete"),
             Op::Pin { target } => {
                 if let Err(e) = self.index.unpin(&op.thread_key, target, ts).await {
                     warn!("undo pin: {e:#}");
                 }
-                "고정"
+                tr!("Pin")
             }
             Op::Unpin { target, author, at, expires } => {
                 if let Err(e) = self.index.pin(&op.thread_key, target, author, at, expires).await {
                     warn!("undo unpin: {e:#}");
                 }
-                "고정 해제"
+                tr!("Unpin")
             }
         };
-        self.notice(format!("{what} 실패: {e}"));
+        self.notice(tr!("{} failed: {}", what, e));
         true
     }
 

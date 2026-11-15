@@ -14,7 +14,6 @@ use super::*;
 
 /// lodash `debounce(..., 1000)` in Signal: one update this long after the last request
 const DEBOUNCE: Duration = Duration::from_secs(1);
-const NEW_MESSAGE: &str = "새 메시지";
 
 /// Someone's reaction to one of our messages.
 #[derive(Clone, PartialEq, Debug)]
@@ -139,13 +138,13 @@ impl Notifier {
 /// (title, body) under the preview setting (`redactMessageNotificationContent`).
 fn content(q: &Queued, level: u8) -> (String, String) {
     if level >= 2 {
-        return ("Sigwin".into(), NEW_MESSAGE.into());
+        return ("Sigwin".into(), tr!("New message").into());
     }
     let body = if q.expiring || level == 1 {
-        NEW_MESSAGE.into()
+        tr!("New message").into()
     } else if let Some(r) = &q.reaction {
-        // Signal puts the sender title here; the plain name avoids "…의 철수 님 님이"
-        format!("{} 님이 \"{}\" 메시지에 {} 이모지로 공감했어요", r.from_name, q.message, r.emoji)
+        // Signal puts the sender title here; the plain name avoids the group in it twice
+        tr!("{0} reacted {1} to \"{2}\"", r.from_name, r.emoji, q.message)
     } else {
         q.message.clone()
     };
@@ -165,7 +164,7 @@ impl App {
         // a stranger's text and pictures don't show before the request is accepted (Signal
         // Desktop shows the same words)
         let request = self.is_request(key);
-        let message = if request { "메시지 요청".into() } else { self.snippet(c).await.unwrap_or_default() };
+        let message = if request { tr!("Message request").into() } else { self.snippet(c).await.unwrap_or_default() };
         let sender_title = self.sender_title(thread, c.metadata.sender.raw_uuid()).await;
         let picture = if request { None } else { self.toast_picture(thread, key, preview).await };
         self.notes.add(Queued { key: key.into(), msg: c.timestamp(), sender_title, message, expiring, reaction: None, picture, preview, sound: n.sound });
@@ -201,11 +200,11 @@ impl App {
         self.notes.add(Queued { key: key.into(), msg: target, sender_title, message, expiring, reaction, picture, preview, sound: n.sound });
     }
 
-    /// 1:1: the sender's name; groups: "{group}의 {sender} 님" (`icu:notificationSenderInGroup`).
+    /// 1:1: the sender's name; groups: "{sender} in {group}" (`icu:notificationSenderInGroup`).
     async fn sender_title(&mut self, thread: &Thread, sender: Uuid) -> String {
         let name = self.name(sender).await;
         match thread {
-            Thread::Group(_) => format!("{}의 {name} 님", self.thread_name(thread).await),
+            Thread::Group(_) => tr!("notification title" => "{0} in {1}", name, self.thread_name(thread).await),
             Thread::Contact(_) => name,
         }
     }
@@ -242,7 +241,7 @@ impl App {
     pub(super) async fn open_from_toast(&mut self, key: &str, msg: Option<u64>) {
         if self.current.as_ref().map(|c| c.key.as_str()) != Some(key) {
             if let Err(e) = self.open_thread(key).await {
-                self.notice(format!("대화를 열지 못했습니다: {e:#}"));
+                self.notice(tr!("Couldn't open the chat: {}", format!("{e:#}")));
                 return;
             }
         }
@@ -268,7 +267,7 @@ mod tests {
         Queued {
             key: "c:1".into(),
             msg: 5,
-            sender_title: "그룹의 철수 님".into(),
+            sender_title: "철수 in 그룹".into(),
             message: "안녕".into(),
             expiring,
             reaction,
@@ -280,12 +279,12 @@ mod tests {
 
     #[test]
     fn content_follows_preview_and_kind() {
-        assert_eq!(content(&q(None, false), 0), ("그룹의 철수 님".into(), "안녕".into()));
-        assert_eq!(content(&q(None, false), 1).1, "새 메시지");
-        assert_eq!(content(&q(None, false), 2), ("Sigwin".into(), "새 메시지".into()));
-        assert_eq!(content(&q(None, true), 0).1, "새 메시지");
+        assert_eq!(content(&q(None, false), 0), ("철수 in 그룹".into(), "안녕".into()));
+        assert_eq!(content(&q(None, false), 1).1, "New message");
+        assert_eq!(content(&q(None, false), 2), ("Sigwin".into(), "New message".into()));
+        assert_eq!(content(&q(None, true), 0).1, "New message");
         let r = ReactionRef { from: Uuid::nil(), from_name: "철수".into(), emoji: "👍".into() };
-        assert_eq!(content(&q(Some(r), false), 0).1, "철수 님이 \"안녕\" 메시지에 👍 이모지로 공감했어요");
+        assert_eq!(content(&q(Some(r), false), 0).1, "철수 reacted 👍 to \"안녕\"");
     }
 
     #[test]

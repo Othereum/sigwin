@@ -11,7 +11,7 @@ use std::cell::Cell;
 thread_local! {
     static HWND: Cell<isize> = const { Cell::new(0) };
     static COUNT: Cell<u32> = const { Cell::new(0) };
-    static NOUN: Cell<&'static str> = const { Cell::new("메시지") };
+    static CHATS: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The native window exists: remember it and show the current count.
@@ -20,10 +20,10 @@ pub fn set_hwnd(hwnd: isize) {
     refresh();
 }
 
-/// `noun` is what's being counted, for the descriptions.
-pub fn set_count(n: u32, noun: &'static str) {
-    let noun_changed = NOUN.replace(noun) != noun;
-    if COUNT.replace(n) != n || noun_changed {
+/// `chats`: the count is of chats, not messages (for the descriptions).
+pub fn set_count(n: u32, chats: bool) {
+    let chats_changed = CHATS.replace(chats) != chats;
+    if COUNT.replace(n) != n || chats_changed {
         refresh();
     }
 }
@@ -34,7 +34,8 @@ pub fn count() -> u32 {
 
 /// The count in words, for the tooltip and screen readers.
 pub fn description() -> String {
-    format!("읽지 않은 {} {}개", NOUN.get(), COUNT.get())
+    let n = COUNT.get();
+    if CHATS.get() { tr!("{n} unread chat" | "{n} unread chats" % n) } else { tr!("{n} unread message" | "{n} unread messages" % n) }
 }
 
 /// Re-applies both badges (count changed, taskbar button (re)created, DPI changed).

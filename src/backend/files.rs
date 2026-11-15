@@ -291,7 +291,7 @@ impl App {
                         Ok(true) => {}
                         Ok(false) => continue,
                         Err(e) => {
-                            let _ = tx.send(Internal::Notice(format!("다운로드 실패: {e:#}")));
+                            let _ = tx.send(Internal::Notice(tr!("Download failed: {}", format!("{e:#}"))));
                             continue;
                         }
                     }
@@ -303,7 +303,7 @@ impl App {
                 match sigwin_vault::decrypt_file(path, &dst) {
                     Ok(()) => saved.push(dst),
                     Err(e) => {
-                        let _ = tx.send(Internal::Notice(format!("저장 실패: {e}")));
+                        let _ = tx.send(Internal::Notice(tr!("Save failed: {}", e)));
                         saved.clear();
                         break;
                     }
@@ -315,7 +315,7 @@ impl App {
                 emit(Event::MediaLabel { key, label: Default::default() });
             }
             if let Some(last) = saved.pop() {
-                let text = format!("첨부 파일 {}개를 저장했습니다.", saved.len() + 1);
+                let text = tr!("Saved {n} attachment." | "Saved {n} attachments." % saved.len() + 1);
                 let _ = tx.send(Internal::Saved(text, last));
             }
         });
@@ -378,7 +378,7 @@ impl App {
             // going to a picture that isn't here asks for it: its blurhash shows meanwhile
             if !path.exists() {
                 if !online {
-                    let _ = tx.send(Internal::Notice("아직 받지 않은 이미지입니다.".into()));
+                    let _ = tx.send(Internal::Notice(tr!("This image hasn't been downloaded yet.").into()));
                     return;
                 }
                 let pending = crate::types::viewer_key(&file_key);
@@ -394,7 +394,7 @@ impl App {
                     Ok(false) => return,
                     Err(e) => {
                         warn!("download attachment: {e:#}");
-                        let _ = tx.send(Internal::Notice(format!("다운로드 실패: {e:#}")));
+                        let _ = tx.send(Internal::Notice(tr!("Download failed: {}", format!("{e:#}"))));
                         return;
                     }
                 }
@@ -493,8 +493,8 @@ impl App {
         crate::picker::spawn_save(owner, attachment_name(&ptr), move |dst| {
             let Some(dst) = dst else { return };
             let _ = tx.send(match sigwin_vault::decrypt_file(&path, &dst) {
-                Ok(()) => Internal::Saved("저장했습니다.".into(), dst),
-                Err(e) => Internal::Notice(format!("저장 실패: {e}")),
+                Ok(()) => Internal::Saved(tr!("Saved.").into(), dst),
+                Err(e) => Internal::Notice(tr!("Save failed: {}", e)),
             });
         });
     }
@@ -695,7 +695,7 @@ impl AttachmentDownloads {
             }
             Show::Toast => {
                 if let Some(percent) = label.progress {
-                    emit(Event::Progress(format!("첨부파일 다운로드 중… {percent}%")));
+                    emit(Event::Progress(tr!("Downloading attachment… {}%", percent)));
                 }
             }
             Show::Quiet => {}
@@ -710,8 +710,8 @@ impl AttachmentDownloads {
                 let saved = tokio::task::spawn_blocking(move || sigwin_vault::write(&dest, &data)).await;
                 Ok(match saved {
                     Ok(Ok(())) => Ok(()),
-                    Ok(Err(e)) => Err(anyhow::anyhow!("저장 실패: {e}")),
-                    Err(e) => Err(anyhow::anyhow!("저장 실패: {e}")),
+                    Ok(Err(e)) => Err(anyhow::anyhow!(tr!("Save failed: {}", e))),
+                    Err(e) => Err(anyhow::anyhow!(tr!("Save failed: {}", e))),
                 })
             }
             Ok(Err(e)) => Ok(Err(e)),
@@ -806,7 +806,7 @@ async fn open_outside(tx: &UnboundedSender<Internal>, path: PathBuf, open_dir: &
             open_with_default_app(&plain);
         }
         Ok(Err(e)) => {
-            let _ = tx.send(Internal::Notice(format!("첨부파일을 열 수 없습니다: {e}")));
+            let _ = tx.send(Internal::Notice(tr!("Couldn't open the attachment: {}", e)));
         }
         Err(_) => {}
     }

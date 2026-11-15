@@ -72,15 +72,15 @@ fn classify_data<'a>(dm: &'a DataMessage, outgoing: bool) -> Kind<'a> {
     }
     if dm.flags.unwrap_or(0) & EXPIRATION_TIMER_UPDATE != 0 {
         return Kind::System(match dm.expire_timer.unwrap_or(0) {
-            0 => "사라지는 메시지를 껐습니다".into(),
-            t => format!("사라지는 메시지: {}", timer_label(t)),
+            0 => tr!("Disappearing messages turned off").into(),
+            t => tr!("Disappearing messages: {}", timer_label(t)),
         });
     }
     if dm.group_call_update.is_some() {
-        return Kind::System("그룹 통화가 시작되었습니다".into());
+        return Kind::System(tr!("Group call started").into());
     }
     if dm.group_v2.as_ref().is_some_and(|g| g.group_change.is_some()) {
-        return Kind::System("그룹 정보가 변경되었습니다".into());
+        return Kind::System(tr!("Group info changed").into());
     }
     Kind::Skip
 }
@@ -105,7 +105,7 @@ pub fn classify(c: &Content, me: Uuid) -> Kind<'_> {
             Kind::Edit { target: *t, dm }
         }
         ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::CallEvent(_)), .. }) => {
-            Kind::System("📞 통화".into())
+            Kind::System(tr!("📞 Call").into())
         }
         ContentBody::NullMessage(_) => Kind::Deleted,
         ContentBody::ReceiptMessage(ReceiptMessage { r#type, timestamp }) if !from_me => {
@@ -345,7 +345,7 @@ pub fn build(
                     m.receipt_info = info;
                 }
                 if edited {
-                    m.time = format!("{} · 수정됨", m.time);
+                    m.time = format!("{} · {}", m.time, tr!("edited"));
                     m.edited = true;
                 }
             }
@@ -362,7 +362,7 @@ pub fn build(
                 let mine = my_deletes.contains(ts) || c.metadata.server_guid.is_none();
                 m.deleted = true;
                 m.outgoing = mine;
-                m.text = if mine { DELETED_MINE } else { DELETED_OTHER }.into();
+                m.text = if mine { deleted_mine() } else { deleted_other() }.into();
             }
             _ => continue,
         }
@@ -389,7 +389,7 @@ fn set_quote(m: &mut MsgDto, q: &Quote, ts: u64, me: Uuid, name_of: &dyn Fn(&Uui
         .as_deref()
         .filter(|t| !t.is_empty())
         .map(|t| with_mentions(t, &q.body_ranges, name_of))
-        .unwrap_or_else(|| "(첨부파일)".into());
+        .unwrap_or_else(|| tr!("(attachment)").into());
     m.quote_author = quote_author_name(q, me, name_of);
     m.quote_id = q.id.map(|i| i.to_string()).unwrap_or_default();
     // the quoted message's picture, as the sender's app cut it
@@ -400,11 +400,11 @@ fn set_quote(m: &mut MsgDto, q: &Quote, ts: u64, me: Uuid, name_of: &dyn Fn(&Uui
     }
 }
 
-/// Reactions as (emoji, count, who), in the order each emoji first came; we are "나".
+/// Reactions as (emoji, count, who), in the order each emoji first came; we are "You" (`tr!`).
 fn reaction_counts(r: &[(Uuid, String)], me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> Vec<(String, u32, String)> {
     let mut counts: Vec<(String, u32, String)> = Vec::new();
     for (who, e) in r {
-        let name = if *who == me { "나".to_string() } else { name_of(who) };
+        let name = if *who == me { tr!("You").to_string() } else { name_of(who) };
         match counts.iter_mut().find(|(x, ..)| x == e) {
             Some(c) => {
                 c.1 += 1;
@@ -424,7 +424,7 @@ pub fn set_my_reaction(m: &mut MsgDto, emoji: Option<&str>) {
             if m.reactions[i].1 == 0 {
                 m.reactions.remove(i);
             } else {
-                let rest: Vec<&str> = m.reactions[i].2.split(", ").filter(|n| *n != "나").collect();
+                let rest: Vec<&str> = m.reactions[i].2.split(", ").filter(|n| *n != tr!("You")).collect();
                 m.reactions[i].2 = rest.join(", ");
             }
         }
@@ -434,9 +434,9 @@ pub fn set_my_reaction(m: &mut MsgDto, emoji: Option<&str>) {
         match m.reactions.iter_mut().find(|(x, ..)| x == e) {
             Some(r) => {
                 r.1 += 1;
-                add_name(&mut r.2, "나");
+                add_name(&mut r.2, tr!("You"));
             }
-            None => m.reactions.push((e.to_string(), 1, "나".to_string())),
+            None => m.reactions.push((e.to_string(), 1, tr!("You").to_string())),
         }
     }
 }
@@ -456,14 +456,18 @@ pub fn set_edited_text(m: &mut MsgDto, text: &str) {
     (m.text, m.styles) = crate::format::parse(text);
     m.mentions.clear();
     m.edited = true;
-    if !m.time.ends_with("수정됨") {
-        m.time = format!("{} · 수정됨", m.time);
+    if !m.time.ends_with(tr!("edited")) {
+        m.time = format!("{} · {}", m.time, tr!("edited"));
     }
     m.big_emoji = m.attachment.is_empty() && m.quote.is_empty() && crate::emoji::only_emoji(&m.text, 5).is_some();
 }
 
-const DELETED_MINE: &str = "내가 삭제한 메시지입니다";
-const DELETED_OTHER: &str = "삭제된 메시지입니다";
+fn deleted_mine() -> &'static str {
+    tr!("You deleted this message")
+}
+fn deleted_other() -> &'static str {
+    tr!("This message was deleted")
+}
 
 /// Optimistic update while a delete for everyone is being sent.
 pub fn set_deleted(m: &mut MsgDto) {
@@ -475,7 +479,7 @@ pub fn set_deleted(m: &mut MsgDto) {
         day: m.day,
         outgoing: true,
         deleted: true,
-        text: DELETED_MINE.into(),
+        text: deleted_mine().into(),
         ..Default::default()
     };
 }
@@ -515,18 +519,18 @@ fn receipt_status(
 
     let mut info = Vec::new();
     if !read.is_empty() {
-        info.push(format!("읽음 ({})\n{}", read.len(), read.join(", ")));
+        info.push(tr!("Read ({})\n{}", read.len(), read.join(", ")));
     }
     if !delivered.is_empty() {
-        info.push(format!("전달됨 ({})\n{}", delivered.len(), delivered.join(", ")));
+        info.push(tr!("Delivered ({})\n{}", delivered.len(), delivered.join(", ")));
     }
     if !pending.is_empty() {
-        info.push(format!("아직 전달 안 됨 ({})\n{}", pending.len(), pending.join(", ")));
+        info.push(tr!("Not delivered yet ({})\n{}", pending.len(), pending.join(", ")));
     }
     if info.is_empty() {
-        info.push("서버로 전송됨. 아직 상대 기기에 전달되지 않았습니다.".into());
+        info.push(tr!("Sent to the server. Not delivered to their devices yet.").into());
     }
-    info.push("※ 읽음 확인을 끈 사람은 '읽음'으로 표시되지 않습니다.".into());
+    info.push(tr!("※ People who turned off read receipts don't show as 'Read'.").into());
     (status, info.join("\n\n"), readers.into_iter().map(|(n, u)| (u, n)).collect())
 }
 
@@ -556,7 +560,7 @@ mod tests {
         let window = [(row, original)];
         let b = build(&window, Uuid::from_u128(1), &[], &indexed, &LongTexts::default(), &|_: &Uuid| String::new());
         assert_eq!(b.items[0].text, "after");
-        assert_eq!(b.items[0].reactions, [("up".to_string(), 2, "나".to_string())]);
+        assert_eq!(b.items[0].reactions, [("up".to_string(), 2, "You".to_string())]);
         assert_eq!(b.items[0].my_reaction, "up");
         assert_eq!(b.items[0].replies, 2);
     }
@@ -696,7 +700,7 @@ mod tests {
 
         let b = run(vec![photo(1), pdf(2), photo(3), photo(4), pdf(5)]);
         let m = &b.items[0];
-        assert_eq!(m.attachment, "2.pdf 외 1개");
+        assert_eq!(m.attachment, "2.pdf and 1 more");
         assert_eq!((m.cells.len(), m.img_w, m.img_h), (3, 301, 201));
         assert_eq!(b.wanted_cells.len(), 3);
         assert!(b.wanted_thumbs.is_empty());
@@ -750,8 +754,8 @@ mod tests {
 
     #[test]
     fn my_reaction_is_replaced_and_taken_back() {
-        let mut m = MsgDto { reactions: vec![("👍".into(), 2, "가, 나".into())], my_reaction: "👍".into(), ..Default::default() };
-        let (up, heart) = (("👍".to_string(), 1, "가".to_string()), ("❤️".to_string(), 1, "나".to_string()));
+        let mut m = MsgDto { reactions: vec![("👍".into(), 2, "가, You".into())], my_reaction: "👍".into(), ..Default::default() };
+        let (up, heart) = (("👍".to_string(), 1, "가".to_string()), ("❤️".to_string(), 1, "You".to_string()));
         set_my_reaction(&mut m, Some("❤️"));
         assert_eq!(m.reactions, vec![up.clone(), heart.clone()]);
         // idempotent: applying the same pending op twice changes nothing

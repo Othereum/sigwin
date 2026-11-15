@@ -445,8 +445,8 @@ pub(crate) fn result_item(r: &ResultDto, avatars: &HashMap<String, Image>) -> Re
         ResultDto::Contact(t) => ResultItem { kind: ResultKind::Contact, text: SharedString::new(), ready: true, thread: thread_item(t, avatars) },
         ResultDto::Find(f) => {
             let (name, initial, key) = match f {
-                Find::Username => ("사용자 이름으로 찾기", "@", "username"),
-                _ => ("전화번호로 찾기", "+", "phone"),
+                Find::Username => (tr!("Find by username"), "@", "username"),
+                _ => (tr!("Find by phone number"), "+", "phone"),
             };
             ResultItem {
                 kind: ResultKind::Find,

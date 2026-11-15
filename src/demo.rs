@@ -29,7 +29,7 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
             if let Some(app) = weak.upgrade() {
                 app.set_total_unread(n.get() as i32);
             }
-            badge::set_count(n.get(), "메시지");
+            badge::set_count(n.get(), false);
         });
     }
     if std::env::var_os("SIGWIN_DEMO_INFO").is_some() {

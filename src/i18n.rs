@@ -41,6 +41,12 @@ fn catalog_for(locale: &str) -> Option<usize> {
         .or_else(|| CATALOGS.iter().position(|c| c.lang.eq_ignore_ascii_case(base(locale))))
 }
 
+/// The current language's code ("en" for the source), for what code formats per language
+/// (dates in `view::time`).
+pub fn lang() -> &'static str {
+    current().map_or("en", |c| c.lang)
+}
+
 fn current() -> Option<&'static Catalog> {
     CATALOGS.get(CURRENT.load(Ordering::Relaxed))
 }
@@ -164,8 +170,9 @@ mod tests {
 
     type Key = (String, String, Option<String>);
 
-    /// `(context, id, plural)` of every `tr!(…)` in src/ and `@tr(…)` in ui/.
-    fn used() -> std::collections::BTreeSet<Key> {
+    /// `(context, id, plural)` of every `tr!(…)` in src/ and `@tr(…)` in ui/, with where each is
+    /// used (`ui/app.slint:42`), so whoever translates can read the code around it.
+    fn used() -> std::collections::BTreeMap<Key, Vec<String>> {
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             for e in std::fs::read_dir(dir).unwrap() {
                 let p = e.unwrap().path();
@@ -198,7 +205,7 @@ mod tests {
         let mut files = Vec::new();
         walk(&root.join("src"), &mut files);
         walk(&root.join("ui"), &mut files);
-        let mut keys = std::collections::BTreeSet::new();
+        let mut keys = std::collections::BTreeMap::<Key, Vec<String>>::new();
         for f in files.iter().filter(|f| !f.ends_with("i18n.rs")) {
             let text = std::fs::read_to_string(f).unwrap();
             let marker = if f.extension().unwrap() == "rs" { "tr!(" } else { "@tr(" };
@@ -216,14 +223,17 @@ mod tests {
                     None => (String::new(), first, rest),
                 };
                 let plural = rest.trim_start().strip_prefix('|').map(|r| literal(r).unwrap_or_else(|| panic!("not a literal: {}", where_())).0);
-                keys.insert((ctx, id, plural));
+                let file = f.strip_prefix(root).unwrap_or(f).to_string_lossy().replace('\\', "/");
+                let line = text[..at].matches('\n').count() + 1;
+                keys.entry((ctx, id, plural)).or_default().push(format!("{file}:{line}"));
             }
         }
         keys
     }
 
-    fn po_entry(k: &Key) -> String {
-        let ctx = if k.0.is_empty() { String::new() } else { format!("msgctxt {:?}\n", k.0) };
+    fn po_entry(k: &Key, at: &[String]) -> String {
+        let refs = if at.is_empty() { String::new() } else { format!("#: {}\n", at.join(" ")) };
+        let ctx = if k.0.is_empty() { refs } else { format!("{refs}msgctxt {:?}\n", k.0) };
         match &k.2 {
             None => format!("{ctx}msgid {:?}\nmsgstr \"\"\n", k.1),
             Some(p) => format!("{ctx}msgid {:?}\nmsgid_plural {p:?}\nmsgstr[0] \"\"\n", k.1),
@@ -254,16 +264,16 @@ mod tests {
                 .filter(|e| !e.obsolete)
                 .map(|e| ((e.msgctxt.clone().unwrap_or_default(), e.msgid.clone(), e.msgid_plural.clone()), e.translated()))
                 .collect();
-            let stale: Vec<_> = entries.keys().filter(|k| !used.contains(*k)).collect();
+            let stale: Vec<_> = entries.keys().filter(|k| !used.contains_key(*k)).collect();
             if !stale.is_empty() {
                 problems += &format!("{code}: not used by the code, remove:\n");
-                stale.iter().for_each(|k| problems += &po_entry(k));
+                stale.iter().for_each(|k| problems += &po_entry(k, &[]));
             }
             if COMPLETE.contains(&code.as_str()) {
-                let missing: Vec<_> = used.iter().filter(|k| entries.get(*k) != Some(&true)).collect();
+                let missing: Vec<_> = used.iter().filter(|(k, _)| entries.get(*k) != Some(&true)).collect();
                 if !missing.is_empty() {
                     problems += &format!("{code}: missing or untranslated, add:\n");
-                    missing.iter().for_each(|k| problems += &po_entry(k));
+                    missing.iter().for_each(|(k, at)| problems += &po_entry(k, at));
                 }
             }
         }

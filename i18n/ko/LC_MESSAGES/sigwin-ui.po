@@ -480,3 +480,533 @@ msgstr "© 2026 Othereum. AGPL-3.0 라이선스로 공개된 자유 소프트웨
 msgid "{n} reply"
 msgid_plural "{n} replies"
 msgstr[0] "답장 {n}개"
+
+msgid "(attachment)"
+msgstr "(첨부파일)"
+
+msgid "(draft)"
+msgstr "(임시 저장)"
+
+msgid "(reply)"
+msgstr "(답장)"
+
+msgid "A message can be up to 64KB. This one is {}KB.\nPlease send it in parts."
+msgstr "한 메시지는 64KB까지 보낼 수 있습니다. 지금 {}KB입니다.\n나눠서 보내 주세요."
+
+msgid "A message to another chat couldn't be sent"
+msgstr "다른 대화로 보낸 메시지를 전송하지 못했습니다"
+
+msgid "Add the pack this sticker is from?"
+msgstr "이 스티커가 들어 있는 팩을 추가할까요?"
+
+msgid "Audio"
+msgstr "오디오"
+
+msgid "Block {}? You won't get their messages, and your phone is told too."
+msgstr "{}님을 차단할까요? 이 사람이 보내는 메시지를 받지 않고, 휴대폰에도 차단을 알립니다."
+
+msgid "Chats"
+msgstr "대화"
+
+msgid "Choose a folder to save to"
+msgstr "저장할 폴더 선택"
+
+msgid "Choose files to attach"
+msgstr "첨부할 파일 선택"
+
+msgid "Connection failed. Retrying in {}s"
+msgstr "연결 실패. {}초 후 재시도"
+
+msgid "Contacts"
+msgstr "연락처"
+
+msgid "Couldn't add the sticker pack: {}"
+msgstr "스티커 팩 추가 실패: {}"
+
+msgid "Couldn't check. Check your network and try again."
+msgstr "확인하지 못했습니다. 네트워크를 확인하고 다시 시도하세요."
+
+msgid "Couldn't import the chat history: {}"
+msgstr "대화 기록을 가져오지 못했습니다: {}"
+
+msgid "Couldn't install Sigwin.\n\n{}"
+msgstr "Sigwin을 설치하지 못했습니다.\n\n{}"
+
+msgid "Couldn't load the saved account: {}"
+msgstr "저장된 계정을 불러오지 못했습니다: {}"
+
+msgid "Couldn't open the attachment: {}"
+msgstr "첨부파일을 열 수 없습니다: {}"
+
+msgid "Couldn't open the chat: {}"
+msgstr "대화를 열지 못했습니다: {}"
+
+msgid "Couldn't open the clipboard"
+msgstr "클립보드를 열 수 없습니다"
+
+msgid "Couldn't read {}"
+msgstr "{} 읽기 실패"
+
+msgid "Couldn't search. You can try again in a moment"
+msgstr "찾지 못했습니다. 잠시 후 다시 시도할 수 있습니다"
+
+msgid "Couldn't send. Some people may have received it.\n{}"
+msgstr "보내지 못했습니다. 일부 사람에게는 전달되었을 수 있습니다.\n{}"
+
+msgid "Couldn't start the installed Sigwin.\n\n{}"
+msgstr "설치한 Sigwin을 실행하지 못했습니다.\n\n{}"
+
+msgid "Couldn't tell your phone. You can make the same choice on your phone"
+msgstr "휴대폰에 알리지 못했습니다. 휴대폰에서도 같은 선택을 할 수 있습니다"
+
+msgid "Couldn't unpack the chat history"
+msgstr "대화 기록을 풀지 못했습니다"
+
+msgid "Creating a QR code…"
+msgstr "QR 코드 생성 중…"
+
+msgid "Delete chat"
+msgstr "대화 삭제"
+
+msgid "Delete message"
+msgstr "메시지 삭제"
+
+msgid "Delete the chat with {}? Its messages and attachments are deleted from this PC, and your phone is told too."
+msgstr "{}님과의 대화를 삭제할까요? 이 PC의 메시지와 첨부파일이 지워지고, 휴대폰에도 삭제를 알립니다."
+
+msgid "Delete this message for everyone?"
+msgstr "모든 사람에게서 이 메시지를 삭제할까요?"
+
+msgid "Deleted message"
+msgstr "삭제된 메시지"
+
+msgid "Delivered ({})\n{}"
+msgstr "전달됨 ({})\n{}"
+
+msgid "Disappearing messages turned off"
+msgstr "사라지는 메시지를 껐습니다"
+
+msgid "Disappearing messages: {}"
+msgstr "사라지는 메시지: {}"
+
+msgid "Disconnected. Reconnecting…"
+msgstr "연결이 끊어졌습니다. 다시 연결 중…"
+
+msgid "Download failed: {}"
+msgstr "다운로드 실패: {}"
+
+msgid "Downloading attachment… {}%"
+msgstr "첨부파일 다운로드 중… {}%"
+
+msgid "Downloading sticker pack…"
+msgstr "스티커 팩 내려받는 중…"
+
+msgid "Edit failed: {}"
+msgstr "수정 실패: {}"
+
+msgid "Encrypting the attachment cache…"
+msgstr "첨부파일 캐시 암호화 중…"
+
+msgid "Error: {}"
+msgstr "오류: {}"
+
+msgid "Failed"
+msgstr "실패"
+
+msgid "File"
+msgstr "파일"
+
+msgid "Files of this kind can harm your computer. Save it only if you trust the sender. Save it?"
+msgstr "이런 종류의 파일은 컴퓨터에 해를 끼칠 수 있습니다. 보낸 사람을 믿을 수 있을 때만 저장하세요. 저장할까요?"
+
+msgid "Find by phone number"
+msgstr "전화번호로 찾기"
+
+msgid "Find by username"
+msgstr "사용자 이름으로 찾기"
+
+msgid "Group"
+msgstr "그룹"
+
+msgid "Group call started"
+msgstr "그룹 통화가 시작되었습니다"
+
+msgid "Group info changed"
+msgstr "그룹 정보가 변경되었습니다"
+
+msgid "Importing the chat history… {n} message"
+msgid_plural "Importing the chat history… {n} messages"
+msgstr[0] "대화 기록 가져오는 중… 메시지 {n}개"
+
+msgid "Install Sigwin {}?\n\nIt is installed and added to the Start menu."
+msgstr "Sigwin {}을(를) 설치할까요?\n\n설치하고 시작 메뉴에 등록합니다."
+
+msgid "Invalid sticker pack"
+msgstr "잘못된 스티커 팩입니다"
+
+msgid "Linked! Syncing chats…"
+msgstr "연결 완료! 대화를 동기화하는 중…"
+
+msgid "Linking failed: {}. Try again."
+msgstr "연결 실패: {}. 다시 시도하세요."
+
+msgid "Loading preview…"
+msgstr "미리보기를 불러오는 중…"
+
+msgid "Message DB {}  ·  Attachments {}  ·  Thumbnail cache {}"
+msgstr "메시지 DB {}  ·  첨부파일 {}  ·  썸네일 캐시 {}"
+
+msgid "Message not found"
+msgstr "메시지를 찾을 수 없습니다"
+
+msgid "Message request"
+msgstr "메시지 요청"
+
+msgid "Message too long"
+msgstr "메시지가 너무 깁니다"
+
+msgid "Message too long (64KB max)"
+msgstr "메시지가 너무 깁니다 (최대 64KB)"
+
+msgid "Messages sent more than 24 hours ago can't be deleted for everyone"
+msgstr "보낸 지 24시간이 지난 메시지는 모두에게서 삭제할 수 없습니다"
+
+msgid "Messages sent more than 24 hours ago can't be edited"
+msgstr "보낸 지 24시간이 지난 메시지는 수정할 수 없습니다"
+
+msgid "Muted until {}"
+msgstr "{}까지 알림 꺼짐"
+
+msgid "New message"
+msgstr "새 메시지"
+
+msgid "No Signal user can be found with this number"
+msgstr "이 번호로 찾을 수 있는 Signal 사용자가 없습니다"
+
+msgid "No image on the clipboard"
+msgstr "클립보드에 이미지가 없습니다"
+
+msgid "No sticker data"
+msgstr "스티커 데이터가 없습니다"
+
+msgid "Not a sticker link (a signal.art/addstickers link)"
+msgstr "스티커 링크를 인식하지 못했습니다 (signal.art/addstickers 링크)"
+
+msgid "Not delivered yet ({})\n{}"
+msgstr "아직 전달 안 됨 ({})\n{}"
+
+msgid "Note to Self"
+msgstr "나에게 쓰는 메모"
+
+msgid "Notifications off"
+msgstr "알림 꺼짐"
+
+msgid "Notifications off (app setting)"
+msgstr "알림 꺼짐 (앱 설정)"
+
+msgid "Notifications on"
+msgstr "알림 켜짐"
+
+msgid "Now"
+msgstr "방금"
+
+msgid "Only the installed Sigwin can update."
+msgstr "설치된 Sigwin에서만 업데이트할 수 있습니다."
+
+msgid "Opening storage…"
+msgstr "저장소 여는 중…"
+
+msgid "Paste failed: {}"
+msgstr "붙여넣기 실패: {}"
+
+msgid "Phone: {}"
+msgstr "휴대폰: {}"
+
+msgid "Photo"
+msgstr "사진"
+
+msgid "Photos or videos and files can't be sent together."
+msgstr "사진·동영상과 파일은 함께 보낼 수 없습니다."
+
+msgid "Possibly dangerous file"
+msgstr "위험할 수 있는 파일"
+
+msgid "Quit"
+msgstr "종료"
+
+msgid "Reaction"
+msgstr "반응"
+
+msgid "Read ({})\n{}"
+msgstr "읽음 ({})\n{}"
+
+msgid "Receiving the chat history… {}"
+msgstr "대화 기록 받는 중… {}"
+
+msgid "Remove the app and its data\nAlso deletes the chat history and account from this PC."
+msgstr "앱과 데이터 모두 삭제\n이 PC의 대화 기록과 계정 정보도 지웁니다."
+
+msgid "Remove the app only\nKeeps your chat history and account. You can pick up where you left off if you install it again."
+msgstr "앱만 제거\n대화 기록과 계정은 남겨 둡니다. 다시 설치하면 이어서 쓸 수 있습니다."
+
+msgid "Removing Sigwin"
+msgstr "Sigwin을 제거합니다"
+
+msgid "Removing Sigwin.\n\nDelete the chat history and account from this PC too?\n\nYes: delete everything\nNo: remove the app only and keep the data"
+msgstr "Sigwin을 제거합니다.\n\n대화 기록과 계정 정보도 이 PC에서 삭제할까요?\n\n예: 모두 삭제\n아니요: 앱만 제거하고 데이터는 남겨 둡니다."
+
+msgid "Save failed: {}"
+msgstr "저장 실패: {}"
+
+msgid "Saved {n} attachment."
+msgid_plural "Saved {n} attachments."
+msgstr[0] "첨부 파일 {n}개를 저장했습니다."
+
+msgid "Saved."
+msgstr "저장했습니다."
+
+msgid "Scan the QR code with your phone."
+msgstr "휴대폰으로 QR 코드를 스캔하세요."
+
+msgid "Searching…"
+msgstr "찾는 중…"
+
+msgid "Sending"
+msgstr "전송 중"
+
+msgid "Sending to the server."
+msgstr "서버로 보내는 중입니다."
+
+msgid "Sent to the server. Not delivered to their devices yet."
+msgstr "서버로 전송됨. 아직 상대 기기에 전달되지 않았습니다."
+
+msgid "Show in folder"
+msgstr "폴더에서 표시"
+
+msgid "Sigwin is already running, so the dev build didn't start.\n\nQuit the running Sigwin (installed or another build) and start this one again."
+msgstr "Sigwin이 이미 실행 중이라 개발 빌드를 시작하지 않았습니다.\n\n실행 중인 Sigwin(설치본 또는 다른 빌드)을 종료한 뒤 다시 실행하세요."
+
+msgid "Sigwin was removed.\n\nAlso unlink it on your phone, in the Signal app under Settings > Linked devices."
+msgstr "Sigwin을 제거했습니다.\n\n휴대폰 Signal 앱의 설정 > 연결된 기기에서도 Sigwin 연결을 해제하세요."
+
+msgid "Something went wrong while removing Sigwin.\n\n{}"
+msgstr "제거하는 중 문제가 생겼습니다.\n\n{}"
+
+msgid "Start a chat with this number"
+msgstr "번호로 대화 시작"
+
+msgid "Start a chat with this username"
+msgstr "사용자 이름으로 대화 시작"
+
+msgid "Sticker"
+msgstr "스티커"
+
+msgid "Sticker pack"
+msgstr "스티커 팩"
+
+msgid "Syncing…"
+msgstr "동기화 중…"
+
+msgid "The chat history is damaged"
+msgstr "대화 기록이 손상되었습니다"
+
+msgid "The chat history is malformed"
+msgstr "대화 기록의 형식이 잘못되었습니다"
+
+msgid "The chat history is too large"
+msgstr "대화 기록이 너무 큽니다"
+
+msgid "The file is too large. You can send up to 100MB."
+msgstr "파일이 너무 큽니다. 최대 100MB까지 보낼 수 있습니다."
+
+msgid "The official Signal app may not accept files of this kind."
+msgstr "이런 종류의 파일은 상대의 공식 앱에서 받지 못할 수 있습니다."
+
+msgid "The phone didn't send the chat history within an hour"
+msgstr "휴대폰이 한 시간 안에 대화 기록을 보내지 않았습니다"
+
+msgid "The phone sent an unknown response"
+msgstr "휴대폰이 알 수 없는 응답을 보냈습니다"
+
+msgid "The running Sigwin didn't quit, so it couldn't be removed.\nClose Sigwin and try again."
+msgstr "실행 중인 Sigwin이 종료되지 않아 제거하지 못했습니다.\nSigwin을 닫은 뒤 다시 시도하세요."
+
+msgid "The running Sigwin didn't quit. Close Sigwin and try again."
+msgstr "실행 중인 Sigwin이 종료되지 않았습니다. Sigwin을 닫은 뒤 다시 시도하세요."
+
+msgid "The server refused ({})"
+msgstr "서버가 거부했습니다 ({})"
+
+msgid "This image hasn't been downloaded yet."
+msgstr "아직 받지 않은 이미지입니다."
+
+msgid "This message can't be edited"
+msgstr "이 메시지는 수정할 수 없습니다"
+
+msgid "This message was deleted"
+msgstr "삭제된 메시지입니다"
+
+msgid "This username couldn't be found"
+msgstr "이 사용자 이름을 찾을 수 없습니다"
+
+msgid "Today"
+msgstr "오늘"
+
+msgid "Tomorrow {}"
+msgstr "내일 {}"
+
+msgid "Truncated image"
+msgstr "잘린 이미지"
+
+msgid "Unknown"
+msgstr "알 수 없음"
+
+msgid "Unknown ({})"
+msgstr "알 수 없음 ({})"
+
+msgid "Unknown number"
+msgstr "알 수 없는 번호"
+
+msgid "Unlink this PC and delete all of its data?"
+msgstr "이 PC의 연결을 해제하고 로컬 데이터를 모두 삭제할까요?"
+
+msgid "Unlinked."
+msgstr "연결이 해제되었습니다."
+
+msgid "Unsupported image format ({}bpp)"
+msgstr "지원하지 않는 이미지 형식입니다 ({}bpp)"
+
+msgid "Update Sigwin to {}?\n\nIt is updated and stays in the Start menu."
+msgstr "Sigwin {}을(를) 업데이트할까요?\n\n업데이트하고 시작 메뉴에 등록합니다."
+
+msgid "Video"
+msgstr "동영상"
+
+msgid "Voice message"
+msgstr "음성 메시지"
+
+msgid "Waiting for your phone to send the chat history…"
+msgstr "휴대폰에서 대화 기록을 보내기를 기다리는 중…"
+
+msgid "Yesterday"
+msgstr "어제"
+
+msgid "You can enter it like name.42"
+msgstr "name.42처럼 입력할 수 있습니다"
+
+msgid "You can search once connected"
+msgstr "연결된 뒤에 찾을 수 있습니다"
+
+msgid "You can search once the number is complete"
+msgstr "끝까지 입력하면 찾을 수 있습니다"
+
+msgid "You can send once you accept the message request"
+msgstr "메시지 요청을 수락한 뒤에 보낼 수 있습니다"
+
+msgid "You can send only one file at a time."
+msgstr "파일은 한 번에 하나만 보낼 수 있습니다."
+
+msgid "You can type up to 64KB in a message"
+msgstr "메시지는 64KB까지 입력할 수 있습니다"
+
+msgid "You deleted this message"
+msgstr "내가 삭제한 메시지입니다"
+
+msgid "You have the latest version."
+msgstr "최신 버전입니다."
+
+msgid "You pinned a message"
+msgstr "메시지를 고정했습니다"
+
+msgid "You: {}"
+msgstr "나: {}"
+
+msgid "Your phone asked to link again. Scan the new QR code."
+msgstr "휴대폰에서 다시 연결하도록 요청했습니다. 새 QR 코드를 스캔하세요."
+
+msgid "[Gift badge]"
+msgstr "[선물 배지]"
+
+msgid "[Payment]"
+msgstr "[결제]"
+
+msgid "[Poll] {}"
+msgstr "[투표] {}"
+
+msgid "[Shared contact]"
+msgstr "[연락처 공유]"
+
+msgid "[Sticker {}]"
+msgstr "[스티커 {}]"
+
+msgid "[View-once media — open it on your phone]"
+msgstr "[한 번 보기 미디어 — 휴대폰에서 확인하세요]"
+
+msgid "edited"
+msgstr "수정됨"
+
+msgid "{0} reacted {1} to \"{2}\""
+msgstr "{0} 님이 \"{2}\" 메시지에 {1} 이모지로 공감했어요"
+
+msgid "{n} day"
+msgid_plural "{n} days"
+msgstr[0] "{n}일"
+
+msgid "{n} hour"
+msgid_plural "{n} hours"
+msgstr[0] "{n}시간"
+
+msgid "{n} member"
+msgid_plural "{n} members"
+msgstr[0] "멤버 {n}명"
+
+msgid "{n} minute"
+msgid_plural "{n} minutes"
+msgstr[0] "{n}분"
+
+msgid "{n} second"
+msgid_plural "{n} seconds"
+msgstr[0] "{n}초"
+
+msgid "{n} unread chat"
+msgid_plural "{n} unread chats"
+msgstr[0] "읽지 않은 대화 {n}개"
+
+msgid "{n} unread message"
+msgid_plural "{n} unread messages"
+msgstr[0] "읽지 않은 메시지 {n}개"
+
+msgid "{n} week"
+msgid_plural "{n} weeks"
+msgstr[0] "{n}주"
+
+msgid "{} (phone setting)"
+msgstr "{} (휴대폰 설정)"
+
+msgid "{} and {} more"
+msgstr "{} 외 {}개"
+
+msgid "{} failed: {}"
+msgstr "{} 실패: {}"
+
+msgid "{} pinned a message"
+msgstr "{}님이 메시지를 고정했습니다"
+
+msgid "{} · {} — follows the Signal app on your phone"
+msgstr "{} · {} — 휴대폰 Signal 앱의 설정을 따릅니다"
+
+msgid "{} · {} — follows the Signal app on your phone (not received yet)"
+msgstr "{} · {} — 휴대폰 Signal 앱의 설정을 따릅니다 (아직 받지 못함)"
+
+msgid "{}m"
+msgstr "{}분"
+
+msgid "※ People who turned off read receipts don't show as 'Read'."
+msgstr "※ 읽음 확인을 끈 사람은 '읽음'으로 표시되지 않습니다."
+
+msgid "📞 Call"
+msgstr "📞 통화"
+
+msgctxt "notification title"
+msgid "{0} in {1}"
+msgstr "{1}의 {0} 님"

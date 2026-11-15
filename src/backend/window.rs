@@ -377,7 +377,7 @@ impl App {
             }
             after = last;
         }
-        self.notice("메시지를 찾을 수 없습니다");
+        self.notice(tr!("Message not found"));
         Ok(())
     }
 
@@ -422,7 +422,7 @@ impl App {
                 if loaded {
                     self.emit_messages(Scroll::Keep).await;
                 }
-                self.notice("메시지를 찾을 수 없습니다");
+                self.notice(tr!("Message not found"));
                 return Ok(());
             };
             searched = true;
@@ -543,7 +543,7 @@ impl App {
         let Some(open) = self.current.as_ref() else { return };
         let names = &self.names;
         let built = view::build(&open.window, self.me, &open.members, &indexed, &self.long, &|u| {
-            names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into())
+            names.get(u).cloned().unwrap_or_else(|| tr!("Unknown").into())
         });
         let key = open.key.clone();
         let paging = Paging { older: open.has_more, newer: open.end_seq.is_some() };
@@ -671,7 +671,7 @@ impl App {
             Thread::Group(k) => {
                 if let Ok(Some(g)) = self.store.group(*k).await {
                     members = g.members.iter().map(|m| Uuid::from(m.aci)).collect();
-                    parts.push(format!("멤버 {}명", g.members.len()));
+                    parts.push(tr!("{n} member" | "{n} members" % g.members.len()));
                 }
             }
             Thread::Contact(id) => {
@@ -682,7 +682,7 @@ impl App {
         }
         if let Ok(Some((t, _))) = self.store.expire_timer(thread).await {
             if t > 0 {
-                parts.push(format!("사라지는 메시지 {}", view::time::timer_label(t)));
+                parts.push(tr!("Disappearing messages: {}", view::time::timer_label(t)));
             }
         }
         let request = self.check_request(thread).await;

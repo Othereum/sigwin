@@ -159,11 +159,11 @@ pub enum MuteSet {
 /// "오후 3:00까지 알림 꺼짐", for the thread menu. Android sends `i64::MAX` for "always".
 pub fn mute_text(until: u64, now: u64) -> String {
     if until <= now {
-        "알림 켜짐".into()
+        tr!("Notifications on").into()
     } else if until >= i64::MAX as u64 || until - now > 100 * 365 * 86_400_000 {
-        "알림 꺼짐".into()
+        tr!("Notifications off").into()
     } else {
-        format!("{}까지 알림 꺼짐", crate::view::time::time_until(until))
+        tr!("Muted until {}", crate::view::time::time_until(until))
     }
 }
 
@@ -758,12 +758,12 @@ mod tests {
     #[test]
     fn mute_text_reads_on_off_and_always() {
         let now = 1_000_000;
-        assert_eq!(mute_text(0, now), "알림 켜짐");
-        assert_eq!(mute_text(now - 1, now), "알림 켜짐");
-        assert_eq!(mute_text(MUTE_ALWAYS, now), "알림 꺼짐");
+        assert_eq!(mute_text(0, now), "Notifications on");
+        assert_eq!(mute_text(now - 1, now), "Notifications on");
+        assert_eq!(mute_text(MUTE_ALWAYS, now), "Notifications off");
         // Android's "always"
-        assert_eq!(mute_text(i64::MAX as u64, now), "알림 꺼짐");
-        assert!(mute_text(now + 3_600_000, now).ends_with("까지 알림 꺼짐"));
+        assert_eq!(mute_text(i64::MAX as u64, now), "Notifications off");
+        assert!(mute_text(now + 3_600_000, now).starts_with("Muted until "));
         assert!(Mute { until: now + 1, overridden: false, phone: 0 }.active(now));
         assert!(!Mute::default().active(now));
     }

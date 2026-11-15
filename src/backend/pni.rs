@@ -26,7 +26,7 @@ impl App {
         let name = number
             .and_then(|e| phonenumber::parse(None, &e).ok())
             .map(|p| super::threads::show_number(&p))
-            .unwrap_or_else(|| "알 수 없는 번호".into());
+            .unwrap_or_else(|| tr!("Unknown number").into());
         self.names.insert(pni, name.clone());
         name
     }

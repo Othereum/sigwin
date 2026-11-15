@@ -188,13 +188,13 @@ pub(crate) fn show_total_unread(app: &AppWindow, ui: &Ui) {
     let all = ui.settings.badge_muted;
     let counts = |t: &&ThreadDto| !t.mute.active(now) || t.prefs.badge.unwrap_or(all);
     let counted = ui.thread_dtos.iter().filter(counts);
-    let (total, noun) = if ui.settings.badge_count == 1 {
-        (counted.filter(|t| t.unread > 0).count() as u32, "대화")
+    let (total, chats) = if ui.settings.badge_count == 1 {
+        (counted.filter(|t| t.unread > 0).count() as u32, true)
     } else {
-        (counted.map(|t| t.unread).sum(), "메시지")
+        (counted.map(|t| t.unread).sum(), false)
     };
     app.set_total_unread(total as i32);
-    badge::set_count(total, noun);
+    badge::set_count(total, chats);
 }
 
 pub(crate) fn qr_image(url: &str) -> Option<Image> {
@@ -335,11 +335,14 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::OpenStickerPanel(pack) => stickers::open(app, pack),
         Event::AskInstallPack(msg_id) => stickers::ask_install(app, msg_id),
         Event::Account { name, number, device, receipts, typing } => {
-            let state = |v: Option<bool>| if v == Some(false) { "꺼짐" } else { "켜짐" };
-            let pending = if receipts.is_none() || typing.is_none() { " (아직 받지 못함)" } else { "" };
-            let phone = format!("{} · {} — 휴대폰 Signal 앱의 설정을 따릅니다{pending}", state(receipts), state(typing));
+            let state = |v: Option<bool>| if v == Some(false) { tr!("Off") } else { tr!("On") };
+            let phone = if receipts.is_none() || typing.is_none() {
+                tr!("{} · {} — follows the Signal app on your phone (not received yet)", state(receipts), state(typing))
+            } else {
+                tr!("{} · {} — follows the Signal app on your phone", state(receipts), state(typing))
+            };
             // the placeholder when there is no photo: the profile name's first letter
-            let letter = if name.is_empty() { "나".to_string() } else { initial(&name) };
+            let letter = initial(if name.is_empty() { tr!("You") } else { &name });
             let d = app.global::<SettingsData>();
             d.set_account_initial(letter.into());
             d.set_account_tint(tint("me"));
@@ -350,7 +353,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         }
         Event::Storage { db, attachments, thumbs } => {
             app.global::<SettingsData>().set_storage(
-                format!("메시지 DB {}  ·  첨부파일 {}  ·  썸네일 캐시 {}", view::media::size_text(db), view::media::size_text(attachments), view::media::size_text(thumbs)).into(),
+                tr!("Message DB {}  ·  Attachments {}  ·  Thumbnail cache {}", view::media::size_text(db), view::media::size_text(attachments), view::media::size_text(thumbs)).into(),
             );
         }
         Event::StickerGrid { pack, items } => stickers::grid_arrived(app, pack, items),

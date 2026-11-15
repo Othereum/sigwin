@@ -136,11 +136,11 @@ mod win {
             Ok(Step::Cancel) => {}
             Ok(Step::Start) => {
                 if let Err(e) = std::process::Command::new(&lay.exe).current_dir(&lay.home).spawn() {
-                    message(&format!("설치한 Sigwin을 실행하지 못했습니다.\n\n{e}"), MB_OK | MB_ICONERROR);
+                    message(&tr!("Couldn't start the installed Sigwin.\n\n{}", e), MB_OK | MB_ICONERROR);
                 }
             }
             Err(e) => {
-                message(&format!("Sigwin을 설치하지 못했습니다.\n\n{e:#}"), MB_OK | MB_ICONERROR);
+                message(&tr!("Couldn't install Sigwin.\n\n{}", format!("{e:#}")), MB_OK | MB_ICONERROR);
             }
         }
         false
@@ -160,19 +160,17 @@ mod win {
             tracing::info!("install: {} already installed ({installed:?}), starting it", lay.exe.display());
             return Ok(Step::Start);
         }
-        let what = if installed.is_some() { "업데이트" } else { "설치" };
-        let answer = message(
-            &format!(
-                "Sigwin {VERSION}을(를) {what}할까요?\n\n\
-                 {what}하고 시작 메뉴에 등록합니다."
-            ),
-            MB_YESNO | MB_ICONQUESTION,
-        );
+        let question = if installed.is_some() {
+            tr!("Update Sigwin to {}?\n\nIt is updated and stays in the Start menu.", VERSION)
+        } else {
+            tr!("Install Sigwin {}?\n\nIt is installed and added to the Start menu.", VERSION)
+        };
+        let answer = message(&question, MB_YESNO | MB_ICONQUESTION);
         if answer != IDYES {
             return Ok(Step::Cancel);
         }
         if !crate::instance::quit_running(data_dir) {
-            bail!("실행 중인 Sigwin이 종료되지 않았습니다. Sigwin을 닫은 뒤 다시 시도하세요.");
+            bail!(tr!("The running Sigwin didn't quit. Close Sigwin and try again."));
         }
         place(lay, src)?;
         register(lay)?;
@@ -283,17 +281,17 @@ mod win {
         let Some(lay) = Layout::user() else { return };
         let Some(delete_data) = ask_uninstall() else { return };
         if !crate::instance::quit_running(data_dir) {
-            message("실행 중인 Sigwin이 종료되지 않아 제거하지 못했습니다.\nSigwin을 닫은 뒤 다시 시도하세요.", MB_OK | MB_ICONERROR);
+            message(tr!("The running Sigwin didn't quit, so it couldn't be removed.\nClose Sigwin and try again."), MB_OK | MB_ICONERROR);
             return;
         }
         let self_exe = std::env::current_exe().unwrap_or_default();
         if let Err(e) = remove(&lay, data_dir, delete_data, &self_exe) {
-            message(&format!("제거하는 중 문제가 생겼습니다.\n\n{e:#}"), MB_OK | MB_ICONERROR);
+            message(&tr!("Something went wrong while removing Sigwin.\n\n{}", format!("{e:#}")), MB_OK | MB_ICONERROR);
             return;
         }
         if delete_data {
             message(
-                "Sigwin을 제거했습니다.\n\n휴대폰 Signal 앱의 설정 > 연결된 기기에서도 Sigwin 연결을 해제하세요.",
+                tr!("Sigwin was removed.\n\nAlso unlink it on your phone, in the Signal app under Settings > Linked devices."),
                 MB_OK | MB_ICONINFORMATION,
             );
         }
@@ -304,16 +302,15 @@ mod win {
         const KEEP: i32 = 101;
         const WIPE: i32 = 102;
         let links = [
-            (KEEP, "앱만 제거\n대화 기록과 계정은 남겨 둡니다. 다시 설치하면 이어서 쓸 수 있습니다."),
-            (WIPE, "앱과 데이터 모두 삭제\n이 PC의 대화 기록과 계정 정보도 지웁니다."),
+            (KEEP, tr!("Remove the app only\nKeeps your chat history and account. You can pick up where you left off if you install it again.")),
+            (WIPE, tr!("Remove the app and its data\nAlso deletes the chat history and account from this PC.")),
         ];
-        match task_dialog("Sigwin을 제거합니다", &links) {
+        match task_dialog(tr!("Removing Sigwin"), &links) {
             Some(choice) => choice.map(|id| id == WIPE),
             None => {
                 // no common-controls v6: plain yes/no/cancel
                 let answer = message(
-                    "Sigwin을 제거합니다.\n\n대화 기록과 계정 정보도 이 PC에서 삭제할까요?\n\n\
-                     예: 모두 삭제\n아니요: 앱만 제거하고 데이터는 남겨 둡니다.",
+                    tr!("Removing Sigwin.\n\nDelete the chat history and account from this PC too?\n\nYes: delete everything\nNo: remove the app only and keep the data"),
                     MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2,
                 );
                 (answer != IDCANCEL && answer != 0).then_some(answer == IDYES)

@@ -21,6 +21,8 @@ pub fn run_if_child() -> bool {
         _ => return false,
     };
     let owner = args.get(2).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
+    // the parent passes its language as SIGWIN_LANG
+    crate::i18n::init(false);
     let mut dialog = rfd::FileDialog::new();
     if owner != 0 {
         dialog = dialog.set_parent(&Owner(owner));
@@ -28,10 +30,10 @@ pub fn run_if_child() -> bool {
     let files: Vec<PathBuf> = match mode {
         ARG_SAVE => {
             let name = args.get(3).map(String::as_str).unwrap_or_default();
-            dialog.set_title("저장").set_file_name(name).save_file().into_iter().collect()
+            dialog.set_title(tr!("Save")).set_file_name(name).save_file().into_iter().collect()
         }
-        ARG_FOLDER => dialog.set_title("저장할 폴더 선택").pick_folder().into_iter().collect(),
-        _ => dialog.set_title("첨부할 파일 선택").pick_files().unwrap_or_default(),
+        ARG_FOLDER => dialog.set_title(tr!("Choose a folder to save to")).pick_folder().into_iter().collect(),
+        _ => dialog.set_title(tr!("Choose files to attach")).pick_files().unwrap_or_default(),
     };
     let mut out = std::io::stdout().lock();
     for f in files {
@@ -48,6 +50,7 @@ pub fn spawn_save(owner: isize, name: String, done: impl FnOnce(Option<PathBuf>)
         let file = (|| {
             let exe = std::env::current_exe().ok()?;
             let out = Command::new(exe)
+                .env("SIGWIN_LANG", crate::i18n::lang())
                 .arg(ARG_SAVE)
                 .arg(owner.to_string())
                 .arg(name)
@@ -69,6 +72,7 @@ pub fn spawn_folder(owner: isize, done: impl FnOnce(Option<PathBuf>) + Send + 's
         let dir = (|| {
             let exe = std::env::current_exe().ok()?;
             let out = Command::new(exe)
+                .env("SIGWIN_LANG", crate::i18n::lang())
                 .arg(ARG_FOLDER)
                 .arg(owner.to_string())
                 .stdin(Stdio::null())
@@ -89,6 +93,7 @@ pub fn spawn(owner: isize, done: impl FnOnce(Vec<PathBuf>) + Send + 'static) {
         let files = (|| {
             let exe = std::env::current_exe().ok()?;
             let out = Command::new(exe)
+                .env("SIGWIN_LANG", crate::i18n::lang())
                 .arg(ARG)
                 .arg(owner.to_string())
                 .stdin(Stdio::null())

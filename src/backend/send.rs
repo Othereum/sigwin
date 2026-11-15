@@ -43,7 +43,7 @@ impl App {
             })
         });
         let names = &self.names;
-        let name_of = |u: &Uuid| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into());
+        let name_of = |u: &Uuid| names.get(u).cloned().unwrap_or_else(|| tr!("Unknown").into());
         // same labels as view::build gives the stored row
         let (quote_label, quote_author) = quote
             .as_ref()
@@ -53,13 +53,13 @@ impl App {
                     .as_deref()
                     .filter(|t| !t.is_empty())
                     .map(|t| view::text::with_mentions(t, &q.body_ranges, &name_of))
-                    .unwrap_or_else(|| "(첨부파일)".into());
+                    .unwrap_or_else(|| tr!("(attachment)").into());
                 (label, view::text::quote_author_name(q, self.me, &name_of))
             })
             .unwrap_or_default();
         let (body, body_ranges) = crate::mention::encode(&text, &mentions);
         if body.len() > view::text::MAX_LONG_TEXT_BYTES {
-            self.notice("메시지가 너무 깁니다 (최대 64KB)");
+            self.notice(tr!("Message too long (64KB max)"));
             return;
         }
         // the message itself ends our typing indicator on the other side
@@ -163,7 +163,7 @@ impl App {
         // the open thread shows it on the row
         let open = self.current.as_ref().map(|c| c.key.as_str());
         if self.pending.iter().any(|p| p.ts == ts && Some(p.thread_key.as_str()) != open) {
-            self.notice("다른 대화로 보낸 메시지를 전송하지 못했습니다");
+            self.notice(tr!("A message to another chat couldn't be sent"));
         }
         let thread = self.pending.iter().find(|p| p.ts == ts).and_then(|p| parse_thread_key(&p.thread_key));
         let after_seq = match thread {
@@ -392,7 +392,7 @@ pub(super) async fn send_task(
     let mut specs = Vec::new();
     for path in &files {
         let mut ct = mime_guess::from_path(path).first_or_octet_stream().to_string();
-        let mut data = std::fs::read(path).with_context(|| format!("{} 읽기 실패", path.display()))?;
+        let mut data = std::fs::read(path).with_context(|| tr!("Couldn't read {}", path.display()))?;
         let mut file_name = path.file_name().map(|s| s.to_string_lossy().to_string());
         let mut facts = None;
         if ct.starts_with("image/") {
@@ -568,13 +568,13 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
         && crate::emoji::only_emoji(&m.text, 5).is_some();
     match &p.error {
         None => {
-            m.status = "전송 중".into();
-            m.receipt_info = "서버로 보내는 중입니다.".into();
+            m.status = tr!("Sending").into();
+            m.receipt_info = tr!("Sending to the server.").into();
         }
         Some(e) => {
-            m.status = "실패".into();
+            m.status = tr!("Failed").into();
             m.failed = true;
-            m.receipt_info = format!("보내지 못했습니다. 일부 사람에게는 전달되었을 수 있습니다.\n{e}");
+            m.receipt_info = tr!("Couldn't send. Some people may have received it.\n{}", e);
         }
     }
     m

@@ -205,8 +205,8 @@ mod win {
         // SAFETY: popup menu owned here, destroyed before returning
         let cmd = unsafe {
             let m = CreatePopupMenu();
-            AppendMenuW(m, MF_STRING, CMD_OPEN, wide("열기").as_ptr());
-            AppendMenuW(m, MF_STRING, CMD_QUIT, wide("종료").as_ptr());
+            AppendMenuW(m, MF_STRING, CMD_OPEN, wide(tr!("Open")).as_ptr());
+            AppendMenuW(m, MF_STRING, CMD_QUIT, wide(tr!("Quit")).as_ptr());
             let mut p = POINT { x: 0, y: 0 };
             GetCursorPos(&mut p);
             // the menu only closes on an outside click when our window is foreground

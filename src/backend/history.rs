@@ -76,16 +76,16 @@ pub(crate) async fn run(
     use crate::types::Event;
     let progress = |phase: Phase| match phase {
         Phase::Waiting => {
-            emit(Event::Loading("휴대폰에서 대화 기록을 보내기를 기다리는 중…".into()));
+            emit(Event::Loading(tr!("Waiting for your phone to send the chat history…").into()));
             emit(Event::HistorySkippable(true));
         }
         Phase::Downloading(bytes) => {
-            emit(Event::Loading(format!("대화 기록 받는 중… {}", crate::view::media::size_text(bytes))));
+            emit(Event::Loading(tr!("Receiving the chat history… {}", crate::view::media::size_text(bytes))));
         }
         // from here it is quick and local; stopping halfway would leave a gap before what comes live
         Phase::Importing(n) => {
             emit(Event::HistorySkippable(false));
-            emit(Event::Loading(format!("대화 기록 가져오는 중… 메시지 {n}개")));
+            emit(Event::Loading(tr!("Importing the chat history… {n} message" | "Importing the chat history… {n} messages" % n)));
         }
     };
     let importing = std::cell::Cell::new(false);
@@ -207,7 +207,7 @@ impl TryFrom<ArchiveResponse> for Archive {
             ArchiveResponse::Error { error } => match error.as_str() {
                 "RELINK_REQUESTED" => Self::RelinkRequested,
                 "CONTINUE_WITHOUT_UPLOAD" => Self::ContinueWithoutUpload,
-                _ => bail!("휴대폰이 알 수 없는 응답을 보냈습니다"),
+                _ => bail!(tr!("The phone sent an unknown response")),
             },
         })
     }
@@ -223,7 +223,7 @@ async fn wait_for_archive(reg: &RegistrationData) -> anyhow::Result<Archive> {
         match poll(&service).await {
             Ok(Some(archive)) => return Ok(archive),
             Ok(None) => backoff = Duration::from_secs(1),
-            Err(Poll::Refused(status)) => bail!("서버가 거부했습니다 ({status})"),
+            Err(Poll::Refused(status)) => bail!(tr!("The server refused ({})", status)),
             // a network hiccup shouldn't cost the history: the archive may still come
             Err(Poll::Failed(e)) => {
                 warn!("history poll: {e:#}");
@@ -232,7 +232,7 @@ async fn wait_for_archive(reg: &RegistrationData) -> anyhow::Result<Archive> {
             }
         }
     }
-    bail!("휴대폰이 한 시간 안에 대화 기록을 보내지 않았습니다")
+    bail!(tr!("The phone didn't send the chat history within an hour"))
 }
 
 enum Poll {
@@ -271,7 +271,7 @@ async fn download(cdn: u32, cdn_key: &str, path: &Path, progress: &dyn Fn(Phase)
         .and_then(reqwest::Response::error_for_status)
         .map_err(reqwest::Error::without_url)?;
     if res.content_length().is_some_and(|n| n > MAX_ARCHIVE) {
-        bail!("대화 기록이 너무 큽니다");
+        bail!(tr!("The chat history is too large"));
     }
     progress(Phase::Downloading(0));
     let mut file = std::io::BufWriter::new(std::fs::File::create(path).context("create history archive")?);
@@ -279,7 +279,7 @@ async fn download(cdn: u32, cdn_key: &str, path: &Path, progress: &dyn Fn(Phase)
     while let Some(chunk) = res.chunk().await.map_err(reqwest::Error::without_url)? {
         size += chunk.len() as u64;
         if size > MAX_ARCHIVE {
-            bail!("대화 기록이 너무 큽니다");
+            bail!(tr!("The chat history is too large"));
         }
         file.write_all(&chunk).context("write history archive")?;
         if size - shown >= 1 << 20 {
@@ -295,7 +295,7 @@ async fn download(cdn: u32, cdn_key: &str, path: &Path, progress: &dyn Fn(Phase)
 /// whole file before handing out a frame, so nothing unauthenticated is stored.
 async fn import(key: [u8; 32], aci: &Aci, path: &Path, store: &mut SqliteStore, index: &Index, progress: &dyn Fn(Phase)) -> anyhow::Result<Stats> {
     let key = message_backup_key(key, aci);
-    let frames = FramesReader::new(&key, FileReaderFactory { path }).await.context("대화 기록을 풀지 못했습니다")?;
+    let frames = FramesReader::new(&key, FileReaderFactory { path }).await.context(tr!("Couldn't unpack the chat history"))?;
     let mut reader = VarintDelimitedReader::new(frames);
     let mut importer = Importer::new(*aci, super::now_ms());
     progress(Phase::Importing(0));
@@ -323,7 +323,7 @@ async fn import(key: [u8; 32], aci: &Aci, path: &Path, store: &mut SqliteStore, 
     // the trailing bytes too, so the HMAC covers everything
     let mut rest = reader.into_inner();
     rest.read_to_end(&mut Vec::new()).await.context("read history")?;
-    rest.verify_hmac().await.context("대화 기록이 손상되었습니다")?;
+    rest.verify_hmac().await.context(tr!("The chat history is damaged"))?;
     Ok(importer.stats)
 }
 
@@ -391,7 +391,7 @@ impl Importer {
     }
 
     fn frame(&mut self, bytes: &[u8]) -> anyhow::Result<Vec<Record>> {
-        let frame = proto::Frame::parse_from_bytes(bytes).context("대화 기록의 형식이 잘못되었습니다")?;
+        let frame = proto::Frame::parse_from_bytes(bytes).context(tr!("The chat history is malformed"))?;
         let mut records = Vec::new();
         match frame.item {
             Some(proto::frame::Item::Recipient(r)) => records.extend(self.recipient(r)),

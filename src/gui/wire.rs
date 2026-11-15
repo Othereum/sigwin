@@ -167,7 +167,7 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let d = app.global::<ThreadMenuData>();
         d.set_status(if mute.active(now) { types::mute_text(mute.until, now).into() } else { SharedString::new() });
         d.set_overridden(mute.overridden);
-        d.set_phone(format!("휴대폰: {}", types::mute_text(mute.phone, now)).into());
+        d.set_phone(tr!("Phone: {}", types::mute_text(mute.phone, now)).into());
         d.set_menu_x(x);
         d.set_menu_y(y);
         d.set_key(key);
@@ -192,13 +192,13 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             Some((t.name.clone(), t.prefs, t.phone_mentions, ui.settings.clone()))
         });
         let Some((name, p, phone_mentions, s)) = found else { return };
-        let on_off = |b: bool| if b { "켬" } else { "끔" };
+        let on_off = |b: bool| if b { tr!("On") } else { tr!("Off") };
         let index = |b: Option<bool>| match b {
             None => 0,
             Some(true) => 1,
             Some(false) => 2,
         };
-        let preview = ["이름과 내용", "이름만", "숨김"][s.preview.min(2) as usize];
+        let preview = [tr!("Name and message"), tr!("Name only"), tr!("Hidden")][s.preview.min(2) as usize];
         let d = app.global::<ThreadMenuData>();
         d.set_prefs_name(name.into());
         d.set_prefs_preview(p.preview.map_or(0, |v| v.min(2) as i32 + 1));
@@ -207,9 +207,9 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         d.set_prefs_mentions(index(p.mentions));
         d.set_prefs_replies(index(p.replies));
         d.set_prefs_badge(index(p.badge));
-        d.set_prefs_preview_default(if s.notify { preview.into() } else { "알림 꺼짐 (앱 설정)".into() });
+        d.set_prefs_preview_default(if s.notify { preview.into() } else { tr!("Notifications off (app setting)").into() });
         d.set_prefs_mentions_default(match phone_mentions {
-            Some(b) => format!("{} (휴대폰 설정)", on_off(b)).into(),
+            Some(b) => tr!("{} (phone setting)", on_off(b)).into(),
             None => on_off(s.muted_mentions).into(),
         });
         d.set_prefs_replies_default(on_off(s.muted_replies).into());
@@ -248,7 +248,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         };
         if let Some(app) = weak.upgrade() {
             app.set_draft(fit.as_str().into());
-            notice::show(&app, "메시지는 64KB까지 입력할 수 있습니다");
+            notice::show(&app, tr!("You can type up to 64KB in a message"));
         }
         *prev = fit;
         cursor as i32
@@ -273,8 +273,8 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             _ => RequestAnswer::Block,
         };
         let (title, text) = match answer {
-            RequestAnswer::Delete => ("대화 삭제", format!("{name}님과의 대화를 삭제할까요? 이 PC의 메시지와 첨부파일이 지워지고, 휴대폰에도 삭제를 알립니다.")),
-            _ => ("차단", format!("{name}님을 차단할까요? 이 사람이 보내는 메시지를 받지 않고, 휴대폰에도 차단을 알립니다.")),
+            RequestAnswer::Delete => (tr!("Delete chat"), tr!("Delete the chat with {}? Its messages and attachments are deleted from this PC, and your phone is told too.", name)),
+            _ => (tr!("Block"), tr!("Block {}? You won't get their messages, and your phone is told too.", name)),
         };
         super::window::ask(&app, super::window::Ask::YesNo, title, text, move || send_cmd(Command::AnswerRequest { key, answer }));
     });
@@ -293,8 +293,8 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         // before anything is cleared: the text stays in the composer to shorten
         // (mentions and format markers only shrink it, so this never refuses what would fit)
         if text.len() > crate::view::text::MAX_LONG_TEXT_BYTES {
-            let text = format!("한 메시지는 64KB까지 보낼 수 있습니다. 지금 {}KB입니다.\n나눠서 보내 주세요.", text.len().div_ceil(1024));
-            window::ask(&app, window::Ask::Warning, "메시지가 너무 깁니다", text, || {});
+            let text = tr!("A message can be up to 64KB. This one is {}KB.\nPlease send it in parts.", text.len().div_ceil(1024));
+            window::ask(&app, window::Ask::Warning, tr!("Message too long"), text, || {});
             return;
         }
         if let Some(id) = UI.with_borrow_mut(|ui| ui.editing.take()) {
@@ -364,7 +364,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
                         let Some(app) = weak.upgrade() else { return };
                         match res {
                             Ok(p) => add_files(&app, vec![p]),
-                            Err(e) => notice::show(&app, &format!("붙여넣기 실패: {e:#}")),
+                            Err(e) => notice::show(&app, &tr!("Paste failed: {}", format!("{e:#}"))),
                         }
                     });
                 });
@@ -490,18 +490,18 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
                 app.set_draft(SharedString::new());
             }
             ui.reply_to = Some(m.id.clone());
-            let who = if m.outgoing { "나".to_string() } else { m.sender.clone() };
+            let who = if m.outgoing { tr!("You").to_string() } else { m.sender.clone() };
             let body = if m.text.is_empty() {
                 if m.sticker {
-                    "스티커".to_string()
+                    tr!("Sticker").to_string()
                 } else if !m.attachment.is_empty() {
                     m.attachment.clone()
                 } else if m.cells.iter().all(|c| c.video) && !m.cells.is_empty() {
-                    "동영상".to_string()
+                    tr!("Video").to_string()
                 } else if !m.cells.is_empty() {
-                    "사진".to_string()
+                    tr!("Photo").to_string()
                 } else {
-                    "(첨부파일)".to_string()
+                    tr!("(attachment)").to_string()
                 }
             } else {
                 view::text::mask_spoilers(m.text.clone(), &m.styles).replace('\n', " ")
@@ -678,7 +678,7 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     app.on_delete_message(move |id| {
         let Some(app) = weak.upgrade() else { return };
         let id = id.to_string();
-        window::ask(&app, window::Ask::YesNo, "메시지 삭제", "모든 사람에게서 이 메시지를 삭제할까요?".into(), move || {
+        window::ask(&app, window::Ask::YesNo, tr!("Delete message"), tr!("Delete this message for everyone?").into(), move || {
             send_cmd(Command::Delete(id))
         });
     });
@@ -721,8 +721,8 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let danger = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && m.file_danger));
         let save = Command::SaveFiles { id: id.to_string(), owner: window::hwnd(&app), all };
         if danger {
-            let text = "이런 종류의 파일은 컴퓨터에 해를 끼칠 수 있습니다. 보낸 사람을 믿을 수 있을 때만 저장하세요. 저장할까요?";
-            window::ask(&app, window::Ask::YesNo, "위험할 수 있는 파일", text.into(), move || send_cmd(save));
+            let text = tr!("Files of this kind can harm your computer. Save it only if you trust the sender. Save it?");
+            window::ask(&app, window::Ask::YesNo, tr!("Possibly dangerous file"), text.into(), move || send_cmd(save));
             return;
         }
         send_cmd(save);
@@ -807,8 +807,8 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     app.on_unlink(move || {
         let Some(app) = weak.upgrade() else { return };
-        let text = "이 PC의 연결을 해제하고 로컬 데이터를 모두 삭제할까요?".into();
-        window::ask(&app, window::Ask::YesNo, "데이터 삭제", text, || send_cmd(Command::Unlink));
+        let text = tr!("Unlink this PC and delete all of its data?").into();
+        window::ask(&app, window::Ask::YesNo, tr!("Delete data"), text, || send_cmd(Command::Unlink));
     });
 
     let s = send.clone();
@@ -892,7 +892,7 @@ fn wire_update(app: &AppWindow) {
             app.global::<SettingsData>().set_update_status(SharedString::new());
             app.global::<SettingsData>().set_update_checking(true);
         } else {
-            app.global::<SettingsData>().set_update_status("설치된 Sigwin에서만 업데이트할 수 있습니다.".into());
+            app.global::<SettingsData>().set_update_status(tr!("Only the installed Sigwin can update.").into());
         }
     });
 }
@@ -913,10 +913,10 @@ pub(crate) fn start_updates(app: &AppWindow, exe: PathBuf) {
                 update::Status::Available(v) => d.set_update_available(v.into()),
                 update::Status::UpToDate => {
                     d.set_update_available(SharedString::new());
-                    d.set_update_status("최신 버전입니다.".into());
+                    d.set_update_status(tr!("You have the latest version.").into());
                 }
                 update::Status::Failed => {
-                    d.set_update_status("확인하지 못했습니다. 네트워크를 확인하고 다시 시도하세요.".into())
+                    d.set_update_status(tr!("Couldn't check. Check your network and try again.").into())
                 }
             }
         });
@@ -939,7 +939,7 @@ pub(crate) fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
     if let Some(why) = why {
         notice::show(app, why);
     } else if danger {
-        notice::show(app, "이런 종류의 파일은 상대의 공식 앱에서 받지 못할 수 있습니다.");
+        notice::show(app, tr!("The official Signal app may not accept files of this kind."));
     }
     attach::show(app, &all);
     app.invoke_focus_composer();

@@ -92,10 +92,10 @@ pub fn quote_author(q: &Quote) -> Option<Uuid> {
         .or_else(|| q.author_aci.as_deref()?.parse().ok())
 }
 
-/// The name shown above a quote: "나" for our own messages.
+/// The name shown above a quote: "You" for our own messages.
 pub fn quote_author_name(q: &Quote, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> String {
     match quote_author(q) {
-        Some(u) if u == me => "나".into(),
+        Some(u) if u == me => tr!("You").into(),
         Some(u) => name_of(&u),
         None => String::new(),
     }
@@ -242,22 +242,22 @@ pub(super) fn body_text_spans(
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
     if dm.is_view_once.unwrap_or(false) {
-        parts.push("[한 번 보기 미디어 — 휴대폰에서 확인하세요]".into());
+        parts.push(tr!("[View-once media — open it on your phone]").into());
     }
     if let Some(s) = &dm.sticker {
-        parts.push(format!("[스티커 {}]", s.emoji.as_deref().unwrap_or("")));
+        parts.push(tr!("[Sticker {}]", s.emoji.as_deref().unwrap_or("")));
     }
     if !dm.contact.is_empty() {
-        parts.push("[연락처 공유]".into());
+        parts.push(tr!("[Shared contact]").into());
     }
     if dm.payment.is_some() {
-        parts.push("[결제]".into());
+        parts.push(tr!("[Payment]").into());
     }
     if let Some(p) = &dm.poll_create {
-        parts.push(format!("[투표] {}", p.question.as_deref().unwrap_or("")));
+        parts.push(tr!("[Poll] {}", p.question.as_deref().unwrap_or("")));
     }
     if dm.gift_badge.is_some() {
-        parts.push("[선물 배지]".into());
+        parts.push(tr!("[Gift badge]").into());
     }
     if let Some(b) = dm.body.as_deref().filter(|b| !b.is_empty()) {
         let mut out = parts.join("\n");
@@ -273,7 +273,7 @@ pub(super) fn body_text_spans(
 /// The preview of a message, or of its edited text.
 pub fn message_snippet(dm: &DataMessage, outgoing: bool, name_of: &dyn Fn(&Uuid) -> String) -> String {
     let t = one_line(dm, name_of);
-    if outgoing { format!("나: {t}") } else { t }
+    if outgoing { tr!("You: {}", t) } else { t }
 }
 
 /// One-line preview used in the thread list and notifications.
@@ -285,7 +285,7 @@ pub fn snippet(c: &Content, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> Opti
         Kind::Msg { dm, outgoing } => message_snippet(dm, outgoing, name_of),
         Kind::System(s) => s,
         Kind::Pin { .. } => pin_label(c, me, name_of),
-        Kind::Deleted => "삭제된 메시지".into(),
+        Kind::Deleted => tr!("Deleted message").into(),
         _ => return None,
     };
     Some(text)
@@ -317,9 +317,9 @@ pub fn one_line(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
 pub(super) fn pin_label(c: &Content, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> String {
     let who = c.metadata.sender.raw_uuid();
     if who == me {
-        "메시지를 고정했습니다".into()
+        tr!("You pinned a message").into()
     } else {
-        format!("{}님이 메시지를 고정했습니다", name_of(&who))
+        tr!("{} pinned a message", name_of(&who))
     }
 }
 
@@ -328,7 +328,7 @@ pub(super) fn pin_label(c: &Content, me: Uuid, name_of: &dyn Fn(&Uuid) -> String
 pub struct LongTexts {
     /// long-text attachment key -> full text
     pub full: HashMap<String, String>,
-    /// row -> characters shown, for rows expanded with "더 읽기"
+    /// row -> characters shown, for rows expanded with "Read more"
     pub shown: HashMap<u64, usize>,
 }
 

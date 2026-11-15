@@ -456,7 +456,7 @@ fn spawn_with(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit, offl
             local.block_on(&rt, async move {
                 if let Err(e) = Box::pin(run(dir, cmd_rx, emit, offline)).await {
                     error!("backend failed: {e:#}");
-                    emit2(Event::Loading(format!("오류: {e:#}")));
+                    emit2(Event::Loading(tr!("Error: {}", format!("{e:#}"))));
                 }
             });
         })
@@ -482,7 +482,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
     // PNG cache of the former DirectWrite emoji path; emoji are plain text now
     let _ = std::fs::remove_dir_all(dir.join("emoji"));
     remove_legacy_sticker_thumbs(&paths.thumbs);
-    emit(Event::Loading("저장소 여는 중…".into()));
+    emit(Event::Loading(tr!("Opening storage…").into()));
 
     let pass = unlock(dir)?;
     clear_dir(&paths.open);
@@ -505,7 +505,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
     let sealed_now = persist.cache_format < CACHE_FORMAT && {
-        emit(Event::Loading("첨부파일 캐시 암호화 중…".into()));
+        emit(Event::Loading(tr!("Encrypting the attachment cache…").into()));
         let (att, thumbs) = (paths.attachments.clone(), paths.thumbs.clone());
         let started = std::time::Instant::now();
         match tokio::task::spawn_blocking(move || seal_legacy_files(&att, &thumbs)).await {
@@ -603,7 +603,7 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit, o
             Err(e) => {
                 warn!("load_registered failed: {e}");
                 (app.emit)(Event::NeedLink);
-                (app.emit)(Event::LinkStatus(format!("저장된 계정을 불러오지 못했습니다: {e}")));
+                (app.emit)(Event::LinkStatus(tr!("Couldn't load the saved account: {}", e)));
             }
         }
     } else {
@@ -705,7 +705,7 @@ impl App {
         );
         if to_open && self.current.as_ref().is_some_and(|o| self.is_request(&o.key)) {
             if !matches!(cmd, Command::Composing(_)) {
-                self.notice("메시지 요청을 수락한 뒤에 보낼 수 있습니다");
+                self.notice(tr!("You can send once you accept the message request"));
             }
             return;
         }
@@ -720,7 +720,7 @@ impl App {
             Command::OpenThread(key) => {
                 self.link_preview(None);
                 if let Err(e) = self.open_thread(&key).await {
-                    self.notice(format!("대화를 열지 못했습니다: {e:#}"));
+                    self.notice(tr!("Couldn't open the chat: {}", format!("{e:#}")));
                 }
             }
             Command::RestoreAt(id) => self.restore_at = id.parse().ok(),
@@ -784,11 +784,11 @@ impl App {
             Command::SendSticker { pack, id } => self.send_sticker(&pack, id).await,
             Command::InstallPack { id, key } => match (hex::decode(&id), blessed_key(&id).or_else(|| hex::decode(&key).ok())) {
                 (Ok(id), Some(key)) => self.install_pack(id, key),
-                _ => self.notice("잘못된 스티커 팩입니다"),
+                _ => self.notice(tr!("Invalid sticker pack")),
             },
             Command::InstallPackUrl(url) => match parse_pack_url(&url) {
                 Some((id, key)) => self.install_pack(id, key),
-                None => self.notice("스티커 링크를 인식하지 못했습니다 (signal.art/addstickers 링크)"),
+                None => self.notice(tr!("Not a sticker link (a signal.art/addstickers link)")),
             },
             Command::InstallPackFromMessage(id) => self.install_pack_from_message(&id),
             Command::StickerClicked(id) => self.sticker_clicked(&id).await,
@@ -840,7 +840,7 @@ impl App {
         }
         .unwrap_or_default();
         let mut name = self.name(self.me).await;
-        if name == number || name.starts_with("알 수 없음") {
+        if name == number || name.starts_with(tr!("Unknown")) {
             name.clear();
         }
         (self.emit)(Event::Account {
@@ -880,7 +880,7 @@ impl App {
         let index = self.index.clone();
         let (skip_tx, skip_rx) = oneshot::channel();
         self.history_skip = Some(skip_tx);
-        (self.emit)(Event::LinkStatus("QR 코드 생성 중…".into()));
+        (self.emit)(Event::LinkStatus(tr!("Creating a QR code…").into()));
         self.link_task = Some(tokio::task::spawn_local(async move {
             let (url_tx, url_rx) = oneshot::channel::<url::Url>();
             let show_emit = emit.clone();
@@ -888,7 +888,7 @@ impl App {
                 if let Ok(mut url) = url_rx.await {
                     url.query_pairs_mut().append_pair("capabilities", history::LINK_CAPABILITY);
                     show_emit(Event::LinkQr(url.to_string()));
-                    show_emit(Event::LinkStatus("휴대폰으로 QR 코드를 스캔하세요.".into()));
+                    show_emit(Event::LinkStatus(tr!("Scan the QR code with your phone.").into()));
                 }
             };
             let link = Manager::link_secondary_device(store.clone(), SignalServers::Production, name, url_tx);
@@ -919,22 +919,22 @@ impl App {
                 if matches!(got, Some(History::Relink)) {
                     self.manager = Some(m);
                     self.unlink().await;
-                    (self.emit)(Event::LinkStatus("휴대폰에서 다시 연결하도록 요청했습니다. 새 QR 코드를 스캔하세요.".into()));
+                    (self.emit)(Event::LinkStatus(tr!("Your phone asked to link again. Scan the new QR code.").into()));
                     return;
                 }
-                (self.emit)(Event::Loading("연결 완료! 대화를 동기화하는 중…".into()));
+                (self.emit)(Event::Loading(tr!("Linked! Syncing chats…").into()));
                 self.on_registered(m, true).await;
                 if let Some(History::Failed(e)) = got {
-                    self.notice(format!("대화 기록을 가져오지 못했습니다: {e}"));
+                    self.notice(tr!("Couldn't import the chat history: {}", e));
                 }
             }
             Internal::Linked(Err(e)) => {
                 self.link_task = None;
                 self.history_skip = None;
-                (self.emit)(Event::LinkStatus(format!("연결 실패: {e}. 다시 시도하세요.")));
+                (self.emit)(Event::LinkStatus(tr!("Linking failed: {}. Try again.", e)));
             }
             Internal::Received(r) => self.received(r).await,
-            Internal::Reconnected => self.connection("동기화 중…", false),
+            Internal::Reconnected => self.connection(tr!("Syncing…"), false),
             Internal::DeviceRenamed => self.emit_account().await,
             Internal::ReceiveStopped(msg) => {
                 self.synced = false;
@@ -983,7 +983,7 @@ impl App {
                 self.current_dirty = true;
                 self.threads_dirty = true;
             }
-            Internal::PackInstalled(Err(e)) => self.notice(format!("스티커 팩 추가 실패: {e}")),
+            Internal::PackInstalled(Err(e)) => self.notice(tr!("Couldn't add the sticker pack: {}", e)),
             Internal::Avatars(done) => {
                 self.avatars_running = false;
                 self.persist.avatars.extend(done.state);
@@ -1132,7 +1132,7 @@ impl App {
         let _ = std::fs::create_dir_all(&self.paths.thumbs);
         (self.emit)(Event::Threads(Vec::new()));
         (self.emit)(Event::NeedLink);
-        (self.emit)(Event::LinkStatus("연결이 해제되었습니다.".into()));
+        (self.emit)(Event::LinkStatus(tr!("Unlinked.").into()));
         self.start_link(self.link_name.clone());
     }
 }

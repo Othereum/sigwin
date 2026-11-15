@@ -70,7 +70,7 @@ impl App {
             t.abort();
         }
         let tx = self.tx.clone();
-        self.connection("동기화 중…", true);
+        self.connection(tr!("Syncing…"), true);
         self.recv_task = Some(tokio::task::spawn_local(async move {
             let mut backoff = 2u64;
             loop {
@@ -86,11 +86,11 @@ impl App {
                             }
                         }
                         info!("receiving stopped");
-                        let _ = tx.send(Internal::ReceiveStopped("연결이 끊어졌습니다. 다시 연결 중…".into()));
+                        let _ = tx.send(Internal::ReceiveStopped(tr!("Disconnected. Reconnecting…").into()));
                     }
                     Err(e) => {
                         warn!("receive: {e}");
-                        let _ = tx.send(Internal::ReceiveStopped(format!("연결 실패. {backoff}초 후 재시도")));
+                        let _ = tx.send(Internal::ReceiveStopped(tr!("Connection failed. Retrying in {}s", backoff)));
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(backoff)).await;
@@ -497,7 +497,7 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<(u64, Outgoing)>, me: Uui
                 };
                 if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, ts)).await {
                     warn!("request answer sync: {e}");
-                    let _ = tx.send(Internal::Notice("휴대폰에 알리지 못했습니다. 휴대폰에서도 같은 선택을 할 수 있습니다".into()));
+                    let _ = tx.send(Internal::Notice(tr!("Couldn't tell your phone. You can make the same choice on your phone").into()));
                 }
             }
             Outgoing::ProfileKey(uuid) => {

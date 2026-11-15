@@ -4,7 +4,7 @@
 use presage::libsignal_service::prelude::phonenumber::{self, country, Mode, PhoneNumber};
 use presage::model::contacts::Contact;
 
-use super::threads::{show_number, unknown_name, NOTE_TO_SELF};
+use super::threads::{note_to_self, show_number, unknown_name};
 use super::*;
 use crate::types::{Find, ResultDto};
 
@@ -80,8 +80,8 @@ impl Start {
     /// E.164 number, which starts with "+", or the username).
     pub(crate) fn row(&self) -> ResultDto {
         let (label, sub, target, phone) = match self {
-            Self::Phone(p) => (show_number(p), "번호로 대화 시작", p.format().mode(Mode::E164).to_string(), true),
-            Self::Username(u) => (u.clone(), "사용자 이름으로 대화 시작", u.clone(), false),
+            Self::Phone(p) => (show_number(p), tr!("Start a chat with this number"), p.format().mode(Mode::E164).to_string(), true),
+            Self::Username(u) => (u.clone(), tr!("Start a chat with this username"), u.clone(), false),
         };
         ResultDto::Start { label, sub: sub.into(), target, ready: true, phone }
     }
@@ -128,8 +128,8 @@ impl Lead {
             Self::Finds => vec![ResultDto::Find(Find::Phone), ResultDto::Find(Find::Username)],
             Self::Start(s) => vec![s.row()],
             Self::Partial { phone } => vec![ResultDto::Start {
-                label: if phone { "번호로 대화 시작" } else { "사용자 이름으로 대화 시작" }.into(),
-                sub: if phone { "끝까지 입력하면 찾을 수 있습니다" } else { "name.42처럼 입력할 수 있습니다" }.into(),
+                label: if phone { tr!("Start a chat with this number") } else { tr!("Start a chat with this username") }.into(),
+                sub: if phone { tr!("You can search once the number is complete") } else { tr!("You can enter it like name.42") }.into(),
                 target: String::new(),
                 ready: false,
                 phone,
@@ -179,7 +179,7 @@ impl App {
         if !self.search.contacts {
             let threads: Vec<ThreadDto> = self.threads.iter().filter(|t| matches(&q, &t.name, "")).cloned().collect();
             if !threads.is_empty() {
-                rows.push(ResultDto::Header("대화".into()));
+                rows.push(ResultDto::Header(tr!("Chats").into()));
                 rows.extend(threads.into_iter().map(ResultDto::Thread));
             }
         }
@@ -187,7 +187,7 @@ impl App {
         if !people.is_empty() {
             // in the contact list, apart from the rows above them
             if !self.search.contacts || !rows.is_empty() {
-                rows.push(ResultDto::Header("연락처".into()));
+                rows.push(ResultDto::Header(tr!("Contacts").into()));
             }
             rows.extend(people.into_iter().map(ResultDto::Contact));
         }
@@ -205,17 +205,17 @@ impl App {
             contacts.flatten().find(|c| c.phone_number.as_ref().is_some_and(|n| n.format().mode(Mode::E164).to_string() == e164))?.uuid
         };
         let key = format!("c:{uuid}");
-        let name = if mine { NOTE_TO_SELF.into() } else { self.name(uuid).await };
+        let name = if mine { note_to_self().into() } else { self.name(uuid).await };
         Some(person_row(self, key, name, show_number(p)))
     }
 
     /// Looks up whom `target` names (`Start::row`), once, in the background.
     pub(super) fn start_chat(&mut self, target: String) {
         let Some(m) = self.manager.clone() else {
-            self.notice("연결된 뒤에 찾을 수 있습니다");
+            self.notice(tr!("You can search once connected"));
             return;
         };
-        self.progress("찾는 중…");
+        self.progress(tr!("Searching…"));
         let tx = self.tx.clone();
         tokio::task::spawn_local(async move {
             let mut m = m;
@@ -252,19 +252,19 @@ impl App {
                 info!("lookup: only a PNI");
                 let e164 = phone.format().mode(Mode::E164).to_string();
                 if let Err(e) = self.index.pni_put(pni, Some(&e164)).await {
-                    return self.notice(format!("대화를 열지 못했습니다: {e:#}"));
+                    return self.notice(tr!("Couldn't open the chat: {}", format!("{e:#}")));
                 }
                 self.names.remove(&pni);
                 if let Err(e) = self.open_thread(&thread_key(&super::pni::pni_thread(pni))).await {
-                    self.notice(format!("대화를 열지 못했습니다: {e:#}"));
+                    self.notice(tr!("Couldn't open the chat: {}", format!("{e:#}")));
                 }
                 return;
             }
-            Found::Nobody { phone: true } => return self.notice("이 번호로 찾을 수 있는 Signal 사용자가 없습니다"),
-            Found::Nobody { phone: false } => return self.notice("이 사용자 이름을 찾을 수 없습니다"),
+            Found::Nobody { phone: true } => return self.notice(tr!("No Signal user can be found with this number")),
+            Found::Nobody { phone: false } => return self.notice(tr!("This username couldn't be found")),
             Found::Failed(e) => {
                 warn!("lookup: {e}");
-                return self.notice("찾지 못했습니다. 잠시 후 다시 시도할 수 있습니다");
+                return self.notice(tr!("Couldn't search. You can try again in a moment"));
             }
         };
         if uuid != self.me {
@@ -274,7 +274,7 @@ impl App {
         }
         let key = format!("c:{uuid}");
         if let Err(e) = self.open_thread(&key).await {
-            self.notice(format!("대화를 열지 못했습니다: {e:#}"));
+            self.notice(tr!("Couldn't open the chat: {}", format!("{e:#}")));
         }
     }
 
@@ -338,8 +338,8 @@ impl App {
             }
         }
         found.sort_by_cached_key(|(_, name, _)| sort_key(name));
-        if all && matches(q, NOTE_TO_SELF, "") {
-            found.insert(0, (me, NOTE_TO_SELF.into(), String::new()));
+        if all && matches(q, note_to_self(), "") {
+            found.insert(0, (me, note_to_self().into(), String::new()));
         }
         found.into_iter().map(|(key, name, phone)| person_row(self, key, name, phone)).collect()
     }

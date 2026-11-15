@@ -31,7 +31,7 @@ fn set(app: &AppWindow, text: SharedString) {
 
 /// `reveal`: a saved file the notice's button shows in its folder.
 fn set_with(app: &AppWindow, text: SharedString, reveal: Option<PathBuf>) {
-    let action: SharedString = if reveal.is_some() { "폴더에서 표시".into() } else { SharedString::new() };
+    let action: SharedString = if reveal.is_some() { tr!("Show in folder").into() } else { SharedString::new() };
     REVEAL.with_borrow_mut(|r| *r = reveal);
     viewer::set_notice(&text, &action);
     app.set_notice_text(text);

@@ -83,7 +83,7 @@ pub(crate) fn update(app: &AppWindow) {
     clear_bar(app);
     if let Some(url) = &next {
         app.set_compose_link_url(url.as_str().into());
-        app.set_compose_link_title("미리보기를 불러오는 중…".into());
+        app.set_compose_link_title(tr!("Loading preview…").into());
         app.set_compose_link_domain(link::domain(url).into());
     }
     send_cmd(Command::LinkPreview(next));

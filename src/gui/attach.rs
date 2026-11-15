@@ -33,11 +33,11 @@ pub(crate) fn admit(have: &[PathBuf], new: Vec<PathBuf>) -> (Vec<PathBuf>, Optio
     let mut why = None;
     for p in new {
         if all.iter().any(|f| !is_media(f)) {
-            why.get_or_insert("파일은 한 번에 하나만 보낼 수 있습니다.");
+            why.get_or_insert(tr!("You can send only one file at a time."));
         } else if !is_media(&p) && !all.is_empty() {
-            why.get_or_insert("사진·동영상과 파일은 함께 보낼 수 없습니다.");
+            why.get_or_insert(tr!("Photos or videos and files can't be sent together."));
         } else if too_big(&p) {
-            why.get_or_insert("파일이 너무 큽니다. 최대 100MB까지 보낼 수 있습니다.");
+            why.get_or_insert(tr!("The file is too large. You can send up to 100MB."));
         } else {
             all.push(p);
         }
@@ -182,14 +182,14 @@ mod tests {
     fn file_refused_after_media() {
         let (ok, why) = admit(&[p("a.jpg")], vec![p("b.pdf")]);
         assert!(ok.is_empty());
-        assert!(why.unwrap().contains("함께"));
+        assert!(why.unwrap().contains("together"));
     }
 
     #[test]
     fn media_refused_after_file() {
         let (ok, why) = admit(&[p("a.pdf")], vec![p("b.jpg"), p("c.zip")]);
         assert!(ok.is_empty());
-        assert!(why.unwrap().contains("하나만"));
+        assert!(why.unwrap().contains("only one"));
     }
 
     #[test]

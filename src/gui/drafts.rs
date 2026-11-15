@@ -36,11 +36,11 @@ impl Draft {
             return view::text::mask_spoilers(plain, &styles).trim().replace(['\r', '\n'], " ");
         }
         if !self.files.is_empty() {
-            "(첨부 파일)".into()
+            tr!("(attachment)").into()
         } else if self.quote.is_some() {
-            "(답장)".into()
+            tr!("(reply)").into()
         } else {
-            "(임시 저장)".into()
+            tr!("(draft)").into()
         }
     }
 }
@@ -220,9 +220,9 @@ mod tests {
         let d = Draft { text: "**안녕**\n  하세요".into(), ..Default::default() };
         assert_eq!(d.preview(), "안녕   하세요");
         let d = Draft { files: vec!["a.png".into()], ..Default::default() };
-        assert_eq!(d.preview(), "(첨부 파일)");
+        assert_eq!(d.preview(), "(attachment)");
         let d = Draft { quote: Some(("1".into(), "x".into())), ..Default::default() };
-        assert_eq!(d.preview(), "(답장)");
+        assert_eq!(d.preview(), "(reply)");
     }
 
     #[test]

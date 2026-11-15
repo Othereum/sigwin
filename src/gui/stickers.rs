@@ -87,8 +87,8 @@ pub(super) fn open(app: &AppWindow, pack: String) {
 }
 
 pub(super) fn ask_install(app: &AppWindow, msg_id: String) {
-    let text = "이 스티커가 들어 있는 팩을 추가할까요?".into();
-    super::window::ask(app, super::window::Ask::YesNo, "스티커 팩", text, move || send_cmd(Command::InstallPackFromMessage(msg_id)));
+    let text = tr!("Add the pack this sticker is from?").into();
+    super::window::ask(app, super::window::Ask::YesNo, tr!("Sticker pack"), text, move || send_cmd(Command::InstallPackFromMessage(msg_id)));
 }
 
 pub(super) fn grid_arrived(app: &AppWindow, pack: String, items: Vec<types::StickerDto>) {

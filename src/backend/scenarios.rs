@@ -376,7 +376,7 @@ fn ops_are_indexed_when_stored_and_undone_when_they_fail() {
         assert!(h.app.ops.is_empty());
         assert!(h.app.index.pins(&key).await.unwrap().is_empty());
         let ev = h.take_events();
-        assert!(ev.iter().any(|e| matches!(e, Event::Notice(s) if s == "고정 실패: offline")));
+        assert!(ev.iter().any(|e| matches!(e, Event::Notice(s) if s == "Pin failed: offline")));
         assert!(last_list(&ev).is_some(), "the row is shown again without the change");
     });
 }
@@ -546,8 +546,8 @@ fn a_message_request_tells_its_sender_nothing_until_accepted() {
         assert_eq!(h.query("request", 2), "false");
         assert_eq!(h.query("sent", 1), "delivery=1 read=0 sync=0", "only the contact hears it arrived");
         let ev = h.take_events();
-        assert_eq!(listed(&ev, 1).expect("listed").snippet, "메시지 요청", "the text doesn't show");
-        assert_ne!(listed(&ev, 2).expect("listed").snippet, "메시지 요청");
+        assert_eq!(listed(&ev, 1).expect("listed").snippet, "Message request", "the text doesn't show");
+        assert_ne!(listed(&ev, 2).expect("listed").snippet, "Message request");
 
         // read on screen: our other devices hear it, the sender doesn't
         h.open(1).await;

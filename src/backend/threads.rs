@@ -3,7 +3,9 @@
 use super::window::{fetch_rows, is_incoming, newly_read};
 use super::*;
 
-pub(super) const NOTE_TO_SELF: &str = "나에게 쓰는 메모";
+pub(super) fn note_to_self() -> &'static str {
+    tr!("Note to Self")
+}
 
 /// A number as people write it: "+82 10-1234-5678".
 pub(super) fn show_number(p: &presage::libsignal_service::prelude::phonenumber::PhoneNumber) -> String {
@@ -13,12 +15,12 @@ pub(super) fn show_number(p: &presage::libsignal_service::prelude::phonenumber::
 /// A group's title as shown; "그룹" without one.
 pub(super) fn group_name(title: &str) -> String {
     let t = crate::link::one_line(title);
-    if t.is_empty() { "그룹".into() } else { t }
+    if t.is_empty() { tr!("Group").into() } else { t }
 }
 
 /// What someone is called when there's no name, profile or number to go by.
 pub(super) fn unknown_name(uuid: Uuid) -> String {
-    format!("알 수 없음 ({})", &uuid.to_string()[..8])
+    tr!("Unknown ({})", &uuid.to_string()[..8])
 }
 
 impl App {
@@ -63,7 +65,7 @@ impl App {
 
     pub(super) async fn thread_name(&mut self, thread: &Thread) -> String {
         match thread {
-            Thread::Contact(id) if id.raw_uuid() == self.me => NOTE_TO_SELF.into(),
+            Thread::Contact(id) if id.raw_uuid() == self.me => note_to_self().into(),
             Thread::Contact(ServiceId::Pni(p)) => self.pni_name((*p).into()).await,
             Thread::Contact(id) => self.name(id.raw_uuid()).await,
             Thread::Group(key) => match self.store.group(*key).await {
@@ -111,7 +113,7 @@ impl App {
             }
             let name = self.thread_name(&row.thread).await;
             // what a stranger wrote doesn't show before it's accepted
-            let snippet = if self.check_request(&row.thread).await { "메시지 요청".to_string() } else { snippet };
+            let snippet = if self.check_request(&row.thread).await { tr!("Message request").to_string() } else { snippet };
             list.push((
                 self.index.seq_of(&row.thread, display_ts).await.ok().flatten().unwrap_or(0),
                 ThreadDto {
@@ -338,7 +340,7 @@ impl App {
             self.name(u).await;
         }
         let names = &self.names;
-        view::text::snippet(c, self.me, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()))
+        view::text::snippet(c, self.me, &|u| names.get(u).cloned().unwrap_or_else(|| tr!("Unknown").into()))
     }
 
     /// `snippet` with the author's newest edit of the message.
@@ -356,7 +358,7 @@ impl App {
                     self.name(u).await;
                 }
                 let names = &self.names;
-                view::text::message_snippet(&dm, outgoing, &|u| names.get(u).cloned().unwrap_or_else(|| "알 수 없음".into()))
+                view::text::message_snippet(&dm, outgoing, &|u| names.get(u).cloned().unwrap_or_else(|| tr!("Unknown").into()))
             }
         };
         if outgoing || !matches!(thread, Thread::Group(_)) {
@@ -588,6 +590,6 @@ mod tests {
         assert_eq!(combine_names("", "홍"), "홍");
         // synced names come wrapped in direction isolates
         assert_eq!(combine_names("\u{2068}길동\u{2069}", "\u{2068}홍\u{2069}"), "홍길동");
-        assert_eq!(group_name(" \u{2068}\u{2069} "), "그룹");
+        assert_eq!(group_name(" \u{2068}\u{2069} "), "Group");
     }
 }
