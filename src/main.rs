@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// first: `tr!` is in scope for the modules after it
+#[macro_use]
+mod i18n;
 mod alloc;
 mod autostart;
 mod away;
@@ -49,13 +52,13 @@ pub use sigwin_ui::*;
 #[global_allocator]
 static GLOBAL: alloc::Counting = alloc::Counting;
 
-/// "Sigwin 0.1.3", or "Sigwin 0.1.3 (개발 빌드, 34f43ce)" for a dev build.
+/// "Sigwin 0.1.3", or "Sigwin 0.1.3 (dev build, 34f43ce)" for a dev build.
 fn version_label() -> String {
     let v = env!("CARGO_PKG_VERSION");
     #[cfg(sigwin_dev)]
     return match env!("SIGWIN_GIT_HASH") {
-        "" => format!("Sigwin {v} (개발 빌드)"),
-        hash => format!("Sigwin {v} (개발 빌드, {hash})"),
+        "" => format!("Sigwin {v} ({})", tr!("dev build")),
+        hash => format!("Sigwin {v} ({}, {hash})", tr!("dev build")),
     };
     #[cfg(not(sigwin_dev))]
     format!("Sigwin {v}")
@@ -139,7 +142,7 @@ fn load_ui_state(app: &AppWindow, cmd_tx: UnboundedSender<Command>) {
     // dev builds: commit hash in the title (the icon: `gui::window::set_dev_icon`, tray)
     #[cfg(sigwin_dev)]
     app.set_dev_tag(match env!("SIGWIN_GIT_HASH") {
-        "" => "개발".into(),
+        "" => tr!("dev").into(),
         hash => hash.into(),
     });
     UI.with_borrow_mut(|ui| {
@@ -159,6 +162,7 @@ fn main() -> anyhow::Result<()> {
     // the uninstaller may delete the data folder, so it must not hold a file open in it
     let uninstall = std::env::args().any(|a| a == "--uninstall");
     init_logging(!uninstall)?;
+    let lang = i18n::init(std::env::var_os("SIGWIN_HEADLESS").is_some());
     if uninstall {
         install::uninstall(&data_dir());
         return Ok(());
@@ -189,6 +193,10 @@ fn main() -> anyhow::Result<()> {
     }
 
     let app = AppWindow::new()?;
+    // after the first component: creating it selects the system's language
+    if let Err(e) = slint::select_bundled_translation(lang) {
+        tracing::warn!("UI language {lang}: {e}");
+    }
     if headless::active() {
         app.invoke_set_dark(headless::dark());
     }

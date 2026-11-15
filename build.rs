@@ -3,6 +3,7 @@ fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");
     println!("cargo:rerun-if-changed=assets/icon-dev.ico");
     // ui/*.slint is compiled by crates/ui
+    translations();
 
     // `sigwin_dev`: a dev build (marked title, icon and version line; no self-install or
     // update). scripts/release.ps1 sets SIGWIN_RELEASE so none of it ships.
@@ -45,6 +46,44 @@ fn main() {
         res.set("Comments", "Unofficial Signal-compatible desktop client");
         res.compile().expect("windows resource");
     }
+}
+
+/// `$OUT_DIR/i18n.rs`: the translated entries of `i18n/<lang>/LC_MESSAGES/sigwin-ui.po` (the
+/// catalogs crates/ui bundles for Slint), as static tables `src/i18n.rs` searches.
+fn translations() {
+    use rspolib::TranslatedEntry;
+    println!("cargo:rerun-if-changed=i18n");
+    let mut langs: Vec<_> = std::fs::read_dir("i18n").expect("i18n dir").map(|e| e.unwrap()).collect();
+    // same order as Slint's bundle, so a build doesn't depend on directory order
+    langs.sort_by_key(|e| e.file_name());
+    let mut out = String::from("pub static CATALOGS: &[Catalog] = &[\n");
+    for lang in langs {
+        let path = lang.path().join("LC_MESSAGES").join("sigwin-ui.po");
+        if !path.exists() {
+            continue;
+        }
+        println!("cargo:rerun-if-changed={}", path.display());
+        let po = rspolib::pofile(path.as_path()).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let mut entries: Vec<_> = po
+            .entries
+            .iter()
+            .filter(|e| e.translated())
+            .map(|e| {
+                let forms = if e.msgid_plural.is_some() { e.msgstr_plural.clone() } else { vec![e.msgstr.clone().unwrap_or_default()] };
+                (e.msgctxt.clone().unwrap_or_default(), e.msgid.clone(), forms)
+            })
+            .collect();
+        entries.sort();
+        let code = lang.file_name().to_string_lossy().into_owned();
+        out += &format!("    Catalog {{ lang: {code:?}, entries: &[\n");
+        for (ctx, id, forms) in entries {
+            out += &format!("        ({ctx:?}, {id:?}, &{forms:?}),\n");
+        }
+        out += "    ] },\n";
+    }
+    out += "];\n";
+    let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("i18n.rs");
+    std::fs::write(dest, out).unwrap();
 }
 
 /// `SIGWIN_GIT_HASH`: short commit hash shown by dev builds, empty without git.

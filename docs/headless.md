@@ -35,7 +35,7 @@ $env:SIGWIN_HEADLESS="wait 500; wheel 650 350 6; click 960 590; type 안녕; key
 ```
 Steps: `size W H` (logical, default 1000x680), `scale S`, `wait MS`, `move/click/rclick/dblclick X Y` (a click rests the pointer and holds the button a moment, as a hand does, so a row drawn anew in between loses it as it would for a user), `drag X1 Y1 X2 Y2`, `wheel X Y N` (+ = up), `type TEXT`, `key [ctrl+][shift+]NAME`, `shot PATH`, `record DIR` (save every frame drawn from now on as `DIR\NNNN.png`, for one-frame glitches; `record` alone stops; saving slows frames down, so give `wait`s more time), `window N` (later steps act on window 1, the main one, or 2, the image viewer).
 
-Theme follows the system (`SIGWIN_HEADLESS_THEME=dark|light`). Coordinates are window-client logical px; read them off a previous shot. Headless ignores theme and zoom settings.
+Headless runs are in English, the source language, so shots and scenarios match on every PC; `SIGWIN_LANG=ko` (any run) picks a catalog. Theme follows the system (`SIGWIN_HEADLESS_THEME=dark|light`). Coordinates are window-client logical px; read them off a previous shot. Headless ignores theme and zoom settings.
 
 ## Scenarios (real backend, no account)
 Demo data can't show behavior: reading, unread counts, focus, the list moving as news arrives. `SIGWIN_FIXTURE=1` (with `SIGWIN_DATA`, and `SIGWIN_HEADLESS` for the window) runs the **real backend with no account and no network** (`src/backend/fixture.rs`): messages are seeded or received through the real receive path, and the receipts and toasts that would go out are kept for checks instead. A data dir that holds an account is refused. Headless also pins "away" to "present" (the PC's real idle and lock state must not decide a run); `away on|off` sets it.

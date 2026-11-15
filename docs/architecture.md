@@ -48,6 +48,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/format.rs` | composing text styles with markers |
 | `src/mention.rs` | composing @mentions: finding the query, filtering members, Signal's wire form |
 | `src/link.rs` | URL detection in message text, opening links |
+| `src/i18n.rs` | UI language: `tr!`, the catalogs build.rs makes from `i18n/` (the ones Slint bundles), the catalog check |
 | `src/emoji.rs` | emoji-only message detection, the reaction picker's emoji list and recent row |
 | `src/clip.rs` | pasting files and images from the clipboard |
 | `src/picker.rs` | file dialogs in a child process |

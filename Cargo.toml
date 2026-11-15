@@ -45,6 +45,7 @@ base64 = "0.22"
 # pure-Rust sqlcipher crypto: no OpenSSL needed on Windows
 libsqlite3-sys = { version = "0.36.0", features = ["bundled-sqlcipher-custom-crypto"] }
 unicode-segmentation = "1"
+sys-locale = "0.3.2" # the UI language when the user hasn't picked one; Slint's bundle uses it too
 emojis = "0.9.1" # the reaction picker's emoji list
 # streaming PNG encoder for pasted clipboard images (same version the image crate uses)
 png = "0.18"
@@ -70,6 +71,9 @@ members = ["crates/thumb", "crates/vault", "crates/ui"]
 # optional GPU renderers for comparison; pick at runtime with SLINT_BACKEND=winit-femtovg|winit-skia|winit-software
 renderer-femtovg = ["slint/renderer-femtovg"]
 renderer-skia = ["slint/renderer-skia"]
+
+[build-dependencies]
+rspolib = "0.1.2" # the .po parser slint-build uses for the same catalogs (`src/i18n.rs`)
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
@@ -111,6 +115,7 @@ libsqlite3-sys = { version = "0.36.0", git = "https://github.com/whisperfish/rus
 libsignal-service = { path = "vendor/libsignal-service" }
 
 [dev-dependencies]
+rspolib = "0.1.2" # the catalog check in `i18n` reads untranslated entries too
 blake2 = "0.10"
 ed25519-dalek = "3.0.0"
 rand = "0.9" # not the latest: must match the version libsignal-protocol's traits use
