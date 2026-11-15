@@ -48,7 +48,8 @@ file.
 - English first, as `## New` and `## Fixes`, leaving out an empty one. Only what differs from the
   last release.
 - Then every other UI language, each folded in `<details><summary>Language name</summary>` (a blank
-  line after the summary, so the Markdown inside renders), in alphabetical order of language name.
+  line after the summary, so the Markdown inside renders): Korean first, the maintainer's language
+  and most users', then the rest in alphabetical order of language name.
   The releases page lists every version and the app can't point at one language, so folding keeps
   the page as short as one language however many are added. Each language carries the same
   content, with setting and screen names as its catalog spells them.
