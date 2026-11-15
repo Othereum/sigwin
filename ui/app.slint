@@ -509,31 +509,25 @@ export component AppWindow inherits Window {
                         font-size: 13px;
                     }
                 }
+                // bars docked at the sidebar's foot: flat on the sidebar, a rule above each
                 if root.whatsnew-offer: Rectangle {
-                    height: 46px;
-                    // a card at the foot of the sidebar
-                    Rectangle {
-                    x: 8px;
-                    width: parent.width - 16px;
-                    height: 38px;
-                    border-radius: 10px;
-                    background: wn-ta.has-hover ? Theme.hover : Theme.pane;
-                    border-width: 1px;
-                    border-color: Theme.border;
+                    height: 44px;
+                    background: wn-ta.has-hover ? Theme.notice-hover : Theme.notice;
+                    Rectangle { y: 0px; height: 1px; background: Theme.border; }
                     wn-ta := TouchArea {
                         mouse-cursor: pointer;
                         clicked => { root.open-whatsnew(); }
                     }
                     HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 4px;
-                        spacing: 8px;
-                            Icon {
-                                y: (parent.height - self.height) / 2;
-                                size: 18px;
-                                icon: Icons.info;
-                                tint: Theme.accent;
-                            }
+                        padding-left: 18px;
+                        padding-right: 8px;
+                        spacing: 10px;
+                        Icon {
+                            y: (parent.height - self.height) / 2;
+                            size: 18px;
+                            icon: Icons.info;
+                            tint: Theme.accent;
+                        }
                         Text {
                             text: "업데이트 완료";
                             color: Theme.text;
@@ -555,19 +549,11 @@ export component AppWindow inherits Window {
                             clicked => { root.dismiss-whatsnew(); }
                         }
                     }
-                    }
                 }
                 if SettingsData.update-version == "" && SettingsData.update-available != "": Rectangle {
-                    height: 46px;
-                    // a card at the foot of the sidebar
-                    Rectangle {
-                    x: 8px;
-                    width: parent.width - 16px;
-                    height: 38px;
-                    border-radius: 10px;
-                    background: avail-ta.has-hover && !SettingsData.update-installing ? Theme.hover : Theme.pane;
-                    border-width: 1px;
-                    border-color: Theme.border;
+                    height: 44px;
+                    background: avail-ta.has-hover && !SettingsData.update-installing ? Theme.notice-hover : Theme.notice;
+                    Rectangle { y: 0px; height: 1px; background: Theme.border; }
                     avail-ta := TouchArea {
                         mouse-cursor: SettingsData.update-installing ? default : pointer;
                         clicked => {
@@ -578,15 +564,15 @@ export component AppWindow inherits Window {
                         }
                     }
                     HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        spacing: 8px;
-                            Icon {
-                                y: (parent.height - self.height) / 2;
-                                size: 18px;
-                                icon: Icons.download;
-                                tint: Theme.accent;
-                            }
+                        padding-left: 18px;
+                        padding-right: 18px;
+                        spacing: 10px;
+                        Icon {
+                            y: (parent.height - self.height) / 2;
+                            size: 18px;
+                            icon: Icons.download;
+                            tint: Theme.accent;
+                        }
                         Text {
                             text: "새 버전 " + SettingsData.update-available + " 있음";
                             color: Theme.text;
@@ -603,33 +589,25 @@ export component AppWindow inherits Window {
                             vertical-alignment: center;
                         }
                     }
-                    }
                 }
                 if SettingsData.update-version != "": Rectangle {
-                    height: 46px;
-                    // a card at the foot of the sidebar
-                    Rectangle {
-                    x: 8px;
-                    width: parent.width - 16px;
-                    height: 38px;
-                    border-radius: 10px;
-                    background: upd-ta.has-hover ? Theme.hover : Theme.pane;
-                    border-width: 1px;
-                    border-color: Theme.border;
+                    height: 44px;
+                    background: upd-ta.has-hover ? Theme.notice-hover : Theme.notice;
+                    Rectangle { y: 0px; height: 1px; background: Theme.border; }
                     upd-ta := TouchArea {
                         mouse-cursor: pointer;
                         clicked => { SettingsData.restart-for-update(); }
                     }
                     HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        spacing: 8px;
-                            Icon {
-                                y: (parent.height - self.height) / 2;
-                                size: 18px;
-                                icon: Icons.download;
-                                tint: Theme.accent;
-                            }
+                        padding-left: 18px;
+                        padding-right: 18px;
+                        spacing: 10px;
+                        Icon {
+                            y: (parent.height - self.height) / 2;
+                            size: 18px;
+                            icon: Icons.download;
+                            tint: Theme.accent;
+                        }
                         Text {
                             text: "새 버전 " + SettingsData.update-version + " 준비됨";
                             color: Theme.text;
@@ -645,7 +623,6 @@ export component AppWindow inherits Window {
                             font-weight: 700;
                             vertical-alignment: center;
                         }
-                    }
                     }
                 }
             }
