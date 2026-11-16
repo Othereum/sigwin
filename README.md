@@ -1,16 +1,12 @@
-# Sigwin
+**English** • [**한국어로 읽기**](README.ko.md)
 
-**English** • [한국어](README.ko.md)
+# Sigwin
 
 ### An ultra-light Signal desktop client (unofficial)
 
 🌐 App in English · Deutsch · 한국어
 
-**Rust** • [**presage**](https://github.com/whisperfish/presage) • [**Slint**](https://slint.dev) (software renderer)
-
 > An unofficial client, not affiliated with Signal. "Signal" is a trademark of the Signal Technology Foundation.
-
-> **Early version (0.x).** Expect bugs. Your chats also stay in the official app on your phone.
 
 <h3>
     <a href="https://github.com/Othereum/sigwin/releases/latest">📥 Download the latest version</a>
@@ -67,7 +63,7 @@ Set notification content, sound and badge for each chat, and override the settin
     <img src="docs/media/notify-en-light.png" width="700" alt="A chat's notification settings: content, sound, mentions and replies while muted, badge">
 </picture>
 
-### For Chinese, Japanese and Korean input
+### For Korean, Japanese and Chinese input
 `@mentions` find people while a character is still being composed, so you don't have to finish it first.
 
 <picture>
@@ -88,6 +84,8 @@ Set notification content, sound and badge for each chat, and override the settin
 Voice and video calls, stories, removing sticker packs, payments, view-once media, changing the disappearing message timer, notification profiles
 
 ## Designed for low memory
+Written in **Rust**, with [presage](https://github.com/whisperfish/presage) for the Signal protocol and [Slint](https://slint.dev) for the UI.
+
 - Slint's **software renderer** (8.4MB private, against 212MB for femtovg and 388MB for Skia)
 - Messages are read 60 rows at a time, and a chat holds at most 600 rows
 - Only thumbnails of images are kept in memory; the rest is cached on disk

@@ -1,16 +1,12 @@
-# Sigwin
+[**Read in English**](README.md) • **한국어**
 
-[English](README.md) • **한국어**
+# Sigwin
 
 ### 초경량 Signal 데스크톱 클라이언트 (비공식)
 
 🌐 앱 언어: English · Deutsch · 한국어
 
-**Rust** • [**presage**](https://github.com/whisperfish/presage) • [**Slint**](https://slint.dev)(소프트웨어 렌더러)
-
 > Signal과 무관한 비공식 클라이언트입니다. "Signal"은 Signal Technology Foundation의 상표입니다.
-
-> **초기 버전(0.x)입니다.** 버그가 있을 수 있습니다. 대화는 휴대폰의 공식 앱에도 그대로 남아 있습니다.
 
 <h3>
     <a href="https://github.com/Othereum/sigwin/releases/latest">📥 최신 버전 다운로드</a>
@@ -89,6 +85,8 @@
 음성·영상 통화, 스토리, 스티커 팩 삭제, 결제, 한 번 보기 미디어, 사라지는 메시지 타이머 변경, 알림 프로필
 
 ## 메모리 절약 설계
+**Rust**로 작성했고, Signal 프로토콜은 [presage](https://github.com/whisperfish/presage), UI는 [Slint](https://slint.dev)를 씁니다.
+
 - Slint **소프트웨어 렌더러** 사용 (femtovg 212MB, Skia 388MB 대비 private 8.4MB)
 - 메시지는 60행씩 조회하고, 대화창에는 최대 600행만 유지
 - 이미지는 썸네일만 메모리에 올리고 나머지는 디스크 캐시
