@@ -23,9 +23,10 @@ impl Search {
 }
 
 /// Whether `name` or `phone` (E.164, as stored) matches the query. A number matches however it
-/// is typed: "010-1234" finds "+821012…", the leading 0 standing for the country code.
+/// is typed: "010-1234" finds "+821012…", the leading 0 standing for the country code. A name
+/// matches as Korean is typed (`hangul::find`).
 fn matches(q: &Query, name: &str, phone: &str) -> bool {
-    if q.text.is_empty() || name.to_lowercase().contains(&q.text) {
+    if q.text.is_empty() || crate::hangul::find(name, &q.text).is_some() {
         return true;
     }
     if q.digits.len() < 3 || phone.is_empty() {

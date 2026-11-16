@@ -17,6 +17,7 @@ mod db;
 mod emoji;
 mod headless;
 mod format;
+mod hangul;
 mod install;
 mod instance;
 mod gui;

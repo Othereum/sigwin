@@ -25,105 +25,15 @@ pub fn query_at(text: &str, cursor: usize) -> Option<(usize, &str)> {
     Some((at, query))
 }
 
-/// Members whose name contains `query` (case-insensitive), names starting with it first.
-/// The query's last character may still be in IME composition, so it matches as keystrokes
-/// (`hangul_keys`): "ㅇ", "우", "윚" and "위지" all find "위진수". Consonants alone match the
-/// name's initials ("ㅇㅈㅅ").
+/// Members whose name matches `query` as Korean is typed (`hangul::find`), names starting with
+/// it first.
 pub fn filter<'a>(members: &'a [Member], query: &str) -> Vec<&'a Member> {
-    let q: Vec<char> = query.to_lowercase().chars().collect();
     let mut hits: Vec<(bool, &Member)> = members
         .iter()
-        .filter_map(|m| {
-            let n: Vec<char> = m.1.to_lowercase().chars().collect();
-            find(&n, &q).or_else(|| find_initials(&n, &q)).map(|at| (at != 0, m))
-        })
+        .filter_map(|m| crate::hangul::find(&m.1, query).map(|at| (at != 0, m)))
         .collect();
     hits.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1 .1.cmp(&b.1 .1)));
     hits.into_iter().map(|(_, m)| m).take(MAX_ROWS).collect()
-}
-
-/// Where in `name` the query starts: all but its last char match exactly, the last one's
-/// keystrokes are a prefix of the keystrokes from there on. A final consonant may still move to
-/// the next syllable ("윚" → "위진"), and a vowel may still grow ("우" → "위").
-fn find(name: &[char], q: &[char]) -> Option<usize> {
-    let Some((&last, head)) = q.split_last() else { return Some(0) };
-    let mut want = Vec::new();
-    hangul_keys(last, &mut want);
-    (0..name.len().checked_sub(head.len())?).find(|&i| {
-        if name[i..i + head.len()] != *head {
-            return false;
-        }
-        let mut got = Vec::new();
-        for &c in &name[i + head.len()..] {
-            hangul_keys(c, &mut got);
-            if got.len() >= want.len() {
-                break;
-            }
-        }
-        got.starts_with(&want)
-    })
-}
-
-/// Where in `name`'s initial consonants a query of consonants only starts: "ㅎㄱㄷ" finds
-/// "홍길동". Spaces in the name are skipped, so it also finds "홍 길동".
-fn find_initials(name: &[char], q: &[char]) -> Option<usize> {
-    let mut want = Vec::new();
-    for &c in q {
-        hangul_keys(c, &mut want);
-    }
-    if want.is_empty() || !want.iter().all(|c| ('ㄱ'..='ㅎ').contains(c)) {
-        return None;
-    }
-    let initials: Vec<char> = name
-        .iter()
-        .filter(|c| !c.is_whitespace())
-        .map(|&c| syllable(c).map_or(c, |s| INITIAL.chars().nth(s / 588).unwrap()))
-        .collect();
-    initials.windows(want.len()).position(|w| w == want)
-}
-
-const INITIAL: &str = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
-const MEDIAL: &str = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ";
-const FINAL: &str = "ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ";
-
-/// The index of a precomposed Hangul syllable (가 = 0).
-fn syllable(c: char) -> Option<usize> {
-    (c as u32).checked_sub(0xAC00).filter(|&s| s < 11172).map(|s| s as usize)
-}
-
-/// The jamo a 2-beolsik keyboard types for `c`, as compatibility jamo with compound vowels and
-/// finals split into their keys ("쵧" → ㅊㅗㅣㄹㄱ). Other characters stand for themselves.
-fn hangul_keys(c: char, out: &mut Vec<char>) {
-    let split = |j: char, out: &mut Vec<char>| {
-        let keys = match j {
-            'ㄳ' => "ㄱㅅ",
-            'ㄵ' => "ㄴㅈ",
-            'ㄶ' => "ㄴㅎ",
-            'ㄺ' => "ㄹㄱ",
-            'ㄻ' => "ㄹㅁ",
-            'ㄼ' => "ㄹㅂ",
-            'ㄽ' => "ㄹㅅ",
-            'ㄾ' => "ㄹㅌ",
-            'ㄿ' => "ㄹㅍ",
-            'ㅀ' => "ㄹㅎ",
-            'ㅄ' => "ㅂㅅ",
-            'ㅘ' => "ㅗㅏ",
-            'ㅙ' => "ㅗㅐ",
-            'ㅚ' => "ㅗㅣ",
-            'ㅝ' => "ㅜㅓ",
-            'ㅞ' => "ㅜㅔ",
-            'ㅟ' => "ㅜㅣ",
-            'ㅢ' => "ㅡㅣ",
-            _ => return out.push(j),
-        };
-        out.extend(keys.chars());
-    };
-    let Some(s) = syllable(c) else { return split(c, out) };
-    out.extend(INITIAL.chars().nth(s / 588));
-    split(MEDIAL.chars().nth(s % 588 / 28).unwrap(), out);
-    if s % 28 > 0 {
-        split(FINAL.chars().nth(s % 28 - 1).unwrap(), out);
-    }
 }
 
 /// Strips the style markers (`format::parse`) into style body ranges, and replaces each "@name"
@@ -201,32 +111,10 @@ mod tests {
     }
 
     #[test]
-    fn matches_while_composing() {
-        let m: Vec<Member> = vec![("1".into(), "위진수".into()), ("2".into(), "가나나".into()), ("3".into(), "Kim".into())];
-        let names = |q| filter(&m, q).iter().map(|m| m.1.as_str()).collect::<Vec<_>>();
-        for q in ["ㅇ", "우", "위", "윚", "위지", "위진", "진수", "수"] {
-            assert_eq!(names(q), ["위진수"], "{q}");
-        }
-        // only the last char is still composing: earlier ones match as typed
-        assert!(names("워").is_empty());
-        assert!(names("우지").is_empty());
-        assert_eq!(names("난"), ["가나나"]);
-        assert!(names("간나").is_empty());
-        assert_eq!(names("ki"), ["Kim"]);
-    }
-
-    #[test]
-    fn matches_initials() {
-        let m: Vec<Member> = vec![("1".into(), "위진수".into()), ("2".into(), "한 지수".into()), ("3".into(), "강수".into())];
-        let names = |q| filter(&m, q).iter().map(|m| m.1.as_str()).collect::<Vec<_>>();
-        assert_eq!(names("ㅇㅈㅅ"), ["위진수"]);
-        assert_eq!(names("ㅎㅈㅅ"), ["한 지수"]);
-        // names starting with it first
-        assert_eq!(names("ㅈㅅ"), ["위진수", "한 지수"]);
-        assert_eq!(names("ㅎㅈ"), ["한 지수"]);
-        // the IME may join two consonants into one: ㄱ + ㅅ = ㄳ
-        assert_eq!(names("ㄳ"), ["강수"]);
-        assert!(names("ㅇㅅ").is_empty());
+    fn filters_initials_prefix_first() {
+        let m: Vec<Member> = vec![("1".into(), "한 지수".into()), ("2".into(), "지수".into())];
+        let names: Vec<&str> = filter(&m, "ㅈㅅ").iter().map(|m| m.1.as_str()).collect();
+        assert_eq!(names, ["지수", "한 지수"]);
     }
 
     #[test]
