@@ -1,7 +1,8 @@
 import { ListView, Palette } from "std-widgets.slint";
 import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, BusySpinner, DangerButton, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton } from "widgets.slint";
+import { Avatar, BusySpinner, DangerButton, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton, TextBox } from "widgets.slint";
+export { TextOps } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
 import { Bubble, MediaLabel, QuoteBox } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
@@ -147,8 +148,6 @@ export component AppWindow inherits Window {
     callback mention-pick(int, string, int);
     // style shortcut (view::STYLE_*), composer text, selection anchor and cursor (bytes)
     callback format-toggle(int, string, int, int);
-    // composer text, selection anchor and cursor (bytes): remove the selection, cursor where it began
-    callback drop-selection(string, int, int);
 
     // pinned messages of the open thread (newest first); the bar shows pins[pin-index]
     in property <[PinItem]> pins;
@@ -426,7 +425,15 @@ export component AppWindow inherits Window {
                             : SearchData.find == FindKind.username ? @tr("Username (e.g. name.42)")
                             : @tr("Name, phone number, username");
                         text <=> SearchData.query;
-                        edited => { SearchData.changed(); }
+                        edited => {
+                            SearchData.preedit = self.preedit;
+                            SearchData.changed();
+                        }
+                        // search as Hangul is composed, before it's committed to the text
+                        preedit-changed => {
+                            SearchData.preedit = self.preedit;
+                            SearchData.changed();
+                        }
                         accepted => { SearchData.accept(); }
                         key-pressed(event) => {
                             if (event.text != Key.Escape) {
@@ -1352,7 +1359,7 @@ export component AppWindow inherits Window {
                                     return reject;
                                 }
                                 Rectangle {
-                                    composer := TextInput {
+                                    composer := TextBox {
                                         text <=> root.draft;
                                         edited => {
                                             // over the 64KB a message can carry: the new part is cut to fit
@@ -1368,13 +1375,7 @@ export component AppWindow inherits Window {
                                             root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
                                         }
                                         // IME composition (Hangul) changes neither text nor cursor: follow it too
-                                        changed preedit-text => {
-                                            // Slint deletes the selection only when the composition commits
-                                            // (not when it starts, like other apps), so typing Hangul over
-                                            // selected text showed both until then
-                                            if (self.preedit-text != "" && self.anchor-position-byte-offset != self.cursor-position-byte-offset) {
-                                                root.drop-selection(self.text, self.anchor-position-byte-offset, self.cursor-position-byte-offset);
-                                            }
+                                        preedit-changed => {
                                             root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
                                         }
                                         single-line: false;

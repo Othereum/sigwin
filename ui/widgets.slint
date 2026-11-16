@@ -148,6 +148,33 @@ export component IconButton inherits Rectangle {
     }
 }
 
+// string edits the Slint language can't do (implemented in Rust)
+export global TextOps {
+    // `text` without the bytes between `a` and `b` (in either order)
+    pure callback cut-out(string, int, int) -> string;
+}
+
+// The editable text of every input in the app (`Field`, the composer), so what Slint's
+// TextInput does differently from other Windows apps is fixed in one place. When Slint fixes
+// one, drop its handler here, not the component.
+export component TextBox inherits TextInput {
+    // composition started or changed; use this instead of `changed preedit-text`, which runs the
+    // fix below
+    callback preedit-changed();
+    changed preedit-text => {
+        // Slint deletes the selection only when the composition commits (not when it starts,
+        // like other apps), so typing Hangul over selected text showed both until then.
+        // Upstream fix: slint-ui/slint#14963
+        if (self.preedit-text != "" && self.anchor-position-byte-offset != self.cursor-position-byte-offset) {
+            let lo = min(self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+            self.text = TextOps.cut-out(self.text, self.anchor-position-byte-offset, self.cursor-position-byte-offset);
+            self.set-selection-offsets(lo, lo);
+            self.edited();
+        }
+        self.preedit-changed();
+    }
+}
+
 // one-line text field on a grey ground, no border; the accent ring while it has the focus
 // a one-line text field (the search box with `icon: Icons.search`)
 export component Field inherits Rectangle {
@@ -155,7 +182,10 @@ export component Field inherits Rectangle {
     // before the text (one of `Icons`)
     in property <string> icon;
     in-out property <string> text;
+    // what the IME is composing, not in `text` yet
+    out property <string> preedit: input.preedit-text;
     callback edited();
+    callback preedit-changed();
     callback accepted();
     callback key-pressed(KeyEvent) -> EventResult;
     forward-focus: input;
@@ -174,7 +204,7 @@ export component Field inherits Rectangle {
         size: 16px;
         icon: root.icon;
     }
-    input := TextInput {
+    input := TextBox {
         x: root.icon != "" ? 34px : 12px;
         width: parent.width - self.x - 10px;
         height: parent.height;
@@ -184,6 +214,7 @@ export component Field inherits Rectangle {
         color: Theme.text;
         font-size: 13px;
         edited => { root.edited(); }
+        preedit-changed => { root.preedit-changed(); }
         accepted => { root.accepted(); }
         key-pressed(e) => { return root.key-pressed(e); }
     }

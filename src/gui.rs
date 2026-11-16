@@ -13,7 +13,7 @@ use crate::types::{ClickedMedia, Command, Event, Find, MsgDto, Paging, ResultDto
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
     AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem,
-    FindKind, ResultItem, ResultKind, SearchData, SettingsData, StickerItem, Theme, ThreadItem, ThreadMenuData,
+    FindKind, ResultItem, ResultKind, SearchData, SettingsData, StickerItem, TextOps, Theme, ThreadItem, ThreadMenuData,
 };
 
 pub(crate) mod anim;

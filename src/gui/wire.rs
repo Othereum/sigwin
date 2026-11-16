@@ -122,7 +122,8 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             FindKind::Username => Find::Username,
             FindKind::Any => Find::Any,
         };
-        s(Command::Search { query: d.get_query().to_string(), contacts: d.get_contacts(), find });
+        let query = format!("{}{}", d.get_query(), d.get_preedit());
+        s(Command::Search { query, contacts: d.get_contacts(), find });
     });
     let weak = app.as_weak();
     app.global::<SearchData>().on_accept(move || {
@@ -418,15 +419,12 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
     });
 
-    app.on_drop_selection({
-        let weak = app.as_weak();
-        move |text, anchor, cursor| {
-            let Some(app) = weak.upgrade() else { return };
-            let (a, b) = (anchor.max(0) as usize, cursor.max(0) as usize);
-            let (lo, hi) = (a.min(b), a.max(b));
-            let (Some(head), Some(tail)) = (text.get(..lo), text.get(hi..)) else { return };
-            app.set_draft([head, tail].concat().into());
-            app.invoke_composer_cursor(lo as i32);
+    app.global::<TextOps>().on_cut_out(|text, a, b| {
+        let (a, b) = (a.max(0) as usize, b.max(0) as usize);
+        let (lo, hi) = (a.min(b), a.max(b));
+        match (text.get(..lo), text.get(hi..)) {
+            (Some(head), Some(tail)) => [head, tail].concat().into(),
+            _ => text,
         }
     });
 

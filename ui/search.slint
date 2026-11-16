@@ -22,12 +22,14 @@ export struct ResultItem {
 
 export global SearchData {
     in-out property <string> query;
+    // what the IME is composing at the end of `query`
+    in-out property <string> preedit;
     // the contact list (✎) instead of the search over everything
     in-out property <bool> contacts;
     in-out property <FindKind> find;
     in property <[ResultItem]> results;
     // the list shows the results instead of the threads
-    out property <bool> active: query != "" || contacts;
+    out property <bool> active: query != "" || preedit != "" || contacts;
     // the query or the scope changed
     callback changed();
     // Enter: the first row that opens something
