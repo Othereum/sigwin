@@ -165,7 +165,25 @@ pub(crate) fn font_spans(m: &MsgDto) -> Vec<(std::ops::Range<usize>, SigwinStyle
             };
             Some((s..e, style))
         })
+        .chain(m.mentions.iter().map(|&(s, e, _)| (s..e, SigwinStyle::Bold)))
         .collect()
+}
+
+fn mention_color(outgoing: bool, dark: bool) -> Color {
+    match (outgoing, dark) {
+        (true, _) => Color::from_rgb_u8(0xff, 0xe2, 0x7a),
+        (false, true) => Color::from_rgb_u8(0x7a, 0xa7, 0xff),
+        (false, false) => Color::from_rgb_u8(0x1f, 0x5f, 0xd6),
+    }
+}
+
+/// Marks the "@name"s of the picked members in the composer like mentions in a received message:
+/// exactly the text `mention::encode` will send as mentions. Call whenever `ui.picked` or the
+/// theme changes.
+pub(crate) fn sync_composer_mentions(ui: &Ui) {
+    let marks = ui.picked.iter().filter(|m| !m.1.is_empty()).map(|m| format!("@{}", m.1)).collect();
+    let styles = vec![SigwinStyle::Bold, SigwinStyle::Color(mention_color(false, ui.dark))];
+    i_slint_core::styled_text::sigwin_set_edit_marks(marks, styles);
 }
 
 /// Spoiler ranges still hidden.
@@ -182,11 +200,7 @@ pub(crate) fn hidden_spoilers(m: &MsgDto, revealed: &std::collections::HashSet<S
 /// out identically; the rest only changes colors, underlines and boxes.
 pub(crate) fn rich_text(m: &MsgDto, links: &[(usize, usize)], spoilers: &[(usize, usize)], dark: bool) -> slint::StyledText {
     // link color comes from the StyledText's `link-color`
-    let mention = match (m.outgoing, dark) {
-        (true, _) => Color::from_rgb_u8(0xff, 0xe2, 0x7a),
-        (false, true) => Color::from_rgb_u8(0x7a, 0xa7, 0xff),
-        (false, false) => Color::from_rgb_u8(0x1f, 0x5f, 0xd6),
-    };
+    let mention = mention_color(m.outgoing, dark);
     // alpha 1 = spoiler box of this color (patched i-slint-core)
     let (r, g, b) = match (m.outgoing, dark) {
         (true, _) => (0xa9, 0xbf, 0xf8),
@@ -490,6 +504,7 @@ pub(crate) fn refresh_rows(app: &AppWindow) {
     let dark = app.global::<Theme>().get_dark();
     UI.with_borrow_mut(|ui| {
         ui.dark = dark;
+        sync_composer_mentions(ui);
         let rows: Vec<MsgItem> = ui.last.iter().map(|m| to_item(m, &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, dark)).collect();
         ui.messages.set_vec(rows);
         ui.typing_row = false;

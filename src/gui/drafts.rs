@@ -125,6 +125,7 @@ pub(crate) fn switch(app: &AppWindow, ui: &mut Ui, next: &str) -> Draft {
     ui.editing = None;
     linkcard::reset(ui);
     ui.picked = d.mentions.clone();
+    super::rows::sync_composer_mentions(ui);
     ui.files = d.files.clone();
     ui.reply_to = d.quote.as_ref().map(|q| q.0.clone());
     d

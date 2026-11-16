@@ -303,7 +303,11 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
                 UI.with_borrow_mut(|ui| ui.editing = Some(id));
                 return;
             }
-            let mentions = UI.with_borrow_mut(|ui| std::mem::take(&mut ui.picked));
+            let mentions = UI.with_borrow_mut(|ui| {
+                let picked = std::mem::take(&mut ui.picked);
+                super::rows::sync_composer_mentions(ui);
+                picked
+            });
             s(Command::Edit { id, text: text.to_string(), mentions });
             app.set_mention_items(ModelRc::default());
             app.set_draft(SharedString::new());
@@ -314,7 +318,11 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         if text.trim().is_empty() && files.is_empty() {
             return;
         }
-        let mentions = UI.with_borrow_mut(|ui| std::mem::take(&mut ui.picked));
+        let mentions = UI.with_borrow_mut(|ui| {
+            let picked = std::mem::take(&mut ui.picked);
+            super::rows::sync_composer_mentions(ui);
+            picked
+        });
         // `files` were taken above: with attachments there is no preview
         let link = linkcard::take_for_send(&app, if files.is_empty() { &text } else { "" });
         let quality = sigwin_thumb::photo::Quality::from_index(UI.with_borrow(|ui| ui.settings.photo_quality));
@@ -437,6 +445,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             let m = m?;
             if !ui.picked.contains(&m) {
                 ui.picked.push(m.clone());
+                super::rows::sync_composer_mentions(ui);
             }
             Some(m)
         });
@@ -588,6 +597,7 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
                 .iter()
                 .filter_map(|(s, e, uuid)| Some((uuid.clone(), m.text.get(s + 1..*e)?.to_string())))
                 .collect();
+            super::rows::sync_composer_mentions(ui);
             // its styles come back as markers
             let text = format::to_markup(&m.text, &m.styles);
             ui.editing = Some(id.to_string());
