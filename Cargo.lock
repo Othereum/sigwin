@@ -6783,7 +6783,7 @@ checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
 
 [[package]]
 name = "sigwin"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
