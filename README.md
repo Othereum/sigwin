@@ -4,22 +4,18 @@
 
 ### An ultra-light Signal desktop client (unofficial)
 
-🌐 App in English · Deutsch · 한국어
-
 > An unofficial client, not affiliated with Signal. "Signal" is a trademark of the Signal Technology Foundation.
-
-<h3>
-    <a href="https://github.com/Othereum/sigwin/releases/latest">📥 Download the latest version</a>
-    <span> • </span>
-    <a href="https://github.com/Othereum/sigwin/issues">🐛 Report a bug</a>
-</h3>
 
 <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-en-dark.png">
     <img src="docs/media/hero-en-light.png" width="800" alt="Sigwin's window: the chat list and a conversation with a photo, a reply and a reaction">
 </picture>
 
----
+<h3><a href="https://github.com/Othereum/sigwin/releases/latest">📥 Download the latest version</a></h3>
+
+🌐 English · Deutsch · 한국어
+
+<br>
 
 ## Why Sigwin
 

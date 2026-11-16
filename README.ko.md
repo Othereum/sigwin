@@ -4,22 +4,18 @@
 
 ### 초경량 Signal 데스크톱 클라이언트 (비공식)
 
-🌐 앱 언어: English · Deutsch · 한국어
-
 > Signal과 무관한 비공식 클라이언트입니다. "Signal"은 Signal Technology Foundation의 상표입니다.
-
-<h3>
-    <a href="https://github.com/Othereum/sigwin/releases/latest">📥 최신 버전 다운로드</a>
-    <span> • </span>
-    <a href="https://github.com/Othereum/sigwin/issues">🐛 버그 제보</a>
-</h3>
 
 <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-ko-dark.png">
     <img src="docs/media/hero-ko-light.png" width="800" alt="Sigwin 창: 대화 목록과 사진, 답장, 반응이 있는 대화">
 </picture>
 
----
+<h3><a href="https://github.com/Othereum/sigwin/releases/latest">📥 최신 버전 다운로드</a></h3>
+
+🌐 English · Deutsch · 한국어
+
+<br>
 
 ## 차별점
 **Sigwin을 선택해야 하는 이유**
