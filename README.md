@@ -4,6 +4,8 @@
 
 ### An ultra-light Signal desktop client (unofficial)
 
+🌐 App in English · Deutsch · 한국어
+
 **Rust** • [**presage**](https://github.com/whisperfish/presage) • [**Slint**](https://slint.dev) (software renderer)
 
 > An unofficial client, not affiliated with Signal. "Signal" is a trademark of the Signal Technology Foundation.
@@ -16,15 +18,59 @@
     <a href="https://github.com/Othereum/sigwin/issues">🐛 Report a bug</a>
 </h3>
 
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-en-dark.png">
+    <img src="docs/media/hero-en-light.png" width="800" alt="Sigwin's window: the chat list and a conversation with a photo, a reply and a reaction">
+</picture>
+
 ---
 
 ## Why Sigwin
-- **Light**: uses very little memory, so it can stay open all day.
-- **IME-friendly**: `@mentions` work even while you're still composing a character (Korean, Japanese, Chinese input).
-- **See who read it**: the profile photos of those who read your message show under it.
-- **No waiting for link previews**: paste a link and press Enter before the preview appears, and it is still sent with the preview.
-- **Per-chat notification settings**: set notification content, sound and badge for each chat, and override the settings synced from your phone on this PC only.
-- **Image viewer**: images open in their own window at a fitting size, even when the chat window is small. Zoom fast with the wheel; click the image to close it.
+
+### Light
+Uses about 1/20 of the official app's memory, so even a low-end PC runs it with ease.
+
+<img src="docs/media/memory.png" alt="Memory used by Sigwin and by Signal Desktop, side by side">
+
+### See who read it
+The profile photos of those who read your message show under it.
+
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/readers-en-dark.png">
+    <img src="docs/media/readers-en-light.png" width="600" alt="A message sent to a group: the photos of those who read it move under it one by one">
+</picture>
+
+### No waiting for link previews
+Paste a link and press Enter before the preview appears: it is still sent with the preview.
+
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/link-en-dark.png">
+    <img src="docs/media/link-en-light.png" width="600" alt="A link sent right after it's pasted, and its preview joins the message">
+</picture>
+
+### Image viewer
+Images open in their own window at a fitting size, even when the chat window is small. Zoom fast with the wheel; click the image to close it.
+
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/viewer-en-dark.png">
+    <img src="docs/media/viewer-en-light.png" width="800" alt="A photo opened from a small chat window in a window of its own, zoomed with the wheel and closed with a click">
+</picture>
+
+### Per-chat notification settings
+Set notification content, sound and badge for each chat, and override the settings synced from your phone on this PC only.
+
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/notify-en-dark.png">
+    <img src="docs/media/notify-en-light.png" width="700" alt="A chat's notification settings: content, sound, mentions and replies while muted, badge">
+</picture>
+
+### For Chinese, Japanese and Korean input
+`@mentions` find people while a character is still being composed, so you don't have to finish it first.
+
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/ime-en-dark.png">
+    <img src="docs/media/ime-en-light.png" width="600" alt="Typing @ and a Korean name: the suggestions narrow while the syllable is still being composed">
+</picture>
 
 ## Features
 - **Chats**: 1:1 and groups, starting a chat, message requests, replies, edits, deletes, reactions, @mentions, text formatting, pinned messages, read receipts
@@ -33,7 +79,7 @@
 - **Always on**: keeps running in the tray when the window is closed, opens at login, updates itself
 - **Getting started**: links to your phone as a **linked device** with a QR code, brings over your recent chat history from the phone
 - **Security**: local data is encrypted, with the key protected by Windows DPAPI
-- **Languages**: English, German, Korean
+- **Languages**: English, Deutsch, 한국어
 
 ### Not supported
 Voice and video calls, stories, removing sticker packs, payments, view-once media, changing the disappearing message timer, notification profiles

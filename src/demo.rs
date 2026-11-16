@@ -4,6 +4,8 @@ use super::*;
 use crate::gui::{initial, tint_rgb};
 use crate::types::{MsgDto, Mute, MuteSet, Paging, ResultDto, Scroll, ThreadDto, ThreadPrefs, MUTE_ALWAYS};
 
+mod real;
+
 /// Demo mode: the fake backend plus the `SIGWIN_DEMO_*` / `SIGWIN_SELFTEST` extras.
 pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Command>) {
     demo(emit, cmd_rx);
@@ -166,7 +168,7 @@ fn resend_thumbs(emit: &backend::Emit, thumbs: &Thumbs, items: &[types::MsgDto])
 pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Command>) {
     let (emit, thumbs) = keep_thumbs(emit);
     if std::env::var_os("SIGWIN_DEMO_REAL").is_some() {
-        return demo_real(emit, cmd_rx);
+        return real::demo_real(emit, thumbs, cmd_rx);
     }
     let threads: Vec<ThreadDto> = (0..40)
         .map(|i| ThreadDto {
@@ -1121,144 +1123,5 @@ pub(crate) fn demo_stickers(emit: backend::Emit) {
         let mut thumbs: Vec<_> = (0..20u32).map(|i| demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8)).collect();
         thumbs.push(demo_blob("sp_p1_0", 96, 200));
         emit(Event::StickerThumbs(thumbs));
-    });
-}
-
-/// `SIGWIN_DEMO_REAL=1`: a believable chat list and conversation (for README screenshots).
-fn demo_real(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<Command>) {
-    let th = |i: usize, name: &str, snippet: &str, time: &str, unread: u32, is_group: bool| ThreadDto {
-        key: format!("c:demo-{i}"),
-        name: name.into(),
-        snippet: snippet.into(),
-        time: time.into(),
-        ts: 0,
-        unread,
-        is_group,
-        mute: Mute::default(),
-        prefs: ThreadPrefs::default(),
-        phone_mentions: None,
-        readers: Vec::new(),
-        readers_more: 0,
-    };
-    // the screenshots are of the UI's language: the people and the chat follow it
-    let ko = crate::i18n::lang() == "ko";
-    // a local time `days_ago` days back, formatted the way the backend formats it
-    let at = |days_ago: u64, h: u32, m: u32| {
-        let d = chrono::Local::now().date_naive() - chrono::Days::new(days_ago);
-        let t = chrono::TimeZone::from_local_datetime(&chrono::Local, &d.and_hms_opt(h, m, 0).unwrap()).earliest().unwrap();
-        t.timestamp_millis() as u64
-    };
-    let list_time = |days_ago: u64, h: u32, m: u32| {
-        let ts = at(days_ago, h, m);
-        // not `time_short` for today: it says "5m" when the shot is taken right after
-        if days_ago == 0 { view::time::ampm(&view::time::local(ts)) } else { view::time::time_short(ts) }
-    };
-    type Row = (&'static str, &'static str, u64, u32, u32, u32, bool);
-    let rows: [Row; 9] = if ko {
-        [
-            ("이서연", "그럼 토요일 11시에 합정역에서 봐요!", 0, 18, 42, 0, false),
-            ("가족 단톡방", "엄마: 이번 주말에 다들 올 수 있지?", 0, 17, 58, 2, true),
-            ("김민준", "📷 IMG_2041.jpg", 0, 14, 10, 0, false),
-            ("프로젝트 팀", "박지훈: 리뷰 올렸습니다", 0, 11, 30, 0, true),
-            ("박지훈", "📄 unlockfps_nc_signed.exe", 1, 20, 5, 0, false),
-            ("최유나", "고마워요 :)", 1, 9, 12, 0, false),
-            ("독서 모임", "다음 책은 뭐로 할까요?", 14, 21, 0, 0, true),
-            ("Alice Kim", "See you next week!", 15, 13, 40, 0, false),
-            ("권준영", "ㅋㅋㅋㅋ 인정", 17, 22, 15, 0, false),
-        ]
-    } else {
-        [
-            ("Emma Lee", "See you Saturday at 11 by the station!", 0, 18, 42, 0, false),
-            ("Family", "Mom: Can everyone make it this weekend?", 0, 17, 58, 2, true),
-            ("Noah Kim", "📷 IMG_2041.jpg", 0, 14, 10, 0, false),
-            ("Project team", "Liam: Pushed the review", 0, 11, 30, 0, true),
-            ("Liam Park", "📄 unlockfps_nc_signed.exe", 1, 20, 5, 0, false),
-            ("Olivia Choi", "Thanks :)", 1, 9, 12, 0, false),
-            ("Book club", "What should we read next?", 14, 21, 0, 0, true),
-            ("Jonas Weber", "Bis nächste Woche!", 15, 13, 40, 0, false),
-            ("Ethan Kwon", "haha true", 17, 22, 15, 0, false),
-        ]
-    };
-    let threads: Vec<ThreadDto> = rows
-        .iter()
-        .enumerate()
-        .map(|(i, &(name, snippet, days, h, m, unread, group))| th(i + 1, name, snippet, &list_time(days, h, m), unread, group))
-        .collect();
-    let chat: [(bool, &str, u32); 14] = if ko {
-        [
-            (false, "주말에 시간 돼요?", 20),
-            (true, "네 토요일 괜찮아요! 뭐 할까요?", 21),
-            (false, "전에 말했던 전시 보러 가요. 합정에 새로 생긴 갤러리인데 평이 좋더라고요", 23),
-            (true, "좋아요 👍", 25),
-            (true, "점심 먹고 갈까요, 아니면 보고 나서 먹을까요?", 25),
-            (false, "보고 나서 먹어요. 근처에 맛있는 파스타집 봐 뒀어요 🍝", 31),
-            (true, "완벽하네요", 32),
-            (false, "그럼 토요일 11시에 합정역에서 봐요!", 42),
-            (true, "네 그때 봬요 😊", 42),
-            (false, "참, 우산 챙겨요. 토요일에 비 온대요", 44),
-            (true, "헉 알려줘서 고마워요 ☔", 45),
-            (false, "ㅋㅋ 별말씀을", 45),
-            (true, "혹시 늦으면 연락할게요", 46),
-            (false, "넵 천천히 와요~", 46),
-        ]
-    } else {
-        [
-            (false, "Are you free this weekend?", 20),
-            (true, "Saturday works! What do you have in mind?", 21),
-            (false, "That exhibition I mentioned. It's a new gallery downtown and the reviews are great", 23),
-            (true, "Sounds good 👍", 25),
-            (true, "Lunch before, or after we see it?", 25),
-            (false, "After. I found a nice pasta place nearby 🍝", 31),
-            (true, "Perfect", 32),
-            (false, "See you Saturday at 11 by the station!", 42),
-            (true, "See you then 😊", 42),
-            (false, "Oh, bring an umbrella. Rain on Saturday", 44),
-            (true, "Ugh, thanks for the heads-up ☔", 45),
-            (false, "Anytime", 45),
-            (true, "I'll text you if I'm running late", 46),
-            (false, "No rush~", 46),
-        ]
-    };
-    let (her, him) = (rows[0].0, if ko { "박지훈" } else { "Liam Park" });
-    let mut items: Vec<MsgDto> = chat
-        .iter()
-        .enumerate()
-        .map(|(i, &(outgoing, text, minute))| MsgDto {
-            id: i.to_string(),
-            ts: at(2, 18, minute),
-            sender: if outgoing { String::new() } else { her.into() },
-            sender_key: if outgoing { String::new() } else { "demo-a".into() },
-            text: text.into(),
-            time: view::time::ampm(&view::time::local(at(2, 18, minute))),
-            outgoing,
-            status: if outgoing { "✓✓".into() } else { String::new() },
-            can_edit: outgoing,
-            can_delete: outgoing,
-            day_sep: i == 0,
-            day: crate::view::time::day_num(&chrono::Local::now()) - 2,
-            ..Default::default()
-        })
-        .collect();
-    items[3].reactions = vec![("❤️".into(), 1, her.into())];
-    items[10].reactions = vec![("😂".into(), 1, him.into())];
-    for m in items.iter_mut() {
-        m.big_emoji = emoji::only_emoji(&m.text, 5).is_some();
-    }
-    view::mark_runs(&mut items, false);
-    emit(Event::Ready);
-    emit(Event::Threads(threads.clone()));
-    header(&emit, &threads, "c:demo-1", false);
-    emit(Event::Messages { key: "c:demo-1".into(), items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
-    emit(Event::Pins(Vec::new()));
-    let (me, number) = if ko { ("홍길동", "+821012345678") } else { ("Alex Morgan", "+14155550123") };
-    emit(Event::Account { name: me.into(), number: number.into(), device: "Sigwin".into(), receipts: Some(true), typing: None });
-    std::thread::spawn(move || {
-        while let Some(c) = cmd_rx.blocking_recv() {
-            if let Command::OpenThread(key) = c {
-                header(&emit, &threads, &key, false);
-                emit(Event::Messages { key, items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
-                emit(Event::Pins(Vec::new()));
-            }
-        }
     });
 }

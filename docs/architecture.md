@@ -23,7 +23,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 |---|---|
 | `src/main.rs` | startup: logging, data dir, settings, backend or demo, event loop |
 | `src/types.rs` | `Command` / `Event` / DTOs crossing threads, thread keys |
-| `src/demo.rs` | demo modes: fake backend with synthetic data, self-test |
+| `src/demo.rs` | demo modes: fake backend with synthetic data, self-test; `demo/real.rs`: believable chats for the README's pictures |
 | `src/headless.rs` | offscreen test platform: scripted input, PNG shots, scenario steps |
 | `src/alloc.rs` | counting global allocator, private memory |
 

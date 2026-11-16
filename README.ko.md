@@ -4,6 +4,8 @@
 
 ### 초경량 Signal 데스크톱 클라이언트 (비공식)
 
+🌐 앱 언어: English · Deutsch · 한국어
+
 **Rust** • [**presage**](https://github.com/whisperfish/presage) • [**Slint**](https://slint.dev)(소프트웨어 렌더러)
 
 > Signal과 무관한 비공식 클라이언트입니다. "Signal"은 Signal Technology Foundation의 상표입니다.
@@ -16,16 +18,60 @@
     <a href="https://github.com/Othereum/sigwin/issues">🐛 버그 제보</a>
 </h3>
 
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-ko-dark.png">
+    <img src="docs/media/hero-ko-light.png" width="800" alt="Sigwin 창: 대화 목록과 사진, 답장, 반응이 있는 대화">
+</picture>
+
 ---
 
 ## 차별점
 **Sigwin을 선택해야 하는 이유**
-- **가벼움**: 메모리를 아주 적게 써서 하루 종일 켜 두어도 부담이 없습니다.
-- **한글 입력에 강함**: 글자를 조합하는 중에도 `@멘션`이 문제없이 동작합니다.
-- **읽은 사람 표시**: 보낸 메시지 아래에 읽은 사람의 프로필 사진이 표시되어 누가 읽었는지 바로 알 수 있습니다.
-- **기다릴 필요 없는 링크 미리보기**: 링크를 붙여넣고 미리보기가 뜨기 전에 Enter를 눌러도 미리보기가 포함되어 전송됩니다.
-- **대화별 알림 설정**: 알림 내용·소리·배지를 대화마다 정할 수 있고, 휴대폰에서 동기화된 알림 설정도 이 PC에서만 바꿀 수 있습니다.
-- **이미지 뷰어**: 메신저 창이 작아도 이미지가 알맞은 크기의 별도 창으로 열립니다. 휠로 빠르게 확대·축소할 수 있고, 이미지를 클릭하면 바로 닫힙니다.
+
+### 가벼움
+메모리 사용량이 공식 앱의 1/20 수준이라, 저사양 PC에서도 부담이 없습니다.
+
+<img src="docs/media/memory.png" alt="Sigwin과 Signal Desktop의 메모리 사용량 비교">
+
+### 한글 입력에 강함
+글자를 조합하는 중에도 `@멘션`이 문제없이 동작합니다.
+
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/ime-ko-dark.png">
+    <img src="docs/media/ime-ko-light.png" width="600" alt="@를 입력하고 이름을 조합하는 동안 멘션 후보가 좁혀짐">
+</picture>
+
+### 읽은 사람 표시
+보낸 메시지 아래에 읽은 사람의 프로필 사진이 표시되어 누가 읽었는지 바로 알 수 있습니다.
+
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/readers-ko-dark.png">
+    <img src="docs/media/readers-ko-light.png" width="600" alt="그룹에 보낸 메시지 아래로 읽은 사람의 프로필이 하나씩 옮겨 옴">
+</picture>
+
+### 기다릴 필요 없는 링크 미리보기
+링크를 붙여넣고 미리보기가 뜨기 전에 Enter를 눌러도 미리보기가 포함되어 전송됩니다.
+
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/link-ko-dark.png">
+    <img src="docs/media/link-ko-light.png" width="600" alt="링크를 붙여넣자마자 보내도 미리보기가 메시지에 붙음">
+</picture>
+
+### 이미지 뷰어
+메신저 창이 작아도 이미지가 알맞은 크기의 별도 창으로 열립니다. 휠로 빠르게 확대·축소할 수 있고, 이미지를 클릭하면 바로 닫힙니다.
+
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/viewer-ko-dark.png">
+    <img src="docs/media/viewer-ko-light.png" width="800" alt="작은 대화 창에서 연 사진이 별도 창에 열리고, 휠로 확대한 뒤 클릭으로 닫힘">
+</picture>
+
+### 대화별 알림 설정
+알림 내용·소리·배지를 대화마다 정할 수 있고, 휴대폰에서 동기화된 알림 설정도 이 PC에서만 바꿀 수 있습니다.
+
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/notify-ko-dark.png">
+    <img src="docs/media/notify-ko-light.png" width="700" alt="대화별 알림 설정: 표시할 내용, 소리, 알림을 끈 동안의 멘션·답장, 배지">
+</picture>
 
 ## 기능
 - **대화**: 1:1·그룹, 새 대화 시작, 메시지 요청, 답장, 수정, 삭제, 반응, @멘션, 글자 서식, 메시지 고정, 읽음 확인
@@ -34,7 +80,7 @@
 - **상주**: 창을 닫아도 트레이에서 계속 실행, 로그인 시 자동 실행, 자동 업데이트
 - **시작**: QR 코드로 휴대폰에 **연결된 기기**로 등록, 휴대폰의 최근 대화 기록 가져오기
 - **보안**: 로컬 데이터 암호화. 키는 Windows DPAPI로 보호합니다.
-- **언어**: 한국어, 영어, 독일어
+- **언어**: English, Deutsch, 한국어
 
 ### 미지원
 음성·영상 통화, 스토리, 스티커 팩 삭제, 결제, 한 번 보기 미디어, 사라지는 메시지 타이머 변경, 알림 프로필
