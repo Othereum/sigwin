@@ -2,7 +2,8 @@
 
 import { PackItem, StickerItem } from "types.slint";
 import { Anim, Theme } from "theme.slint";
-import { Field, PlainButton, TextButton } from "widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Field, HStrip, PlainButton, TextButton } from "widgets.slint";
 import { Icons } from "icons.slint";
 
 export component StickerPanel inherits Rectangle {
@@ -17,7 +18,8 @@ export component StickerPanel inherits Rectangle {
     callback close();
 
     property <length> cell: 84px;
-    property <int> cols: max(1, floor((self.width - 40px) / cell));
+    // the side paddings, and room for the grid's scrollbar thumb
+    property <int> cols: max(1, floor((self.width - 50px) / cell));
     property <bool> suggest: current-pack == "" || current-pack == "+";
 
     height: 308px;
@@ -40,45 +42,34 @@ export component StickerPanel inherits Rectangle {
         padding-top: 16px;
         spacing: 6px;
         // pack tabs
-        // The wheel only scrolls vertically, which this Flickable can't: the parent TouchArea
-        // gets the event the Flickable rejects and turns it into a horizontal move.
-        TouchArea {
+        HStrip {
             height: 40px;
-            scroll-event(e) => {
-                tabs-flick.content-x = clamp(tabs-flick.content-x + (e.delta-y != 0px ? e.delta-y : e.delta-x),
-                    min(0px, tabs-flick.width - tabs-flick.content-width), 0px);
-                accept
-            }
-            tabs-flick := Flickable {
-                width: parent.width;
-                height: parent.height;
-                content-width: tabs.preferred-width;
-                tabs := HorizontalLayout {
-                    spacing: 4px;
-                    for p in root.packs: Rectangle {
-                        visible: p.installed;
-                        width: p.installed ? 40px : 0px;
-                        height: 40px;
-                        border-radius: 10px;
-                        background: p.id == root.current-pack ? Theme.selected : (pta.has-hover ? Theme.hover : transparent);
-                        Image { width: 32px; height: 32px; source: p.cover; image-fit: contain; }
-                        pta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.pick-pack(p.id); }
-                        }
+            content-width: tabs.preferred-width;
+            tabs := HorizontalLayout {
+                spacing: 4px;
+                for p in root.packs: Rectangle {
+                    visible: p.installed;
+                    width: p.installed ? 40px : 0px;
+                    height: 40px;
+                    border-radius: 10px;
+                    background: p.id == root.current-pack ? Theme.selected : (pta.has-hover ? Theme.hover : transparent);
+                    Image { width: 32px; height: 32px; source: p.cover; image-fit: contain; }
+                    pta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.pick-pack(p.id); }
                     }
-                    TextButton {
-                        y: 6px;
-                        text: @tr("Add pack");
-                        icon: Icons.plus;
-                        active: root.suggest;
-                        clicked => { root.pick-pack("+"); }
-                    }
+                }
+                TextButton {
+                    y: 6px;
+                    text: @tr("Add pack");
+                    icon: Icons.plus;
+                    active: root.suggest;
+                    clicked => { root.pick-pack("+"); }
                 }
             }
         }
         // sticker grid
-        if !root.suggest: Flickable {
+        if !root.suggest: ScrollView {
             vertical-stretch: 1;
             max-width: 100000px;
             content-height: ceil(root.stickers.length / root.cols) * root.cell;
@@ -105,11 +96,13 @@ export component StickerPanel inherits Rectangle {
             }
         }
         // add packs: Signal's built-in packs + signal.art link
-        if root.suggest: Flickable {
+        if root.suggest: sug-view := ScrollView {
             vertical-stretch: 1;
             max-width: 100000px;
             content-height: sug.preferred-height;
             sug := VerticalLayout {
+                // the Add buttons clear of the scrollbar's thumb
+                width: sug-view.visible-width - 12px;
                 spacing: 4px;
                 Text { text: @tr("Featured sticker packs"); color: Theme.subtle; font-size: 12px; }
                 for p in root.packs: HorizontalLayout {

@@ -1,6 +1,6 @@
 // The image viewer window. Fixed dark look: globals (`Theme`) aren't shared between windows.
 
-import { Notice } from "widgets.slint";
+import { HStrip, Notice } from "widgets.slint";
 import { MediaLabel, VideoMark } from "bubble.slint";
 import { MediaState } from "types.slint";
 import { Icon, Icons } from "icons.slint";
@@ -333,15 +333,9 @@ export component ImageViewer inherits Window {
             visible: self.opacity > 0;
             animate opacity { duration: root.strip-shown ? 100ms : 250ms; }
             // clicks between the thumbnails don't close the window. The wheel over the strip
-            // scrolls it instead of zooming: the horizontal Flickable rejects the wheel and it
-            // bubbles to this parent.
+            // scrolls it instead of zooming (HStrip takes it).
             TouchArea {
-                scroll-event(e) => {
-                    strip.content-x = clamp(strip.content-x + (e.delta-y != 0px ? e.delta-y : e.delta-x),
-                        min(0px, strip.width - strip.content-width), 0px);
-                    accept
-                }
-                strip := Flickable {
+                strip := HStrip {
                     property <int> at: root.current;
                     property <bool> shown: root.strip-shown;
                     function reveal() {

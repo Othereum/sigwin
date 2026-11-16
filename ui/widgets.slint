@@ -178,6 +178,25 @@ export component TextBox inherits TextInput {
     }
 }
 
+// A row that scrolls sideways, with no scrollbar: a tile cut off at the edge shows there's more,
+// and a bar would cover a strip this low. A Flickable that overflows only sideways rejects the
+// wheel, so the event bubbles up to this TouchArea, which moves the row. Vertical overflow wants
+// a scrollbar: use a ScrollView or ListView there, not a bare Flickable.
+export component HStrip inherits TouchArea {
+    in-out property <length> content-x <=> flick.content-x;
+    in-out property <length> content-width <=> flick.content-width;
+    scroll-event(e) => {
+        flick.content-x = clamp(flick.content-x + (e.delta-y != 0px ? e.delta-y : e.delta-x),
+            min(0px, flick.width - flick.content-width), 0px);
+        accept
+    }
+    flick := Flickable {
+        width: parent.width;
+        height: parent.height;
+        @children
+    }
+}
+
 // one-line text field on a grey ground, no border; the accent ring while it has the focus
 // a one-line text field (the search box with `icon: Icons.search`)
 export component Field inherits Rectangle {

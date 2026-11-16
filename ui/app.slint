@@ -1,7 +1,7 @@
 import { ListView, Palette, ScrollView } from "std-widgets.slint";
 import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, BusySpinner, DangerButton, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton, TextBox, TextOps } from "widgets.slint";
+import { Avatar, BusySpinner, DangerButton, HStrip, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton, TextBox, TextOps } from "widgets.slint";
 export { TextOps } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
 import { Bubble, MediaLabel, QuoteBox } from "bubble.slint";
@@ -1149,76 +1149,65 @@ export component AppWindow inherits Window {
                                 background: Theme.pane;
                                 HorizontalLayout {
                                     padding: 6px;
-                    // The wheel only scrolls vertically, which this Flickable can't: the TouchArea
-                    // gets the event the Flickable rejects and turns it into a horizontal move.
-                    TouchArea {
+                    HStrip {
                         horizontal-stretch: 1;
                         height: 120px;
-                        scroll-event(e) => {
-                            files-flick.content-x = clamp(files-flick.content-x + (e.delta-y != 0px ? e.delta-y : e.delta-x),
-                                min(0px, files-flick.width - files-flick.content-width), 0px);
-                            accept
-                        }
-                        files-flick := Flickable {
-                            width: parent.width;
-                            height: parent.height;
-                            content-width: files-row.preferred-width;
-                            files-row := HorizontalLayout {
-                                spacing: 8px;
-                                for f[i] in root.pending-files: Rectangle {
-                                    width: 120px;
-                                    height: 120px;
+                        content-width: files-row.preferred-width;
+                        files-row := HorizontalLayout {
+                            spacing: 8px;
+                            for f[i] in root.pending-files: Rectangle {
+                                width: 120px;
+                                height: 120px;
+                                border-radius: 10px;
+                                clip: true;
+                                background: Theme.hover;
+                                if f.has-thumb: Image {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    source: f.thumb;
+                                    // a still is already this size; a GIF's frame is cut to fill it
+                                    image-fit: cover;
+                                }
+                                if f.gif && !f.playing: MediaLabel {
+                                    text: "GIF";
+                                    x: 6px;
+                                    y: parent.height - self.height - 6px;
+                                }
+                                if f.gif: TouchArea {
+                                    property <bool> hovered: self.has-hover;
+                                    changed hovered => { root.pending-gif-hover(i, self.hovered); }
+                                }
+                                if !f.has-thumb: Text {
+                                    text: f.ext;
+                                    color: Theme.subtle;
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    x: parent.width - self.width - 3px;
+                                    y: 3px;
+                                    width: 20px;
+                                    height: 20px;
                                     border-radius: 10px;
-                                    clip: true;
-                                    background: Theme.hover;
-                                    if f.has-thumb: Image {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        source: f.thumb;
-                                        // a still is already this size; a GIF's frame is cut to fill it
-                                        image-fit: cover;
+                                    background: remove-area.has-hover ? Theme.on-media-hover : Theme.on-media;
+                                    // drawn, not a glyph: the glyph sits off the circle's center
+                                    Path {
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        width: 8px;
+                                        height: 8px;
+                                        viewbox-width: 8;
+                                        viewbox-height: 8;
+                                        commands: "M 0 0 L 8 8 M 8 0 L 0 8";
+                                        stroke: #ffffff;
+                                        stroke-width: 1.5px;
+                                        stroke-line-cap: round;
                                     }
-                                    if f.gif && !f.playing: MediaLabel {
-                                        text: "GIF";
-                                        x: 6px;
-                                        y: parent.height - self.height - 6px;
-                                    }
-                                    if f.gif: TouchArea {
-                                        property <bool> hovered: self.has-hover;
-                                        changed hovered => { root.pending-gif-hover(i, self.hovered); }
-                                    }
-                                    if !f.has-thumb: Text {
-                                        text: f.ext;
-                                        color: Theme.subtle;
-                                        font-size: 12px;
-                                        font-weight: 700;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    Rectangle {
-                                        x: parent.width - self.width - 3px;
-                                        y: 3px;
-                                        width: 20px;
-                                        height: 20px;
-                                        border-radius: 10px;
-                                        background: remove-area.has-hover ? Theme.on-media-hover : Theme.on-media;
-                                        // drawn, not a glyph: the glyph sits off the circle's center
-                                        Path {
-                                            x: (parent.width - self.width) / 2;
-                                            y: (parent.height - self.height) / 2;
-                                            width: 8px;
-                                            height: 8px;
-                                            viewbox-width: 8;
-                                            viewbox-height: 8;
-                                            commands: "M 0 0 L 8 8 M 8 0 L 0 8";
-                                            stroke: #ffffff;
-                                            stroke-width: 1.5px;
-                                            stroke-line-cap: round;
-                                        }
-                                        remove-area := TouchArea {
-                                            mouse-cursor: pointer;
-                                            clicked => { root.remove-attachment(i); }
-                                        }
+                                    remove-area := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.remove-attachment(i); }
                                     }
                                 }
                             }
