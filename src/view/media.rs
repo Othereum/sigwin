@@ -123,6 +123,11 @@ pub fn undownloaded_label(ptr: &AttachmentPointer) -> crate::types::MediaLabel {
     crate::types::MediaLabel { text, undownloaded: true, progress: None }
 }
 
+/// What the picture of a file the server no longer has says: nothing a click could get.
+pub fn gone_label() -> crate::types::MediaLabel {
+    crate::types::MediaLabel { text: tr!("Not available").into(),undownloaded: false, progress: None }
+}
+
 /// What the picture of a file on its way says: `got` bytes of it, and `percent` for its ring.
 /// `got` counts what's on the wire, a little more than the file: it stops at the file's size.
 pub fn downloading_label(ptr: &AttachmentPointer, got: u64, percent: u8) -> crate::types::MediaLabel {

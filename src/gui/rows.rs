@@ -407,7 +407,13 @@ pub(crate) fn to_item(
         file_ext: file.2.into(),
         file_danger: m.file_danger,
         // shared and changed in place, like a picture's: no row is drawn again for a percent
-        file_state: if m.attachment.is_empty() { Default::default() } else { states.model(&types::file_line_key(&m.id)) },
+        file_state: if !m.attachment.is_empty() {
+            states.model(&types::file_line_key(&m.id))
+        } else if m.sticker {
+            states.model(&m.image_key)
+        } else {
+            Default::default()
+        },
         has_image: !m.image_key.is_empty() || !m.cells.is_empty(),
         image: image.unwrap_or_default(),
         frames,

@@ -623,7 +623,7 @@ impl App {
         // rows that left the window let go of what they asked for, so coming back asks again
         if std::mem::take(&mut self.moved) {
             let keep: HashSet<&str> = built
-                .wanted_thumbs
+                .wanted_stickers
                 .iter()
                 .map(|t| t.0.as_str())
                 .chain(built.wanted_cells.iter().map(|c| c.key.as_str()))
@@ -635,9 +635,9 @@ impl App {
         }
         // a stranger's pictures wait for a click until the request is accepted
         let auto = !self.is_request(&key);
-        for (k, ptr, fit) in built.wanted_thumbs {
+        for (k, ptr, pack) in built.wanted_stickers {
             if self.thumbs_requested.borrow_mut().insert(k.clone()) {
-                self.request_thumb(k.clone(), k, ptr, ThumbShape::Fit(fit), auto);
+                self.request_thumb(k.clone(), k, ptr, ThumbShape::Fit(view::media::STICKER_SIZE), auto, pack);
             }
         }
         // newest first: videos take turns, and the newest are the ones on screen
@@ -646,7 +646,7 @@ impl App {
                 if view::media::is_video(&c.ptr) {
                     self.request_video_thumb(c.key, c.file_key, c.ptr, c.size, auto);
                 } else {
-                    self.request_thumb(c.key, c.file_key, c.ptr, ThumbShape::Cover(c.size.0, c.size.1), auto);
+                    self.request_thumb(c.key, c.file_key, c.ptr, ThumbShape::Cover(c.size.0, c.size.1), auto, None);
                 }
             }
         }

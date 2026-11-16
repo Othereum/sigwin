@@ -165,6 +165,12 @@ export component MsgImage inherits Rectangle {
         source: m.frames.length > 0 ? m.frames[m.frame[0]] : m.image;
         image-fit: contain;
     }
+    // only when the server no longer has it: its size while it downloads would be noise on a sticker
+    if m.cells.length == 0 && m.file-state.length > 0 && m.file-state[0].label != "" && !m.file-state[0].undownloaded: MediaLabel {
+        text: m.file-state[0].label;
+        x: 6px;
+        y: parent.height - self.height - 6px;
+    }
     if m.cells.length == 0: TouchArea {
         mouse-cursor: pointer;
         clicked => { root.attachment-clicked(m.id, 0); }

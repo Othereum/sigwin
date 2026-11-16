@@ -15,10 +15,20 @@ pub(super) enum ThumbShape {
 impl App {
     /// `key` is what the UI knows the result by, `file_key` the attachment's files on disk.
     /// Not `auto`: it waits for a click whatever its size (a message request's).
-    pub(super) fn request_thumb(&self, key: String, file_key: String, ptr: AttachmentPointer, shape: ThumbShape, auto: bool) {
+    /// `sticker`: (pack id, sticker id) of a sticker message, taken from the pack when installed.
+    pub(super) fn request_thumb(
+        &self,
+        key: String,
+        file_key: String,
+        ptr: AttachmentPointer,
+        shape: ThumbShape,
+        auto: bool,
+        sticker: Option<(Vec<u8>, u32)>,
+    ) {
         let thumb_path = self.paths.thumbs.join(format!("{file_key}.enc"));
         let orig_path = attachment_path(&self.paths.attachments, &file_key);
         let manager = self.manager.clone();
+        let store = self.store.clone();
         let emit = self.emit.clone();
         let tx = self.tx.clone();
         let gate = self.thumb_gate.clone();
@@ -28,11 +38,15 @@ impl App {
         tokio::task::spawn_local(async move {
             let mut labelled = false;
             if !thumb_path.exists() {
-                if !orig_path.exists() {
+                if !orig_path.exists() && !from_installed_pack(&store, sticker, &orig_path).await {
                     labelled = true;
                     // its blurhash until it is here
                     if let Some(t) = ptr.blur_hash.as_deref().and_then(|b| blur_for(&key, b, &ptr, &shape)) {
                         emit(Event::Thumb(Arc::new(t)));
+                    }
+                    if gone_path(&orig_path).exists() {
+                        emit(Event::MediaLabel { key, label: view::media::gone_label() });
+                        return;
                     }
                     emit(Event::MediaLabel { key: key.clone(), label: view::media::undownloaded_label(&ptr) });
                     if manager.is_none() {
@@ -49,6 +63,8 @@ impl App {
                         Ok(true) => {}
                         // stopped (it has put its label back)
                         Ok(false) => return,
+                        // its label is set: no retry, the server won't have it later either
+                        Err(e) if e.is::<Gone>() => return,
                         Err(e) => {
                             warn!("download attachment: {e:#}");
                             let _ = tx.send(Internal::ThumbFailed(key));
@@ -676,6 +692,9 @@ impl AttachmentDownloads {
         if dest.exists() {
             return Ok(true);
         }
+        if gone_path(dest).exists() {
+            return Err(Gone.into());
+        }
         self.run(file_key, ptr, show, emit, dest).await
     }
 
@@ -714,6 +733,12 @@ impl AttachmentDownloads {
                     Err(e) => Err(anyhow::anyhow!(tr!("Save failed: {}", e))),
                 })
             }
+            Ok(Err(e)) if is_not_found(&e) => {
+                if let Err(e) = std::fs::write(gone_path(dest), []) {
+                    warn!("save gone marker: {e}");
+                }
+                Ok(Err(Gone.into()))
+            }
             Ok(Err(e)) => Ok(Err(e)),
             Err(aborted) => Err(aborted),
         };
@@ -725,7 +750,11 @@ impl AttachmentDownloads {
         // however it ended, what showed its progress stops showing it here, whoever started it:
         // waiting for the caller to clear it left a full ring on cells a different caller got
         // the file for (the viewer)
-        show_now(if matches!(res, Ok(Ok(()))) { Default::default() } else { view::media::undownloaded_label(ptr) });
+        show_now(match &res {
+            Ok(Ok(())) => Default::default(),
+            Ok(Err(e)) if e.is::<Gone>() => view::media::gone_label(),
+            _ => view::media::undownloaded_label(ptr),
+        });
         // unless a new one has started meanwhile, with watchers of its own
         if !self.is_running(file_key) {
             self.watchers.borrow_mut().remove(file_key);
@@ -733,6 +762,7 @@ impl AttachmentDownloads {
         info!(
             result = match &res {
                 Ok(Ok(())) => "done",
+                Ok(Err(e)) if e.is::<Gone>() => "gone",
                 Ok(Err(_)) => "failed",
                 Err(_) => "stopped",
             },
@@ -822,6 +852,7 @@ pub(super) fn remove_files(c: &Content, ts: u64, attachments: &Path, thumbs: &Pa
     keys.extend(dm.preview.iter().filter_map(|p| p.image.as_ref()).map(|a| view::media::attachment_key(a, ts, view::media::LINK_IMAGE_INDEX)));
     for k in keys {
         let _ = std::fs::remove_file(attachment_path(attachments, &k));
+        let _ = std::fs::remove_file(gone_path(&attachment_path(attachments, &k)));
         let _ = std::fs::remove_file(thumbs.join(format!("{k}.enc")));
         let _ = std::fs::remove_file(no_frame_path(thumbs, &k));
         let _ = std::fs::remove_file(length_path(thumbs, &k));
@@ -860,6 +891,33 @@ fn video_length(path: &Path, orig: &Path) -> u32 {
             0
         }
     }
+}
+
+/// The CDN doesn't have the attachment (404): it keeps them only for some weeks, so it never will.
+#[derive(Debug)]
+pub(super) struct Gone;
+
+impl std::fmt::Display for Gone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(tr!("This attachment is no longer available on the server"))
+    }
+}
+
+impl std::error::Error for Gone {}
+
+fn is_not_found(e: &anyhow::Error) -> bool {
+    use presage::libsignal_service::prelude::ServiceError;
+    e.chain().any(|c| match c.downcast_ref::<ServiceError>() {
+        Some(ServiceError::NotFoundError) => true,
+        Some(ServiceError::Http(r)) => r.status().is_some_and(|s| s.as_u16() == 404),
+        _ => false,
+    })
+}
+
+/// Empty file next to where the attachment would be, saying the server no longer has it: without
+/// it every visit to the row asked the CDN again.
+fn gone_path(attachment: &Path) -> PathBuf {
+    attachment.with_extension("gone")
 }
 
 /// Empty file saying a video's frame can't be decoded here, so it isn't tried on every visit.
@@ -979,6 +1037,22 @@ pub(super) fn make_thumb_from(
 
 /// Encrypted copy of a downloaded attachment. The name says nothing about the file: its real
 /// name only appears on the plain copy made to open it (`attachment_name`).
+/// Writes a sticker's bytes from its installed pack to `path`, its attachment file. The attachment
+/// CDN drops files after some weeks (old stickers 404), while an installed pack keeps every
+/// sticker; it also saves the download. Reads the whole pack row, but only once per sticker.
+async fn from_installed_pack(store: &SqliteStore, sticker: Option<(Vec<u8>, u32)>, path: &Path) -> bool {
+    let Some((pack, id)) = sticker else { return false };
+    let Ok(Some(p)) = store.sticker_pack(&pack).await else { return false };
+    let Some(bytes) = p.manifest.stickers.into_iter().find(|s| s.id == id).and_then(|s| s.bytes) else { return false };
+    match sigwin_vault::write(path, &bytes) {
+        Ok(()) => true,
+        Err(e) => {
+            warn!("save sticker from pack: {e}");
+            false
+        }
+    }
+}
+
 pub(super) fn attachment_path(dir: &Path, key: &str) -> PathBuf {
     dir.join(format!("{key}.enc"))
 }

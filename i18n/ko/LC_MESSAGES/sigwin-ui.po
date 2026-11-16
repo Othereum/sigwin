@@ -1034,3 +1034,9 @@ msgstr "언어"
 
 msgid "Applies after Sigwin restarts"
 msgstr "Sigwin을 다시 시작하면 적용됩니다"
+
+msgid "Not available"
+msgstr "받을 수 없음"
+
+msgid "This attachment is no longer available on the server"
+msgstr "서버에 더 이상 남아 있지 않은 첨부 파일입니다"

@@ -163,8 +163,8 @@ pub struct Indexed {
 
 pub struct Built {
     pub items: Vec<MsgDto>,
-    /// image attachments that need a thumbnail: (key, pointer, square box in logical px to fit into, 0 = as is)
-    pub wanted_thumbs: Vec<(String, AttachmentPointer, u32)>,
+    /// stickers that need a thumbnail: (key, attachment, (pack id, sticker id) when the message names them)
+    pub wanted_stickers: Vec<(String, AttachmentPointer, Option<(Vec<u8>, u32)>)>,
     pub wanted_cells: Vec<WantedCell>,
     /// long-text attachments not in `LongTexts::full` yet: (key, pointer)
     pub wanted_texts: Vec<(String, AttachmentPointer)>,
@@ -285,9 +285,9 @@ pub fn build(
                 }
                 m.text = body_text_spans(text_dm, name_of, &mut m.mentions, &mut m.styles);
                 // stickers with image data render as a borderless picture instead of text
-                if let Some(data) = dm.sticker.as_ref().and_then(|s| s.data.as_ref()) {
+                if let Some((s, data)) = dm.sticker.as_ref().and_then(|s| Some((s, s.data.as_ref()?))) {
                     let key = attachment_key(data, *ts, 99);
-                    wanted.push((key.clone(), data.clone(), STICKER_SIZE));
+                    wanted.push((key.clone(), data.clone(), s.pack_id.clone().zip(s.sticker_id)));
                     m.image_key = key;
                     m.img_w = STICKER_SIZE;
                     m.img_h = STICKER_SIZE;
@@ -379,7 +379,7 @@ pub fn build(
         m.readers.retain(|(u, _)| seen.insert(u.clone()));
     }
     // runs (`mark_runs`) are marked by the caller once pins, pending ops and stub rows are in
-    Built { items, wanted_thumbs: wanted, wanted_cells, long_keys, wanted_texts, next_expiry }
+    Built { items, wanted_stickers: wanted,wanted_cells, long_keys, wanted_texts, next_expiry }
 }
 
 /// The quote at the top of a reply: its text, author, target and picture.
@@ -638,7 +638,7 @@ mod tests {
         let m = &b.items[0];
         assert!(m.sticker && m.cells.is_empty());
         assert_eq!((m.img_w, m.img_h), (STICKER_SIZE, STICKER_SIZE));
-        assert_eq!(b.wanted_thumbs[0].0, m.image_key);
+        assert_eq!(b.wanted_stickers[0].0, m.image_key);
     }
 
     #[test]
@@ -665,7 +665,7 @@ mod tests {
         assert_eq!((m.img_w, m.img_h), (400, 225));
         assert_eq!(b.wanted_cells[0].key, m.cells[0].key);
         assert_eq!(b.wanted_cells[0].file_key, attachment_key(&video(1), 5, 0));
-        assert!(b.wanted_thumbs.is_empty());
+        assert!(b.wanted_stickers.is_empty());
 
         // a GIF plays in place, alone or in a grid
         let gif = AttachmentPointer { content_type: Some("image/gif".into()), ..photo(4) };
@@ -703,7 +703,7 @@ mod tests {
         assert_eq!(m.attachment, "2.pdf and 1 more");
         assert_eq!((m.cells.len(), m.img_w, m.img_h), (3, 301, 201));
         assert_eq!(b.wanted_cells.len(), 3);
-        assert!(b.wanted_thumbs.is_empty());
+        assert!(b.wanted_stickers.is_empty());
         assert_eq!(b.wanted_cells[1].file_key, attachment_key(&photo(3), 5, 2));
         // the key tells a cell from the same image shown alone
         assert_ne!(b.wanted_cells[1].key, b.wanted_cells[1].file_key);
@@ -718,7 +718,7 @@ mod tests {
         let b = run(vec![photo(1)]);
         assert_eq!(b.items[0].cells.len(), 1);
         assert_eq!(b.wanted_cells.len(), 1);
-        assert!(b.wanted_thumbs.is_empty());
+        assert!(b.wanted_stickers.is_empty());
     }
 
     #[test]

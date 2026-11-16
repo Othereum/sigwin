@@ -1045,3 +1045,9 @@ msgstr "Sprache"
 
 msgid "Applies after Sigwin restarts"
 msgstr "Gilt nach dem Neustart von Sigwin"
+
+msgid "Not available"
+msgstr "Nicht verfügbar"
+
+msgid "This attachment is no longer available on the server"
+msgstr "Dieser Anhang ist auf dem Server nicht mehr verfügbar"
