@@ -323,8 +323,10 @@ struct Open {
     /// after everything was read (a window key): the list draws a line above it. It stays put
     /// while the user reads on.
     divider: Option<u64>,
-    /// the user has been at the divider's row (read on from it): the jump button goes to the
-    /// bottom then
+    /// the user has been at the divider's row (read on from it, or the list took them there):
+    /// the jump button goes to the bottom then. Not only once reading reports it: that comes
+    /// after the jump lands, and not at all while the window is inactive, so a press before it
+    /// would jump to where the view already is.
     divider_reached: bool,
     /// the thread just got unread messages: the divider goes where the window shows them
     divider_due: bool,

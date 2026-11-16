@@ -126,7 +126,7 @@ impl App {
         // the line goes where the jump lands (the first unread then)
         if let Some(open) = self.current.as_mut() {
             open.divider = Some(row);
-            open.divider_reached = false;
+            open.divider_reached = true;
         }
         // not at the bottom any more, whatever the UI last said
         self.at_bottom = false;
@@ -220,6 +220,7 @@ impl App {
             Some(row) => {
                 if let Some(open) = self.current.as_mut() {
                     open.divider = Some(row);
+                    open.divider_reached = true;
                 }
                 self.at_bottom = false;
                 self.emit_messages(Scroll::Unread).await;

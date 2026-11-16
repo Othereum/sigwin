@@ -298,20 +298,36 @@ fn someone_who_only_sent_receipts_is_not_listed() {
 fn the_button_goes_to_the_first_unread_then_to_the_bottom() {
     scenario(|| async {
         let mut h = Harness::new().await;
-        h.op("seed who=1 n=100 unread=30").await;
+        h.op("seed who=1 n=100").await;
         h.open(1).await;
-        let at = h.query("window", 1);
-        let first: usize = at.split("divider=").nth(1).unwrap().split(' ').next().unwrap().parse().unwrap();
-        let first_id = h.row(first);
+        // scrolled up when news comes in
+        h.cmd(Command::AtBottom(false)).await;
+        h.op("recv who=1 n=10").await;
         h.take_events();
 
         // not been there yet: to the first unread message
         h.cmd(Command::UnreadButton).await;
         let ev = h.take_events();
-        assert_eq!(jump_target(&ev), Some(first_id.as_str()));
+        let first_id = jump_target(&ev).expect("a jump to the first unread").to_string();
+        let len = h.app.current.as_ref().unwrap().window.len();
+        assert_eq!(first_id, h.row(len - 10));
 
-        // reading on from it
-        h.cmd(Command::ReadUpTo(first_id.clone())).await;
+        // there now, even before reading reports it: to the bottom
+        h.cmd(Command::UnreadButton).await;
+        let ev = h.take_events();
+        assert!(jump_target(&ev).is_none());
+        assert_eq!(last_list(&ev).map(|l| l.1), Some(Scroll::Bottom));
+    });
+}
+
+/// The thread opens at its first unread message, so the button goes on to the bottom at once,
+/// though the list hasn't reported anything read yet (still landing, or the window inactive).
+#[test]
+fn the_button_after_opening_at_unread_goes_to_the_bottom() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=100 unread=30").await;
+        h.open(1).await;
         h.take_events();
         h.cmd(Command::UnreadButton).await;
         let ev = h.take_events();
