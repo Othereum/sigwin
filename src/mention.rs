@@ -7,9 +7,6 @@ use presage::proto::BodyRange;
 /// A member that can be mentioned: (ACI uuid, display name).
 pub type Member = (String, String);
 
-/// Max rows in the mention popup.
-pub const MAX_ROWS: usize = 6;
-
 /// The "@query" ending at `cursor` (byte offset): the byte offset of the '@' and the query.
 /// The '@' must start the text or follow whitespace, and the query has no whitespace.
 pub fn query_at(text: &str, cursor: usize) -> Option<(usize, &str)> {
@@ -33,7 +30,7 @@ pub fn filter<'a>(members: &'a [Member], query: &str) -> Vec<&'a Member> {
         .filter_map(|m| crate::hangul::find(&m.1, query).map(|at| (at != 0, m)))
         .collect();
     hits.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1 .1.cmp(&b.1 .1)));
-    hits.into_iter().map(|(_, m)| m).take(MAX_ROWS).collect()
+    hits.into_iter().map(|(_, m)| m).collect()
 }
 
 /// Strips the style markers (`format::parse`) into style body ranges, and replaces each "@name"

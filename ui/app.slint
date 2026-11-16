@@ -1515,20 +1515,33 @@ export component AppWindow inherits Window {
 
     // @mention popup, just above the composer
     if root.mention-items.length > 0: Rectangle {
+        property <length> row-h: 36px;
+        // a half row past six hints that the list scrolls
+        property <length> list-h: min(root.mention-items.length * row-h, 6.5 * row-h);
+        property <int> sel: root.mention-sel;
+        property <[MentionItem]> items: root.mention-items;
+        // keep the keyboard selection in view
+        changed sel => {
+            mention-list.content-y = min(max(mention-list.content-y, -sel * row-h), mention-list.visible-height - (sel + 1) * row-h);
+        }
+        changed items => { mention-list.content-y = 0px; }
         x: composer.absolute-position.x - 8px;
         y: composer-bar.absolute-position.y - self.height - 4px;
         width: 240px;
-        height: mention-col.preferred-height;
+        height: list-h + 8px;
         border-radius: 10px;
         background: Theme.pane;
         border-width: 1px;
         border-color: Theme.border;
         drop-shadow-blur: 12px;
         drop-shadow-color: Theme.shadow;
-        mention-col := VerticalLayout {
-            padding: 4px;
+        mention-list := ListView {
+            x: 4px;
+            y: 4px;
+            width: parent.width - 8px;
+            height: list-h;
             for item[i] in root.mention-items: Rectangle {
-                height: 36px;
+                height: row-h;
                 border-radius: 6px;
                 background: i == root.mention-sel ? Theme.selected : mta.has-hover ? Theme.hover : transparent;
                 mta := TouchArea {
