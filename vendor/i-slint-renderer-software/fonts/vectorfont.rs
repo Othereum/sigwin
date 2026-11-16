@@ -1,19 +1,21 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
+// cspell:ignore COLR CBDT sbix
+
 use core::num::NonZeroU16;
 
-use alloc::rc::Rc;
 use alloc::vec::Vec;
 use skrifa::MetadataProvider;
 
-use crate::PhysicalLength;
 use crate::fixed::Fixed;
+use crate::{PhysicalLength, TextLength};
 use i_slint_common::sharedfontique::fontique;
+use i_slint_core::graphics::{Rgba8Pixel, SharedPixelBuffer};
 use i_slint_core::lengths::PhysicalPx;
 use i_slint_core::textlayout::{Glyph, TextShaper};
 
-use super::RenderableVectorGlyph;
+use super::{RenderableVectorGlyph, VectorGlyphPixels};
 
 // A length in font design space.
 struct FontUnit;
@@ -28,9 +30,27 @@ type FontScaleFactor = euclid::Scale<f32, FontUnit, PhysicalPx>;
 /// UI text sizes while keeping the glyph cache small.
 pub(crate) const SUBPIXEL_BIN_COUNT: i32 = 4;
 
-/// Cache key includes blob id, font index, pixel size, glyph id, a hash of normalized
-/// variation coordinates (so different variable font instances produce distinct cache
-/// entries) and the horizontal sub-pixel bin.
+/// Steps per physical pixel that a glyph stroke width is quantized to.
+/// Quantizing keeps an animated `stroke-width` from filling the glyph cache with
+/// one entry per frame.
+const STROKE_WIDTH_STEPS_PER_PIXEL: f32 = 8.;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct StrokeWidth(NonZeroU16);
+
+impl StrokeWidth {
+    /// Rounds `physical_width` to the nearest step. Zero, negative, and `NaN` widths become
+    /// the smallest step.
+    pub fn from_physical(physical_width: f32) -> Self {
+        let steps = (physical_width * STROKE_WIDTH_STEPS_PER_PIXEL).round() as u16;
+        Self(NonZeroU16::new(steps).unwrap_or(NonZeroU16::MIN))
+    }
+
+    fn to_physical(self) -> f32 {
+        self.0.get() as f32 / STROKE_WIDTH_STEPS_PER_PIXEL
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct GlyphCacheKey {
     /// Font blob id.
@@ -45,16 +65,21 @@ struct GlyphCacheKey {
     coords_hash: u64,
     /// Horizontal sub-pixel bin.
     subpixel_bin: u8,
-    /// sigwin patch: synthetic italic skew (degrees, f32 bits)
-    skew_bits: u32,
+    /// Faux-italic skew angle in degrees, bit-cast for `Eq`/`Hash`; `None` when the font has
+    /// (or doesn't need) a real italic/oblique face.
+    skew_bits: Option<u32>,
+    /// Outline stroke width; `None` for a filled glyph.
+    stroke_width: Option<StrokeWidth>,
+    /// Whether a color glyph was asked for, where the font has one, and for a font with color
+    /// layers the text's color, which layers drawn in the text's color use (`[0; 3]` otherwise).
+    color: Option<[u8; 3]>,
 }
 
 struct RenderableGlyphWeightScale;
 
 impl clru::WeightScale<GlyphCacheKey, RenderableVectorGlyph> for RenderableGlyphWeightScale {
     fn weight(&self, _: &GlyphCacheKey, value: &RenderableVectorGlyph) -> usize {
-        value.alpha_map.len()
-            + value.color.as_ref().map_or(0, |c| (c.width() * c.height() * 4) as usize)
+        value.byte_size()
     }
 }
 
@@ -79,18 +104,20 @@ pub struct VectorFont {
     font_blob: fontique::Blob<u8>,
     swash_key: swash::CacheKey,
     swash_offset: u32,
-    ascender: PhysicalLength,
-    descender: PhysicalLength,
-    height: PhysicalLength,
+    ascender: TextLength,
+    descender: TextLength,
+    height: TextLength,
     pixel_size: PhysicalLength,
-    x_height: PhysicalLength,
-    cap_height: PhysicalLength,
+    x_height: TextLength,
+    cap_height: TextLength,
     /// Normalized variation coordinates (F2Dot14, fvar axis order) for variable font rendering.
     normalized_coords: Vec<i16>,
     /// Hash of normalized_coords for use in the glyph cache key.
     coords_hash: u64,
-    /// sigwin patch: synthetic italic skew in degrees (0 = upright)
-    skew: f32,
+    /// Faux-italic/faux-bold hints from fontique, applied at render time via
+    /// [`with_synthesis`](Self::with_synthesis). Left at the default (no-op) for instances used
+    /// only for shaping and metrics, where synthesis is irrelevant.
+    synthesis: fontique::Synthesis,
 }
 
 fn hash_coords(coords: &[i16]) -> u64 {
@@ -174,24 +201,43 @@ impl VectorFont {
             cap_height: (cap_height.cast() * scale).cast(),
             normalized_coords: normalized_coords.to_vec(),
             coords_hash,
-            skew: 0.0,
+            synthesis: fontique::Synthesis::default(),
         }
     }
 
-    /// sigwin patch: slants the glyphs (fontique's synthesis for an italic the font lacks).
-    pub fn with_skew(mut self, degrees: f32) -> Self {
-        self.skew = degrees;
+    /// Attaches fontique's synthesis suggestions (currently only faux-italic skew is applied,
+    /// see [`render_vector_glyph`](Self::render_vector_glyph)) to use when rasterizing glyphs.
+    /// Only meaningful for a font instance used to render (as opposed to shape) text, since
+    /// synthesis changes the glyph outline, not its advance width.
+    pub fn with_synthesis(mut self, synthesis: fontique::Synthesis) -> Self {
+        self.synthesis = synthesis;
         self
     }
 
+    /// Renders a glyph. With `color` (the text's red, green and blue), a glyph the font draws in
+    /// color (an emoji's layers or bitmap) comes back as [`VectorGlyphPixels::Color`], its layers
+    /// that use the text's color drawn in `color`; otherwise, and for a stroke, it's the
+    /// outline's coverage.
     pub fn render_vector_glyph(
         &self,
         glyph_id: core::num::NonZeroU16,
         subpixel_bin: u8,
+        stroke_width: Option<StrokeWidth>,
+        color: Option<[u8; 3]>,
         slint_context: &i_slint_core::SlintContext,
     ) -> Option<RenderableVectorGlyph> {
         GLYPH_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
+
+            let skew_degrees = self.synthesis.skew();
+            // A stroke is drawn from the outline, so color makes no difference to it. Only color
+            // layers (a `COLR` table) can use the text's color: other glyphs keep one cache entry
+            // whatever the text's color is.
+            let color = color.filter(|_| stroke_width.is_none()).map(|rgb| {
+                let has_layers =
+                    self.swash_font_ref().table(swash::tag_from_bytes(b"COLR")).is_some();
+                if has_layers { rgb } else { [0; 3] }
+            });
 
             let cache_key = GlyphCacheKey {
                 font_blob_id: self.font_blob.id(),
@@ -200,7 +246,9 @@ impl VectorFont {
                 glyph_id,
                 coords_hash: self.coords_hash,
                 subpixel_bin,
-                skew_bits: self.skew.to_bits(),
+                skew_bits: skew_degrees.map(f32::to_bits),
+                stroke_width,
+                color,
             };
 
             if let Some(entry) = cache.get(&cache_key) {
@@ -219,36 +267,73 @@ impl VectorFont {
                     // sigwin patch: optional TrueType hinting (crisper small text)
                     .hint(text_tuning().hint)
                     .build();
-                // sigwin patch: try color outlines (COLR v0, e.g. Segoe UI Emoji) first
-                let image = swash::scale::Render::new(&[
-                    swash::scale::Source::ColorOutline(0),
-                    swash::scale::Source::Outline,
-                ])
-                .format(swash::zeno::Format::Alpha)
-                .offset(swash::zeno::Vector::new(subpixel_offset_x, 0.0))
-                // sigwin patch: synthetic italic
-                .transform((self.skew != 0.0).then(|| {
+                // Faux italic, for fonts fontique picked as the closest match to an `italic`
+                // request but that carry neither a true italic face nor an `ital`/`slnt`
+                // variation axis (common for CJK fonts, see issue #10178). This transform runs
+                // in the outline's own font-design space (Y-up: ascenders have larger Y), not
+                // device pixels, so the sign that leans glyphs forward here is the opposite of
+                // the device-space renderers -- verified by rendering both ways and comparing
+                // which one actually leans right, not derived from a convention doc alone.
+                let transform = skew_degrees.map(|degrees| {
                     swash::zeno::Transform::skew(
-                        swash::zeno::Angle::from_degrees(self.skew),
+                        swash::zeno::Angle::from_degrees(degrees),
                         swash::zeno::Angle::ZERO,
                     )
-                }))
-                .render(&mut scaler, glyph_id.get())?;
+                });
+                // Color first: the layers of a `COLR` font (version 0), then the bitmaps of a
+                // `CBDT` or `sbix` font, scaled to the pixel size. A font without either, and a
+                // stroke, gives the outline.
+                use swash::scale::{Source, StrikeWith};
+                let sources: &[Source] = if color.is_some() {
+                    &[
+                        Source::ColorOutline(0),
+                        Source::ColorBitmap(StrikeWith::BestFit),
+                        Source::Outline,
+                    ]
+                } else {
+                    &[Source::Outline]
+                };
+                let mut render = swash::scale::Render::new(sources);
+                render
+                    .format(swash::zeno::Format::Alpha)
+                    .offset(swash::zeno::Vector::new(subpixel_offset_x, 0.0))
+                    .transform(transform);
+                if let Some([r, g, b]) = color {
+                    // Opaque: the text's alpha applies when the glyph is drawn.
+                    render.default_color([r, g, b, 255]);
+                }
+                if let Some(stroke_width) = stroke_width {
+                    let mut stroke = swash::zeno::Stroke::new(stroke_width.to_physical());
+                    // Matches the Skia and FemtoVG text stroke.
+                    stroke
+                        .join(swash::zeno::Join::Miter)
+                        .miter_limit(10.)
+                        .cap(swash::zeno::Cap::Butt);
+                    render.style(stroke);
+                }
+                let image = render.render(&mut scaler, glyph_id.get())?;
 
                 let placement = image.placement;
-                let (alpha_map, color): (Rc<[u8]>, _) =
-                    if image.content == swash::scale::image::Content::Color {
-                        // swash composites layers "over" a transparent base: premultiplied RGBA
-                        let buf = i_slint_core::graphics::SharedPixelBuffer::<
-                            i_slint_core::graphics::Rgba8Pixel,
-                        >::clone_from_slice(
-                            &image.data, placement.width, placement.height
+                let pixels = match image.content {
+                    swash::scale::image::Content::Color => {
+                        let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                            &image.data,
+                            placement.width,
+                            placement.height,
                         );
-                        (
-                            Rc::from(&[][..]),
-                            Some(i_slint_core::graphics::SharedImageBuffer::RGBA8Premultiplied(buf)),
-                        )
-                    } else {
+                        // Layers come composited over transparent, so premultiplied; bitmaps
+                        // are decoded from PNG with straight alpha.
+                        if matches!(image.source, Source::ColorBitmap(_)) {
+                            for pixel in buffer.make_mut_slice() {
+                                let alpha = pixel.a as u16;
+                                pixel.r = ((pixel.r as u16 * alpha + 127) / 255) as u8;
+                                pixel.g = ((pixel.g as u16 * alpha + 127) / 255) as u8;
+                                pixel.b = ((pixel.b as u16 * alpha + 127) / 255) as u8;
+                            }
+                        }
+                        VectorGlyphPixels::Color(buffer)
+                    }
+                    _ => {
                         let mut data = image.data;
                         // sigwin patch: DirectWrite-style enhanced contrast on coverage
                         if let Some(lut) = &text_tuning().contrast_lut {
@@ -256,18 +341,18 @@ impl VectorFont {
                                 *a = lut[*a as usize];
                             }
                         }
-                        (data.into(), None)
-                    };
+                        VectorGlyphPixels::AlphaMap(data.into())
+                    }
+                };
 
                 Some(RenderableVectorGlyph {
                     x: Fixed::from_integer(placement.left),
                     y: Fixed::from_integer(placement.top - placement.height as i32),
                     width: PhysicalLength::new(placement.width.try_into().unwrap()),
                     height: PhysicalLength::new(placement.height.try_into().unwrap()),
-                    alpha_map,
+                    pixels,
                     pixel_stride: placement.width.try_into().unwrap(),
                     glyph_origin_x: placement.left as f32,
-                    color,
                 })
             };
 
@@ -280,9 +365,9 @@ impl VectorFont {
 }
 
 impl TextShaper for VectorFont {
-    type LengthPrimitive = i16;
-    type Length = PhysicalLength;
-    fn shape_text<GlyphStorage: core::iter::Extend<Glyph<PhysicalLength>>>(
+    type LengthPrimitive = i32;
+    type Length = TextLength;
+    fn shape_text<GlyphStorage: core::iter::Extend<Glyph<TextLength>>>(
         &self,
         text: &str,
         glyphs: &mut GlyphStorage,
@@ -296,20 +381,20 @@ impl TextShaper for VectorFont {
         glyphs.extend(text.char_indices().map(|(byte_offset, char)| {
             let glyph_id = NonZeroU16::try_from(charmap.map(char)).ok();
             let x_advance = glyph_id.map_or_else(
-                || self.pixel_size.get(),
+                || self.pixel_size.get().into(),
                 |id| (gm.advance_width(id.get()) * scale) as _,
             );
 
             Glyph {
                 glyph_id,
-                advance: PhysicalLength::new(x_advance),
+                advance: TextLength::new(x_advance),
                 text_byte_offset: byte_offset,
                 ..Default::default()
             }
         }));
     }
 
-    fn glyph_for_char(&self, ch: char) -> Option<Glyph<PhysicalLength>> {
+    fn glyph_for_char(&self, ch: char) -> Option<Glyph<TextLength>> {
         let font_ref = self.swash_font_ref();
         let charmap = font_ref.charmap();
         let gm = font_ref.glyph_metrics(&[]);
@@ -318,30 +403,30 @@ impl TextShaper for VectorFont {
 
         NonZeroU16::try_from(charmap.map(ch)).ok().map(|glyph_id| Glyph {
             glyph_id: Some(glyph_id),
-            advance: PhysicalLength::new((gm.advance_width(glyph_id.get()) * scale) as _),
+            advance: TextLength::new((gm.advance_width(glyph_id.get()) * scale) as _),
             ..Default::default()
         })
     }
 }
 
-impl i_slint_core::textlayout::FontMetrics<PhysicalLength> for VectorFont {
-    fn ascent(&self) -> PhysicalLength {
+impl i_slint_core::textlayout::FontMetrics<TextLength> for VectorFont {
+    fn ascent(&self) -> TextLength {
         self.ascender
     }
 
-    fn height(&self) -> PhysicalLength {
+    fn height(&self) -> TextLength {
         self.height
     }
 
-    fn descent(&self) -> PhysicalLength {
+    fn descent(&self) -> TextLength {
         self.descender
     }
 
-    fn x_height(&self) -> PhysicalLength {
+    fn x_height(&self) -> TextLength {
         self.x_height
     }
 
-    fn cap_height(&self) -> PhysicalLength {
+    fn cap_height(&self) -> TextLength {
         self.cap_height
     }
 }
@@ -352,14 +437,18 @@ impl super::GlyphRenderer for VectorFont {
         glyph_id: core::num::NonZeroU16,
         slint_context: &i_slint_core::SlintContext,
     ) -> Option<super::RenderableGlyph> {
-        self.render_vector_glyph(glyph_id, 0, slint_context).map(|glyph| super::RenderableGlyph {
-            x: glyph.x,
-            y: glyph.y,
-            width: glyph.width,
-            height: glyph.height,
-            alpha_map: glyph.alpha_map.into(),
-            pixel_stride: glyph.pixel_stride,
-            sdf: false,
+        // A coverage map, like the bitmap fonts' glyphs this path also draws.
+        self.render_vector_glyph(glyph_id, 0, None, None, slint_context).and_then(|glyph| {
+            let VectorGlyphPixels::AlphaMap(alpha_map) = glyph.pixels else { return None };
+            Some(super::RenderableGlyph {
+                x: glyph.x,
+                y: glyph.y,
+                width: glyph.width,
+                height: glyph.height,
+                alpha_map: alpha_map.into(),
+                pixel_stride: glyph.pixel_stride,
+                sdf: false,
+            })
         })
     }
 

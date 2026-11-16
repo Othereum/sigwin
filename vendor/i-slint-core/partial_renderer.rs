@@ -23,7 +23,9 @@ use crate::item_rendering::{
 use crate::item_tree::{ItemTreeRc, ItemTreeWeak, ItemVisitorResult};
 #[cfg(feature = "path")]
 use crate::items::Path;
-use crate::items::{BoxShadow, Clip, ItemRc, ItemRef, Layer, Opacity, RenderingResult, TextInput};
+use crate::items::{
+    BackdropBlur, BoxShadow, Clip, ItemRc, ItemRef, Layer, Opacity, RenderingResult, TextInput,
+};
 use crate::lengths::{
     ItemTransform, LogicalBorderRadius, LogicalPoint, LogicalPx, LogicalRect, LogicalSize,
     LogicalVector, ScaleFactor,
@@ -331,14 +333,7 @@ impl DirtyRegion {
     /// Bounding rectangle of the region.
     #[must_use]
     pub fn bounding_rect(&self) -> LogicalRect {
-        if self.count == 0 {
-            return Default::default();
-        }
-        let mut r = self.rectangles[0];
-        for i in 1..self.count {
-            r = r.union(&self.rectangles[i]);
-        }
-        r.to_rect()
+        self.iter().reduce(|a, b| a.union(&b)).map(|r| r.to_rect()).unwrap_or_default()
     }
 
     /// Intersection of a region and a rectangle.
@@ -400,6 +395,11 @@ fn clipped_screen_rect(
     transform: &ItemTransform,
     clip_rect: &LogicalRect,
 ) -> Option<LogicalRect> {
+    screen_rect(rect, transform)?.intersection(clip_rect)
+}
+
+/// Map `rect` (relative to its parent) to screen space through `transform`.
+fn screen_rect(rect: &LogicalRect, transform: &ItemTransform) -> Option<LogicalRect> {
     #[cfg(not(slint_int_coord))]
     if !rect.origin.is_finite() {
         // Account for NaN
@@ -418,7 +418,7 @@ fn clipped_screen_rect(
         } else {
             transform.outer_transformed_rect(&rect)
         };
-    transformed.cast().intersection(clip_rect)
+    Some(transformed.cast())
 }
 
 /// Put this structure in the renderer to help with partial rendering
@@ -432,6 +432,9 @@ pub struct PartialRenderer<'a, T> {
     pub actual_renderer: T,
     /// The window adapter the renderer is rendering into.
     pub window_adapter: Rc<dyn WindowAdapter>,
+    /// What each `BackdropBlur` item reads, including the parts outside of its clip,
+    /// see [`Self::expand_to_backdrop_blurs`].
+    backdrop_blurs: alloc::vec::Vec<LogicalRect>,
 }
 
 impl<'a, T: ItemRenderer + ItemRendererFeatures> PartialRenderer<'a, T> {
@@ -442,7 +445,13 @@ impl<'a, T: ItemRenderer + ItemRendererFeatures> PartialRenderer<'a, T> {
         actual_renderer: T,
     ) -> Self {
         let window_adapter = actual_renderer.window().window_adapter();
-        Self { cache, dirty_region: initial_dirty_region, actual_renderer, window_adapter }
+        Self {
+            cache,
+            dirty_region: initial_dirty_region,
+            actual_renderer,
+            window_adapter,
+            backdrop_blurs: Default::default(),
+        }
     }
 
     /// Visit the tree of item and compute what are the dirty regions
@@ -538,6 +547,14 @@ impl<'a, T: ItemRenderer + ItemRendererFeatures> PartialRenderer<'a, T> {
                 if !new_screen_rect.is_empty() {
                     let acc = cache.tree_screen_rects.entry(tree_key).or_default();
                     *acc = acc.union(&new_screen_rect);
+                }
+                if T::SUPPORTS_BACKDROP_BLUR
+                    && !new_screen_rect.is_empty()
+                    && ItemRef::downcast_pin::<BackdropBlur>(item).is_some()
+                    && let Some(sampled) =
+                        screen_rect(new_geom.bounding_rect(), &state.transform_to_screen)
+                {
+                    self.backdrop_blurs.push(sampled);
                 }
 
                 match rendering_data.get_entry(&mut cache) {
@@ -699,6 +716,17 @@ impl<'a, T: ItemRenderer + ItemRendererFeatures> PartialRenderer<'a, T> {
         );
     }
 
+    /// Adds everything that each backdrop blur reading from `region` reads,
+    /// because a blur changes as a whole when anything beneath it changes,
+    /// and it must read the same freshly drawn pixels as in a full redraw.
+    fn expand_to_backdrop_blurs(&self, mut region: DirtyRegion) -> DirtyRegion {
+        let mut blurs = self.backdrop_blurs.clone();
+        while let Some(index) = blurs.iter().position(|sampled| region.draw_intersects(*sampled)) {
+            region.add_rect(blurs.swap_remove(index));
+        }
+        region
+    }
+
     fn mark_dirty_rect(
         &mut self,
         rect: &LogicalRect,
@@ -817,6 +845,7 @@ impl<T: ItemRenderer + ItemRendererFeatures> ItemRenderer for PartialRenderer<'_
     #[cfg(feature = "path")]
     forward_rendering_call!(fn draw_path(Path));
     forward_rendering_call!(fn draw_box_shadow(BoxShadow));
+    forward_rendering_call!(fn draw_backdrop_blur(BackdropBlur));
 
     forward_rendering_call!(fn visit_clip(Clip) -> RenderingResult);
     forward_rendering_call!(fn visit_opacity(Opacity) -> RenderingResult);
@@ -941,11 +970,14 @@ impl PartialRenderingState {
             partial_renderer.dirty_region = screen_region.into();
         }
 
-        let region_to_repaint = partial_renderer.dirty_region.clone();
+        let region_to_repaint =
+            partial_renderer.expand_to_backdrop_blurs(partial_renderer.dirty_region.clone());
 
         partial_renderer.dirty_region = match dirty_region_of_existing_buffer {
-            Some(dirty_region) => partial_renderer.dirty_region.union(&dirty_region),
-            None => partial_renderer.dirty_region.clone(),
+            Some(dirty_region) => {
+                partial_renderer.expand_to_backdrop_blurs(region_to_repaint.union(&dirty_region))
+            }
+            None => region_to_repaint.clone(),
         }
         .intersection(screen_region);
 

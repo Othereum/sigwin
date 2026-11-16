@@ -13,7 +13,7 @@ The target is idle private memory (30MB), not a fixed peak. A peak cap counts on
 GPU renderers load the graphics driver into the process (nvoglv64, d3d12): they blow the memory target by themselves, and they are not cheaper on CPU either. Only compiling the GPU renderers in, even when running software, already costs ~54MB private. The `renderer-femtovg` / `renderer-skia` cargo features exist only for re-measuring (`SLINT_BACKEND=winit-skia`); never enable them by default.
 
 ## Color emoji: DirectWrite path removed
-A DirectWrite path (3D COLRv1 style) was tried and removed. In-process it kept ~20MB of font caches (+18MB for 16 emoji, only 6MB returned on drop), it needed a child process plus a PNG cache, and it mixed two emoji styles on screen. Now emoji are plain text drawn by the patched software renderer in one flat style.
+A DirectWrite path (3D COLRv1 style) was tried and removed. In-process it kept ~20MB of font caches (+18MB for 16 emoji, only 6MB returned on drop), it needed a child process plus a PNG cache, and it mixed two emoji styles on screen. Now emoji are plain text drawn by the software renderer (COLR v0, Slint 1.19 and later) in one flat style.
 
 ## Image viewer resampling (measured 2026-11-06, synthetic JPEG, 16 threads)
 `fast_image_resize` (integer SIMD, single thread) over `image`:

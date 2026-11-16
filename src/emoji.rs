@@ -1,5 +1,5 @@
-//! Emoji helpers. Color emoji themselves are drawn by the patched software renderer
-//! (vendor/i-slint-renderer-software, COLR v0), so emoji are just text everywhere.
+//! Emoji helpers. Color emoji themselves are drawn by Slint's software renderer (COLR v0
+//! layers of Segoe UI Emoji), so emoji are just text everywhere.
 
 /// Whether a grapheme cluster is an emoji.
 pub fn is_emoji(cluster: &str) -> bool {

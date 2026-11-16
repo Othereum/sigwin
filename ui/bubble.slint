@@ -809,7 +809,7 @@ export component Bubble inherits VerticalLayout {
                                 wrap: word-wrap;
                                 color: m.has-rich ? transparent : m.deleted ? Theme.subtle : (m.outgoing && !m.sticker && !m.big-emoji && !m.deleted ? white : Theme.text);
                                 font-italic: m.deleted;
-                                // emoji-only messages are shown large (color comes from the patched renderer)
+                                // emoji-only messages are shown large
                                 font-size: m.big-emoji ? 40px : 14px;
                                 selection-background-color: m.outgoing ? #ffffff60 : #2c6bed60;
                                 selection-foreground-color: m.has-rich ? transparent : m.outgoing ? white : Theme.text;

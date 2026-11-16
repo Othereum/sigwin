@@ -13,7 +13,7 @@ paths:
 # Slint gotchas
 
 - **Missing glyphs render as blank. There is no per-glyph font fallback.** Malgun Gothic (UI font) lacks `✓ ✕ ➤`. So icons are never font glyphs (no symbol characters, no Segoe UI Symbol / MDL2 Assets): draw them with `Icon` and a path from `Icons` in `ui/icons.slint`, adding one there if it's missing. Check every new icon in a screenshot. How the UI looks (tokens, sizes, components): `docs/design.md`.
-- **Color emoji are plain text everywhere** (reactions, emoji-only messages at 40px, inline): the patched renderer draws them in one consistent flat style. Don't add a separate emoji path (see `docs/decisions.md`). Windows has no flag emoji (🇰🇷 renders as "KR").
+- **Color emoji are plain text everywhere** (reactions, emoji-only messages at 40px, inline): the software renderer draws them in one consistent flat style (COLR v0). Don't add a separate emoji path (see `docs/decisions.md`). Windows has no flag emoji (🇰🇷 renders as "KR").
 - Text styles, links and spoilers depend on the vendored core patch (`gui::rows::to_item` registers styled text, `gui::rows::rich_text` builds link spans). Details in `vendor/PATCHES.md`.
 - Don't use `EmbedResourcesKind::EmbedForSoftwareRenderer`: it bakes only glyphs that appear in `.slint` files, so runtime Korean text loses characters.
 - A `Flickable`'s max size defaults to its content size and propagates up through layouts, which can shrink the window. Set `max-width: 100000px` on Flickables inside layouts.

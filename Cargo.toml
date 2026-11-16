@@ -9,7 +9,7 @@ description = "A lightweight Signal-compatible desktop client (unofficial)"
 presage = { git = "https://github.com/whisperfish/presage", rev = "4b81740610c301cbd54d95f4dbd4cadd692af95e" }
 presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "4b81740610c301cbd54d95f4dbd4cadd692af95e", features = ["cdsi"] }
 
-slint = { version = "1.18.1", default-features = false, features = [
+slint = { version = "1.19.0", default-features = false, features = [
     "std",
     "compat-1-2",
     "backend-winit",
@@ -19,7 +19,7 @@ slint = { version = "1.18.1", default-features = false, features = [
     "unstable-winit-030",
 ] }
 # patched (see [patch.crates-io]): text styles API `styled_text::sigwin_*`
-i-slint-core = { version = "=1.18.1", default-features = false }
+i-slint-core = { version = "=1.19.0", default-features = false }
 raw-window-handle = "0.6"
 
 anyhow = "1"
@@ -103,7 +103,7 @@ strip = true
 panic = "abort"
 
 [patch.crates-io]
-# color emoji (COLR v0) in the software renderer: see vendor/i-slint-renderer-software, "sigwin patch"
+# glyph hinting and contrast in the software renderer: see vendor/i-slint-renderer-software, "sigwin patch"
 i-slint-renderer-software = { path = "vendor/i-slint-renderer-software" }
 # StyledText passes non-link mouse events through (clickable links over a selectable TextInput): see vendor/i-slint-core, "sigwin patch"
 i-slint-core = { path = "vendor/i-slint-core" }

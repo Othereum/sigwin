@@ -11,9 +11,9 @@
 
 [package]
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.95"
 name = "i-slint-renderer-software"
-version = "1.18.1"
+version = "1.19.0"
 authors = ["Slint Developers <info@slint.dev>"]
 build = false
 autolib = false
@@ -21,9 +21,22 @@ autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "Slint's Software renderer implementation"
+description = "Software renderer of Slint, for embedded GUIs on microcontrollers such as STM32, ESP32, and RP2040, and on devices without a GPU"
 homepage = "https://slint.dev"
 readme = "README.md"
+keywords = [
+    "gui",
+    "ui",
+    "mcu",
+    "esp32",
+    "stm32",
+]
+categories = [
+    "gui",
+    "embedded",
+    "no-std",
+    "rendering",
+]
 license = "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0"
 repository = "https://github.com/slint-ui/slint"
 
@@ -34,6 +47,8 @@ features = ["experimental"]
 [features]
 default = ["std"]
 experimental = []
+image-pixel-format-gray8 = ["i-slint-core/image-pixel-format-gray8"]
+image-pixel-format-rgb565 = ["i-slint-core/image-pixel-format-rgb565"]
 libm = [
     "zeno?/libm",
     "num-traits/libm",
@@ -41,6 +56,7 @@ libm = [
     "i-slint-core/libm",
     "swash?/libm",
 ]
+owned-pre-rendered-resources = ["i-slint-core/owned-pre-rendered-resources"]
 path = [
     "dep:zeno",
     "dep:lyon_path",
@@ -100,11 +116,11 @@ version = "0.22.1"
 default-features = false
 
 [dependencies.i-slint-common]
-version = "=1.18.1"
+version = "=1.19.0"
 default-features = false
 
 [dependencies.i-slint-core]
-version = "=1.18.1"
+version = "=1.19.0"
 default-features = false
 
 [dependencies.lyon_path]

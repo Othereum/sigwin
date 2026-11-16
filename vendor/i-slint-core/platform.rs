@@ -82,8 +82,7 @@ pub trait Platform {
     /// This is being phased out, see #1499.
     fn set_event_loop_quit_on_last_window_closed(&self, quit_on_last_window_closed: bool) {
         assert!(!quit_on_last_window_closed);
-        crate::context::GLOBAL_CONTEXT
-            .with(|ctx| (*ctx.get().unwrap().0.window_count.borrow_mut()) += 1);
+        crate::context::GLOBAL_CONTEXT.with(|ctx| ctx.get().unwrap().keep_alive_forever());
     }
 
     /// Return an [`EventLoopProxy`] that can be used to send event to the event loop
@@ -110,9 +109,7 @@ pub trait Platform {
         #[cfg(feature = "std")]
         {
             let the_beginning = *INITIAL_INSTANT.get_or_init(time::Instant::now);
-            let now = time::Instant::now();
-            assert!(now >= the_beginning, "The platform's clock is not monotonic!");
-            now - the_beginning
+            time::Instant::now().saturating_duration_since(the_beginning)
         }
         #[cfg(not(feature = "std"))]
         unimplemented!("The platform abstraction must implement `duration_since_start`")
@@ -122,8 +119,7 @@ pub trait Platform {
     ///
     /// A double click event is a series of two pointer clicks.
     fn click_interval(&self) -> core::time::Duration {
-        // 500ms is the default delay according to https://en.wikipedia.org/wiki/Double-click#Speed_and_timing
-        core::time::Duration::from_millis(500)
+        crate::input::DEFAULT_CLICK_INTERVAL
     }
 
     /// Returns the current rate at which the text cursor should flash or blink.
@@ -212,7 +208,7 @@ static INITIAL_INSTANT: once_cell::sync::OnceCell<time::Instant> = once_cell::sy
 impl std::convert::From<crate::animations::Instant> for time::Instant {
     fn from(our_instant: crate::animations::Instant) -> Self {
         let the_beginning = *INITIAL_INSTANT.get_or_init(time::Instant::now);
-        the_beginning + core::time::Duration::from_millis(our_instant.0)
+        the_beginning + time::Duration::from_nanos(our_instant.as_nanos())
     }
 }
 
@@ -312,8 +308,7 @@ pub fn duration_until_next_timer_update() -> Option<core::time::Duration> {
     match crate::context::GLOBAL_CONTEXT.with(|ctx| ctx.get().cloned()) {
         Some(ctx) => ctx.duration_until_next_timer_update(),
         // No context, hence no clock: the deadline is measured from a zero origin.
-        None => crate::timers::TimerList::next_timeout()
-            .map(|timeout| core::time::Duration::from_millis(timeout.0)),
+        None => crate::timers::TimerList::next_timeout().map(|timeout| timeout.into()),
     }
 }
 
@@ -590,6 +585,10 @@ pub enum InternalEvent {
         position: crate::lengths::LogicalPoint,
         /// Whether the finger was put down, moved, lifted or cancelled.
         phase: crate::input::TouchPhase,
+        /// Original sample time on the animation clock, independent of event delivery.
+        event_time: Option<crate::animations::Instant>,
+        /// Movement samples coalesced into this event.
+        history: crate::input::TouchHistory,
     },
 }
 
