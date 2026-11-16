@@ -49,6 +49,9 @@ pub struct Settings {
     /// the image viewer was once closed by a click or Esc, so its hint about that is no longer
     /// shown (not a preference)
     pub viewer_click_closed: bool,
+    /// the image viewer was once zoomed with the wheel, so its hint about that is no longer
+    /// shown (not a preference)
+    pub viewer_wheel_zoomed: bool,
     /// where the window was last (not a preference; restored at start)
     pub window: Option<WindowGeom>,
 }
@@ -85,6 +88,7 @@ impl Default for Settings {
             photo_quality: 0,
             last_seen_version: String::new(),
             viewer_click_closed: false,
+            viewer_wheel_zoomed: false,
             window: None,
         }
     }

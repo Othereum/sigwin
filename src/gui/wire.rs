@@ -855,6 +855,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             photo_quality: d.get_photo_quality().clamp(0, 1) as u8,
             last_seen_version: UI.with_borrow(|ui| ui.settings.last_seen_version.clone()),
             viewer_click_closed: UI.with_borrow(|ui| ui.settings.viewer_click_closed),
+            viewer_wheel_zoomed: UI.with_borrow(|ui| ui.settings.viewer_wheel_zoomed),
             window: UI.with_borrow(|ui| ui.settings.window),
         };
         let (old, path) = UI.with_borrow_mut(|ui| (std::mem::replace(&mut ui.settings, new.clone()), ui.settings_path.clone()));

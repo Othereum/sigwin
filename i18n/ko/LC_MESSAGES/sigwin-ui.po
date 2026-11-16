@@ -345,6 +345,12 @@ msgstr "다시 보내기"
 msgid "Save"
 msgstr "저장"
 
+msgid "Scroll to zoom"
+msgstr "휠로 확대·축소할 수 있습니다"
+
+msgid "Scroll to zoom · Click the image or press Esc to close"
+msgstr "휠로 확대·축소하고, 이미지를 클릭하거나 Esc를 눌러 닫을 수 있습니다"
+
 msgid "Search"
 msgstr "검색"
 

@@ -84,7 +84,9 @@ export component ImageViewer inherits Window {
     // for a moment after opening, a bit longer: the hint shows, if it's on
     in property <bool> intro-on;
     // how to close without the ✕, until the user once has
-    in property <bool> hint-on;
+    in property <bool> close-hint-on;
+    // how to zoom, until the user once has
+    in property <bool> zoom-hint-on;
     // wanted offset of the image from the center when it is bigger than the window, physical px
     in-out property <float> pan-x;
     in-out property <float> pan-y;
@@ -415,8 +417,10 @@ export component ImageViewer inherits Window {
         y: root.height - self.height - 50px - root.strip-lift;
     }
     // where the notice would be, which comes first
-    if root.notice-text == "" && root.hint-on: Notice {
-        text: @tr("Click the image or press Esc to close");
+    if root.notice-text == "" && (root.close-hint-on || root.zoom-hint-on): Notice {
+        text: !root.zoom-hint-on ? @tr("Click the image or press Esc to close")
+            : !root.close-hint-on ? @tr("Scroll to zoom")
+            : @tr("Scroll to zoom · Click the image or press Esc to close");
         opacity: root.intro-on ? 1 : 0;
         visible: self.opacity > 0;
         animate opacity { duration: 250ms; }

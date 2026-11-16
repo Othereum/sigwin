@@ -54,6 +54,8 @@ const STRIP_SHOWN: Duration = Duration::from_secs(1);
 const TOP_SHOWN: Duration = Duration::from_millis(1000);
 /// The hint on how to close stays this long after opening.
 const HINT_SHOWN: Duration = Duration::from_secs(3);
+/// Two hints in one line take longer to read.
+const HINTS_SHOWN: Duration = Duration::from_secs(5);
 /// From this scale the original's pixels show as they are.
 const SMOOTH_BELOW: f64 = 3.0;
 
@@ -247,6 +249,17 @@ fn toggle_download() {
     });
 }
 
+/// The user did what a hint teaches: it stays off from now on.
+fn learned(flag: fn(&mut crate::settings::Settings) -> &mut bool) {
+    UI.with_borrow_mut(|ui| {
+        let f = flag(&mut ui.settings);
+        if !*f {
+            *f = true;
+            ui.settings.save(&ui.settings_path);
+        }
+    });
+}
+
 /// What the window shows about an image besides its pixels.
 fn show_details(win: &ImageViewer, img: &ViewerImage) {
     win.set_original_w(img.pixels.full().0 as i32);
@@ -260,21 +273,18 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
     win.on_prev(|| step(-1));
     win.on_next(|| step(1));
     win.on_dismiss(close);
-    win.on_quick_closed(|| {
-        UI.with_borrow_mut(|ui| {
-            if !ui.settings.viewer_click_closed {
-                ui.settings.viewer_click_closed = true;
-                ui.settings.save(&ui.settings_path);
-            }
-        });
-    });
-    win.set_hint_on(!UI.with_borrow(|ui| ui.settings.viewer_click_closed));
+    win.on_quick_closed(|| learned(|s| &mut s.viewer_click_closed));
+    let (close_hint, zoom_hint) =
+        UI.with_borrow(|ui| (!ui.settings.viewer_click_closed, !ui.settings.viewer_wheel_zoomed));
+    win.set_close_hint_on(close_hint);
+    win.set_zoom_hint_on(zoom_hint);
     win.set_top_on(true);
     win.set_intro_on(true);
     let hide_top = slint::Timer::default();
     hide_top.start(slint::TimerMode::SingleShot, TOP_SHOWN, || with_current(|v| v.win.set_top_on(false)));
+    let hint_shown = if close_hint && zoom_hint { HINTS_SHOWN } else { HINT_SHOWN };
     let hide_hint = slint::Timer::default();
-    hide_hint.start(slint::TimerMode::SingleShot, HINT_SHOWN, || with_current(|v| v.win.set_intro_on(false)));
+    hide_hint.start(slint::TimerMode::SingleShot, hint_shown, || with_current(|v| v.win.set_intro_on(false)));
     win.on_toggle_download(toggle_download);
     win.on_notice_action_clicked(super::notice::reveal);
     win.on_save(|| {
@@ -299,7 +309,10 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
         });
     });
     win.on_window_followed(follow_drag);
-    win.on_zoom(zoom);
+    win.on_zoom(|notches, x, y| {
+        learned(|s| &mut s.viewer_wheel_zoomed);
+        zoom(notches, x, y);
+    });
     win.on_drag_window(|| {
         with_current(|v| {
             v.win.window().with_winit_window(|w| w.drag_window());

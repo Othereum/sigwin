@@ -345,6 +345,12 @@ msgstr "Erneut versuchen"
 msgid "Save"
 msgstr "Speichern"
 
+msgid "Scroll to zoom"
+msgstr "Mit dem Mausrad zoomen"
+
+msgid "Scroll to zoom · Click the image or press Esc to close"
+msgstr "Mit dem Mausrad zoomen · Zum Schließen auf das Bild klicken oder Esc drücken"
+
 msgid "Search"
 msgstr "Suchen"
 
