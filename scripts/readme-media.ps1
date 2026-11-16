@@ -5,7 +5,8 @@ no window, no account, nothing personal. Run it after a UI change that shows in 
     pwsh scripts/readme-media.ps1
 
 Each picture comes in English and Korean (README.md / README.ko.md), light and dark (the README
-picks by the reader's GitHub theme). All but the first are animated PNGs:
+picks by the reader's device or browser setting, not by GitHub's own theme). All but the first are
+animated PNGs:
     hero-*        the main window
     readers-*     a message sent to a group, read by one member after another
     link-*        a link sent before its preview arrived still gets it
@@ -13,7 +14,8 @@ picks by the reader's GitHub theme). All but the first are animated PNGs:
     ime-*         @mention candidates narrowing while a Korean syllable is being composed
     notify-*      (still) a chat's own notification settings
 
-memory.png (the README's memory comparison) is a real measurement, not made here.
+memory-light.png / memory-dark.png (the README's memory comparison) are real measurements in Task
+Manager, not made here.
 
 A running sigwin.exe built from this tree locks it and the build fails: quit it first.
 #>

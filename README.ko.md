@@ -29,9 +29,12 @@
 **Sigwin을 선택해야 하는 이유**
 
 ### 가벼움
-메모리 사용량이 공식 앱의 1/20 수준이라, 저사양 PC에서도 부담이 없습니다.
+메모리 사용량이 공식 앱의 1/15도 안 되어, 저사양 PC에서도 부담이 없습니다.
 
-<img src="docs/media/memory.png" alt="Sigwin과 Signal Desktop의 메모리 사용량 비교">
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/memory-dark.png">
+    <img src="docs/media/memory-light.png" alt="Sigwin과 Signal Desktop의 메모리 사용량 비교">
+</picture>
 
 ### 한글 입력에 강함
 글자를 조합하는 중에도 `@멘션`이 문제없이 동작합니다.

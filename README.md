@@ -28,9 +28,12 @@
 ## Why Sigwin
 
 ### Light
-Uses about 1/20 of the official app's memory, so even a low-end PC runs it with ease.
+Uses less than 1/15 of the official app's memory, so even a low-end PC runs it with ease.
 
-<img src="docs/media/memory.png" alt="Memory used by Sigwin and by Signal Desktop, side by side">
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/memory-dark.png">
+    <img src="docs/media/memory-light.png" alt="Memory used by Sigwin and by Signal Desktop, side by side">
+</picture>
 
 ### See who read it
 The profile photos of those who read your message show under it.
