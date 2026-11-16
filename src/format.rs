@@ -41,10 +41,18 @@ fn is_word(c: Option<char>) -> bool {
     c.is_some_and(|c| c.is_ascii_alphanumeric())
 }
 
+/// Per marker (index in `MARKERS`), a stretch of one line of the string being parsed known to
+/// hold no closing marker: (from, line end). Whether a marker can close doesn't depend on where
+/// its span opened, so a later opening on the line needn't search there again. Without it, a long
+/// line of openings that never close (`a **b a **b …`) took time squared in its length.
+type Unclosed = [(usize, usize); MARKERS.len()];
+
+const NO_UNCLOSED: Unclosed = [(usize::MAX, 0); MARKERS.len()];
+
 /// A span opening at byte `i` of `s`: (style, marker length, content end = closing marker start).
-fn span_at(s: &str, i: usize) -> Option<(u8, usize, usize)> {
+fn span_at(s: &str, i: usize, unclosed: &mut Unclosed) -> Option<(u8, usize, usize)> {
     let rest = &s[i..];
-    let &(m, style) = MARKERS.iter().find(|(m, _)| rest.starts_with(m))?;
+    let (k, &(m, style)) = MARKERS.iter().enumerate().find(|(_, (m, _))| rest.starts_with(m))?;
     let start = i + m.len();
     if m == "_" && is_word(s[..i].chars().next_back()) {
         return None;
@@ -55,20 +63,26 @@ fn span_at(s: &str, i: usize) -> Option<(u8, usize, usize)> {
     }
     let line_end = s[start..].find('\n').map_or(s.len(), |n| start + n);
     let mut from = start + first.len_utf8();
+    if unclosed[k].1 == line_end && from >= unclosed[k].0 {
+        return None;
+    }
+    let searched = from;
     while let Some(off) = s[from..line_end].find(m) {
         let mut end = from + off;
         let mut next = end + 1;
         if m.starts_with('*') {
             // a run of stars: `*` passes over a `**` pair inside it (`*a **b** c*`). A longer run
-            // closes with its first stars or its last, whichever leaves no stray star inside:
-            // `**a***b*` is bold `a` then italic `b`, `***x***` bold around `*x*`
+            // closes with its first stars when that leaves no stray star inside, else its last
+            // (which always can): `**a***b*` is bold `a` then italic `b`, `***x***` bold around `*x*`
             let run = s[end..line_end].bytes().take_while(|&b| b == b'*').count();
             next = end + run;
             if run < m.len() || (m.len() == 1 && run == 2) {
                 from = next;
                 continue;
             }
-            if run > m.len() && parse(&s[start..end]).0.contains('*') {
+            if run > m.len()
+                && (s[..end].ends_with(char::is_whitespace) || parse(&s[start..end]).0.contains('*'))
+            {
                 end += run - m.len();
             }
         }
@@ -82,6 +96,7 @@ fn span_at(s: &str, i: usize) -> Option<(u8, usize, usize)> {
             from += 1;
         }
     }
+    unclosed[k] = (searched, line_end);
     None
 }
 
@@ -94,17 +109,19 @@ pub fn parse(s: &str) -> (String, Vec<(usize, usize, u8)>) {
 }
 
 fn parse_into(s: &str, out: &mut String, styles: &mut Vec<(usize, usize, u8)>) {
+    let mut unclosed = NO_UNCLOSED;
     let mut i = 0;
     while i < s.len() {
         let c = s[i..].chars().next().unwrap();
-        if c == '\\' && span_at(s, i + 1).is_some() {
-            // escaped: the marker itself is text
-            let (_, len, _) = span_at(s, i + 1).unwrap();
-            out.push_str(&s[i + 1..i + 1 + len]);
-            i += 1 + len;
-            continue;
+        if c == '\\' {
+            if let Some((_, len, _)) = span_at(s, i + 1, &mut unclosed) {
+                // escaped: the marker itself is text
+                out.push_str(&s[i + 1..i + 1 + len]);
+                i += 1 + len;
+                continue;
+            }
         }
-        if let Some((style, len, end)) = span_at(s, i) {
+        if let Some((style, len, end)) = span_at(s, i, &mut unclosed) {
             let start = out.len();
             let inner = &s[i + len..end];
             if style == STYLE_MONO {
@@ -132,16 +149,17 @@ pub fn preview(s: &str) -> (Vec<(usize, usize, u8)>, Vec<(usize, usize)>) {
 
 // mirrors `parse_into`, which judges a span's inner text on its own
 fn preview_into(s: &str, base: usize, styles: &mut Vec<(usize, usize, u8)>, markup: &mut Vec<(usize, usize)>) {
+    let mut unclosed = NO_UNCLOSED;
     let mut i = 0;
     while i < s.len() {
         if s[i..].starts_with('\\') {
-            if let Some((_, len, _)) = span_at(s, i + 1) {
+            if let Some((_, len, _)) = span_at(s, i + 1, &mut unclosed) {
                 markup.push((base + i, base + i + 1));
                 i += 1 + len;
                 continue;
             }
         }
-        if let Some((style, len, end)) = span_at(s, i) {
+        if let Some((style, len, end)) = span_at(s, i, &mut unclosed) {
             markup.push((base + i, base + i + len));
             markup.push((base + end, base + end + len));
             if style != STYLE_MONO {
@@ -311,6 +329,18 @@ mod tests {
         let (t, st) = show("**굵은 _기울임_**");
         assert_eq!(t, "굵은 기울임");
         assert_eq!(st, [("기울임".into(), STYLE_ITALIC), ("굵은 기울임".into(), STYLE_BOLD)]);
+    }
+
+    #[test]
+    fn long_lines_of_unclosed_markers_stay_fast() {
+        // each took seconds when every opening searched the rest of the line again
+        for unit in ["a **b ", "_a _b ", "*a **b ", "a ~~b ", "a ||b "] {
+            let s = unit.repeat(65536 / unit.len());
+            let t = std::time::Instant::now();
+            let _ = parse(&s);
+            let _ = preview(&s);
+            assert!(t.elapsed() < std::time::Duration::from_secs(1), "{unit}: {:?}", t.elapsed());
+        }
     }
 
     #[test]
