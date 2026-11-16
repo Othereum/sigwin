@@ -170,8 +170,7 @@ pub fn preview() -> Option<u8> {
     }
 }
 
-/// Whether Windows apps are set to dark mode right now (for switching back to "system"
-/// at runtime; at startup Slint follows the system by itself).
+/// Whether Windows apps are set to dark mode right now.
 pub fn system_dark() -> bool {
     #[cfg(windows)]
     {

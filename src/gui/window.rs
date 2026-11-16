@@ -6,17 +6,41 @@ use slint::winit_030::{EventResult, WinitWindowAccessor};
 
 use super::*;
 
-/// Light / dark per the setting. "System" is Slint's default binding at startup; switching
-/// back to it at runtime reads the current Windows setting (the binding can't be restored).
-pub(crate) fn apply_theme(app: &AppWindow, startup: bool) {
+/// Light / dark per the setting. "System" is always set explicitly from the registry, never
+/// left to Slint's default binding: that follows winit, which asks `ShouldAppsUseDarkMode` and
+/// lags behind the setting. `system_theme_changed` keeps it current.
+pub(crate) fn apply_theme(app: &AppWindow) {
     if headless::active() {
         return; // SIGWIN_HEADLESS_THEME decides
     }
-    match UI.with_borrow(|ui| ui.settings.theme) {
-        1 => app.invoke_set_dark(false),
-        2 => app.invoke_set_dark(true),
-        _ if !startup => app.invoke_set_dark(settings::system_dark()),
-        _ => {}
+    let dark = match UI.with_borrow(|ui| ui.settings.theme) {
+        1 => false,
+        2 => true,
+        _ => settings::system_dark(),
+    };
+    app.invoke_set_dark(dark);
+    title_bar(app, dark);
+}
+
+/// The native title bar takes its look from winit's theme, not from Slint's palette. Without a
+/// preferred theme winit follows the system on its own, lagging like the palette did. Needs the
+/// native window: `ensure_shown` calls this again once it exists.
+pub(crate) fn title_bar(app: &AppWindow, dark: bool) {
+    use slint::winit_030::winit::window::Theme as WinitTheme;
+    let theme = if dark { WinitTheme::Dark } else { WinitTheme::Light };
+    app.window().with_winit_window(|w| w.set_theme(Some(theme)));
+}
+
+/// Windows switched between light and dark apps (`WM_SETTINGCHANGE`).
+pub(crate) fn system_theme_changed(app: &AppWindow) {
+    if headless::active() || UI.with_borrow(|ui| ui.settings.theme) != 0 {
+        return;
+    }
+    let dark = settings::system_dark();
+    if dark != app.global::<Theme>().get_dark() {
+        app.invoke_set_dark(dark);
+        title_bar(app, dark);
+        refresh_rows(app); // message text and mention colors are baked per theme
     }
 }
 
@@ -195,6 +219,9 @@ pub(crate) fn ensure_shown(app: &AppWindow) -> bool {
     restore_geometry(app);
     if let Err(e) = app.show() {
         tracing::warn!("show window: {e}");
+    }
+    if !headless::active() {
+        title_bar(app, app.global::<Theme>().get_dark());
     }
     STARTER.with_borrow(|s| {
         if let Some(s) = s {

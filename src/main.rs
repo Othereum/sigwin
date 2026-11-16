@@ -252,7 +252,7 @@ fn main() -> anyhow::Result<()> {
     });
 
     load_ui_state(&app, cmd_tx.clone());
-    apply_theme(&app, true);
+    apply_theme(&app);
     wire(&app, cmd_tx.clone());
     if !headless::active() {
         let weak = app.as_weak();

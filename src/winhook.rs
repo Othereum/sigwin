@@ -92,7 +92,7 @@ unsafe extern "system" fn subclass_proc(
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_DPICHANGED,
-        WM_POWERBROADCAST, WM_SHOWWINDOW, WM_SIZE,
+        WM_POWERBROADCAST, WM_SETTINGCHANGE, WM_SHOWWINDOW, WM_SIZE,
     };
     /// `PBT_POWERSETTINGCHANGE`
     const SETTING_CHANGE: usize = 0x8013;
@@ -165,11 +165,36 @@ unsafe extern "system" fn subclass_proc(
                 });
             });
         }
+        WM_SETTINGCHANGE if lparam != 0 && is_color_set(lparam) => {
+            let _ = slint::invoke_from_event_loop(|| {
+                APP.with_borrow(|a| {
+                    if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
+                        crate::gui::system_theme_changed(&app);
+                    }
+                });
+            });
+        }
         m if m == taskbar_created() => crate::badge::refresh(),
         _ => {}
     }
     // SAFETY: forwarding to the next handler in the subclass chain
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// `WM_SETTINGCHANGE` for "ImmersiveColorSet": the light/dark app setting (among other colors)
+/// changed.
+#[cfg(windows)]
+fn is_color_set(lparam: windows_sys::Win32::Foundation::LPARAM) -> bool {
+    let want = "ImmersiveColorSet".encode_utf16().chain(Some(0));
+    // SAFETY: for this message a non-zero `lparam` is a NUL-terminated wide string; we stop
+    // at the first mismatch or the NUL
+    let p = lparam as *const u16;
+    for (i, c) in want.enumerate() {
+        if unsafe { *p.add(i) } != c {
+            return false;
+        }
+    }
+    true
 }
 
 /// "TaskbarButtonCreated": the taskbar button exists (again, after an Explorer restart).

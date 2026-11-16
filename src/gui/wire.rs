@@ -873,7 +873,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             autostart::apply(new.autostart, new.start_hidden, !old.autostart && new.autostart);
         }
         if old.theme != new.theme {
-            apply_theme(&app, false);
+            apply_theme(&app);
         }
         if old.clock != new.clock {
             view::time::set_clock(new.clock, false);
