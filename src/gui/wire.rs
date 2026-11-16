@@ -426,6 +426,9 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
     });
 
+    app.global::<TextOps>().on_selected_styles(|text, a, b| {
+        format::selected_styles(&text, a.max(0) as usize, b.max(0) as usize) as i32
+    });
     app.global::<TextOps>().on_cut_out(|text, a, b| {
         let (a, b) = (a.max(0) as usize, b.max(0) as usize);
         let (lo, hi) = (a.min(b), a.max(b));

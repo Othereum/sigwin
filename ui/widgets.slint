@@ -129,6 +129,7 @@ export component IconButton inherits Rectangle {
     // drawn in the accent (a panel it opens is showing)
     in property <bool> active;
     in property <color> hover-color: Theme.hover;
+    out property <bool> hovered: ta.has-hover;
     callback clicked;
     width: 36px;
     height: 36px;
@@ -152,6 +153,8 @@ export component IconButton inherits Rectangle {
 export global TextOps {
     // `text` without the bytes between `a` and `b` (in either order)
     pure callback cut-out(string, int, int) -> string;
+    // the text styles the selection between `a` and `b` already has, as `1 << style` bits
+    pure callback selected-styles(string, int, int) -> int;
 }
 
 // The editable text of every input in the app (`Field`, the composer), so what Slint's

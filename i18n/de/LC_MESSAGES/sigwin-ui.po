@@ -17,7 +17,6 @@ msgstr "Entwicklungsversion"
 
 msgid "dev"
 msgstr "Entw."
-
 msgid "1 day"
 msgstr "1 Tag"
 
@@ -80,6 +79,9 @@ msgstr "Zähler"
 
 msgid "Block"
 msgstr "Blockieren"
+
+msgid "Bold"
+msgstr "Fett"
 
 msgid "Check for updates"
 msgstr "Nach Aktualisierungen suchen"
@@ -192,6 +194,9 @@ msgstr "Im Zähler mitzählen"
 msgid "Info"
 msgstr "Info"
 
+msgid "Italic"
+msgstr "Kursiv"
+
 msgid "License"
 msgstr "Lizenz"
 
@@ -212,6 +217,9 @@ msgstr "Nachricht"
 
 msgid "Message info"
 msgstr "Nachrichtendetails"
+
+msgid "Monospace"
+msgstr "Monospace"
 
 msgid "Mute notifications"
 msgstr "Stummschalten"
@@ -390,6 +398,9 @@ msgstr "Auf der Taskleiste und dem Symbol im Infobereich"
 msgid "Source code"
 msgstr "Quellcode"
 
+msgid "Spoiler"
+msgstr "Spoiler"
+
 msgid "Standard"
 msgstr "Standard"
 
@@ -407,6 +418,9 @@ msgstr "Start"
 
 msgid "Storage"
 msgstr "Speicher"
+
+msgid "Strikethrough"
+msgstr "Durchgestrichen"
 
 msgid "System"
 msgstr "System"

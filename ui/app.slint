@@ -1,7 +1,7 @@
 import { ListView, Palette } from "std-widgets.slint";
 import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, BusySpinner, DangerButton, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton, TextBox } from "widgets.slint";
+import { Avatar, BusySpinner, DangerButton, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton, TextBox, TextOps } from "widgets.slint";
 export { TextOps } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
 import { Bubble, MediaLabel, QuoteBox } from "bubble.slint";
@@ -1569,6 +1569,63 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+        }
+    }
+
+    // text style buttons, just above the composer while text in it is selected; a hovered one
+    // tells its shortcut
+    if composer.has-focus && composer.anchor-position-byte-offset != composer.cursor-position-byte-offset
+        && composer.preedit-text == "" && root.mention-items.length == 0 && !root.sticker-open: Rectangle {
+        property <int> on: TextOps.selected-styles(composer.text, composer.anchor-position-byte-offset, composer.cursor-position-byte-offset);
+        property <string> hint;
+        x: composer.absolute-position.x - 8px;
+        y: composer-bar.absolute-position.y - self.height - 4px;
+        width: style-row.preferred-width;
+        height: style-row.preferred-height;
+        border-radius: 10px;
+        background: Theme.pane;
+        border-width: 1px;
+        border-color: Theme.border;
+        drop-shadow-blur: 12px;
+        drop-shadow-color: Theme.shadow;
+        // keeps clicks between the buttons off the list below
+        TouchArea { }
+        style-row := HorizontalLayout {
+            padding: 4px;
+            spacing: 2px;
+            // style: view::STYLE_*
+            for b in [
+                { style: 1, icon: Icons.bold, hint: @tr("Bold") + "   Ctrl+B" },
+                { style: 2, icon: Icons.italic, hint: @tr("Italic") + "   Ctrl+I" },
+                { style: 4, icon: Icons.strike, hint: @tr("Strikethrough") + "   Ctrl+Shift+X" },
+                { style: 5, icon: Icons.mono, hint: @tr("Monospace") + "   Ctrl+E" },
+                { style: 3, icon: Icons.spoiler, hint: @tr("Spoiler") + "   Ctrl+Shift+B" },
+            ]: IconButton {
+                width: 32px;
+                height: 32px;
+                icon-size: 18px;
+                active: Math.mod(Math.floor(on / Math.pow(2, b.style)), 2) == 1;
+                icon: b.icon;
+                changed hovered => {
+                    if (self.hovered) {
+                        hint = b.hint;
+                    } else if (hint == b.hint) {
+                        hint = "";
+                    }
+                }
+                clicked => {
+                    root.format-toggle(b.style, composer.text, composer.anchor-position-byte-offset, composer.cursor-position-byte-offset);
+                }
+            }
+            if hint != "": Rectangle { width: 4px; }
+            if hint != "": Text {
+                text: hint;
+                color: Theme.subtle;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+            // the hint's room after it
+            if hint != "": Rectangle { width: 8px; }
         }
     }
 

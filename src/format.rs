@@ -1,21 +1,40 @@
-//! Composing text styles with markers: `**bold**`, `_italic_`, `~~strike~~`, `` `mono` ``,
-//! `||spoiler||`. `parse` strips them into plain text + style ranges when sending, `to_markup`
-//! turns a message back into markers for editing, `toggle` is what the composer shortcuts do.
+//! Composing text styles with markers, as in Discord: `**bold**`, `_italic_` or `*italic*`,
+//! `~~strike~~`, `` `mono` ``, `||spoiler||`. `parse` strips them into plain text + style ranges
+//! when sending, `to_markup` turns a message back into markers for editing, `toggle` is what the
+//! composer shortcuts do.
 //!
 //! Rules (tuned for Korean chat): a span stays on one line, its content is non-empty and doesn't
 //! start or end with whitespace; particles may follow directly (`**굵게**를`). `_` only counts
-//! when the outer neighbors aren't ASCII letters/digits (`file_name_v2` stays as is). Nothing is
-//! parsed inside `` ` ``. A backslash before a marker that would open a span keeps it literal.
-//! Unmatched markers stay as typed.
+//! when the outer neighbors aren't ASCII letters/digits (`file_name_v2` stays as is); `*` works
+//! inside a word too, and is what italics are written with. Nothing is parsed inside
+//! `` ` ``. A backslash before a marker that would open a span keeps it literal. Unmatched
+//! markers stay as typed.
 
 use crate::view::text::{STYLE_BOLD, STYLE_ITALIC, STYLE_MONO, STYLE_SPOILER, STYLE_STRIKE};
 
-/// Marker of each style, longest first where they share a prefix.
-const MARKERS: [(&str, u8); 5] =
-    [("**", STYLE_BOLD), ("~~", STYLE_STRIKE), ("||", STYLE_SPOILER), ("`", STYLE_MONO), ("_", STYLE_ITALIC)];
+/// Marker of each style, longest first where they share a prefix; a style's first one is what
+/// it is written with.
+const MARKERS: [(&str, u8); 6] = [
+    ("**", STYLE_BOLD),
+    ("~~", STYLE_STRIKE),
+    ("||", STYLE_SPOILER),
+    ("`", STYLE_MONO),
+    ("*", STYLE_ITALIC),
+    ("_", STYLE_ITALIC),
+];
 
 pub fn marker(style: u8) -> &'static str {
     MARKERS.iter().find(|m| m.1 == style).map_or("", |m| m.0)
+}
+
+/// The marker that writes `style` between `before` and `after`: italics next to a star take `_`,
+/// since `**a***b*` can't tell where the bold ends.
+fn marker_between(style: u8, before: Option<char>, after: Option<char>) -> &'static str {
+    if style == STYLE_ITALIC && (before == Some('*') || after == Some('*')) && !is_word(before) && !is_word(after) {
+        "_"
+    } else {
+        marker(style)
+    }
 }
 
 fn is_word(c: Option<char>) -> bool {
@@ -27,7 +46,7 @@ fn span_at(s: &str, i: usize) -> Option<(u8, usize, usize)> {
     let rest = &s[i..];
     let &(m, style) = MARKERS.iter().find(|(m, _)| rest.starts_with(m))?;
     let start = i + m.len();
-    if style == STYLE_ITALIC && is_word(s[..i].chars().next_back()) {
+    if m == "_" && is_word(s[..i].chars().next_back()) {
         return None;
     }
     let first = s[start..].chars().next()?;
@@ -37,13 +56,28 @@ fn span_at(s: &str, i: usize) -> Option<(u8, usize, usize)> {
     let line_end = s[start..].find('\n').map_or(s.len(), |n| start + n);
     let mut from = start + first.len_utf8();
     while let Some(off) = s[from..line_end].find(m) {
-        let end = from + off;
+        let mut end = from + off;
+        let mut next = end + 1;
+        if m.starts_with('*') {
+            // a run of stars: `*` passes over a `**` pair inside it (`*a **b** c*`). A longer run
+            // closes with its first stars or its last, whichever leaves no stray star inside:
+            // `**a***b*` is bold `a` then italic `b`, `***x***` bold around `*x*`
+            let run = s[end..line_end].bytes().take_while(|&b| b == b'*').count();
+            next = end + run;
+            if run < m.len() || (m.len() == 1 && run == 2) {
+                from = next;
+                continue;
+            }
+            if run > m.len() && parse(&s[start..end]).0.contains('*') {
+                end += run - m.len();
+            }
+        }
         let ok_inner = !s[..end].chars().next_back().is_some_and(char::is_whitespace);
-        let ok_outer = style != STYLE_ITALIC || !is_word(s[end + m.len()..].chars().next());
+        let ok_outer = m != "_" || !is_word(s[end + m.len()..].chars().next());
         if ok_inner && ok_outer {
             return Some((style, m.len(), end));
         }
-        from = end + 1;
+        from = next;
         while !s.is_char_boundary(from) {
             from += 1;
         }
@@ -136,23 +170,25 @@ pub fn to_markup(text: &str, styles: &[(usize, usize, u8)]) -> String {
     cuts.sort_unstable();
     cuts.dedup();
     let mut out = String::with_capacity(text.len() + styles.len() * 4);
-    // open styles: (style, end)
-    let mut stack: Vec<(u8, usize)> = Vec::new();
+    // open styles: (style, end, marker)
+    let mut stack: Vec<(u8, usize, &str)> = Vec::new();
     for w in cuts.windows(2) {
         let (a, b) = (w[0], w[1]);
         if !text.is_char_boundary(a) || !text.is_char_boundary(b) {
             continue;
         }
         let active = |k: u8| styles.iter().any(|&(s, e, kk)| kk == k && s <= a && b <= e);
-        let wanted: Vec<u8> = MARKERS.iter().map(|m| m.1).filter(|&k| active(k)).collect();
+        let mut wanted: Vec<u8> = MARKERS.iter().map(|m| m.1).filter(|&k| active(k)).collect();
+        // italics have two markers
+        wanted.dedup();
         let new: Vec<u8> = wanted.iter().copied().filter(|k| !stack.iter().any(|s| s.0 == *k)).collect();
         // keep the longest prefix of the stack that stays open (mono can't have anything inside)
         let keep = stack
             .iter()
-            .position(|&(k, _)| !wanted.contains(&k) || (k == STYLE_MONO && !new.is_empty()))
+            .position(|&(k, _, _)| !wanted.contains(&k) || (k == STYLE_MONO && !new.is_empty()))
             .unwrap_or(stack.len());
         while stack.len() > keep {
-            out.push_str(marker(stack.pop().unwrap().0));
+            out.push_str(stack.pop().unwrap().2);
         }
         let mut open: Vec<(u8, usize)> = wanted
             .iter()
@@ -164,23 +200,22 @@ pub fn to_markup(text: &str, styles: &[(usize, usize, u8)]) -> String {
             })
             .collect();
         open.sort_by_key(|&(k, end)| (k == STYLE_MONO, std::cmp::Reverse(end)));
-        for o in open {
-            out.push_str(marker(o.0));
-            stack.push(o);
+        for (k, end) in open {
+            let m = marker_between(k, out.chars().next_back(), text[end..].chars().next());
+            out.push_str(m);
+            stack.push((k, end, m));
         }
         out.push_str(&text[a..b]);
     }
-    while let Some((k, _)) = stack.pop() {
-        out.push_str(marker(k));
+    while let Some((_, _, m)) = stack.pop() {
+        out.push_str(m);
     }
     out
 }
 
-/// Composer shortcut: wraps the selection `a..b` (byte offsets) in the style's markers, or
-/// removes them when it is already wrapped. Whitespace at the selection's edges stays outside.
-/// Returns the new text and the new selection; `None` when nothing (but whitespace) is selected.
-pub fn toggle(text: &str, a: usize, b: usize, style: u8) -> Option<(String, usize, usize)> {
-    let m = marker(style);
+/// The selection `a..b` (byte offsets, either order) without whitespace at its edges; `None`
+/// when nothing but whitespace is selected.
+fn trimmed(text: &str, a: usize, b: usize) -> Option<(usize, usize)> {
     let (mut a, mut b) = (a.min(b).min(text.len()), a.max(b).min(text.len()));
     if !text.is_char_boundary(a) || !text.is_char_boundary(b) {
         return None;
@@ -191,18 +226,59 @@ pub fn toggle(text: &str, a: usize, b: usize, style: u8) -> Option<(String, usiz
     while a < b && text[a..b].ends_with(char::is_whitespace) {
         b -= text[..b].chars().next_back().unwrap().len_utf8();
     }
-    if a == b {
-        return None;
+    (a < b).then_some((a, b))
+}
+
+/// The content range of the `style` span the selection `a..b` lies in (or is, with its markers).
+fn span_around(spans: &[(usize, usize, u8)], a: usize, b: usize, style: u8) -> Option<(usize, usize)> {
+    let m = marker(style).len();
+    spans
+        .iter()
+        .find(|&&(s, e, k)| k == style && ((s <= a && b <= e) || (s - m, e + m) == (a, b)))
+        .map(|&(s, e, _)| (s, e))
+}
+
+/// `seg`, found between `before` and `after`, in the markers of `style`, whitespace at its edges
+/// kept outside; nothing to wrap stays as is.
+fn wrap(seg: &str, style: u8, before: Option<char>, after: Option<char>) -> String {
+    let core = seg.trim();
+    if core.is_empty() {
+        return seg.to_string();
     }
-    // already wrapped (markers just outside, or selected along with the text): unwrap
-    if text[..a].ends_with(m) && text[b..].starts_with(m) {
-        let out = format!("{}{}{}", &text[..a - m.len()], &text[a..b], &text[b + m.len()..]);
-        return Some((out, a - m.len(), b - m.len()));
+    let lead = &seg[..seg.len() - seg.trim_start().len()];
+    let trail = &seg[seg.trim_end().len()..];
+    let m = marker_between(style, lead.chars().next_back().or(before), trail.chars().next().or(after));
+    format!("{lead}{m}{core}{m}{trail}")
+}
+
+/// The styles the composer's selection `a..b` already has, as `1 << style` bits: what a style
+/// shortcut would remove rather than add.
+pub fn selected_styles(text: &str, a: usize, b: usize) -> u32 {
+    let Some((a, b)) = trimmed(text, a, b) else { return 0 };
+    let spans = preview(text).0;
+    MARKERS.iter().filter(|m| span_around(&spans, a, b, m.1).is_some()).fold(0, |bits, m| bits | 1 << m.1)
+}
+
+/// Composer shortcut: wraps the selection `a..b` (byte offsets) in the style's markers, or, when
+/// it lies in a span of that style, takes it out of the span (what's left of the span on either
+/// side keeps the style). Whitespace at the selection's edges stays outside. Returns the new text
+/// and the new selection; `None` when nothing (but whitespace) is selected.
+pub fn toggle(text: &str, a: usize, b: usize, style: u8) -> Option<(String, usize, usize)> {
+    let (a, b) = trimmed(text, a, b)?;
+    if let Some((s, e)) = span_around(&preview(text).0, a, b, style) {
+        let ml = marker(style).len();
+        let (a, b) = (a.clamp(s, e), b.clamp(s, e));
+        let mut out = text[..s - ml].to_string();
+        let left = wrap(&text[s..a], style, out.chars().next_back(), text[a..].chars().next());
+        out += &left;
+        let na = out.len();
+        out += &text[a..b];
+        let nb = out.len();
+        out += &wrap(&text[b..e], style, text[..b].chars().next_back(), text[e + ml..].chars().next());
+        out += &text[e + ml..];
+        return Some((out, na, nb));
     }
-    if b - a >= 2 * m.len() && text[a..b].starts_with(m) && text[a..b].ends_with(m) {
-        let out = format!("{}{}{}", &text[..a], &text[a + m.len()..b - m.len()], &text[b..]);
-        return Some((out, a, b - 2 * m.len()));
-    }
+    let m = marker_between(style, text[..a].chars().next_back(), text[b..].chars().next());
     let out = format!("{}{m}{}{m}{}", &text[..a], &text[a..b], &text[b..]);
     Some((out, a + m.len(), b + m.len()))
 }
@@ -238,6 +314,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_stars() {
+        // inside a word, where `_` doesn't count
+        assert_eq!(show("asdf*qwer*zxcv"), ("asdfqwerzxcv".into(), vec![("qwer".into(), STYLE_ITALIC)]));
+        assert_eq!(show("asdf_qwer_zxcv").1, []);
+        let both = vec![("x".into(), STYLE_ITALIC), ("x".into(), STYLE_BOLD)];
+        assert_eq!(show("***x***"), ("x".into(), both));
+        assert_eq!(show("*a **b** c*"), ("a b c".into(), vec![("b".into(), STYLE_BOLD), ("a b c".into(), STYLE_ITALIC)]));
+        assert_eq!(show("**a *b* c**"), ("a b c".into(), vec![("b".into(), STYLE_ITALIC), ("a b c".into(), STYLE_BOLD)]));
+        // runs of three between two spans
+        assert_eq!(show("**a***b*c"), ("abc".into(), vec![("a".into(), STYLE_BOLD), ("b".into(), STYLE_ITALIC)]));
+        assert_eq!(show("*a***b**c"), ("abc".into(), vec![("a".into(), STYLE_ITALIC), ("b".into(), STYLE_BOLD)]));
+        assert_eq!(show("*a **b***").1, [("b".into(), STYLE_BOLD), ("a b".into(), STYLE_ITALIC)]);
+    }
+
+    #[test]
     fn leaves_ordinary_text_alone() {
         for s in [
             "10~20 좋아요~",
@@ -255,13 +346,17 @@ mod tests {
         }
         // escaped
         assert_eq!(parse("\\**그대로**"), ("**그대로**".to_string(), vec![]));
+        assert_eq!(parse("\\*그대로*"), ("*그대로*".to_string(), vec![]));
+        for s in ["a * b * c", "*a", "* a*"] {
+            assert_eq!(parse(s), (s.to_string(), vec![]), "{s}");
+        }
         // italic: Hangul neighbors are fine, ASCII ones aren't
         assert_eq!(show("한_글_자").1, [("글".into(), STYLE_ITALIC)]);
     }
 
     #[test]
     fn markup_round_trips() {
-        for s in ["**굵게**를 _기울임_ 보통 `mono` ||스포 **일러**||", "**a _b `c`_ d**", "평문"] {
+        for s in ["**굵게**를 *기울임* 보통 `mono` ||스포 **일러**||", "**a *b `c`* d**", "평문"] {
             let (t, st) = parse(s);
             assert_eq!(to_markup(&t, &st), s);
         }
@@ -269,13 +364,22 @@ mod tests {
         let text = "가나다라마바";
         let st = [(0, 12, STYLE_BOLD), (6, 18, STYLE_ITALIC)];
         let m = to_markup(text, &st);
-        assert_eq!(m, "**가나_다라_**_마바_");
+        assert_eq!(m, "**가나*다라***_마바_");
         let (t2, mut st2) = parse(&m);
         assert_eq!(t2, text);
         st2.sort();
         assert_eq!(st2, [(0, 12, STYLE_BOLD), (6, 12, STYLE_ITALIC), (12, 18, STYLE_ITALIC)]);
         // bold inside mono: mono stays innermost
         assert_eq!(to_markup("abc", &[(0, 3, STYLE_MONO), (1, 2, STYLE_BOLD)]), "`a`**`b`**`c`");
+        // italics take `*`, inside a word too; next to bold markers `_`
+        let st = [(4, 8, STYLE_ITALIC), (13, 17, STYLE_ITALIC)];
+        let m = to_markup("asdfqwerzxcv rest", &st);
+        assert_eq!(m, "asdf*qwer*zxcv *rest*");
+        assert_eq!(parse(&m), ("asdfqwerzxcv rest".to_string(), st.to_vec()));
+        let st = [(0, 1, STYLE_BOLD), (1, 2, STYLE_ITALIC)];
+        let m = to_markup("ab", &st);
+        assert_eq!(m, "**a**_b_");
+        assert_eq!(parse(&m), ("ab".to_string(), st.to_vec()));
     }
 
     #[test]
@@ -294,6 +398,37 @@ mod tests {
         // nothing selected, or only spaces: no empty pair of markers
         assert_eq!(toggle("ab", 1, 1, STYLE_SPOILER), None);
         assert_eq!(toggle("a  b", 1, 3, STYLE_BOLD), None);
+        // part of a bold span: only that part loses it
+        let (s, a, b) = toggle("x **ab cd ef**", 7, 9, STYLE_BOLD).unwrap();
+        assert_eq!(s, "x **ab** cd **ef**");
+        assert_eq!(&s[a..b], "cd");
+        assert_eq!(toggle("**ab cd**", 2, 4, STYLE_BOLD).unwrap().0, "ab **cd**");
+        // italics inside a word, and taking part of one out
+        let (s, a, b) = toggle("asdfqwerzxcv", 4, 8, STYLE_ITALIC).unwrap();
+        assert_eq!(s, "asdf*qwer*zxcv");
+        assert_eq!(&s[a..b], "qwer");
+        assert_eq!(toggle(&s, a, b, STYLE_ITALIC).unwrap().0, "asdfqwerzxcv");
+        assert_eq!(toggle("_abcd_", 2, 4, STYLE_ITALIC).unwrap().0, "*a*bc*d*");
+        assert_eq!(toggle("한글 abc", 0, 6, STYLE_ITALIC).unwrap().0, "*한글* abc");
+        assert_eq!(toggle("**a**b", 5, 6, STYLE_ITALIC).unwrap().0, "**a**_b_");
+        let (s, ..) = toggle("**a**bc", 5, 6, STYLE_ITALIC).unwrap();
+        assert_eq!(s, "**a***b*c");
+        assert_eq!(parse(&s).1, [(0, 1, STYLE_BOLD), (1, 2, STYLE_ITALIC)]);
+    }
+
+    #[test]
+    fn knows_selected_styles() {
+        let t = "**_굵은 기울임_** 보통";
+        let inner = t.find('굵').unwrap();
+        let end = t.find("_**").unwrap();
+        let both = 1 << STYLE_ITALIC | 1 << STYLE_BOLD;
+        assert_eq!(selected_styles(t, inner, end), both);
+        // with the italic markers: the bold span's content
+        assert_eq!(selected_styles(t, inner - 1, end + 1), both);
+        assert_eq!(selected_styles(t, inner, inner + 3), both);
+        assert_eq!(selected_styles(t, end + 4, t.len()), 0);
+        assert_eq!(selected_styles(t, 0, t.len()), 0);
+        assert_eq!(selected_styles(t, 3, 3), 0);
     }
 
     #[test]

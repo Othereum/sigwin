@@ -17,7 +17,6 @@ msgstr "개발 빌드"
 
 msgid "dev"
 msgstr "개발"
-
 msgid "1 day"
 msgstr "1일"
 
@@ -80,6 +79,9 @@ msgstr "알림 배지"
 
 msgid "Block"
 msgstr "차단"
+
+msgid "Bold"
+msgstr "굵게"
 
 msgid "Check for updates"
 msgstr "업데이트 확인"
@@ -192,6 +194,9 @@ msgstr "배지에 포함"
 msgid "Info"
 msgstr "정보"
 
+msgid "Italic"
+msgstr "기울임"
+
 msgid "License"
 msgstr "라이선스"
 
@@ -212,6 +217,9 @@ msgstr "메시지 입력"
 
 msgid "Message info"
 msgstr "메시지 정보"
+
+msgid "Monospace"
+msgstr "고정 폭"
 
 msgid "Mute notifications"
 msgstr "알림 끄기"
@@ -390,6 +398,9 @@ msgstr "작업 표시줄과 알림 영역 아이콘에 표시합니다"
 msgid "Source code"
 msgstr "소스 코드"
 
+msgid "Spoiler"
+msgstr "스포일러"
+
 msgid "Standard"
 msgstr "표준"
 
@@ -407,6 +418,9 @@ msgstr "시작"
 
 msgid "Storage"
 msgstr "저장 공간"
+
+msgid "Strikethrough"
+msgstr "취소선"
 
 msgid "System"
 msgstr "시스템"
