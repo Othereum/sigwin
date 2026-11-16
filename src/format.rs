@@ -231,18 +231,25 @@ pub fn to_markup(text: &str, styles: &[(usize, usize, u8)]) -> String {
     out
 }
 
-/// The selection `a..b` (byte offsets, either order) without whitespace at its edges; `None`
-/// when nothing but whitespace is selected.
-fn trimmed(text: &str, a: usize, b: usize) -> Option<(usize, usize)> {
+/// The selection `a..b` (byte offsets, either order) without whitespace or `markup` (markers) at
+/// its edges, so selecting `**_x_**` whole is selecting `x`; `None` when nothing else is selected.
+fn trimmed(text: &str, a: usize, b: usize, markup: &[(usize, usize)]) -> Option<(usize, usize)> {
     let (mut a, mut b) = (a.min(b).min(text.len()), a.max(b).min(text.len()));
     if !text.is_char_boundary(a) || !text.is_char_boundary(b) {
         return None;
     }
-    while a < b && text[a..b].starts_with(char::is_whitespace) {
-        a += text[a..].chars().next().unwrap().len_utf8();
-    }
-    while a < b && text[a..b].ends_with(char::is_whitespace) {
-        b -= text[..b].chars().next_back().unwrap().len_utf8();
+    loop {
+        if a < b && text[a..b].starts_with(char::is_whitespace) {
+            a += text[a..].chars().next().unwrap().len_utf8();
+        } else if a < b && text[a..b].ends_with(char::is_whitespace) {
+            b -= text[..b].chars().next_back().unwrap().len_utf8();
+        } else if let Some(&(_, me)) = markup.iter().find(|&&(ms, me)| ms == a && me <= b) {
+            a = me;
+        } else if let Some(&(ms, _)) = markup.iter().find(|&&(ms, me)| me == b && a <= ms) {
+            b = ms;
+        } else {
+            break;
+        }
     }
     (a < b).then_some((a, b))
 }
@@ -256,13 +263,26 @@ fn span_around(spans: &[(usize, usize, u8)], a: usize, b: usize, style: u8) -> O
         .map(|&(s, e, _)| (s, e))
 }
 
-/// `seg`, found between `before` and `after`, in the markers of `style`, whitespace at its edges
-/// kept outside; nothing to wrap stays as is.
-fn wrap(seg: &str, style: u8, before: Option<char>, after: Option<char>) -> String {
-    let core = seg.trim();
-    if core.is_empty() {
+/// `text[r]`, found between `before` and `after`, in the markers of `style`, whitespace at its
+/// edges kept outside. A part with nothing but whitespace and `markup` (other spans' markers, as
+/// in `**_` when `_x_` is taken out of the bold) has nothing to wrap and stays as is.
+fn wrap(
+    text: &str,
+    r: std::ops::Range<usize>,
+    markup: &[(usize, usize)],
+    style: u8,
+    before: Option<char>,
+    after: Option<char>,
+) -> String {
+    let seg = &text[r.clone()];
+    let shown = seg
+        .char_indices()
+        .map(|(o, c)| (r.start + o, c))
+        .any(|(at, c)| !c.is_whitespace() && !markup.iter().any(|&(ms, me)| ms <= at && at < me));
+    if !shown {
         return seg.to_string();
     }
+    let core = seg.trim();
     let lead = &seg[..seg.len() - seg.trim_start().len()];
     let trail = &seg[seg.trim_end().len()..];
     let m = marker_between(style, lead.chars().next_back().or(before), trail.chars().next().or(after));
@@ -272,9 +292,38 @@ fn wrap(seg: &str, style: u8, before: Option<char>, after: Option<char>) -> Stri
 /// The styles the composer's selection `a..b` already has, as `1 << style` bits: what a style
 /// shortcut would remove rather than add.
 pub fn selected_styles(text: &str, a: usize, b: usize) -> u32 {
-    let Some((a, b)) = trimmed(text, a, b) else { return 0 };
-    let spans = preview(text).0;
+    let (spans, markup) = preview(text);
+    let Some((a, b)) = trimmed(text, a, b, &strippable(&spans, &markup)) else { return 0 };
     MARKERS.iter().filter(|m| span_around(&spans, a, b, m.1).is_some()).fold(0, |bits, m| bits | 1 << m.1)
+}
+
+/// Markup without the backticks of monospace spans: a selection keeps them, since what styles
+/// monospace text has to go outside them.
+fn strippable(spans: &[(usize, usize, u8)], markup: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let ticks: Vec<(usize, usize)> =
+        spans.iter().filter(|s| s.2 == STYLE_MONO).flat_map(|&(s, e, _)| [(s - 1, s), (e, e + 1)]).collect();
+    markup.iter().copied().filter(|m| !ticks.contains(m)).collect()
+}
+
+/// Nothing is parsed inside `` ` ``, so a style for monospace text goes around its backticks: a
+/// monospace span the selection `a..b` reaches into is split where the selection starts or ends,
+/// and the selection grows to the backticks of its part. `None` when there is no such span.
+fn split_mono(text: &str, a: usize, b: usize, spans: &[(usize, usize, u8)]) -> Option<(String, usize, usize)> {
+    let &(s, e, _) = spans
+        .iter()
+        .find(|&&(s, e, k)| k == STYLE_MONO && a < e && s < b && !(a < s && e < b))?;
+    let (lo, hi) = (a.max(s), b.min(e));
+    let mut out = text[..s - 1].to_string();
+    out += &wrap(text, s..lo, &[], STYLE_MONO, out.chars().next_back(), Some('`'));
+    let na = if a < s { a } else { out.len() };
+    out += "`";
+    out += &text[lo..hi];
+    out += "`";
+    let mid_end = out.len();
+    out += &wrap(text, hi..e, &[], STYLE_MONO, Some('`'), text[e + 1..].chars().next());
+    let nb = if b > e { b + out.len() - (e + 1) } else { mid_end };
+    out += &text[e + 1..];
+    Some((out, na, nb))
 }
 
 /// Composer shortcut: wraps the selection `a..b` (byte offsets) in the style's markers, or, when
@@ -282,17 +331,50 @@ pub fn selected_styles(text: &str, a: usize, b: usize) -> u32 {
 /// side keeps the style). Whitespace at the selection's edges stays outside. Returns the new text
 /// and the new selection; `None` when nothing (but whitespace) is selected.
 pub fn toggle(text: &str, a: usize, b: usize, style: u8) -> Option<(String, usize, usize)> {
-    let (a, b) = trimmed(text, a, b)?;
-    if let Some((s, e)) = span_around(&preview(text).0, a, b, style) {
+    let (out, a, b) = toggle_split(text, a, b, style)?;
+    Some(join_mono(out, a, b))
+}
+
+/// Monospace pieces right next to each other (`` `a``b` ``, left by `split_mono` once the style
+/// that set them apart is gone) become one again.
+fn join_mono(text: String, a: usize, b: usize) -> (String, usize, usize) {
+    let mut mono: Vec<(usize, usize)> =
+        preview(&text).0.into_iter().filter(|s| s.2 == STYLE_MONO).map(|(s, e, _)| (s, e)).collect();
+    mono.sort_unstable();
+    // where each "``" between two pieces starts
+    let joins: Vec<usize> = mono.windows(2).filter(|w| w[0].1 + 2 == w[1].0).map(|w| w[0].1).collect();
+    if joins.is_empty() {
+        return (text, a, b);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    for &j in &joins {
+        out += &text[last..j];
+        last = j + 2;
+    }
+    out += &text[last..];
+    let at = |p: usize| p - joins.iter().map(|&j| p.saturating_sub(j).min(2)).sum::<usize>();
+    (out, at(a), at(b))
+}
+
+fn toggle_split(text: &str, a: usize, b: usize, style: u8) -> Option<(String, usize, usize)> {
+    let (spans, markup) = preview(text);
+    let (a, b) = trimmed(text, a, b, &strippable(&spans, &markup))?;
+    if style != STYLE_MONO {
+        if let Some((t, a, b)) = split_mono(text, a, b, &spans) {
+            return toggle_split(&t, a, b, style);
+        }
+    }
+    if let Some((s, e)) = span_around(&spans, a, b, style) {
         let ml = marker(style).len();
         let (a, b) = (a.clamp(s, e), b.clamp(s, e));
         let mut out = text[..s - ml].to_string();
-        let left = wrap(&text[s..a], style, out.chars().next_back(), text[a..].chars().next());
+        let left = wrap(text, s..a, &markup, style, out.chars().next_back(), text[a..].chars().next());
         out += &left;
         let na = out.len();
         out += &text[a..b];
         let nb = out.len();
-        out += &wrap(&text[b..e], style, text[..b].chars().next_back(), text[e + ml..].chars().next());
+        out += &wrap(text, b..e, &markup, style, text[..b].chars().next_back(), text[e + ml..].chars().next());
         out += &text[e + ml..];
         return Some((out, na, nb));
     }
@@ -441,6 +523,43 @@ mod tests {
         assert_eq!(toggle("_abcd_", 2, 4, STYLE_ITALIC).unwrap().0, "*a*bc*d*");
         assert_eq!(toggle("한글 abc", 0, 6, STYLE_ITALIC).unwrap().0, "*한글* abc");
         assert_eq!(toggle("**a**b", 5, 6, STYLE_ITALIC).unwrap().0, "**a**_b_");
+        // bold and italic toggled in turns on the same text come back to it, whichever goes first
+        for order in [[STYLE_BOLD, STYLE_ITALIC], [STYLE_ITALIC, STYLE_BOLD]] {
+            let (mut s, mut a, mut b) = ("abc".to_string(), 0, 3);
+            for _ in 0..3 {
+                for style in order.into_iter().chain(order) {
+                    (s, a, b) = toggle(&s, a, b, style).unwrap();
+                    assert_eq!(&s[a..b], "abc");
+                }
+                assert_eq!(s, "abc", "{order:?}");
+            }
+        }
+        // monospace first: other styles go around its backticks, and come back off
+        for order in [[STYLE_MONO, STYLE_BOLD, STYLE_ITALIC], [STYLE_BOLD, STYLE_MONO, STYLE_SPOILER]] {
+            let (mut s, mut a, mut b) = ("abc".to_string(), 0, 3);
+            for _ in 0..3 {
+                for style in order.into_iter().chain(order) {
+                    (s, a, b) = toggle(&s, a, b, style).unwrap();
+                    assert!(s.len() <= 3 + 2 * (1 + 2 + 2), "{order:?}: {s}");
+                }
+                assert_eq!(s, "abc", "{order:?}");
+            }
+        }
+        let (s, ..) = toggle("`abc`", 1, 4, STYLE_BOLD).unwrap();
+        assert_eq!(s, "**`abc`**");
+        assert_eq!(selected_styles(&s, 3, 6), 1 << STYLE_BOLD | 1 << STYLE_MONO);
+        let (s, a, b) = toggle("x `abcd` y", 4, 6, STYLE_BOLD).unwrap();
+        assert_eq!(s, "x `a`**`bc`**`d` y");
+        assert_eq!(parse(&s).1, [(2, 3, STYLE_MONO), (3, 5, STYLE_MONO), (3, 5, STYLE_BOLD), (5, 6, STYLE_MONO)]);
+        // and back: bold off, the monospace pieces one again
+        let (s2, a2, b2) = toggle(&s, a, b, STYLE_BOLD).unwrap();
+        assert_eq!(s2, "x `abcd` y");
+        assert_eq!(&s2[a2..b2], "bc");
+        // selected along with the markers: the styles inside are what's toggled
+        assert_eq!(toggle("**_abc_**", 0, 9, STYLE_ITALIC).unwrap().0, "**abc**");
+        assert_eq!(toggle("**_abc_**", 0, 9, STYLE_BOLD).unwrap().0, "_abc_");
+        assert_eq!(toggle("**abc**", 0, 7, STYLE_ITALIC).unwrap().0, "**_abc_**");
+        assert_eq!(selected_styles("**_abc_**", 0, 9), 1 << STYLE_ITALIC | 1 << STYLE_BOLD);
         let (s, ..) = toggle("**a**bc", 5, 6, STYLE_ITALIC).unwrap();
         assert_eq!(s, "**a***b*c");
         assert_eq!(parse(&s).1, [(0, 1, STYLE_BOLD), (1, 2, STYLE_ITALIC)]);
