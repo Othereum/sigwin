@@ -3,7 +3,7 @@
 //! - Restore from minimized: the software renderer redraws only damaged regions, and when
 //!   the UI changed while minimized it loses track of them. The restored window then shows
 //!   only the last-changed bits over a transparent background. We force a full repaint.
-//!   Sticker animations pause while minimized for the same reason (`gui::anim::pause`).
+//!   A GIF playing in the message list stops when minimized for the same reason (`gui::anim::pause`).
 //! - Activation changes: tell the backend whether the window is in the foreground
 //!   (replaces polling).
 //! - The monitor turned off or on: the user is away (`away`).

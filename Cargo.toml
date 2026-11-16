@@ -18,8 +18,9 @@ slint = { version = "1.19.0", default-features = false, features = [
     "raw-window-handle-06",
     "unstable-winit-030",
 ] }
-# patched (see [patch.crates-io]): text styles API `styled_text::sigwin_*`
-i-slint-core = { version = "=1.19.0", default-features = false }
+# patched (see [patch.crates-io]): text styles API `styled_text::sigwin_*`.
+# image-decoders: `Image::load_from_data` plays animated stickers (PNG through our `image`)
+i-slint-core = { version = "=1.19.0", default-features = false, features = ["image-decoders"] }
 raw-window-handle = "0.6"
 
 anyhow = "1"

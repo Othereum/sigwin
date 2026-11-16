@@ -444,66 +444,62 @@ pub fn square(img: &DynamicImage, px: u32) -> RgbaImage {
     fit(img.crop_imm((w - s) / 2, (h - s) / 2, s, s).to_rgba8(), px)
 }
 
-/// Frames of an animated image, resampled, with each frame's display time in µs (APNG times
-/// are fractions: 1/30 s must stay 33333µs, not 33ms, or the cadence drifts).
-pub struct Animation {
-    pub frames: Vec<RgbaImage>,
-    pub delays_us: Vec<u32>,
-}
-
 /// Decoding stops here: long animations would take seconds to resample.
 const MAX_FRAMES: usize = 500;
 
-/// Decodes an animated WebP / APNG / GIF, each frame resampled to `px` (see `fit`).
-/// `None` when the image is a still (one frame, or a format without animation). If the frames
-/// would take more than `max_bytes`, every other frame is dropped (its time goes to the one before)
-/// until they fit.
-pub fn animation(bytes: &[u8], px: u32, max_bytes: usize) -> ImageResult<Option<Animation>> {
+/// The frames of an animated WebP / APNG / GIF; `None` for a still or another format.
+fn frames(bytes: &[u8]) -> ImageResult<Option<image::Frames<'_>>> {
     use image::AnimationDecoder;
     use image::codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder};
-    let reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
     let cur = || std::io::Cursor::new(bytes);
-    let frames = match reader.format() {
+    Ok(match image::ImageReader::new(cur()).with_guessed_format()?.format() {
         Some(image::ImageFormat::WebP) => {
             let d = WebPDecoder::new(cur())?;
-            if !d.has_animation() {
-                return Ok(None);
-            }
-            d.into_frames()
+            d.has_animation().then(|| d.into_frames())
         }
         Some(image::ImageFormat::Png) => {
             let d = PngDecoder::new(cur())?;
-            if !d.is_apng()? {
-                return Ok(None);
-            }
-            d.apng()?.into_frames()
+            if d.is_apng()? { Some(d.apng()?.into_frames()) } else { None }
         }
-        Some(image::ImageFormat::Gif) => GifDecoder::new(cur())?.into_frames(),
-        _ => return Ok(None),
-    };
-    let mut anim = Animation { frames: Vec::new(), delays_us: Vec::new() };
-    for f in frames.take(MAX_FRAMES) {
-        let f = f?;
-        anim.delays_us.push(delay_us(f.delay()));
-        anim.frames.push(fit(f.into_buffer(), px));
-    }
-    if anim.frames.len() < 2 {
+        Some(image::ImageFormat::Gif) => Some(GifDecoder::new(cur())?.into_frames()),
+        _ => None,
+    })
+}
+
+/// An animated WebP / APNG / GIF as an APNG with every frame resampled to `px` (see `fit`),
+/// looping forever. Slint's `Image` plays it, decoding one frame at a time, but draws frames
+/// nearest-neighbor: they must come at the size shown. `None` for a still (one frame, or a
+/// format without animation). Holds one frame at a time: a first pass only counts them, which
+/// the APNG header needs before the first.
+pub fn animation_png(bytes: &[u8], px: u32) -> ImageResult<Option<Vec<u8>>> {
+    let Some(counted) = frames(bytes)? else { return Ok(None) };
+    let n = counted.take(MAX_FRAMES).count();
+    if n < 2 {
         return Ok(None);
     }
-    let size = |a: &Animation| a.frames.iter().map(|f| f.as_raw().len()).sum::<usize>();
-    while size(&anim) > max_bytes && anim.frames.len() > 1 {
-        let (mut frames, mut delays) = (Vec::new(), Vec::new());
-        for (i, (f, d)) in anim.frames.into_iter().zip(anim.delays_us).enumerate() {
-            if i % 2 == 0 {
-                frames.push(f);
-                delays.push(d);
-            } else if let Some(last) = delays.last_mut() {
-                *last += d;
-            }
-        }
-        anim = Animation { frames, delays_us: delays };
+    let io = |e: png::EncodingError| image::ImageError::IoError(std::io::Error::other(e));
+    // APNG keeps fractions: 1/30 s stays 33.3ms, so the cadence doesn't drift
+    let resampled = |f: image::Frame| ((delay_us(f.delay()) / 100).min(u16::MAX as u32) as u16, fit(f.into_buffer(), px));
+    let mut src = frames(bytes)?.into_iter().flatten().take(n);
+    let Some(first) = src.next() else { return Ok(None) };
+    let (delay, first) = resampled(first?);
+    let mut out = Vec::new();
+    let mut e = png::Encoder::new(&mut out, first.width(), first.height());
+    e.set_color(png::ColorType::Rgba);
+    e.set_depth(png::BitDepth::Eight);
+    // a few times faster than the default, ~15% bigger
+    e.set_compression(png::Compression::Fast);
+    e.set_animated(n as u32, 0).map_err(io)?;
+    let mut w = e.write_header().map_err(io)?;
+    w.set_frame_delay(delay, 10_000).map_err(io)?;
+    w.write_image_data(first.as_raw()).map_err(io)?;
+    for f in src {
+        let (delay, img) = resampled(f?);
+        w.set_frame_delay(delay, 10_000).map_err(io)?;
+        w.write_image_data(img.as_raw()).map_err(io)?;
     }
-    Ok(Some(anim))
+    w.finish().map_err(io)?;
+    Ok(Some(out))
 }
 
 /// Whether `bytes` are an animation (GIF, animated WebP or APNG) with more than one frame.
@@ -644,16 +640,45 @@ mod tests {
     }
 
     #[test]
-    fn decodes_animated_gif_and_skips_stills() {
-        let a = animation(&gif(4, 50), 32, usize::MAX).unwrap().unwrap();
-        assert_eq!(a.frames.len(), 4);
-        assert_eq!(a.frames[0].dimensions(), (32, 32));
-        assert_eq!(a.delays_us, vec![50_000; 4]);
-        assert!(animation(&gif(1, 50), 32, usize::MAX).unwrap().is_none());
+    fn makes_a_resampled_apng_and_skips_stills() {
+        let a = animation_png(&gif(4, 50), 32).unwrap().unwrap();
+        let mut seen = Vec::new();
+        stream_gif(&a, 32, |f, d| {
+            assert_eq!((f.dimensions(), d), ((32, 32), 50_000));
+            seen.push(f.get_pixel(0, 0)[0]);
+            seen.len() < 4
+        })
+        .unwrap();
+        assert_eq!(seen, [0, 40, 80, 120]);
+        assert!(animation_png(&gif(1, 50), 32).unwrap().is_none());
         let png = png_rgba(&RgbaImage::new(8, 8)).unwrap();
-        assert!(animation(&png, 32, usize::MAX).unwrap().is_none());
+        assert!(animation_png(&png, 32).unwrap().is_none());
         assert!(is_animated(&gif(3, 50)));
         assert!(!is_animated(&gif(1, 50)) && !is_animated(&png) && !is_animated(b"junk"));
+    }
+
+    #[test]
+    fn apng_keeps_fractional_delays() {
+        // 1/30 s in the source stays 33.3ms
+        let mut out = Vec::new();
+        let mut enc = png::Encoder::new(&mut out, 4, 4);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.set_animated(2, 0).unwrap();
+        enc.set_frame_delay(1, 30).unwrap();
+        let mut w = enc.write_header().unwrap();
+        for _ in 0..2 {
+            w.write_image_data(&[0; 64]).unwrap();
+        }
+        w.finish().unwrap();
+        let a = animation_png(&out, 4).unwrap().unwrap();
+        let mut delays = Vec::new();
+        stream_gif(&a, 4, |_, d| {
+            delays.push(d);
+            delays.len() < 2
+        })
+        .unwrap();
+        assert_eq!(delays, [33_300, 33_300]);
     }
 
     #[test]
@@ -662,14 +687,6 @@ mod tests {
         assert_eq!(delay_us(image::Delay::from_numer_denom_ms(100, 3)), 33_333);
         assert_eq!(delay_us(image::Delay::from_numer_denom_ms(0, 1)), 100_000);
         assert_eq!(delay_us(image::Delay::from_numer_denom_ms(20, 1)), 20_000);
-    }
-
-    #[test]
-    fn drops_frames_to_fit_the_budget() {
-        // 4 frames of 32x32 RGBA = 4 x 4096 bytes; room for 2
-        let a = animation(&gif(4, 50), 32, 2 * 4096).unwrap().unwrap();
-        assert_eq!(a.frames.len(), 2);
-        assert_eq!(a.delays_us, vec![100_000, 100_000]);
     }
 
 

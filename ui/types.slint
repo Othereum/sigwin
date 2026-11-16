@@ -118,9 +118,8 @@ export struct MsgItem {
     has-image: bool,
     // a sticker's picture
     image: image,
-    // animated sticker: frames and the current one's index in `frame[0]` (empty: show `image`)
-    frames: [image],
-    frame: [int],
+    // an animated sticker, which the Image plays (empty: show `image`)
+    anim: image,
     img-w: length,
     img-h: length,
     // the preview of a link in the text (link-url empty: none); link-img-w 0: no image
@@ -206,8 +205,7 @@ export struct StickerItem {
     id: int,
     emoji: string,
     img: image,
-    // plays while hovered (frames are loaded then and dropped after)
+    // plays while hovered (the animation is loaded then and dropped after)
     animated: bool,
-    frames: [image],
-    frame: [int],
+    anim: image,
 }

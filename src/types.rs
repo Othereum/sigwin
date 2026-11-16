@@ -471,35 +471,27 @@ impl GifSlot {
     }
 }
 
-/// Frames of all playing stickers in the message list together; the least recently shown
-/// sticker beyond this goes back to its still image.
-pub const ANIM_BUDGET: usize = 24 << 20;
+/// What the message list's playing stickers hold together (each: its APNG plus the two frames
+/// a playing `Image` keeps decoded); the least recently shown sticker beyond this goes back to
+/// its still image.
+pub const ANIM_BUDGET: usize = 12 << 20;
 
-/// An animated sticker's frames (all `width` x `height` RGBA) and how long each shows (µs).
-/// No frames: the image is a still.
+/// An animated sticker as an APNG of frames at the size shown, for Slint's `Image` to play.
+/// Empty: the image is a still.
 pub struct Frames {
     pub key: String,
-    pub width: u32,
-    pub height: u32,
-    pub frames: Vec<Vec<u8>>,
-    pub delays_us: Vec<u32>,
+    pub png: Vec<u8>,
 }
 
 impl Frames {
     pub fn still(key: String) -> Self {
-        Frames { key, width: 0, height: 0, frames: Vec::new(), delays_us: Vec::new() }
+        Frames { key, png: Vec::new() }
     }
 
-    /// Decodes `bytes` with each frame fitted to `fit` logical px.
-    pub fn decode(key: String, bytes: &[u8], fit: u32, max_bytes: usize) -> Self {
-        match sigwin_thumb::animation(bytes, physical_px(fit), max_bytes) {
-            Ok(Some(a)) => Frames {
-                key,
-                width: a.frames[0].width(),
-                height: a.frames[0].height(),
-                delays_us: a.delays_us,
-                frames: a.frames.into_iter().map(|f| f.into_raw()).collect(),
-            },
+    /// Re-encodes `bytes` with each frame fitted to `fit` logical px.
+    pub fn decode(key: String, bytes: &[u8], fit: u32) -> Self {
+        match sigwin_thumb::animation_png(bytes, physical_px(fit)) {
+            Ok(Some(png)) => Frames { key, png },
             Ok(None) => Frames::still(key),
             Err(e) => {
                 tracing::debug!("frames {key}: {e}");

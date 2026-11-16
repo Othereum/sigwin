@@ -1,20 +1,18 @@
-//! Animated stickers: frames per sticker under a memory budget, and the timer that flips them.
+//! Animated stickers, and the one GIF playing in the message list.
 //!
-//! Message list: a sticker row reports itself on screen (`Anim.shown`), then its frames are
-//! asked from the backend once; stills answer with no frames. The least recently shown sticker
-//! goes back to its still when the frames would exceed `ANIM_BUDGET`. Picker: only the hovered
-//! sticker plays.
+//! Stickers: a row reports itself on screen (`Anim.shown`), then the backend is asked once for
+//! the sticker as an APNG at the size shown (stills answer with none). Slint's `Image` plays it,
+//! decoding a frame when it draws one, so nothing ticks here and nothing decodes while it isn't
+//! drawn. The least recently shown sticker goes back to its still when the list's stickers
+//! would exceed `ANIM_BUDGET`. Picker: only the hovered sticker plays.
 //!
-//! Timing: each sticker plays from when its frames arrived, by the wall clock, with exact frame
-//! times (µs; APNG's 1/30 s stays 33.3ms, so every frame lands on the same number of display
-//! refreshes). One single-shot timer sleeps until the earliest frame change, then updates only
-//! the stickers whose frame changed: a one-element `frame` model their rows share, so no row is
-//! touched. It stops while nothing plays or the window is minimized.
+//! GIFs play from frames the backend streams (`backend::gif`): one at a time, decoded off the UI
+//! thread, which Slint's player can't do for big ones.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use slint::{ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 
@@ -22,30 +20,20 @@ use super::{Ui, UI};
 use crate::types::{Command, Frames, GifSlot, GifTarget, ANIM_BUDGET, STICKER_THUMB_PREFIX};
 use crate::{Anim, AppWindow};
 
-struct Playing {
-    frames: ModelRc<Image>,
-    /// the shown frame's index, one element, shared by every row of this sticker
-    frame: Rc<VecModel<i32>>,
-    /// end of each frame within a loop (µs, cumulative); the last is the loop length
-    ends: Vec<u64>,
-    start: Instant,
+struct Sticker {
+    /// the APNG, played by the rows' `Image`s
+    image: Image,
+    /// what it holds while playing: its bytes and the two frames `Image` keeps decoded
     bytes: usize,
     /// `Anims.clock` when last shown
     used: u64,
 }
 
-impl Playing {
-    /// The frame due at `now`, and when the next one is.
-    fn at(&self, now: Instant) -> (usize, Instant) {
-        let total = *self.ends.last().unwrap_or(&1);
-        let t = now.saturating_duration_since(self.start).as_micros() as u64;
-        let pos = t % total;
-        let i = self.ends.partition_point(|&e| e <= pos).min(self.ends.len() - 1);
-        (i, now + Duration::from_micros(self.ends[i] - pos))
-    }
-
-    fn models(&self) -> (ModelRc<Image>, ModelRc<i32>) {
-        (self.frames.clone(), ModelRc::from(self.frame.clone()))
+impl Sticker {
+    fn new(f: &Frames, used: u64) -> Option<Self> {
+        let image = Image::load_from_data(&f.png, Some("png")).ok()?;
+        let size = image.size();
+        Some(Sticker { image, bytes: f.png.len() + 2 * 4 * (size.width * size.height) as usize, used })
     }
 }
 
@@ -65,19 +53,19 @@ pub(crate) struct Anims {
     gif: Option<GifPlay>,
     gif_seq: u64,
     /// message-list stickers by thumbnail key, open thread only
-    list: HashMap<String, Playing>,
+    list: HashMap<String, Sticker>,
     /// keys asked from the backend, answered or not (an evicted key leaves, so it can come back)
     asked: HashSet<String>,
     clock: u64,
-    /// the hovered picker sticker's key, and its frames once they arrive
+    /// the hovered picker sticker's key, and whether it plays (its APNG arrived)
     hovered: Option<String>,
-    picker: Option<Playing>,
+    picker: bool,
 }
 
 impl Anims {
-    /// A sticker's frames and current-frame model for a message row (empty: show the still).
-    pub(crate) fn models(&self, key: &str) -> (ModelRc<Image>, ModelRc<i32>) {
-        self.list.get(key).map(Playing::models).unwrap_or_default()
+    /// A sticker's animation for a message row (empty: show the still).
+    pub(crate) fn image(&self, key: &str) -> Image {
+        self.list.get(key).map(|s| s.image.clone()).unwrap_or_default()
     }
 
     /// The playing GIF's frames for cell `cell` of row `id` (empty: show the still).
@@ -88,22 +76,18 @@ impl Anims {
         }
     }
 
-    /// Thread switch: the old thread's frames go.
+    /// Thread switch: the old thread's stickers go.
     pub(crate) fn clear_list(&mut self) {
         self.list.clear();
         self.asked.clear();
-        if self.picker.is_none() {
-            TIMER.with(|t| t.stop());
-        }
     }
 
     fn bytes(&self) -> usize {
-        self.list.values().map(|p| p.bytes).sum()
+        self.list.values().map(|s| s.bytes).sum()
     }
 }
 
 thread_local! {
-    static TIMER: slint::Timer = slint::Timer::default();
     static APP: RefCell<Option<slint::Weak<AppWindow>>> = const { RefCell::new(None) };
     static PAUSED: Cell<bool> = const { Cell::new(false) };
     /// a hover refresh is queued
@@ -150,17 +134,15 @@ pub(crate) fn refresh_hover() {
     });
 }
 
-/// The window was minimized (true) or restored. Nothing ticks meanwhile: updates while
-/// minimized also confuse the software renderer's damage tracking (`winhook.rs`).
+/// The window was minimized (true) or restored. The GIF stops: its frames would keep coming,
+/// and updates while minimized confuse the software renderer's damage tracking (`winhook.rs`).
+/// Stickers need nothing: their `Image`s decode only when drawn.
 pub(crate) fn pause(paused: bool) {
     PAUSED.set(paused);
-    // called from the window procedure: don't touch UI state from inside it
-    slint::Timer::single_shot(Duration::ZERO, move || {
-        if paused {
-            UI.with_borrow_mut(stop_gif);
-        }
-        UI.with_borrow(sync_timer)
-    });
+    if paused {
+        // called from the window procedure: don't touch UI state from inside it
+        slint::Timer::single_shot(Duration::ZERO, || UI.with_borrow_mut(stop_gif));
+    }
 }
 
 /// The cursor came onto cell `cell` of row `id` or left it. A GIF plays while the cursor is on
@@ -291,133 +273,59 @@ fn hover(pack: &str, id: u32, on: bool) {
         } else if ui.anims.hovered.as_deref() == Some(key.as_str()) {
             stop_picker(ui);
         }
-        sync_timer(ui);
     });
 }
 
-/// The hovered picker sticker stops and its frames go (also when the grid changes or closes).
+/// The hovered picker sticker stops and its animation goes (also when the grid changes or closes).
 pub(crate) fn stop_picker(ui: &mut Ui) {
     let Some(key) = ui.anims.hovered.take() else { return };
-    if ui.anims.picker.take().is_some() {
-        set_picker_row(ui, &key, Default::default());
+    if std::mem::take(&mut ui.anims.picker) {
+        set_picker_row(ui, &key, Image::default());
     }
-    sync_timer(ui);
 }
 
 pub(crate) fn frames_arrived(f: Frames) {
     UI.with_borrow_mut(|ui| {
+        if f.png.is_empty() {
+            // a still; it stays in `asked`
+            return;
+        }
         if f.key.starts_with(STICKER_THUMB_PREFIX) {
-            if f.frames.is_empty() || ui.anims.hovered.as_deref() != Some(f.key.as_str()) {
+            if ui.anims.hovered.as_deref() != Some(f.key.as_str()) {
                 return;
             }
-            let p = playing(&f, 0);
-            set_picker_row(ui, &f.key, p.models());
-            ui.anims.picker = Some(p);
+            let Some(s) = Sticker::new(&f, 0) else { return };
+            set_picker_row(ui, &f.key, s.image);
+            ui.anims.picker = true;
         } else {
-            // stills stay in `asked`; a key not asked belongs to a thread left meanwhile
-            if f.frames.is_empty() || !ui.anims.asked.contains(&f.key) || ui.anims.list.contains_key(&f.key) {
+            // a key not asked belongs to a thread left meanwhile
+            if !ui.anims.asked.contains(&f.key) || ui.anims.list.contains_key(&f.key) {
                 return;
             }
-            let p = playing(&f, ui.anims.clock);
-            while !ui.anims.list.is_empty() && ui.anims.bytes() + p.bytes > ANIM_BUDGET {
-                let Some(old) = ui.anims.list.iter().min_by_key(|(_, p)| p.used).map(|(k, _)| k.clone()) else { break };
+            let Some(s) = Sticker::new(&f, ui.anims.clock) else { return };
+            while !ui.anims.list.is_empty() && ui.anims.bytes() + s.bytes > ANIM_BUDGET {
+                let Some(old) = ui.anims.list.iter().min_by_key(|(_, s)| s.used).map(|(k, _)| k.clone()) else { break };
                 tracing::debug!("anim budget: {old} back to its still");
                 ui.anims.list.remove(&old);
                 ui.anims.asked.remove(&old);
                 set_rows(ui, &old);
             }
-            ui.anims.list.insert(f.key.clone(), p);
+            ui.anims.list.insert(f.key.clone(), s);
             set_rows(ui, &f.key);
             tracing::debug!(playing = ui.anims.list.len(), kb = ui.anims.bytes() / 1024, "anim frames");
         }
-        sync_timer(ui);
     });
 }
 
-fn playing(f: &Frames, used: u64) -> Playing {
-    let frames: Vec<Image> = f
-        .frames
-        .iter()
-        .map(|px| Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(px, f.width, f.height)))
-        .collect();
-    let ends = f
-        .delays_us
-        .iter()
-        .scan(0u64, |end, &d| {
-            *end += d.max(1) as u64;
-            Some(*end)
-        })
-        .collect();
-    Playing {
-        frames: ModelRc::new(VecModel::from(frames)),
-        frame: Rc::new(VecModel::from(vec![0])),
-        ends,
-        start: Instant::now(),
-        bytes: f.frames.iter().map(Vec::len).sum(),
-        used,
-    }
-}
-
-/// Puts a key's frames (or none) on its message rows.
+/// Puts a key's animation (or none) on its message rows.
 fn set_rows(ui: &Ui, key: &str) {
     super::rows::redraw_rows(ui, |m| m.image_key == key);
 }
 
-fn set_picker_row(ui: &Ui, key: &str, (frames, frame): (ModelRc<Image>, ModelRc<i32>)) {
+fn set_picker_row(ui: &Ui, key: &str, anim: Image) {
     let Some(i) = ui.sticker.grid.iter().position(|s| s.key == key) else { return };
     if let Some(mut row) = ui.sticker.stickers.row_data(i) {
-        row.frames = frames;
-        row.frame = frame;
+        row.anim = anim;
         ui.sticker.stickers.set_row_data(i, row);
     }
-}
-
-/// Shows each sticker's current frame and sleeps until the earliest next one. Frames follow
-/// the wall clock, so a late tick never slows an animation down.
-fn tick() {
-    let now = Instant::now();
-    let next = UI.with_borrow(|ui| {
-        let playing = ui.anims.list.values().chain(ui.anims.picker.as_ref());
-        playing
-            .map(|p| {
-                let (i, next) = p.at(now);
-                if p.frame.row_data(0) != Some(i as i32) {
-                    p.frame.set_row_data(0, i as i32);
-                }
-                next
-            })
-            .min()
-    });
-    if let Some(next) = next {
-        TIMER.with(|t| t.start(slint::TimerMode::SingleShot, next.saturating_duration_since(Instant::now()), tick));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn frames_follow_exact_times() {
-        let f = Frames { key: "k".into(), width: 1, height: 1, frames: vec![vec![0; 4]; 3], delays_us: vec![33_333; 3] };
-        let p = playing(&f, 0);
-        let us = |n: u64| p.start + Duration::from_micros(n);
-        assert_eq!(p.at(us(0)), (0, us(33_333)));
-        assert_eq!(p.at(us(33_333)), (1, us(66_666)));
-        assert_eq!(p.at(us(66_665)), (1, us(66_666)));
-        // loops; the boundary keeps its fraction instead of drifting by 1ms per frame
-        assert_eq!(p.at(us(99_999 + 40_000)), (1, us(99_999 + 66_666)));
-    }
-}
-
-fn sync_timer(ui: &Ui) {
-    let run = !PAUSED.get() && (!ui.anims.list.is_empty() || ui.anims.picker.is_some());
-    TIMER.with(|t| {
-        if !run {
-            t.stop();
-        } else {
-            // a new sticker may change sooner than the one the timer waits for
-            t.start(slint::TimerMode::SingleShot, Duration::ZERO, tick);
-        }
-    });
 }

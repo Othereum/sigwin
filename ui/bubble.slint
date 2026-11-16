@@ -162,7 +162,7 @@ export component MsgImage inherits Rectangle {
     if m.cells.length == 0: Image {
         width: 100%;
         height: 100%;
-        source: m.frames.length > 0 ? m.frames[m.frame[0]] : m.image;
+        source: m.anim.width > 0 ? m.anim : m.image;
         image-fit: contain;
     }
     // only when the server no longer has it: its size while it downloads would be noise on a sticker

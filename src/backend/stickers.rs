@@ -135,10 +135,10 @@ impl App {
         tokio::task::spawn_blocking(move || {
             let started = std::time::Instant::now();
             let f = match sigwin_vault::read(&path) {
-                Ok(bytes) => Frames::decode(key, &bytes, view::media::STICKER_SIZE, ANIM_BUDGET / 2),
+                Ok(bytes) => Frames::decode(key, &bytes, view::media::STICKER_SIZE),
                 Err(_) => Frames::still(key),
             };
-            debug!(ms = started.elapsed().as_millis() as u64, frames = f.frames.len(), "sticker frames");
+            debug!(ms = started.elapsed().as_millis() as u64, kb = f.png.len() / 1024, "sticker frames");
             emit(Event::Frames(f));
         });
     }
@@ -150,7 +150,7 @@ impl App {
         let emit = self.emit.clone();
         tokio::task::spawn_blocking(move || {
             let f = match sigwin_vault::read(&path) {
-                Ok(bytes) => Frames::decode(key, &bytes, PICKER_CELL, ANIM_BUDGET / 4),
+                Ok(bytes) => Frames::decode(key, &bytes, PICKER_CELL),
                 Err(_) => Frames::still(key),
             };
             emit(Event::Frames(f));

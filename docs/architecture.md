@@ -37,7 +37,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/gui/media.rs` | thumbnails, their labels and photos arriving for rows already shown |
 | `src/gui/stickers.rs` | sticker panel: pack tabs, the open pack's grid |
 | `src/gui/scroll.rs` | message list scrolling and jumps |
-| `src/gui/anim.rs` | animated stickers: frames under a memory budget, the timer that flips them; the one GIF playing in the message list |
+| `src/gui/anim.rs` | animated stickers (APNGs that Slint's `Image` plays) under a memory budget; the one GIF playing in the message list |
 | `src/gui/drafts.rs` | per-thread composer drafts |
 | `src/gui/linkcard.rs` | the link preview card in the composer |
 | `src/gui/viewer.rs` | image viewer window |
@@ -100,7 +100,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 ### Crates
 | Crate | Role |
 |---|---|
-| `crates/thumb` | image decoding, resampling, animation frames |
+| `crates/thumb` | image decoding, resampling, resampled sticker APNGs, GIF frames |
 | `crates/vault` | encrypted cache files |
 | `crates/ui` | compiles `ui/app.slint` and holds the generated code |
 

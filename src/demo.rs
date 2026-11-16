@@ -978,7 +978,7 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
     let emit = emit.clone();
     std::thread::spawn(move || {
         if let Ok(gif) = sigwin_thumb::gif(frames, 120) {
-            emit(Event::Frames(types::Frames::decode(key, &gif, fit, types::ANIM_BUDGET / 2)));
+            emit(Event::Frames(types::Frames::decode(key, &gif, fit)));
         }
     });
 }

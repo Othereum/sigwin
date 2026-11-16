@@ -324,9 +324,9 @@ pub(crate) fn to_item(
     revealed: &std::collections::HashSet<String>,
     dark: bool,
 ) -> MsgItem {
-    // stickers: the picture and its frames
+    // stickers: the picture and its animation
     let image = thumbs.get(&m.image_key).cloned();
-    let (frames, frame) = anims.models(&m.image_key);
+    let anim = anims.image(&m.image_key);
     let cells: Vec<ImageCell> = m
         .cells
         .iter()
@@ -416,8 +416,7 @@ pub(crate) fn to_item(
         },
         has_image: !m.image_key.is_empty() || !m.cells.is_empty(),
         image: image.unwrap_or_default(),
-        frames,
-        frame,
+        anim,
         img_w: m.img_w as f32,
         img_h: m.img_h as f32,
         cells: if cells.is_empty() { Default::default() } else { ModelRc::new(VecModel::from(cells)) },

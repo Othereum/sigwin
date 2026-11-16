@@ -35,7 +35,7 @@ use tracing::{debug, error, info, warn};
 use crate::db::Index;
 use crate::types::{
     parse_thread_key, thread_key, Command, Event, Frames, MsgDto, PackDto, Paging, PinDto, ReplyDto, Scroll, StickerDto, Thumb, ThreadDto,
-    ANIM_BUDGET, STICKER_THUMB_PREFIX,
+    STICKER_THUMB_PREFIX,
 };
 use crate::view::media::THUMB_MAX;
 use crate::view::{self, Kind};

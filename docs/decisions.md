@@ -72,3 +72,10 @@ A click on an undownloaded video only downloads it, and another click plays it. 
 Eight bits per channel cost little: over white and black the results differ by 0.3 of 255 on average and 10 at most, along edges, not visible side by side, with no dark fringes.
 
 `decode_thumb` keeps `thumbnail`: at 4000x3000 to 400 it takes 14ms and 1MB, fir 8.5ms and 5.7MB without premultiplying. It runs on its own for every image received, so memory decides.
+
+## Animated stickers: an APNG that Slint plays (measured 2026-11-16)
+Stickers used to be decoded ahead into every frame at the size shown (about 290KB a frame at 1.5x scale), under a 24MB budget that dropped every other frame of long ones, with our own timer flipping frames. Now the backend re-encodes the resampled frames as an APNG (`png`, fast compression) and Slint 1.19's `Image` plays it, decoding a frame each time it draws one.
+
+Synthetic 512px sticker, 90 frames: ahead-decoded 11MB at 180px (6.4MB at 270px after dropping 3 of every 4 frames); APNG 1.2–2.9MB plus two decoded frames, encoded in 9–17ms, decoded in 0.08–0.16ms a frame. Real account, five animated stickers on screen, 20s each: heap 24.5MB to 21.2MB, CPU 4.5% to 5.4% of one core (within noise). Short stickers save little because each playing `Image` keeps its first and current frame decoded; long ones save most and no longer lose frames.
+
+Rejected: giving Slint the original file. It draws frames at the source size, nearest-neighbor, so a 512px sticker shown at 180px gets jagged. GIFs in messages stay with `backend::gif`: big ones would stall the UI thread decoding them, and re-encoding hundreds of frames costs more than streaming them.

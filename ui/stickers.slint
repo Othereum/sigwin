@@ -92,7 +92,7 @@ export component StickerPanel inherits Rectangle {
                 Image {
                     width: root.cell - 12px;
                     height: root.cell - 12px;
-                    source: s.frames.length > 0 ? s.frames[s.frame[0]] : s.img;
+                    source: s.anim.width > 0 ? s.anim : s.img;
                     image-fit: contain;
                 }
                 sta := TouchArea {

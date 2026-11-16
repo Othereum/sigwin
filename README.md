@@ -85,7 +85,7 @@ Written in **Rust**, with [presage](https://github.com/whisperfish/presage) for 
 - Slint's **software renderer** (8.4MB private, against 212MB for femtovg and 388MB for Skia)
 - Messages are read 60 rows at a time, and a chat holds at most 600 rows
 - Only thumbnails of images are kept in memory; the rest is cached on disk
-- Animated sticker frames only for what's on screen, 24MB in all (LRU)
+- Animated stickers are kept compressed at the size shown and decoded a frame at a time
 - File dialogs run in a child process
 - Measurements and the reasons behind these choices: [`docs/decisions.md`](docs/decisions.md)
 
