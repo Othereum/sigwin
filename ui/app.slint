@@ -297,7 +297,7 @@ export component AppWindow inherits Window {
     // a switched-to thread at the bottom from its first frame: the ListView lays out only when
     // drawing, and the Flickable first clamps content-y to the (old thread's) content height.
     // A huge content height avoids the clamp; past the end, the layout puts the last row at the
-    // bottom with real row heights above it and sets both values right. Not ensure-row-visible:
+    // bottom with real row heights above it (vendor patch) and sets both values right. Not ensure-row-visible:
     // it puts a row taller than the view at its top, so a long last message slid into place.
     public function seek-end() {
         msg-list.content-height = 10000000px;
