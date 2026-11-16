@@ -177,13 +177,37 @@ fn mention_color(outgoing: bool, dark: bool) -> Color {
     }
 }
 
-/// Marks the "@name"s of the picked members in the composer like mentions in a received message:
-/// exactly the text `mention::encode` will send as mentions. Call whenever `ui.picked` or the
-/// theme changes.
-pub(crate) fn sync_composer_mentions(ui: &Ui) {
-    let marks = ui.picked.iter().filter(|m| !m.1.is_empty()).map(|m| format!("@{}", m.1)).collect();
-    let styles = vec![SigwinStyle::Bold, SigwinStyle::Color(mention_color(false, ui.dark))];
-    i_slint_core::styled_text::sigwin_set_edit_marks(marks, styles);
+/// Shows the composer's text as it will be sent: the "@name"s of the picked members like mentions
+/// in a received message (exactly the text `mention::encode` will send as mentions), and text
+/// styles in place with their markers dimmed. Call whenever `ui.picked` or the theme changes.
+pub(crate) fn sync_composer_styles(ui: &Ui) {
+    let marks: Vec<String> = ui.picked.iter().filter(|m| !m.1.is_empty()).map(|m| format!("@{}", m.1)).collect();
+    let mention = mention_color(false, ui.dark);
+    // Theme.subtle
+    let dim = if ui.dark { Color::from_rgb_u8(0x9a, 0x9a, 0xa0) } else { Color::from_rgb_u8(0x6b, 0x6b, 0x70) };
+    i_slint_core::styled_text::sigwin_set_edit_styler(Some(Box::new(move |text: &str| {
+        let mut spans = Vec::new();
+        for mark in &marks {
+            for (at, _) in text.match_indices(mark.as_str()) {
+                spans.push((at..at + mark.len(), SigwinStyle::Bold));
+                spans.push((at..at + mark.len(), SigwinStyle::Color(mention)));
+            }
+        }
+        let (styles, markup) = format::preview(text);
+        for (s, e, k) in styles {
+            let style = match k {
+                view::text::STYLE_BOLD => SigwinStyle::Bold,
+                view::text::STYLE_ITALIC => SigwinStyle::Italic,
+                view::text::STYLE_STRIKE => SigwinStyle::Strike,
+                view::text::STYLE_MONO => SigwinStyle::Mono,
+                // the writer sees what they hide: only the markers show it
+                _ => continue,
+            };
+            spans.push((s..e, style));
+        }
+        spans.extend(markup.into_iter().map(|(s, e)| (s..e, SigwinStyle::Color(dim))));
+        spans
+    })));
 }
 
 /// Spoiler ranges still hidden.
@@ -509,7 +533,7 @@ pub(crate) fn refresh_rows(app: &AppWindow) {
     let dark = app.global::<Theme>().get_dark();
     UI.with_borrow_mut(|ui| {
         ui.dark = dark;
-        sync_composer_mentions(ui);
+        sync_composer_styles(ui);
         let rows: Vec<MsgItem> = ui.last.iter().map(|m| to_item(m, &ui.thumbs, &ui.media_labels, &ui.anims, &ui.sender_avatars, &ui.revealed, dark)).collect();
         ui.messages.set_vec(rows);
         ui.typing_row = false;

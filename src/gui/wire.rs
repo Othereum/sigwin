@@ -305,7 +305,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             }
             let mentions = UI.with_borrow_mut(|ui| {
                 let picked = std::mem::take(&mut ui.picked);
-                super::rows::sync_composer_mentions(ui);
+                super::rows::sync_composer_styles(ui);
                 picked
             });
             s(Command::Edit { id, text: text.to_string(), mentions });
@@ -320,7 +320,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
         let mentions = UI.with_borrow_mut(|ui| {
             let picked = std::mem::take(&mut ui.picked);
-            super::rows::sync_composer_mentions(ui);
+            super::rows::sync_composer_styles(ui);
             picked
         });
         // `files` were taken above: with attachments there is no preview
@@ -417,13 +417,12 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let weak = app.as_weak();
         move |style, text, anchor, cursor| {
             let Some(app) = weak.upgrade() else { return };
-            let (new, a, b) = format::toggle(&text, anchor.max(0) as usize, cursor.max(0) as usize, style as u8);
-            let was_empty = text.is_empty();
+            let Some((new, a, b)) = format::toggle(&text, anchor.max(0) as usize, cursor.max(0) as usize, style as u8)
+            else {
+                return;
+            };
             app.set_draft(new.into());
             app.invoke_composer_select(a as i32, b as i32);
-            if was_empty {
-                app.invoke_composing(true);
-            }
         }
     });
 
@@ -445,7 +444,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             let m = m?;
             if !ui.picked.contains(&m) {
                 ui.picked.push(m.clone());
-                super::rows::sync_composer_mentions(ui);
+                super::rows::sync_composer_styles(ui);
             }
             Some(m)
         });
@@ -597,7 +596,7 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
                 .iter()
                 .filter_map(|(s, e, uuid)| Some((uuid.clone(), m.text.get(s + 1..*e)?.to_string())))
                 .collect();
-            super::rows::sync_composer_mentions(ui);
+            super::rows::sync_composer_styles(ui);
             // its styles come back as markers
             let text = format::to_markup(&m.text, &m.styles);
             ui.editing = Some(id.to_string());

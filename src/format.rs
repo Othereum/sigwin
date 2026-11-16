@@ -87,6 +87,40 @@ fn parse_into(s: &str, out: &mut String, styles: &mut Vec<(usize, usize, u8)>) {
     }
 }
 
+/// What `parse` would make of `s`, in `s`'s own byte offsets, for showing a draft with its styles:
+/// (start, end, style) of each span's content, and the ranges of markup that won't be sent
+/// (markers, escaping backslashes).
+pub fn preview(s: &str) -> (Vec<(usize, usize, u8)>, Vec<(usize, usize)>) {
+    let (mut styles, mut markup) = (Vec::new(), Vec::new());
+    preview_into(s, 0, &mut styles, &mut markup);
+    (styles, markup)
+}
+
+// mirrors `parse_into`, which judges a span's inner text on its own
+fn preview_into(s: &str, base: usize, styles: &mut Vec<(usize, usize, u8)>, markup: &mut Vec<(usize, usize)>) {
+    let mut i = 0;
+    while i < s.len() {
+        if s[i..].starts_with('\\') {
+            if let Some((_, len, _)) = span_at(s, i + 1) {
+                markup.push((base + i, base + i + 1));
+                i += 1 + len;
+                continue;
+            }
+        }
+        if let Some((style, len, end)) = span_at(s, i) {
+            markup.push((base + i, base + i + len));
+            markup.push((base + end, base + end + len));
+            if style != STYLE_MONO {
+                preview_into(&s[i + len..end], base + i + len, styles, markup);
+            }
+            styles.push((base + i + len, base + end, style));
+            i = end + len;
+            continue;
+        }
+        i += s[i..].chars().next().unwrap().len_utf8();
+    }
+}
+
 /// Plain text + style ranges back to markers (inverse of `parse` for well-nested styles).
 /// Styles are opened outermost first, monospace always innermost (nothing parses inside it).
 pub fn to_markup(text: &str, styles: &[(usize, usize, u8)]) -> String {
@@ -144,12 +178,12 @@ pub fn to_markup(text: &str, styles: &[(usize, usize, u8)]) -> String {
 
 /// Composer shortcut: wraps the selection `a..b` (byte offsets) in the style's markers, or
 /// removes them when it is already wrapped. Whitespace at the selection's edges stays outside.
-/// Returns the new text and the new selection.
-pub fn toggle(text: &str, a: usize, b: usize, style: u8) -> (String, usize, usize) {
+/// Returns the new text and the new selection; `None` when nothing (but whitespace) is selected.
+pub fn toggle(text: &str, a: usize, b: usize, style: u8) -> Option<(String, usize, usize)> {
     let m = marker(style);
     let (mut a, mut b) = (a.min(b).min(text.len()), a.max(b).min(text.len()));
     if !text.is_char_boundary(a) || !text.is_char_boundary(b) {
-        return (text.to_string(), a, b);
+        return None;
     }
     while a < b && text[a..b].starts_with(char::is_whitespace) {
         a += text[a..].chars().next().unwrap().len_utf8();
@@ -157,17 +191,20 @@ pub fn toggle(text: &str, a: usize, b: usize, style: u8) -> (String, usize, usiz
     while a < b && text[a..b].ends_with(char::is_whitespace) {
         b -= text[..b].chars().next_back().unwrap().len_utf8();
     }
+    if a == b {
+        return None;
+    }
     // already wrapped (markers just outside, or selected along with the text): unwrap
     if text[..a].ends_with(m) && text[b..].starts_with(m) {
         let out = format!("{}{}{}", &text[..a - m.len()], &text[a..b], &text[b + m.len()..]);
-        return (out, a - m.len(), b - m.len());
+        return Some((out, a - m.len(), b - m.len()));
     }
     if b - a >= 2 * m.len() && text[a..b].starts_with(m) && text[a..b].ends_with(m) {
         let out = format!("{}{}{}", &text[..a], &text[a + m.len()..b - m.len()], &text[b..]);
-        return (out, a, b - 2 * m.len());
+        return Some((out, a, b - 2 * m.len()));
     }
     let out = format!("{}{m}{}{m}{}", &text[..a], &text[a..b], &text[b..]);
-    (out, a + m.len(), b + m.len())
+    Some((out, a + m.len(), b + m.len()))
 }
 
 #[cfg(test)]
@@ -245,16 +282,32 @@ mod tests {
     fn toggles_markers() {
         // "안녕 하세요" with "하세요 " selected: the trailing space stays outside
         let t = "안녕 하세요 ";
-        let (s, a, b) = toggle(t, 7, t.len(), STYLE_BOLD);
+        let (s, a, b) = toggle(t, 7, t.len(), STYLE_BOLD).unwrap();
         assert_eq!(s, "안녕 **하세요** ");
         assert_eq!(&s[a..b], "하세요");
         // again: unwrap
-        let (s2, a2, b2) = toggle(&s, a, b, STYLE_BOLD);
+        let (s2, a2, b2) = toggle(&s, a, b, STYLE_BOLD).unwrap();
         assert_eq!(s2, t);
         assert_eq!(&s2[a2..b2], "하세요");
         // selected along with the markers
-        assert_eq!(toggle("x **y** z", 2, 7, STYLE_BOLD).0, "x y z");
-        // no selection: an empty pair with the cursor inside
-        assert_eq!(toggle("ab", 1, 1, STYLE_SPOILER), ("a||||b".to_string(), 3, 3));
+        assert_eq!(toggle("x **y** z", 2, 7, STYLE_BOLD).unwrap().0, "x y z");
+        // nothing selected, or only spaces: no empty pair of markers
+        assert_eq!(toggle("ab", 1, 1, STYLE_SPOILER), None);
+        assert_eq!(toggle("a  b", 1, 3, STYLE_BOLD), None);
+    }
+
+    #[test]
+    fn previews_in_place() {
+        let s = "**굵은 _기울임_**를 \\**그대로** `a_b_`";
+        let (styles, markup) = preview(s);
+        let at = |(a, b): (usize, usize)| &s[a..b];
+        let spans: Vec<(&str, u8)> = styles.iter().map(|&(a, b, k)| (at((a, b)), k)).collect();
+        assert_eq!(spans, [("기울임", STYLE_ITALIC), ("굵은 _기울임_", STYLE_BOLD), ("a_b_", STYLE_MONO)]);
+        let marks: Vec<&str> = markup.iter().map(|&r| at(r)).collect();
+        assert_eq!(marks, ["**", "**", "_", "_", "\\", "`", "`"]);
+        // same spans as what gets sent
+        let (plain, sent) = parse(s);
+        assert_eq!(sent.len(), styles.len());
+        assert_eq!(plain, "굵은 기울임를 **그대로** a_b_");
     }
 }

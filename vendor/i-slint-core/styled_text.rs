@@ -258,37 +258,36 @@ pub fn sigwin_clear_plain_styles() {
     SIGWIN_PLAIN.with_borrow_mut(|m| m.clear());
 }
 
+/// sigwin patch: computes the styles of text being edited, from that text as shaped (an IME
+/// composition included): (byte range, style) pairs.
+#[cfg(feature = "std")]
+pub type SigwinEditStyler = alloc::boxed::Box<dyn Fn(&str) -> alloc::vec::Vec<(core::ops::Range<usize>, SigwinStyle)>>;
+
 #[cfg(feature = "std")]
 std::thread_local! {
-    static SIGWIN_EDIT_MARKS: core::cell::RefCell<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<SigwinStyle>)> =
-        Default::default();
+    static SIGWIN_EDIT_STYLER: core::cell::RefCell<Option<SigwinEditStyler>> = Default::default();
     // bumped on every change: shaping reads it, so cached layouts of edited text are redone
     static SIGWIN_EDIT_GEN: core::pin::Pin<alloc::boxed::Box<crate::Property<u32>>> =
         alloc::boxed::Box::pin(crate::Property::new(0));
 }
 
-/// sigwin patch: editable TextInputs draw every occurrence of each of `marks` with `styles`
-/// (font styles and colors; links are ignored). Replaces the previous marks. Matching substrings
-/// rather than the whole text keeps them while the text is edited or an IME composes.
+/// sigwin patch: multi-line editable TextInputs are drawn with the styles `styler` gives for
+/// their text (font styles and colors; links are ignored). Replaces the previous styler; set it
+/// again whenever what it depends on changes, so laid out text is redone.
 #[cfg(feature = "std")]
-pub fn sigwin_set_edit_marks(marks: alloc::vec::Vec<alloc::string::String>, styles: alloc::vec::Vec<SigwinStyle>) {
-    SIGWIN_EDIT_MARKS.with_borrow_mut(|m| *m = (marks, styles));
+pub fn sigwin_set_edit_styler(styler: Option<SigwinEditStyler>) {
+    SIGWIN_EDIT_STYLER.with_borrow_mut(|s| *s = styler);
     SIGWIN_EDIT_GEN.with(|g| g.as_ref().set(g.as_ref().get_untracked().wrapping_add(1)));
 }
 
-/// sigwin patch: the formatting of each paragraph of edited `text` from [`sigwin_set_edit_marks`].
+/// sigwin patch: the formatting of each paragraph of edited `text` from [`sigwin_set_edit_styler`].
 #[cfg(feature = "std")]
 pub(crate) fn sigwin_edit_style(
     text: &str,
 ) -> Option<alloc::vec::Vec<alloc::vec::Vec<i_slint_common::styled_text::FormattedSpan>>> {
     SIGWIN_EDIT_GEN.with(|g| g.as_ref().get());
-    SIGWIN_EDIT_MARKS.with_borrow(|(marks, styles)| {
-        let mut spans = alloc::vec::Vec::new();
-        for mark in marks.iter().filter(|m| !m.is_empty()) {
-            for (at, _) in text.match_indices(mark.as_str()) {
-                spans.extend(styles.iter().map(|s| (at..at + mark.len(), s.clone())));
-            }
-        }
+    SIGWIN_EDIT_STYLER.with_borrow(|styler| {
+        let spans = styler.as_ref()?(text);
         if spans.is_empty() {
             return None;
         }

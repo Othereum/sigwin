@@ -311,15 +311,18 @@ pub(super) fn create_text_paragraphs(
     match text {
         PlainOrStyledText::Plain(ref text) => {
             // sigwin patch: formatting registered for this exact text (`sigwin_set_plain_style`),
-            // and for text being edited the marked substrings (`sigwin_set_edit_marks`) instead:
-            // a draft that happens to equal a message must not take its styles
-            let editable = item_rc
-                .and_then(|rc| rc.downcast::<crate::items::TextInput>())
-                .is_some_and(|ti| !ti.as_pin_ref().read_only());
-            let mut styles = if editable {
+            // and for text being edited the app's styler (`sigwin_set_edit_styler`) instead: a
+            // draft that happens to equal a message must not take its styles. Single-line fields
+            // (search, settings) take neither.
+            let input = item_rc.and_then(|rc| rc.downcast::<crate::items::TextInput>());
+            let editable = input.as_ref().is_some_and(|ti| !ti.as_pin_ref().read_only());
+            let single = input.as_ref().is_some_and(|ti| ti.as_pin_ref().single_line());
+            let mut styles = if !editable {
+                crate::styled_text::sigwin_plain_style(text)
+            } else if !single {
                 crate::styled_text::sigwin_edit_style(text)
             } else {
-                crate::styled_text::sigwin_plain_style(text)
+                None
             }
             .map(|v| v.into_iter());
             for range in paragraph_ranges(text) {
