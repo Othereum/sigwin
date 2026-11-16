@@ -33,11 +33,11 @@
 </picture>
 
 ### 한글 입력에 강함
-글자를 조합하는 중에도 `@멘션`이 문제없이 동작합니다.
+글자를 조합하는 중에도 `@멘션`과 검색이 문제없이 동작하고, 초성만으로도 이름을 찾을 수 있습니다.
 
 <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/media/ime-ko-dark.png">
-    <img src="docs/media/ime-ko-light.png" width="600" alt="@를 입력하고 이름을 조합하는 동안 멘션 후보가 좁혀짐">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/ime-dark.png">
+    <img src="docs/media/ime-light.png" width="600" alt="@ 뒤에 '잇'까지 조합한 채로 이서연을 고르고, 초성 ㅇㅁㅈ로 이민준을 찾음">
 </picture>
 
 ### 읽은 사람 표시

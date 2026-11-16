@@ -3,6 +3,7 @@ Regenerates the README's pictures in docs/media from the demo data (SIGWIN_DEMO_
 no window, no account, nothing personal. Run it after a UI change that shows in them:
 
     pwsh scripts/readme-media.ps1
+    pwsh scripts/readme-media.ps1 -Only ime,link
 
 Each picture comes in English and Korean (README.md / README.ko.md), light and dark (the README
 picks by the reader's device or browser setting, not by GitHub's own theme). All but the first are
@@ -11,7 +12,8 @@ animated PNGs:
     readers-*     a message sent to a group, read by one member after another
     link-*        a link sent before its preview arrived still gets it
     viewer-*      a photo opened from a small window, zoomed, closed
-    ime-*         @mention candidates narrowing while a Korean syllable is being composed
+    ime-*         @mention candidates narrowing while a Korean syllable is being composed, and
+                  found by initials (Korean typing: one picture for both READMEs)
     notify-*      (still) a chat's own notification settings
 
 memory-light.png / memory-dark.png (the README's memory comparison) are real measurements in Task
@@ -21,8 +23,11 @@ A running sigwin.exe built from this tree locks it and the build fails: quit it 
 #>
 param(
     # the shots' scale: sharp on high-DPI screens, at a cost in file size
-    [double]$Scale = 1.5
+    [double]$Scale = 1.5,
+    # only these pictures (hero, link, readers, viewer, ime, notify), so the others stay as they are
+    [string[]]$Only
 )
+function Want($scene) { -not $Only -or $Only -contains $scene }
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $out = Join-Path $root 'docs\media'
@@ -136,73 +141,91 @@ foreach ($lang in 'en', 'ko') {
         $shots = Join-Path $work $name
         New-Item -ItemType Directory -Force $shots | Out-Null
 
-        Invoke-Demo $lang $theme @('size 1000 760', 'wait 800', "shot $shots\hero.png")
-        Invoke-Tool frame, "$shots\hero.png", "$out\hero-$name.png"
+        if (Want hero) {
+            Invoke-Demo $lang $theme @('size 1000 760', 'wait 800', "shot $shots\hero.png")
+            Invoke-Tool frame, "$shots\hero.png", "$out\hero-$name.png"
+        }
 
         # a link pasted and sent at once, before its preview could show
-        Start-Frames "$shots\link"
-        $steps = @('size 1000 760', 'wait 800')
-        $steps += Click-Composer
-        $steps += Type-Slowly $text.link[$lang]
-        $steps += "type $url", 'wait 400', (Frame 500), 'key Enter'
-        $steps += Watch 24 3000
-        Invoke-Demo $lang $theme $steps
-        Invoke-Tool apng, "$shots\link", "$out\link-$name.png", "crop=$(Rect 300 260 700 500)"
+        if (Want link) {
+            Start-Frames "$shots\link"
+            $steps = @('size 1000 760', 'wait 800')
+            $steps += Click-Composer
+            $steps += Type-Slowly $text.link[$lang]
+            $steps += "type $url", 'wait 400', (Frame 500), 'key Enter'
+            $steps += Watch 24 3000
+            Invoke-Demo $lang $theme $steps
+            Invoke-Tool apng, "$shots\link", "$out\link-$name.png", "crop=$(Rect 300 260 700 500)"
+        }
 
         # the group reads our message: the photos move down to it one by one
-        Start-Frames "$shots\readers"
-        $steps = @('size 1000 760', 'wait 800', 'click 150 150', 'wait 600')
-        $steps += Click-Composer
-        $steps += Type-Slowly $text.group[$lang]
-        $steps += 'key Enter'
-        $steps += Watch 40 3000
-        Invoke-Demo $lang $theme $steps
-        Invoke-Tool apng, "$shots\readers", "$out\readers-$name.png", "crop=$(Rect 300 200 700 560)"
+        if (Want readers) {
+            Start-Frames "$shots\readers"
+            $steps = @('size 1000 760', 'wait 800', 'click 150 150', 'wait 600')
+            $steps += Click-Composer
+            $steps += Type-Slowly $text.group[$lang]
+            $steps += 'key Enter'
+            $steps += Watch 40 3000
+            Invoke-Demo $lang $theme $steps
+            Invoke-Tool apng, "$shots\readers", "$out\readers-$name.png", "crop=$(Rect 300 200 700 560)"
+        }
 
         # a photo from a small window opens around the pointer, zooms with the wheel around it,
         # closes on a click
-        Start-Frames "$shots\viewer"
-        $steps = @(
-            'screen 1280 800', 'size 760 560', 'at 40 40', 'wait 800', 'wheel 500 300 3',
-            # the pointer on the header, so no row shows hovered; the date pill gone
-            'move 620 30', 'wait 1500', (Frame 800)
-        )
-        $steps += Glide 620 30 500 220 10
-        $steps += 'wait 300', (Frame 400)
-        # the viewer's window comes with its image: give the demo time to paint one
-        $steps += 'click', 'wait 1500'
-        $steps += Frame2 1000
-        foreach ($i in 1..2) {
-            $steps += 'wheel 1'
-            foreach ($j in 1..3) { $steps += 'wait 60'; $steps += Frame2 100 }
+        if (Want viewer) {
+            Start-Frames "$shots\viewer"
+            $steps = @(
+                'screen 1280 800', 'size 760 560', 'at 40 40', 'wait 800', 'wheel 500 300 3',
+                # the pointer on the header, so no row shows hovered; the date pill gone
+                'move 620 30', 'wait 1500', (Frame 800)
+            )
+            $steps += Glide 620 30 500 220 10
+            $steps += 'wait 300', (Frame 400)
+            # the viewer's window comes with its image: give the demo time to paint one
+            $steps += 'click', 'wait 1500'
+            $steps += Frame2 1000
+            foreach ($i in 1..2) {
+                $steps += 'wheel 1'
+                foreach ($j in 1..3) { $steps += 'wait 60'; $steps += Frame2 100 }
+            }
+            $steps += 'wait 500'; $steps += Frame2 1200
+            $steps += 'click', 'window 1', 'wait 300', (Frame 500)
+            $steps += Glide 500 220 620 30 10
+            $steps += 'wait 300', (Frame 1500)
+            # shown at about half size in the README: no need for more pixels
+            Invoke-Demo $lang $theme $steps 1
+            Invoke-Tool -s 1 apng, "$shots\viewer", "$out\viewer-$name.png", cursor
         }
-        $steps += 'wait 500'; $steps += Frame2 1200
-        $steps += 'click', 'window 1', 'wait 300', (Frame 500)
-        $steps += Glide 500 220 620 30 10
-        $steps += 'wait 300', (Frame 1500)
-        # shown at about half size in the README: no need for more pixels
-        Invoke-Demo $lang $theme $steps 1
-        Invoke-Tool -s 1 apng, "$shots\viewer", "$out\viewer-$name.png", cursor
 
-        # @mention candidates narrow while a Korean syllable is still being composed (the team's
-        # members have Korean names in either language)
-        Start-Frames "$shots\ime"
-        $steps = @('size 1000 760', 'wait 800', 'click 150 278', 'wait 600')
-        $steps += Click-Composer
-        $steps += 'type @', 'wait 100', (Frame 400)
-        foreach ($c in 'ㅇ', '이', '잇') { $steps += "ime $c", 'wait 100', (Frame 350) }
-        # the next jamo starts a syllable of its own: 이 is committed, 서 composes
-        $steps += 'commit 이', 'ime 서', 'wait 100', (Frame 1500)
-        $steps += 'commit 서', 'key Enter', 'wait 200', (Frame 3000)
-        Invoke-Demo $lang $theme $steps
-        Invoke-Tool apng, "$shots\ime", "$out\ime-$name.png", "crop=$(Rect 300 600 700 160)"
+        # @mention candidates narrow while a Korean syllable is still being composed, even where
+        # its final consonant will start the next one (잇 → 이서), and one is picked right there;
+        # then by initials alone. Korean typing only, so one picture serves both READMEs.
+        if ((Want ime) -and $lang -eq 'ko') {
+            Start-Frames "$shots\ime"
+            $steps = @('size 1000 760', 'wait 800', 'click 150 278', 'wait 600')
+            $steps += Click-Composer
+            $steps += 'type @', 'wait 100', (Frame 400)
+            foreach ($c in 'ㅇ', '이') { $steps += "ime $c", 'wait 100', (Frame 500) }
+            $steps += 'ime 잇', 'wait 100', (Frame 1000)
+            $steps += 'commit 잇', 'key Enter', 'wait 200', (Frame 1000)
+            # ㅇ → 이민준, 이서연, 최유나 (유); ㅇㅁ → 이민준
+            $steps += 'type @', 'wait 100', (Frame 400)
+            $steps += 'ime ㅇ', 'wait 100', (Frame 500), 'commit ㅇ'
+            $steps += 'ime ㅁ', 'wait 100', (Frame 500), 'commit ㅁ'
+            $steps += 'ime ㅈ', 'wait 100', (Frame 1000), 'commit ㅈ'
+            $steps += 'key Enter', 'wait 200', (Frame 3000)
+            Invoke-Demo $lang $theme $steps
+            Invoke-Tool apng, "$shots\ime", "$out\ime-$theme.png", "crop=$(Rect 300 560 700 200)"
+        }
 
         # a chat's own notification settings
-        Invoke-Demo $lang $theme @(
-            'size 1000 760', 'wait 800', 'click 150 150', 'wait 600', 'click 970 28', 'wait 500',
-            'click 810 276', 'wait 600', "shot $shots\notify.png"
-        )
-        Invoke-Tool frame, "$shots\notify.png", "$out\notify-$name.png"
+        if (Want notify) {
+            Invoke-Demo $lang $theme @(
+                'size 1000 760', 'wait 800', 'click 150 150', 'wait 600', 'click 970 28', 'wait 500',
+                'click 810 276', 'wait 600', "shot $shots\notify.png"
+            )
+            Invoke-Tool frame, "$shots\notify.png", "$out\notify-$name.png"
+        }
     }
 }
 Get-ChildItem $out | Format-Table Name, @{ n = 'KB'; e = { [math]::Round($_.Length / 1KB) } }

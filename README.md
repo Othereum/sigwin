@@ -64,11 +64,11 @@ Set notification content, sound and badge for each chat, and override the settin
 </picture>
 
 ### For Korean, Japanese and Chinese input
-`@mentions` find people while a character is still being composed, so you don't have to finish it first.
+`@mentions` and search find people while a character is still being composed, so you don't have to finish it first. Korean names are also found by their initial consonants alone.
 
 <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/media/ime-en-dark.png">
-    <img src="docs/media/ime-en-light.png" width="600" alt="Typing @ and a Korean name: the suggestions narrow while the syllable is still being composed">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/ime-dark.png">
+    <img src="docs/media/ime-light.png" width="600" alt="Typing @ and a Korean name: one is picked while its syllable is still being composed, another is found by its initial consonants">
 </picture>
 
 ## Features

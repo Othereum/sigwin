@@ -204,7 +204,8 @@ pub(super) fn demo_real(emit: backend::Emit, thumbs: Thumbs, mut cmd_rx: tokio::
                     emit(Event::Messages { key: key.clone(), items: items.clone(), paging: Paging::default(), scroll: Scroll::Bottom });
                     emit(Event::Pins(Vec::new()));
                     resend_thumbs(&emit, &thumbs, &items);
-                    // who @mentions can name in the team (the IME picture composes "이서")
+                    // who @mentions can name in the team (the IME picture composes "잇", then
+                    // types the initials "ㅇㅁㅈ")
                     if key == TEAM {
                         let names = ["이서연", "이민준", "박지훈", "최유나"];
                         emit(Event::Members(names.iter().enumerate().map(|(i, n)| (format!("00000000-0000-0000-0000-00000000010{i}"), n.to_string())).collect()));
