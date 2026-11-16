@@ -1,4 +1,4 @@
-import { ListView, Palette } from "std-widgets.slint";
+import { ListView, Palette, ScrollView } from "std-widgets.slint";
 import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
 import { Avatar, BusySpinner, DangerButton, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton, TextBox, TextOps } from "widgets.slint";
@@ -1359,8 +1359,18 @@ export component AppWindow inherits Window {
                                     }
                                     return reject;
                                 }
-                                Rectangle {
+                                // past the cap the text scrolls, with the message list's scrollbar
+                                composer-flick := ScrollView {
+                                    min-height: 0px;
+                                    content-height: composer.height;
                                     composer := TextBox {
+                                        x: 0px;
+                                        y: 0px;
+                                        // keep the text clear of the scrollbar's thumb. Always, not
+                                        // only while it shows: the width sets the wrapped height,
+                                        // which decides whether it shows
+                                        width: composer-flick.visible-width - 10px;
+                                        height: self.preferred-height;
                                         text <=> root.draft;
                                         edited => {
                                             // over the 64KB a message can carry: the new part is cut to fit
@@ -1372,7 +1382,15 @@ export component AppWindow inherits Window {
                                             root.link-check();
                                             root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
                                         }
-                                        cursor-position-changed => {
+                                        cursor-position-changed(pos) => {
+                                            // keep the cursor line in view (`pos` is its top)
+                                            let line = 20px;
+                                            let view = composer-flick.visible-height;
+                                            if (pos.y + composer-flick.content-y < 0px) {
+                                                composer-flick.content-y = -pos.y;
+                                            } else if (pos.y + line + composer-flick.content-y > view) {
+                                                composer-flick.content-y = max(view - self.height, view - pos.y - line);
+                                            }
                                             root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
                                         }
                                         // IME composition (Hangul) changes neither text nor cursor: follow it too
@@ -1383,7 +1401,6 @@ export component AppWindow inherits Window {
                                         wrap: word-wrap;
                                         color: Theme.text;
                                         font-size: 14px;
-                                        max-height: 140px;
                                     }
                                     // hide as soon as IME composition starts (preedit isn't in text yet)
                                     if root.draft == "" && composer.preedit-text == "": Text {
