@@ -54,6 +54,11 @@ fn exec(app: &AppWindow, line: &str) -> anyhow::Result<()> {
             window::refresh_active(app);
         }
         "expect" => expect(app, rest)?,
+        // who @mentions can name, as a group's members arrive: `members 이서연|이민준`
+        "members" => {
+            let names = rest.split('|').enumerate().map(|(i, n)| (format!("00000000-0000-0000-0000-{i:012}"), n.trim().to_string()));
+            UI.with_borrow_mut(|ui| ui.members = names.collect());
+        }
         _ => anyhow::bail!("unknown scenario step: {line}"),
     }
     Ok(())
@@ -96,6 +101,8 @@ fn probe(app: &AppWindow, name: &str) -> anyhow::Result<String> {
         // the request bar shows instead of the composer
         "current-request" => app.get_current_request().to_string(),
         "cells" => app.get_messages().iter().map(|m| m.cells.row_count()).sum::<usize>().to_string(),
+        // names the @mention popup offers
+        "mention-rows" => app.get_mention_items().row_count().to_string(),
         // cells that play in place when the pointer is on them, and those playing now
         "gif-cells" => app.get_messages().iter().flat_map(|m| m.cells.iter().collect::<Vec<_>>()).filter(|c| c.gif).count().to_string(),
         "playing-cells" => app.get_messages().iter().flat_map(|m| m.cells.iter().collect::<Vec<_>>()).filter(|c| c.frames.row_count() > 0).count().to_string(),

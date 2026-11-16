@@ -9,7 +9,14 @@
 //!   click X Y        left click (also `rclick`, `dblclick`)
 //!   drag X1 Y1 X2 Y2 left-button drag
 //!   wheel X Y N      N wheel notches, positive = up (older), negative = down
+//!                    (`click` and `wheel N` without X Y: where the pointer is)
+//!   window N         later steps act on window 1 (main) or 2 (the image viewer)
+//!   screen W H       the work area, logical px (default 1600 1000); at X Y: put the window there
+//!                    (the app places other windows itself); shots note where the window and the
+//!                    pointer are on the screen (PNG text `sigwin-pos`, `sigwin-cursor`)
 //!   type TEXT        key presses for each character
+//!   ime TEXT         the input method's composition shows TEXT (`ime` alone: none);
+//!                    commit TEXT: it ends, putting TEXT in
 //!   key NAME         Enter Esc Tab Up Down Left Right Backspace Delete Home End PageUp PageDown,
 //!                    optionally with modifiers: ctrl+shift+Enter
 //!   shot PATH        save the window as PNG
@@ -50,12 +57,20 @@ enum Step {
     Drag(f32, f32, f32, f32),
     Wheel(f32, f32, i32),
     Type(String),
+    /// the input method's text being composed (empty: none)
+    Ime(String),
+    /// the input method commits its composition as this text
+    Commit(String),
     Key(Vec<String>),
     Shot(String),
     /// save every frame drawn from now on as `<dir>\NNNN.png`; empty: stop
     Record(String),
     /// later steps act on window 1 (main) or 2 (the latest other one, the image viewer)
     Window(u32),
+    /// the work area's logical size
+    Screen(f32, f32),
+    /// puts the window steps act on at this logical place on the screen
+    At(f32, f32),
     /// a scenario step, run by the driver (`gui/scenario.rs`)
     Scenario(String),
     /// wait until nothing moves between the UI and the backend
@@ -63,7 +78,7 @@ enum Step {
 }
 
 /// Scenario steps the driver runs.
-const SCENARIO_STEPS: [&str; 9] = ["fx", "open", "jump", "focus", "away", "shown", "expect", "settle", "attach"];
+const SCENARIO_STEPS: [&str; 10] = ["fx", "open", "jump", "focus", "away", "shown", "expect", "settle", "attach", "members"];
 
 /// What runs scenario steps: it knows the window and the backend.
 pub struct Driver {
@@ -74,14 +89,68 @@ pub struct Driver {
     pub busy: Box<dyn Fn() -> bool>,
 }
 
-thread_local! {
-    /// where the scripted pointer is: a headless window has no cursor of the system's to ask
-    static POINTER: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
+/// A desktop of its own, so what the app asks the system (the work area, where its windows are,
+/// where the cursor is) has answers that don't depend on this PC's monitor and mouse. Physical px.
+struct Desk {
+    /// the work area's logical size (`screen`); physical = this x scale
+    logical: (f32, f32),
+    scale: f32,
+    /// where each window is: keyed by its `slint::Window`'s address
+    places: Vec<(usize, (i32, i32))>,
+    /// the scripted pointer on the screen
+    cursor: Option<(i32, i32)>,
 }
 
-/// The scripted pointer's place (headless runs only).
-pub(crate) fn pointer() -> Option<LogicalPosition> {
-    POINTER.get().map(|(x, y)| LogicalPosition::new(x, y))
+thread_local! {
+    static DESK: RefCell<Desk> = const { RefCell::new(Desk { logical: (1600.0, 1000.0), scale: 1.0, places: Vec::new(), cursor: None }) };
+}
+
+fn key(w: &slint::Window) -> usize {
+    w as *const slint::Window as usize
+}
+
+fn place_of(w: &slint::Window) -> (i32, i32) {
+    DESK.with_borrow(|d| d.places.iter().find(|p| p.0 == key(w)).map_or((0, 0), |p| p.1))
+}
+
+/// The monitor's work area (x, y, w, h), in a headless run.
+pub(crate) fn work_area() -> Option<(i32, i32, i32, i32)> {
+    active().then(|| DESK.with_borrow(|d| (0, 0, (d.logical.0 * d.scale).round() as i32, (d.logical.1 * d.scale).round() as i32)))
+}
+
+/// The cursor on the screen, in a headless run (`None` before the script has moved it).
+pub(crate) fn cursor() -> Option<(i32, i32)> {
+    if !active() {
+        return None;
+    }
+    DESK.with_borrow(|d| d.cursor)
+}
+
+/// The scripted pointer within `w` (headless runs only).
+pub(crate) fn pointer(w: &slint::Window) -> Option<LogicalPosition> {
+    let (cx, cy) = cursor()?;
+    let (x, y) = place_of(w);
+    let s = DESK.with_borrow(|d| d.scale);
+    Some(LogicalPosition::new((cx - x) as f32 / s, (cy - y) as f32 / s))
+}
+
+/// Where a window is on the screen, in a headless run: its adapter keeps no position.
+pub(crate) fn position(w: &slint::Window) -> Option<slint::PhysicalPosition> {
+    active().then(|| {
+        let (x, y) = place_of(w);
+        slint::PhysicalPosition::new(x, y)
+    })
+}
+
+/// The app moved a window (headless runs only).
+pub(crate) fn set_position(w: &slint::Window, p: slint::PhysicalPosition) {
+    if !active() {
+        return;
+    }
+    DESK.with_borrow_mut(|d| {
+        d.places.retain(|e| e.0 != key(w));
+        d.places.push((key(w), (p.x, p.y)));
+    });
 }
 
 thread_local! {
@@ -142,19 +211,37 @@ fn parse(script: &str) -> anyhow::Result<Vec<Step>> {
                 Step::Move(v[0], v[1])
             }
             "click" | "rclick" | "dblclick" => {
-                let v = need(2)?;
+                // no place: where the pointer is
+                let v = if rest.is_empty() { vec![f32::NAN, f32::NAN] } else { need(2)? };
                 let b = if cmd == "rclick" { PointerEventButton::Right } else { PointerEventButton::Left };
                 Step::Click(v[0], v[1], b, if cmd == "dblclick" { 2 } else { 1 })
+            }
+            "screen" => {
+                let v = need(2)?;
+                Step::Screen(v[0], v[1])
+            }
+            "at" => {
+                let v = need(2)?;
+                Step::At(v[0], v[1])
             }
             "drag" => {
                 let v = need(4)?;
                 Step::Drag(v[0], v[1], v[2], v[3])
             }
             "wheel" => {
-                let v = need(3)?;
-                Step::Wheel(v[0], v[1], v[2] as i32)
+                let v = nums()?;
+                match v[..] {
+                    // where the pointer is
+                    [n] => Step::Wheel(f32::NAN, f32::NAN, n as i32),
+                    _ => {
+                        let v = need(3)?;
+                        Step::Wheel(v[0], v[1], v[2] as i32)
+                    }
+                }
             }
             "type" => Step::Type(rest.to_string()),
+            "ime" => Step::Ime(rest.to_string()),
+            "commit" => Step::Commit(rest.to_string()),
             "key" => Step::Key(rest.split('+').map(|s| s.trim().to_string()).collect()),
             "shot" => Step::Shot(rest.to_string()),
             "record" => Step::Record(rest.to_string()),
@@ -185,6 +272,8 @@ fn key_text(name: &str) -> anyhow::Result<SharedString> {
         "ctrl" | "control" => Key::Control,
         "shift" => Key::Shift,
         "alt" => Key::Alt,
+        // `type` trims its text, so a space is a key of its own
+        "space" => return Ok(" ".into()),
         _ => {
             let mut c = name.chars();
             return match (c.next(), c.next()) {
@@ -305,7 +394,7 @@ impl Platform for Headless {
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
         let w = self.window.borrow().clone().ok_or_else(|| PlatformError::Other("no window".into()))?;
-        let mut st = State { main: w.clone(), w, buf: Vec::new(), size: PhysicalSize::new(0, 0), scale: 1.0, logical: (1000.0, 680.0), record: None };
+        let mut st = State { main: w.clone(), w, buf: Vec::new(), size: PhysicalSize::new(0, 0), parked: Vec::new(), scale: 1.0, logical: (1000.0, 680.0), record: None };
         loop {
             let Some(step) = self.steps.borrow_mut().pop_front() else { break };
             tracing::debug!(?step, "headless");
@@ -339,6 +428,9 @@ struct State {
     w: Rc<MinimalSoftwareWindow>,
     buf: Vec<Rgb8Pixel>,
     size: PhysicalSize,
+    /// the other window's buffer and size while steps act on this one: the renderer repaints
+    /// only what changed, so each window needs its own last frame
+    parked: Vec<(Rc<MinimalSoftwareWindow>, PhysicalSize, Vec<Rgb8Pixel>)>,
     scale: f32,
     logical: (f32, f32),
     /// `record`: target dir and frames saved so far
@@ -387,7 +479,9 @@ impl State {
 
     fn send(&mut self, ev: WindowEvent, pump: &impl Fn()) {
         if let WindowEvent::PointerMoved { position } | WindowEvent::PointerPressed { position, .. } | WindowEvent::PointerReleased { position, .. } = &ev {
-            POINTER.set(Some((position.x, position.y)));
+            let (x, y) = place_of(self.w.window());
+            let at = (x + (position.x * self.scale).round() as i32, y + (position.y * self.scale).round() as i32);
+            DESK.with_borrow_mut(|d| d.cursor = Some(at));
         }
         self.w.window().dispatch_event(ev);
         self.idle(Duration::ZERO, pump);
@@ -402,8 +496,15 @@ impl State {
 
     fn run(&mut self, step: Step, pump: impl Fn()) -> anyhow::Result<()> {
         let pump = &pump;
-        let pos = |x: f32, y: f32| LogicalPosition::new(x, y);
+        // NaN: where the pointer is now, in this window (it may have moved under the pointer)
+        let here = pointer(self.w.window()).map_or((0.0, 0.0), |p| (p.x, p.y));
+        let pos = |x: f32, y: f32| if x.is_nan() { LogicalPosition::new(here.0, here.1) } else { LogicalPosition::new(x, y) };
         match step {
+            Step::Screen(w, h) => DESK.with_borrow_mut(|d| d.logical = (w, h)),
+            Step::At(x, y) => {
+                let p = slint::PhysicalPosition::new((x * self.scale).round() as i32, (y * self.scale).round() as i32);
+                set_position(self.w.window(), p);
+            }
             Step::Size(w, h) => {
                 self.logical = (w, h);
                 self.resize();
@@ -411,6 +512,7 @@ impl State {
             }
             Step::Scale(s) => {
                 self.scale = s;
+                DESK.with_borrow_mut(|d| d.scale = s);
                 self.resize();
                 self.idle(Duration::ZERO, pump);
             }
@@ -457,6 +559,28 @@ impl State {
                     self.send(WindowEvent::KeyReleased { text: t }, pump);
                 }
             }
+            // as the winit backend passes them on: Slint's public events have no composition
+            Step::Ime(text) => {
+                // the caret after the composition, as the Windows IMEs report it
+                let end = text.len() as i32;
+                let ev = i_slint_core::input::InternalKeyEvent {
+                    event_type: i_slint_core::input::KeyEventType::UpdateComposition,
+                    preedit_selection: Some(end..end),
+                    preedit_text: text.into(),
+                    ..Default::default()
+                };
+                self.send(WindowEvent::internal(ev), pump);
+            }
+            Step::Commit(text) => {
+                let mut key_event = i_slint_core::input::KeyEvent::default();
+                key_event.text = text.into();
+                let ev = i_slint_core::input::InternalKeyEvent {
+                    event_type: i_slint_core::input::KeyEventType::CommitComposition,
+                    key_event,
+                    ..Default::default()
+                };
+                self.send(WindowEvent::internal(ev), pump);
+            }
             Step::Key(parts) => {
                 let keys = parts.iter().map(|p| key_text(p)).collect::<anyhow::Result<Vec<_>>>()?;
                 for k in &keys {
@@ -473,11 +597,23 @@ impl State {
                 tracing::info!(path, "headless shot");
             }
             Step::Window(n) => {
-                self.w = match n {
+                let next = match n {
                     1 => self.main.clone(),
                     _ => SECOND.with_borrow(|s| s.clone()).ok_or_else(|| anyhow::anyhow!("no second window"))?,
                 };
-                self.size = PhysicalSize::new(0, 0);
+                if !Rc::ptr_eq(&next, &self.w) {
+                    let buf = std::mem::take(&mut self.buf);
+                    self.parked.push((self.w.clone(), self.size, buf));
+                    (self.size, self.buf) = match self.parked.iter().position(|p| Rc::ptr_eq(&p.0, &next)) {
+                        Some(i) => {
+                            let (_, size, buf) = self.parked.swap_remove(i);
+                            (size, buf)
+                        }
+                        // never drawn here: `draw` allocates and paints it whole
+                        None => (PhysicalSize::new(0, 0), Vec::new()),
+                    };
+                    self.w = next;
+                }
                 self.idle(Duration::ZERO, pump);
             }
             Step::Scenario(line) => {
@@ -514,6 +650,12 @@ impl State {
         let mut enc = png::Encoder::new(f, self.size.width, self.size.height);
         enc.set_color(png::ColorType::Rgb);
         enc.set_depth(png::BitDepth::Eight);
+        // for putting shots of several windows together as they were on the screen
+        let (x, y) = place_of(self.w.window());
+        enc.add_text_chunk("sigwin-pos".into(), format!("{x},{y}"))?;
+        if let Some((cx, cy)) = cursor() {
+            enc.add_text_chunk("sigwin-cursor".into(), format!("{cx},{cy}"))?;
+        }
         let mut w = enc.write_header()?;
         let bytes: Vec<u8> = self.buf.iter().flat_map(|p| [p.r, p.g, p.b]).collect();
         w.write_image_data(&bytes)?;

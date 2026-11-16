@@ -185,7 +185,7 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
         v.win.set_pan_y(0.0);
         let (old_w, old_h) = client_size(v);
         let (w, h) = window_size(v, size);
-        let pos = v.win.window().position();
+        let pos = window_pos(v.win.window());
         Some(on_screen(
             work_area(viewer_hwnd(&v.win)),
             pos.x + (old_w as i32 - w as i32) / 2,
@@ -294,7 +294,7 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
     });
     win.on_press_started(|| {
         with_current(|v| {
-            let pos = v.win.window().position();
+            let pos = window_pos(v.win.window());
             v.press.set(cursor_pos().map(|cursor| (cursor, (pos.x, pos.y))));
         });
     });
@@ -328,7 +328,7 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
     let center = clicked.or(area.map(|(x, y, w, h)| (x + w / 2, y + h / 2)));
     if let Some((cx, cy)) = center {
         let (x, y, ..) = on_screen(area, cx - size.0 as i32 / 2, cy - size.1 as i32 / 2, size.0, size.1);
-        win.window().set_position(slint::PhysicalPosition::new(x, y));
+        move_window(win.window(), slint::PhysicalPosition::new(x, y));
     }
     win.show()?;
     // the native window doesn't exist yet: show only asks for it
@@ -490,7 +490,7 @@ fn zoom(notches: f32, cursor_x: f32, cursor_y: f32) {
             ((cursor as f64 - (client as f64 - old as f64) / 2.0 - cur as f64) / old as f64).clamp(0.0, 1.0)
         };
         let at = (at(cursor_x, client.0, old.0, v.win.get_cur_x()), at(cursor_y, client.1, old.1, v.win.get_cur_y()));
-        let pos = v.win.window().position();
+        let pos = window_pos(v.win.window());
         let cursor = (pos.x as f64 + cursor_x as f64, pos.y as f64 + cursor_y as f64);
         let edge = |cursor: f64, at: f64, new: u32, window: u32| cursor - (at * new as f64 + (window as f64 - new as f64) / 2.0);
         let (ex, ey) = (edge(cursor.0, at.0, new.0, w), edge(cursor.1, at.1, new.1, h));
@@ -518,7 +518,7 @@ fn follow_drag() {
         let cursor = cursor_pos()?;
         let (w, h) = client_size(v);
         let image = shown(v);
-        let pos = v.win.window().position();
+        let pos = window_pos(v.win.window());
         let x = if image.0 > w { pos.x } else { window.0 + cursor.0 - from.0 };
         let y = if image.1 > h { pos.y } else { window.1 + cursor.1 - from.1 };
         let placement = on_screen(work_area(viewer_hwnd(&v.win)), x, y, w, h);
@@ -529,9 +529,12 @@ fn follow_drag() {
     }
 }
 
-/// The cursor on the screen, physical px.
+/// The cursor on the screen, physical px; a headless run's scripted one there.
 #[cfg(windows)]
 fn cursor_pos() -> Option<(i32, i32)> {
+    if crate::headless::active() {
+        return crate::headless::cursor();
+    }
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
     let mut p = POINT { x: 0, y: 0 };
@@ -565,7 +568,7 @@ fn place((x, y, w, h): Placement) {
     let _ = hwnd;
     with_current(|v| {
         v.win.window().set_size(slint::PhysicalSize::new(w, h));
-        v.win.window().set_position(slint::PhysicalPosition::new(x, y));
+        move_window(v.win.window(), slint::PhysicalPosition::new(x, y));
     });
 }
 
@@ -673,9 +676,23 @@ fn screen_box(hwnd: isize) -> (u32, u32) {
     ((w as f32 * SCREEN_SHARE) as u32, (h as f32 * SCREEN_SHARE) as u32)
 }
 
-/// Work area (x, y, w, h) of the monitor the window is on.
-#[cfg(windows)]
+/// Work area (x, y, w, h) of the monitor the window is on; a headless run's own screen there.
 fn work_area(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
+    crate::headless::work_area().or_else(|| monitor_area(hwnd))
+}
+
+/// Where the window is on the screen; a headless window keeps no position, the run does.
+fn window_pos(w: &slint::Window) -> slint::PhysicalPosition {
+    crate::headless::position(w).unwrap_or_else(|| w.position())
+}
+
+fn move_window(w: &slint::Window, p: slint::PhysicalPosition) {
+    crate::headless::set_position(w, p);
+    w.set_position(p);
+}
+
+#[cfg(windows)]
+fn monitor_area(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
     if hwnd == 0 {
         return None;
@@ -694,7 +711,7 @@ fn work_area(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
 }
 
 #[cfg(not(windows))]
-fn work_area(_: isize) -> Option<(i32, i32, i32, i32)> {
+fn monitor_area(_: isize) -> Option<(i32, i32, i32, i32)> {
     None
 }
 

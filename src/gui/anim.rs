@@ -144,7 +144,7 @@ pub(crate) fn refresh_hover() {
         if app.get_inactive() {
             return;
         }
-        if let Some(position) = super::window::cursor_in_window(&app).or_else(crate::headless::pointer) {
+        if let Some(position) = super::window::cursor_in_window(&app).or_else(|| crate::headless::pointer(app.window())) {
             app.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
         }
     });
