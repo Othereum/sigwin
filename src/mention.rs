@@ -26,17 +26,82 @@ pub fn query_at(text: &str, cursor: usize) -> Option<(usize, &str)> {
 }
 
 /// Members whose name contains `query` (case-insensitive), names starting with it first.
+/// The query's last character may still be in IME composition, so it matches as keystrokes
+/// (`hangul_keys`): "ㅇ", "우", "윚" and "위지" all find "위진수".
 pub fn filter<'a>(members: &'a [Member], query: &str) -> Vec<&'a Member> {
-    let q = query.to_lowercase();
+    let q: Vec<char> = query.to_lowercase().chars().collect();
     let mut hits: Vec<(bool, &Member)> = members
         .iter()
         .filter_map(|m| {
-            let n = m.1.to_lowercase();
-            n.contains(&q).then(|| (!n.starts_with(&q), m))
+            let n: Vec<char> = m.1.to_lowercase().chars().collect();
+            find(&n, &q).map(|at| (at != 0, m))
         })
         .collect();
     hits.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1 .1.cmp(&b.1 .1)));
     hits.into_iter().map(|(_, m)| m).take(MAX_ROWS).collect()
+}
+
+/// Where in `name` the query starts: all but its last char match exactly, the last one's
+/// keystrokes are a prefix of the keystrokes from there on. A final consonant may still move to
+/// the next syllable ("윚" → "위진"), and a vowel may still grow ("우" → "위").
+fn find(name: &[char], q: &[char]) -> Option<usize> {
+    let Some((&last, head)) = q.split_last() else { return Some(0) };
+    let mut want = Vec::new();
+    hangul_keys(last, &mut want);
+    (0..name.len().checked_sub(head.len())?).find(|&i| {
+        if name[i..i + head.len()] != *head {
+            return false;
+        }
+        let mut got = Vec::new();
+        for &c in &name[i + head.len()..] {
+            hangul_keys(c, &mut got);
+            if got.len() >= want.len() {
+                break;
+            }
+        }
+        got.starts_with(&want)
+    })
+}
+
+/// The jamo a 2-beolsik keyboard types for `c`, as compatibility jamo with compound vowels and
+/// finals split into their keys ("쵧" → ㅊㅗㅣㄹㄱ). Other characters stand for themselves.
+fn hangul_keys(c: char, out: &mut Vec<char>) {
+    const INITIAL: &str = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
+    const MEDIAL: &str = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ";
+    const FINAL: &str = "ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ";
+    let split = |j: char, out: &mut Vec<char>| {
+        let keys = match j {
+            'ㄳ' => "ㄱㅅ",
+            'ㄵ' => "ㄴㅈ",
+            'ㄶ' => "ㄴㅎ",
+            'ㄺ' => "ㄹㄱ",
+            'ㄻ' => "ㄹㅁ",
+            'ㄼ' => "ㄹㅂ",
+            'ㄽ' => "ㄹㅅ",
+            'ㄾ' => "ㄹㅌ",
+            'ㄿ' => "ㄹㅍ",
+            'ㅀ' => "ㄹㅎ",
+            'ㅄ' => "ㅂㅅ",
+            'ㅘ' => "ㅗㅏ",
+            'ㅙ' => "ㅗㅐ",
+            'ㅚ' => "ㅗㅣ",
+            'ㅝ' => "ㅜㅓ",
+            'ㅞ' => "ㅜㅔ",
+            'ㅟ' => "ㅜㅣ",
+            'ㅢ' => "ㅡㅣ",
+            _ => return out.push(j),
+        };
+        out.extend(keys.chars());
+    };
+    let Some(s) = (c as u32).checked_sub(0xAC00).filter(|&s| s < 11172) else {
+        return split(c, out);
+    };
+    let s = s as usize;
+    out.extend(INITIAL.chars().nth(s / 588));
+    split(MEDIAL.chars().nth(s % 588 / 28).unwrap(), out);
+    if s % 28 > 0 {
+        split(FINAL.chars().nth(s % 28 - 1).unwrap(), out);
+    }
 }
 
 /// Strips the style markers (`format::parse`) into style body ranges, and replaces each "@name"
@@ -111,6 +176,21 @@ mod tests {
         let names: Vec<&str> = filter(&m, "철").iter().map(|m| m.1.as_str()).collect();
         assert_eq!(names, ["철수", "김철수"]);
         assert_eq!(filter(&m, "").len(), 3);
+    }
+
+    #[test]
+    fn matches_while_composing() {
+        let m: Vec<Member> = vec![("1".into(), "위진수".into()), ("2".into(), "가나나".into()), ("3".into(), "Kim".into())];
+        let names = |q| filter(&m, q).iter().map(|m| m.1.as_str()).collect::<Vec<_>>();
+        for q in ["ㅇ", "우", "위", "윚", "위지", "위진", "진수", "수"] {
+            assert_eq!(names(q), ["위진수"], "{q}");
+        }
+        // only the last char is still composing: earlier ones match as typed
+        assert!(names("워").is_empty());
+        assert!(names("우지").is_empty());
+        assert_eq!(names("난"), ["가나나"]);
+        assert!(names("간나").is_empty());
+        assert_eq!(names("ki"), ["Kim"]);
     }
 
     #[test]
