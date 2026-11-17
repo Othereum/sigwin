@@ -671,8 +671,8 @@ export component AppWindow inherits Window {
                     padding-right: 12px;
                     spacing: 12px;
                     Avatar {
+                        // default size: the photo is the thread row's, pre-cut for it (avatar.rs)
                         y: (parent.height - self.height) / 2;
-                        size: 36px;
                         initial: root.current-initial;
                         tint: root.current-tint;
                         photo: root.current-photo;
