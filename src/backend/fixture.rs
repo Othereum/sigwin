@@ -373,6 +373,11 @@ impl App {
 /// The running offline backend's own queue, for ops from outside (the headless `fx` step).
 static TX: std::sync::OnceLock<UnboundedSender<Internal>> = std::sync::OnceLock::new();
 
+/// The offline backend is up and takes ops.
+pub fn running() -> bool {
+    TX.get().is_some()
+}
+
 /// Runs one op line in the offline backend and waits for its answer: the op and the flush
 /// after it are done then. Blocks the caller (the backend never waits for the UI).
 pub fn run(line: &str) -> anyhow::Result<String> {

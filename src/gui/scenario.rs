@@ -15,8 +15,9 @@ pub(crate) fn install(app: &AppWindow) {
         sync: Box::new(|| {
             let _ = backend::fixture::run("query window");
         }),
+        // a backend still opening its DB says nothing for a while: that isn't quiet
         busy: Box::new(move || {
-            busy.upgrade().is_some_and(|app| app.get_reading_hold() || !app.get_jump_id().is_empty())
+            !backend::fixture::running() || busy.upgrade().is_some_and(|app| app.get_reading_hold() || !app.get_jump_id().is_empty())
         }),
     });
 }
