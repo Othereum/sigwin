@@ -54,6 +54,14 @@ async fn step(_pool: &SqlitePool, v: i64) -> anyhow::Result<i64> {
     }
 }
 
+/// What a chat's media and files list an attachment under (`ls_media.kind`; stored, so the values stay).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaKind {
+    /// pictures and videos
+    Media = 0,
+    Files = 1,
+}
+
 #[derive(Clone)]
 pub struct Index {
     pool: SqlitePool,
@@ -305,6 +313,20 @@ impl Index {
         sqlx::query("CREATE INDEX IF NOT EXISTS ls_replies_by_reply ON ls_replies (thread, reply_ts)")
             .execute(&pool)
             .await?;
+        // which messages carry pictures, videos or files, for a chat's media and files: finding
+        // them in presage's table means reading every message. Ids only; `kind` is `MediaKind`
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_media (
+                thread TEXT NOT NULL,
+                ts INTEGER NOT NULL,
+                idx INTEGER NOT NULL,
+                kind INTEGER NOT NULL,
+                PRIMARY KEY (thread, ts, idx)
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS ls_media_by_kind ON ls_media (thread, kind, ts)").execute(&pool).await?;
         // title and cover of installed sticker packs: presage keeps every sticker's bytes in one
         // JSON column, so listing packs from its table means reading all of them
         sqlx::query(
@@ -458,7 +480,8 @@ impl Index {
     pub async fn rekey_thread(&self, from: &str, to: &str) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         // one pair per table keyed by thread (sqlx wants the strings static)
-        const TABLES: [(&str, &str); 5] = [
+        const TABLES: [(&str, &str); 6] = [
+            ("UPDATE OR IGNORE ls_media SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_media WHERE thread = ?1"),
             ("UPDATE OR IGNORE ls_pins SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_pins WHERE thread = ?1"),
             ("UPDATE OR IGNORE ls_edits SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_edits WHERE thread = ?1"),
             ("UPDATE OR IGNORE ls_reactions SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_reactions WHERE thread = ?1"),
@@ -681,6 +704,47 @@ impl Index {
         Ok(())
     }
 
+    /// The message sent at `ts` carries these attachments: (index in its `attachments`, kind).
+    pub async fn record_media(&self, thread: &str, ts: u64, items: &[(usize, MediaKind)]) -> anyhow::Result<()> {
+        for &(idx, kind) in items {
+            sqlx::query("INSERT OR IGNORE INTO ls_media (thread, ts, idx, kind) VALUES (?, ?, ?, ?)")
+                .bind(thread)
+                .bind(ts as i64)
+                .bind(idx as i64)
+                .bind(kind as i64)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Up to `limit` attachments of `kind`, newest message first and in message order within
+    /// one, after `after` (the last one of the previous page): (sent ts, index).
+    pub async fn media_page(&self, thread: &str, kind: MediaKind, after: Option<(u64, usize)>, limit: u32) -> anyhow::Result<Vec<(u64, usize)>> {
+        let (ts, idx) = after.map_or((i64::MAX, -1), |(t, i)| (t as i64, i as i64));
+        let rows = sqlx::query(
+            "SELECT ts, idx FROM ls_media WHERE thread = ?1 AND kind = ?2 AND (ts < ?3 OR (ts = ?3 AND idx > ?4))
+             ORDER BY ts DESC, idx ASC LIMIT ?5",
+        )
+        .bind(thread)
+        .bind(kind as i64)
+        .bind(ts)
+        .bind(idx)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| Some((r.try_get::<i64, _>("ts").ok()? as u64, r.try_get::<i64, _>("idx").ok()? as usize)))
+            .collect())
+    }
+
+    /// The message sent at `ts` is gone (deleted, expired).
+    pub async fn forget_media(&self, thread: &str, ts: u64) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM ls_media WHERE thread = ? AND ts = ?").bind(thread).bind(ts as i64).execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Ids of installed sticker packs. Reads the id column only, not the manifests.
     pub async fn pack_ids(&self) -> anyhow::Result<Vec<Vec<u8>>> {
         let rows = sqlx::query("SELECT id FROM sticker_packs").fetch_all(&self.pool).await?;
@@ -874,6 +938,7 @@ impl Index {
             "DELETE FROM ls_edits WHERE thread = ?",
             "DELETE FROM ls_reactions WHERE thread = ?",
             "DELETE FROM ls_replies WHERE thread = ?",
+            "DELETE FROM ls_media WHERE thread = ?",
         ] {
             sqlx::query(sql).bind(key).execute(&self.pool).await?;
         }
@@ -1283,6 +1348,33 @@ pub(crate) mod tests {
         index.forget_replies("t", 1).await.unwrap();
         assert!(index.reply_counts("t", &[1]).await.unwrap().is_empty());
         assert_eq!(index.reply_counts("u", &[1]).await.unwrap()[&1], 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn media_pages_go_back_in_time_by_kind() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        let (m, f) = (MediaKind::Media, MediaKind::Files);
+        index.record_media("t", 10, &[(0, m), (1, m), (2, f)]).await.unwrap();
+        index.record_media("t", 20, &[(0, m)]).await.unwrap();
+        // twice (live, then the backfill) counts once
+        index.record_media("t", 20, &[(0, m)]).await.unwrap();
+        index.record_media("t", 30, &[(1, m)]).await.unwrap();
+        index.record_media("u", 40, &[(0, m)]).await.unwrap();
+        let first = index.media_page("t", m, None, 2).await.unwrap();
+        assert_eq!(first, [(30, 1), (20, 0)]);
+        // a page can end inside a message
+        let next = index.media_page("t", m, first.last().copied(), 1).await.unwrap();
+        assert_eq!(next, [(10, 0)]);
+        assert_eq!(index.media_page("t", m, Some((10, 0)), 10).await.unwrap(), [(10, 1)]);
+        assert_eq!(index.media_page("t", f, None, 10).await.unwrap(), [(10, 2)]);
+        index.forget_media("t", 10).await.unwrap();
+        assert_eq!(index.media_page("t", m, None, 10).await.unwrap(), [(30, 1), (20, 0)]);
+        assert!(index.media_page("t", f, None, 10).await.unwrap().is_empty());
+        index.rekey_thread("t", "v").await.unwrap();
+        assert_eq!(index.media_page("v", m, None, 10).await.unwrap().len(), 2);
+        index.forget_thread("v").await.unwrap();
+        assert!(index.media_page("v", m, None, 10).await.unwrap().is_empty());
     }
 
     #[tokio::test(flavor = "current_thread")]

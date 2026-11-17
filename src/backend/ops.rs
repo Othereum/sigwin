@@ -257,6 +257,8 @@ impl App {
                 if let Err(e) = self.index.forget_replies(thread_key, *target).await {
                     warn!("forget replies: {e:#}");
                 }
+                let (key, target) = (thread_key.clone(), *target);
+                self.forget_media(&key, target).await;
             }
             Some(PendingOp { op: Op::Edit { target, .. }, thread_key, .. }) => {
                 if let Err(e) = self.index.record_edit(thread_key, *target, self.me, ts).await {
@@ -359,6 +361,18 @@ pub(super) async fn record_reply(index: &Index, key: &str, c: &Content, me: Uuid
     let Kind::Msg { dm, .. } = view::classify(c, me) else { return Ok(false) };
     let Some(target) = dm.quote.as_ref().and_then(|q| q.id) else { return Ok(false) };
     index.record_reply(key, target, c.timestamp(), c.metadata.sender.raw_uuid()).await?;
+    Ok(true)
+}
+
+/// Notes the pictures, videos and files of a stored message, for the chat's media and files;
+/// true if it had any.
+pub(super) async fn record_media(index: &Index, key: &str, c: &Content, me: Uuid) -> anyhow::Result<bool> {
+    let Kind::Msg { dm, .. } = view::classify(c, me) else { return Ok(false) };
+    let items = view::media::gallery_items(dm);
+    if items.is_empty() {
+        return Ok(false);
+    }
+    index.record_media(key, c.timestamp(), &items).await?;
     Ok(true)
 }
 

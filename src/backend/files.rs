@@ -34,7 +34,13 @@ impl App {
         let gate = self.thumb_gate.clone();
         let downloads = self.attachment_downloads.clone();
         // the same picture can be shown at another size; each shows how far it is
-        let shown: Vec<String> = self.thumbs_requested.borrow().iter().filter(|k| k.starts_with(&file_key)).cloned().collect();
+        let mut shown: Vec<String> = self.thumbs_requested.borrow().iter().filter(|k| k.starts_with(&file_key)).cloned().collect();
+        // the media page's take turns, and only while they're still on screen there: scrolling
+        // through it shouldn't start a download for everything that went by
+        let gallery = key.starts_with(crate::types::GALLERY_PREFIX).then(|| {
+            shown.push(key.clone());
+            (self.gallery_gate.clone(), self.gallery_requested.clone())
+        });
         tokio::task::spawn_local(async move {
             let mut labelled = false;
             if !thumb_path.exists() {
@@ -57,6 +63,16 @@ impl App {
                         tracing::debug!(stopped = downloads.was_stopped(&file_key), "picture waits for a click");
                         return;
                     }
+                    let _turn = match gallery {
+                        Some((turn, requested)) => {
+                            let t = turn.acquire_owned().await;
+                            if !requested.borrow().contains(&key) {
+                                return;
+                            }
+                            Some(t)
+                        }
+                        None => None,
+                    };
                     // the same picture shown at another size may be getting it already: waited for
                     let show = Show::Cells(if shown.is_empty() { vec![key.clone()] } else { shown });
                     match downloads.ensure(&file_key, &ptr, &show, &emit, &orig_path).await {
@@ -107,7 +123,8 @@ impl App {
         let tx = self.tx.clone();
         let gate = self.thumb_gate.clone();
         let fetch_gate = self.video_gate.clone();
-        let requested = self.thumbs_requested.clone();
+        let requested =
+            if key.starts_with(crate::types::GALLERY_PREFIX) { self.gallery_requested.clone() } else { self.thumbs_requested.clone() };
         let downloads = self.attachment_downloads.clone();
         tokio::task::spawn_local(async move {
             if !thumb_path.exists() {
@@ -208,6 +225,7 @@ impl App {
         self.attachment_downloads.allow(file_key);
         self.thumbs_requested.borrow_mut().retain(|k| !k.starts_with(file_key));
         self.emit_messages(Scroll::Keep).await;
+        self.gallery_ask_again(file_key);
     }
 
     /// Downloads (or reads from the cache) a long message's full text.
@@ -257,7 +275,11 @@ impl App {
         // the row's file line shows how far it is, and a click on it stops it; a row of pictures
         // alone has no line, so that goes to the notice
         let line = view::media::shown_attachments(dm).any(|(_, a)| !view::media::is_media(a));
-        let save = Save { id: id.to_string(), line, jobs };
+        self.ask_where_to_save(Save { id: id.to_string(), line, jobs }, owner);
+    }
+
+    /// The user picks where `save` goes: a file's path for one, a folder for several.
+    pub(super) fn ask_where_to_save(&self, save: Save, owner: isize) {
         let tx = self.tx.clone();
         match save.jobs.as_slice() {
             [] => {}
@@ -338,14 +360,17 @@ impl App {
     }
 
     /// The message of row `id` in the open window.
-    fn row_message(&self, id: &str) -> Option<(u64, &DataMessage)> {
+    /// Message `id` of the window, or of the media page (which reaches back past the window).
+    pub(super) fn row_message(&self, id: &str) -> Option<(u64, &DataMessage)> {
         let open = self.current.as_ref()?;
         let ts = id.parse::<u64>().ok()?;
-        let (_, c) = open.window.iter().find(|(t, _)| *t == ts)?;
-        match view::classify(c, self.me) {
-            Kind::Msg { dm, .. } => Some((ts, dm)),
-            _ => None,
+        if let Some((_, c)) = open.window.iter().find(|(t, _)| *t == ts) {
+            return match view::classify(c, self.me) {
+                Kind::Msg { dm, .. } => Some((ts, dm)),
+                _ => None,
+            };
         }
+        self.gallery.as_ref()?.message(ts).map(|dm| (ts, dm))
     }
 
     /// Image `index` of row `id`: cache path and pointer.

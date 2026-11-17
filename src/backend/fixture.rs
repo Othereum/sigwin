@@ -183,6 +183,7 @@ impl App {
         self.persist.edits_indexed = true;
         self.persist.reactions_indexed = true;
         self.persist.replies_indexed = true;
+        self.persist.media_indexed = true;
         self.offline = Some(Offline { sent: Vec::new(), next_ts: view::time::now_ms() - 2 * 86_400_000 });
         (self.emit)(Event::Ready);
         self.threads_dirty = true;

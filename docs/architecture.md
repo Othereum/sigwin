@@ -41,6 +41,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/gui/drafts.rs` | per-thread composer drafts |
 | `src/gui/linkcard.rs` | the link preview card in the composer |
 | `src/gui/viewer.rs` | image viewer window |
+| `src/gui/gallery.rs` | a chat's media page: rows by month, which items are on screen, their thumbnails |
 | `src/gui/window.rs` | theme, zoom, native window handle, releasing memory while hidden |
 | `src/gui/whatsnew.rs` | the "what's new" offer after an update, which opens the GitHub releases page |
 | `src/away.rs` | whether the user is away (no input for a while, screen locked or off) and whether the window can be seen (not covered) |
@@ -73,6 +74,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/backend/ops.rs` | reactions, edits, deletes, pins |
 | `src/backend/typing.rs` | typing indicators |
 | `src/backend/stickers.rs` | sticker packs: picker, sending, installing |
+| `src/backend/gallery.rs` | a chat's media page: pages from the media index, the messages it loaded (the viewer finds them there), its thumbnails |
 | `src/backend/gif.rs` | a GIF playing in a message or the viewer: one frame at a time on its own thread, handed over through a slot |
 | `src/backend/files.rs` | attachment and thumbnail caches, opening and viewing attachments; `AttachmentDownloads::ensure` is the only place an attachment is downloaded |
 | `src/videoframe.rs` | a video's first frame, decoded by Media Foundation in a child process |
@@ -112,6 +114,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `ui/bubble.slint` | message bubble |
 | `ui/reactions.slint` | reaction buttons and the emoji picker of the message menu |
 | `ui/viewer.slint` | image viewer window |
+| `ui/gallery.slint` | a chat's media page, and its `GalleryData` |
 | `ui/widgets.slint` | small shared widgets |
 | `ui/icons.slint` | the icon set: paths on a 24-unit grid and the `Icon` that draws them |
 | `ui/thread_row.slint`, `ui/stickers.slint`, `ui/link.slint` | thread list row, sticker panel, linking page |

@@ -1,0 +1,255 @@
+// A chat's media page: its pictures and videos in a grid by month, or its files.
+
+import { ScrollView } from "std-widgets.slint";
+import { MediaState } from "types.slint";
+import { Theme } from "theme.slint";
+import { BusySpinner, IconButton, Segmented } from "widgets.slint";
+import { Icon, Icons } from "icons.slint";
+import { MediaLabel, VideoMark } from "bubble.slint";
+
+export struct GalleryCell {
+    // the message's sent timestamp, the attachment's index in it, and its place among the
+    // message's pictures or videos
+    id: string,
+    index: int,
+    nth: int,
+    video: bool,
+    photo: image,
+    state: [MediaState],
+}
+
+// One row of the page: a month's heading, a row of cells, or a file.
+export struct GalleryRow {
+    month: string,
+    cells: [GalleryCell],
+    id: string,
+    index: int,
+    name: string,
+    sub: string,
+    ext: string,
+    danger: bool,
+}
+
+// Rust fills it (`gui::gallery`) and reads the row heights to know what's on screen.
+export global GalleryData {
+    in-out property <bool> open;
+    // 0 pictures and videos, 1 files
+    in-out property <int> tab;
+    in property <string> chat;
+    in property <[GalleryRow]> rows;
+    // the first page isn't here yet
+    in property <bool> loading;
+    in property <length> cell: 120px;
+    out property <length> gap: 4px;
+    out property <length> head-h: 44px;
+    out property <length> file-h: 60px;
+    out property <length> pad: 16px;
+    callback show();
+    callback close();
+    callback switch(int);
+    // how many cells fit in a row
+    callback layout(int);
+    // the top of what's on screen and its height
+    callback scrolled(length, length);
+    callback open-cell(GalleryCell);
+    callback show-in-chat(string);
+    callback save(string, int);
+}
+
+// a round button over a picture
+component MediaButton inherits Rectangle {
+    in property <string> icon;
+    callback clicked;
+    width: 28px;
+    height: 28px;
+    border-radius: 14px;
+    background: bta.has-hover ? Theme.on-media-hover : Theme.on-media;
+    bta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        size: 16px;
+        icon: root.icon;
+        tint: white;
+    }
+}
+
+component Cell inherits Rectangle {
+    in property <GalleryCell> c;
+    width: GalleryData.cell;
+    height: GalleryData.cell;
+    border-radius: 4px;
+    clip: true;
+    background: Theme.hover;
+    cta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { GalleryData.open-cell(root.c); }
+        Image {
+            width: 100%;
+            height: 100%;
+            source: root.c.photo;
+            image-fit: fill;
+        }
+        if root.c.video: VideoMark {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            undownloaded: root.c.state[0].undownloaded;
+            progress: root.c.state[0].progress;
+            ring: root.c.state[0].ring;
+            hovered: cta.has-hover;
+        }
+        if root.c.state[0].label != "" || (!root.c.video && root.c.state[0].undownloaded): MediaLabel {
+            x: 4px;
+            y: parent.height - self.height - 4px;
+            text: root.c.state[0].label;
+            icon: !root.c.video && root.c.state[0].undownloaded ? Icons.download : "";
+        }
+        if cta.has-hover: MediaButton {
+            x: parent.width - self.width - 4px;
+            y: 4px;
+            icon: Icons.chat;
+            clicked => { GalleryData.show-in-chat(root.c.id); }
+        }
+    }
+}
+
+component FileRow inherits Rectangle {
+    in property <GalleryRow> r;
+    border-radius: 8px;
+    background: fta.has-hover ? Theme.hover : transparent;
+    fta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { GalleryData.save(root.r.id, root.r.index); }
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 12px;
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                width: 40px;
+                height: 40px;
+                border-radius: 6px;
+                background: root.r.danger ? Theme.warning : Theme.accent;
+                Text {
+                    text: root.r.ext != "" ? root.r.ext : "FILE";
+                    color: #ffffff;
+                    font-size: 11px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                spacing: 1px;
+                Text { text: root.r.name; color: Theme.text; font-size: 14px; overflow: elide; }
+                Text {
+                    text: root.r.danger ? root.r.sub + " · " + @tr("May be dangerous") : root.r.sub;
+                    color: root.r.danger ? Theme.warning-text : Theme.subtle;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+            }
+            if fta.has-hover: IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: Icons.chat;
+                clicked => { GalleryData.show-in-chat(root.r.id); }
+            }
+            if fta.has-hover: IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: Icons.download;
+                clicked => { GalleryData.save(root.r.id, root.r.index); }
+            }
+        }
+    }
+}
+
+export component GalleryPage inherits Rectangle {
+    background: Theme.pane;
+    // swallow clicks so nothing underneath reacts
+    TouchArea { }
+    VerticalLayout {
+        Rectangle {
+            height: 56px;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 16px;
+                spacing: 8px;
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Icons.back;
+                    clicked => { GalleryData.close(); }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    Text { text: @tr("Media and files"); color: Theme.text; font-size: 15px; font-weight: 700; overflow: elide; }
+                    Text { text: GalleryData.chat; color: Theme.subtle; font-size: 12px; overflow: elide; }
+                }
+                Segmented {
+                    y: (parent.height - self.height) / 2;
+                    options: [@tr("Media"), @tr("Files")];
+                    current: GalleryData.tab;
+                    changed(i) => { GalleryData.switch(i); }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            sv := ScrollView {
+                // the scrollbar overlaps the right edge: `pad` keeps the cells clear of it
+                property <int> cols: max(1, floor((self.visible-width - 2 * GalleryData.pad + GalleryData.gap) / (GalleryData.cell + GalleryData.gap)));
+                // the grid sits in the middle; files take the width
+                property <length> side: GalleryData.tab == 1 ? GalleryData.pad
+                    : max(GalleryData.pad, (self.visible-width - self.cols * GalleryData.cell - (self.cols - 1) * GalleryData.gap) / 2);
+                init => {
+                    GalleryData.layout(self.cols);
+                    GalleryData.scrolled(-self.content-y, self.visible-height);
+                }
+                changed cols => { GalleryData.layout(self.cols); }
+                changed content-y => { GalleryData.scrolled(-self.content-y, self.visible-height); }
+                changed visible-height => { GalleryData.scrolled(-self.content-y, self.visible-height); }
+                VerticalLayout {
+                    padding-left: sv.side;
+                    padding-right: sv.side;
+                    padding-bottom: GalleryData.pad;
+                    for r in GalleryData.rows: Rectangle {
+                        height: r.month != "" ? GalleryData.head-h : r.name != "" ? GalleryData.file-h : GalleryData.cell + GalleryData.gap;
+                        if r.month != "": Text {
+                            x: 4px;
+                            y: parent.height - self.height - 8px;
+                            text: r.month;
+                            color: Theme.text;
+                            font-size: 13px;
+                            font-weight: 700;
+                        }
+                        if r.cells.length > 0: HorizontalLayout {
+                            alignment: start;
+                            spacing: GalleryData.gap;
+                            padding-bottom: GalleryData.gap;
+                            for c in r.cells: Cell { c: c; }
+                        }
+                        if r.name != "": FileRow { r: r; }
+                    }
+                }
+            }
+            if GalleryData.loading: BusySpinner {
+                x: (parent.width - self.width) / 2;
+                y: 40px;
+            }
+            if !GalleryData.loading && GalleryData.rows.length == 0: Text {
+                y: 48px;
+                width: parent.width;
+                text: GalleryData.tab == 0 ? @tr("No photos or videos in this chat") : @tr("No files in this chat");
+                color: Theme.subtle;
+                font-size: 14px;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}

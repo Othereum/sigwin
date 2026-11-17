@@ -106,6 +106,26 @@ fn date(d: NaiveDate, year: bool, weekday: bool) -> String {
     }
 }
 
+/// The month of `ts` as a heading in a chat's media: "November 2026", "2026년 11월".
+pub fn month_label(ts: u64) -> String {
+    let d = local(ts).date_naive();
+    match i18n::lang() {
+        "de" => {
+            const MON: [&str; 12] =
+                ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+            format!("{} {}", MON[d.month0() as usize], d.year())
+        }
+        "ko" => format!("{}년 {}월", d.year(), d.month()),
+        _ => d.format("%B %Y").to_string(),
+    }
+}
+
+/// The day of `ts` in a list of files: "Nov 7", with the year when it isn't this one.
+pub fn day_short(ts: u64) -> String {
+    let d = local(ts).date_naive();
+    date(d, d.year() != Local::now().year(), false)
+}
+
 pub fn time_short(ts: u64) -> String {
     if ts == 0 {
         return String::new();

@@ -610,6 +610,73 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     }
 }
 
+/// The media page: 300 pictures (every 7th a video, every 11th not downloaded) and 45 files over
+/// the past year and a half, in pages like the backend's. True if `c` was the page's.
+fn demo_gallery(emit: &backend::Emit, c: &Command) -> bool {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    static FILES: AtomicBool = AtomicBool::new(false);
+    static SENT: AtomicUsize = AtomicUsize::new(0);
+    const MEDIA: usize = 300;
+    const FILES_N: usize = 45;
+    const PAGE: usize = 120;
+    let now = view::time::now_ms();
+    let ts = |i: usize| now - i as u64 * 40 * 3_600_000;
+    let key = |i: usize| {
+        let cell = view::media::GALLERY_CELL;
+        format!("{}demo-{i}@{cell}x{cell}", types::GALLERY_PREFIX)
+    };
+    let page = |files: bool, from: usize| {
+        let total = if files { FILES_N } else { MEDIA };
+        let to = (from + if files { 60 } else { PAGE }).min(total);
+        let names = ["보고서_최종.pdf", "견적서.xlsx", "회의록 2026-03.docx", "photos.zip", "setup.exe", "노트.txt"];
+        let items = (from..to)
+            .map(|i| {
+                let mut d = types::GalleryItemDto { id: ts(i).to_string(), index: 0, month: view::time::month_label(ts(i)), ..Default::default() };
+                if files {
+                    d.name = names[i % names.len()].into();
+                    d.ext = view::media::file_ext(&d.name);
+                    d.danger = view::media::is_dangerous_file(&d.name);
+                    d.sub = format!("{} · {}", view::media::size_text(((i * 7919) % 20_000_000) as u64 + 30_000), view::time::day_short(ts(i)));
+                } else {
+                    d.key = key(i);
+                    d.video = i % 7 == 3;
+                }
+                d
+            })
+            .collect();
+        emit(Event::Gallery { files, items, more: to < total, reset: from == 0 });
+        to
+    };
+    match c {
+        Command::GalleryOpen { files } => {
+            FILES.store(*files, Ordering::Relaxed);
+            SENT.store(page(*files, 0), Ordering::Relaxed);
+        }
+        Command::GalleryMore => {
+            let files = FILES.load(Ordering::Relaxed);
+            SENT.store(page(files, SENT.load(Ordering::Relaxed)), Ordering::Relaxed);
+        }
+        Command::GalleryShown { from, to } => {
+            let px = types::physical_px(view::media::GALLERY_CELL);
+            for i in *from..*to {
+                let t = image::RgbaImage::from_fn(px, px, |x, y| {
+                    image::Rgba([(x * 255 / px) as u8, (i * 37 % 256) as u8, (y * 255 / px) as u8, 255])
+                });
+                emit(Event::Thumb(Arc::new(types::Thumb { key: key(i), width: px, height: px, rgba: t.into_raw() })));
+                let label = match (i % 7 == 3, i % 11 == 5) {
+                    (true, _) => types::MediaLabel { text: view::media::length_text((i * 13 % 300) as u32 + 5), ..Default::default() },
+                    (false, true) => types::MediaLabel { text: "4.2MB".into(), undownloaded: true, progress: None },
+                    _ => continue,
+                };
+                emit(Event::MediaLabel { key: key(i), label });
+            }
+        }
+        Command::GalleryClose | Command::GallerySave { .. } => {}
+        _ => return false,
+    }
+    true
+}
+
 fn demo_link_image(key: &str, w: u32, h: u32) -> types::Thumb {
     let (pw, ph) = (types::physical_px(w), types::physical_px(h));
     // thin diagonal lines: any nearest-neighbor stretch of the card shows as jagged steps
@@ -944,6 +1011,9 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
     }
     if let Command::ViewImage { id, index, fit, .. } = c {
         return demo_viewer(emit, id, *index, *fit);
+    }
+    if demo_gallery(emit, c) {
+        return;
     }
     if let Command::SaveViewed { .. } | Command::SaveFiles { .. } = c {
         return emit(Event::Saved("첨부 파일 1개를 저장했습니다.".into(), std::env::temp_dir().join("demo.pdf")));

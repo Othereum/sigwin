@@ -14,6 +14,7 @@ import { LinkPage } from "link.slint";
 import { RepliesData, RepliesDialog } from "replies.slint";
 import { RequestCard, RequestData, SafetyTipsDialog } from "request.slint";
 import { FindKind, ResultRow, ResultKind, SearchData } from "search.slint";
+import { GalleryData, GalleryPage } from "gallery.slint";
 
 // Structs and globals the Rust side uses.
 export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, ReplyItem, MentionItem, PackItem, StickerItem } from "types.slint";
@@ -24,6 +25,7 @@ export { ThreadMenuData } from "thread_menu.slint";
 export { FindKind, ResultItem, ResultKind, SearchData } from "search.slint";
 export { RepliesData } from "replies.slint";
 export { RequestData } from "request.slint";
+export { GalleryCell, GalleryData, GalleryRow } from "gallery.slint";
 
 export component AppWindow inherits Window {
     in property <int> total-unread;
@@ -487,6 +489,7 @@ export component AppWindow inherits Window {
                             selected: t.key == root.current-key;
                             clicked => {
                                 root.settings-open = false;
+                                GalleryData.close();
                                 root.open-thread(t.key);
                             }
                             menu(x, y) => { ThreadMenuData.open(t.key, x, y); }
@@ -506,6 +509,7 @@ export component AppWindow inherits Window {
                                     }
                                 } else if (r.kind != ResultKind.header) {
                                     root.settings-open = false;
+                                    GalleryData.close();
                                     root.open-thread(r.thread.key);
                                     SearchData.leave-contacts();
                                 }
@@ -683,6 +687,12 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                         Text { text: root.current-name; color: Theme.text; font-size: 15px; font-weight: 700; overflow: elide; }
                         if root.current-sub != "": Text { text: root.current-sub; color: Theme.subtle; font-size: 12px; overflow: elide; }
+                    }
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
+                        icon: Icons.gallery;
+                        active: GalleryData.open;
+                        clicked => { GalleryData.show(); }
                     }
                     IconButton {
                         y: (parent.height - self.height) / 2;
@@ -1489,6 +1499,12 @@ export component AppWindow inherits Window {
                 }
             }
         }
+    }
+
+    if page == "main" && GalleryData.open && root.current-key != "": GalleryPage {
+        x: 300px;
+        width: root.width - 300px;
+        height: root.height;
     }
 
     if page == "main" && root.settings-open: SettingsPage {

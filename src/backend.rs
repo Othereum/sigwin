@@ -43,6 +43,7 @@ use crate::view::{self, Kind};
 pub(crate) mod files;
 pub(crate) mod fixture;
 pub(crate) mod linkpreview;
+mod gallery;
 mod gif;
 mod history;
 mod mute;
@@ -154,6 +155,9 @@ struct Persist {
     /// replies stored before the reply index existed have been indexed
     #[serde(default)]
     replies_indexed: bool,
+    /// attachments stored before the media index existed have been indexed
+    #[serde(default)]
+    media_indexed: bool,
     /// layout of the attachment and thumbnail caches on disk (`CACHE_FORMAT` once converted)
     #[serde(default)]
     cache_format: u32,
@@ -366,6 +370,12 @@ struct App {
     thumb_gate: Arc<tokio::sync::Semaphore>,
     /// held while downloading a video nobody asked for
     video_gate: Arc<tokio::sync::Semaphore>,
+    /// the open chat's media page, while it shows
+    gallery: Option<gallery::Gallery>,
+    /// thumbnails the media page asked for, like `thumbs_requested` for the list
+    gallery_requested: Rc<RefCell<HashSet<String>>>,
+    /// held while downloading a picture for the media page
+    gallery_gate: Arc<tokio::sync::Semaphore>,
     long: view::text::LongTexts,
     pending: Vec<Pending>,
     /// the composer's link preview
@@ -547,6 +557,9 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         attachment_downloads: Default::default(),
         thumb_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         video_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+        gallery: None,
+        gallery_requested: Default::default(),
+        gallery_gate: Arc::new(tokio::sync::Semaphore::new(2)),
         long: Default::default(),
         pending: Vec::new(),
         link_draft: None,
@@ -681,6 +694,7 @@ impl App {
             || !self.persist.edits_indexed
             || !self.persist.reactions_indexed
             || !self.persist.replies_indexed
+            || !self.persist.media_indexed
         {
             self.backfill_pins();
         }
@@ -751,6 +765,11 @@ impl App {
             Command::ViewerThumbs { id, px } => self.viewer_thumbs(&id, px),
             Command::OpenViewed { id, index } => self.open_viewed(&id, index),
             Command::SaveViewed { id, index, owner } => self.save_viewed(&id, index, owner),
+            Command::GalleryOpen { files } => self.gallery_open(files).await,
+            Command::GalleryMore => self.gallery_more().await,
+            Command::GalleryShown { from, to } => self.gallery_shown(from, to),
+            Command::GalleryClose => self.gallery_close(),
+            Command::GallerySave { id, index, owner } => self.gallery_save(&id, index, owner),
             Command::ReadMore(id) => {
                 if let Ok(row) = id.parse::<u64>() {
                     *self.long.shown.entry(row).or_insert(view::text::READ_MORE_AT) += view::text::READ_MORE_STEP;
@@ -935,8 +954,9 @@ impl App {
             Internal::Sent(ts, Err(e)) => self.send_failed(ts, e).await,
             Internal::LinkFetched(url, res) => self.link_fetched(url, res),
             Internal::ThumbFailed(key) => {
-                // allow a retry next time the thread is opened
+                // allow a retry next time the thread is opened, or the cell comes back on screen
                 self.thumbs_requested.borrow_mut().remove(&key);
+                self.gallery_requested.borrow_mut().remove(&key);
             }
             Internal::LongText(key, text) => {
                 // still the thread it was asked for
@@ -950,6 +970,7 @@ impl App {
             Internal::Fetched(file_key) => {
                 self.thumbs_requested.borrow_mut().retain(|k| !k.starts_with(&file_key));
                 self.emit_messages(Scroll::Keep).await;
+                self.gallery_ask_again(&file_key);
             }
             Internal::Saved(text, path) => {
                 (self.emit)(Event::ProgressDone);
@@ -965,6 +986,7 @@ impl App {
                 self.persist.edits_indexed = true;
                 self.persist.reactions_indexed = true;
                 self.persist.replies_indexed = true;
+                self.persist.media_indexed = true;
                 self.persist_dirty = true;
                 self.current_dirty = true;
             }
@@ -1008,6 +1030,9 @@ impl App {
                 if !changed.is_empty() {
                     info!("disappearing messages removed in {} threads", changed.len());
                     self.threads_dirty = true;
+                }
+                if self.gallery.as_ref().is_some_and(|g| changed.contains(&g.key)) {
+                    self.gallery_prune().await;
                 }
             }
         }
@@ -1069,6 +1094,9 @@ impl App {
                             }
                             if let Err(e) = index.forget_replies(&key, c.timestamp()).await {
                                 warn!("forget replies: {e:#}");
+                            }
+                            if let Err(e) = index.forget_media(&key, c.timestamp()).await {
+                                warn!("forget media: {e:#}");
                             }
                         } else {
                             st.hold = Some(st.hold.map_or(ts, |h| h.min(ts)));

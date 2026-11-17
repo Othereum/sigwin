@@ -1106,3 +1106,18 @@ msgstr "받을 수 없음"
 
 msgid "This attachment is no longer available on the server"
 msgstr "서버에 더 이상 남아 있지 않은 첨부 파일입니다"
+
+msgid "Media and files"
+msgstr "미디어와 파일"
+
+msgid "Media"
+msgstr "미디어"
+
+msgid "Files"
+msgstr "파일"
+
+msgid "No photos or videos in this chat"
+msgstr "이 대화에 사진이나 동영상이 없습니다"
+
+msgid "No files in this chat"
+msgstr "이 대화에 파일이 없습니다"

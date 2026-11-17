@@ -141,6 +141,15 @@ impl App {
                     warn!("record reply: {e:#}");
                 }
             }
+            // the pointers it was sent with exist only in what presage stored
+            let key = p.thread_key.clone();
+            if let Some(thread) = parse_thread_key(&key) {
+                if let Ok(Some(c)) = self.store.message(&thread, ts).await {
+                    if let Err(e) = record_media(&self.index, &key, &c, self.me).await {
+                        warn!("record media: {e:#}");
+                    }
+                }
+            }
         }
         if let Some(key) = self.pending.iter().find(|p| p.ts == ts).map(|p| p.thread_key.clone()) {
             self.wrote(&key);

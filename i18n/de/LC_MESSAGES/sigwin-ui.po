@@ -1118,3 +1118,18 @@ msgstr "Nicht verfügbar"
 
 msgid "This attachment is no longer available on the server"
 msgstr "Dieser Anhang ist auf dem Server nicht mehr verfügbar"
+
+msgid "Media and files"
+msgstr "Medien und Dateien"
+
+msgid "Media"
+msgstr "Medien"
+
+msgid "Files"
+msgstr "Dateien"
+
+msgid "No photos or videos in this chat"
+msgstr "Keine Fotos oder Videos in diesem Chat"
+
+msgid "No files in this chat"
+msgstr "Keine Dateien in diesem Chat"

@@ -318,6 +318,31 @@ pub struct ReplyDto {
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
 pub const STICKER_THUMB_PREFIX: &str = "sp_";
 
+/// Thumbnail and label keys with this prefix belong to the chat's media page, not the message list.
+pub const GALLERY_PREFIX: &str = "g:";
+
+/// An attachment on the chat's media page.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GalleryItemDto {
+    /// the message's sent timestamp (what `Command::JumpTo` and the row commands take)
+    pub id: String,
+    /// index in the message's `attachments`
+    pub index: usize,
+    /// its month: items are grouped under it
+    pub month: String,
+    /// media: the thumbnail's key; whether it's a video, and its place among the message's
+    /// pictures or videos (what `ViewImage` / `OpenVideo` take)
+    pub key: String,
+    pub video: bool,
+    pub nth: usize,
+    /// files: name, "size · day", the extension for the badge, and whether opening it could
+    /// run something
+    pub name: String,
+    pub sub: String,
+    pub ext: String,
+    pub danger: bool,
+}
+
 /// The `MediaLabel` key of row `id`'s file line: how far saving its files has come. One line
 /// stands for all of the row's files.
 pub fn file_line_key(id: &str) -> String {
@@ -588,6 +613,9 @@ pub enum Event {
     Connection { text: String, at_once: bool },
     StickerPacks(Vec<PackDto>),
     StickerGrid { pack: String, items: Vec<StickerDto> },
+    /// The open chat's media page: items to add below what it has (`reset`: in place of it),
+    /// and whether older ones remain. `files`: the page's files rather than its pictures.
+    Gallery { files: bool, items: Vec<GalleryItemDto>, more: bool, reset: bool },
     /// open the sticker panel on this (installed) pack
     OpenStickerPanel(String),
     /// the clicked sticker's pack is not installed: ask, then InstallPackFromMessage(msg id)
@@ -659,6 +687,16 @@ pub enum Command {
     /// Square thumbnails of `px` physical px of all images of a message for the viewer. The ones
     /// that aren't here yet stay blank: nothing but the list downloads a picture.
     ViewerThumbs { id: String, px: u32 },
+    /// the open chat's media page opened, or switched to its pictures or `files`
+    GalleryOpen { files: bool },
+    /// the media page reached the end of what it has: older items
+    GalleryMore,
+    /// items `from..to` of the media page are on screen or close: their thumbnails are wanted,
+    /// the others' not
+    GalleryShown { from: usize, to: usize },
+    GalleryClose,
+    /// save attachment `index` of message `id` from the media page; `owner`: HWND for the dialog
+    GallerySave { id: String, index: usize, owner: isize },
     /// the viewer's "기본 앱으로 열기"
     OpenViewed { id: String, index: usize },
     /// the viewer's "저장"; `owner`: HWND for the file dialog

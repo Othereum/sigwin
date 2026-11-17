@@ -429,6 +429,62 @@ fn replies_are_counted_and_listed() {
     });
 }
 
+/// The media page's last answer: (files, items, more, reset).
+fn last_gallery(events: &[Event]) -> Option<(bool, Vec<crate::types::GalleryItemDto>, bool, bool)> {
+    events.iter().rev().find_map(|e| match e {
+        Event::Gallery { files, items, more, reset } => Some((*files, items.clone(), *more, *reset)),
+        _ => None,
+    })
+}
+
+#[test]
+fn the_media_page_lists_what_arrived_and_drops_what_goes() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=3").await;
+        h.op("gifs who=1 n=2").await;
+        h.op("big who=1").await;
+        h.open(1).await;
+        h.take_events();
+        h.cmd(Command::GalleryOpen { files: false }).await;
+        let (files, items, more, reset) = last_gallery(&h.take_events()).expect("a page");
+        assert!(!files && !more && reset);
+        // newest message first, its pictures in order; what `ViewImage` takes for each
+        let got: Vec<(usize, usize)> = items.iter().map(|i| (i.index, i.nth)).collect();
+        assert_eq!(got, [(0, 0), (0, 0), (1, 1)]);
+        let (big, gifs) = (items[0].id.clone(), items[1].id.clone());
+        assert_ne!(big, gifs);
+
+        // the cached GIFs get their pictures, under the page's keys
+        h.cmd(Command::GalleryShown { from: 0, to: 3 }).await;
+        let mut came = false;
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if h.take_events().iter().any(|e| matches!(e, Event::Thumb(t) if t.key == items[1].key)) {
+                came = true;
+                break;
+            }
+        }
+        assert!(came, "the GIF's picture never came");
+        // out of range: let go of
+        h.cmd(Command::GalleryShown { from: 0, to: 1 }).await;
+        assert!(!h.app.gallery_requested.borrow().contains(&items[2].key));
+
+        // deleted for everyone: gone from the page and the index
+        let key = h.app.current.as_ref().unwrap().key.clone();
+        h.app.forget_media(&key, gifs.parse().unwrap()).await;
+        let (_, items, _, reset) = last_gallery(&h.take_events()).expect("the page again");
+        assert!(reset);
+        assert_eq!(items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), [big.as_str()]);
+
+        h.cmd(Command::GalleryOpen { files: true }).await;
+        let (files, items, more, _) = last_gallery(&h.take_events()).expect("the files");
+        assert!(files && items.is_empty() && !more);
+        h.cmd(Command::GalleryClose).await;
+        assert!(h.app.gallery.is_none() && h.app.gallery_requested.borrow().is_empty());
+    });
+}
+
 #[test]
 fn jumping_to_a_day_lands_on_its_first_message() {
     scenario(|| async {

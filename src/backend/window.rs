@@ -178,6 +178,10 @@ impl App {
 
     pub(super) async fn open_thread(&mut self, key: &str) -> anyhow::Result<()> {
         let thread = parse_thread_key(key).context("bad thread key")?;
+        // the UI leaves the media page on a switch
+        if self.gallery.as_ref().is_some_and(|g| g.key != key) {
+            self.gallery_close();
+        }
         let restore = self.restore_at.take();
         let span = self.latest_rows(&thread).await?;
         let is_group = matches!(thread, Thread::Group(_));

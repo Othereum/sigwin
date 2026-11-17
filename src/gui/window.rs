@@ -638,6 +638,7 @@ pub(crate) fn visibility(app: &AppWindow, shown: bool) {
         t.start(slint::TimerMode::SingleShot, RELEASE_AFTER, move || {
             if let Some(app) = weak.upgrade() {
                 stickers::close(&app);
+                super::gallery::close(&app);
             }
             UI.with_borrow_mut(|ui| {
                 anim::stop_gif(ui);

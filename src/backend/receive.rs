@@ -3,12 +3,13 @@
 use super::*;
 
 impl App {
-    /// One-time: index pin, edit, reaction and reply messages presage stored before we kept our own indexes.
+    /// One-time: index pin, edit, reaction, reply and media messages presage stored before we kept our own indexes.
     /// Walks every thread oldest first in pages, so pins and unpins apply in order.
     pub(super) fn backfill_pins(&self) {
         let (store, index, me, tx) = (self.store.clone(), self.index.clone(), self.me, self.tx.clone());
         // a second replay could bring back a pin whose unpin is still being sent
         let pins = !self.persist.pins_indexed;
+        let media = !self.persist.media_indexed;
         tokio::task::spawn_local(async move {
             let Ok(threads) = index.threads().await else { return };
             let mut n = 0usize;
@@ -29,6 +30,7 @@ impl App {
                                 record_edit(&index, &key, c, me).await,
                                 record_reaction(&index, &key, c, me).await,
                                 record_reply(&index, &key, c, me).await,
+                                if media { record_media(&index, &key, c, me).await } else { Ok(false) },
                             ] {
                                 match r {
                                     Ok(true) => n += 1,
@@ -44,7 +46,7 @@ impl App {
                     tokio::task::yield_now().await;
                 }
             }
-            info!("pin, edit, reaction and reply index backfilled: {n} messages");
+            info!("pin, edit, reaction, reply and media index backfilled: {n} messages");
             let _ = tx.send(Internal::PinsIndexed);
         });
     }
@@ -270,6 +272,7 @@ impl App {
             if let Err(e) = self.index.forget_replies(&key, target).await {
                 warn!("forget replies: {e:#}");
             }
+            self.forget_media(&key, target).await;
         }
         if let Err(e) = record_pin(&self.index, &key, &c, self.me).await {
             warn!("record pin: {e:#}");
@@ -282,6 +285,9 @@ impl App {
         }
         if let Err(e) = record_reply(&self.index, &key, &c, self.me).await {
             warn!("record reply: {e:#}");
+        }
+        if let Err(e) = record_media(&self.index, &key, &c, self.me).await {
+            warn!("record media: {e:#}");
         }
         let kind = view::classify(&c, self.me);
         match kind {
@@ -346,6 +352,9 @@ impl App {
             self.next_expiry = None;
             self.current_dirty = true;
             self.sweep();
+        }
+        if self.gallery.as_ref().and_then(|g| g.expires).is_some_and(|t| t <= view::time::now_ms()) {
+            self.gallery_prune().await;
         }
         if self.pin_expiry.is_some_and(|t| t <= view::time::now_ms()) {
             self.pin_expiry = None;

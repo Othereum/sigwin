@@ -19,6 +19,7 @@ use sigwin_ui::{
 pub(crate) mod anim;
 pub(crate) mod attach;
 pub(crate) mod drafts;
+pub(crate) mod gallery;
 pub(crate) mod linkcard;
 mod media;
 pub(crate) mod notice;
@@ -309,8 +310,11 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::Avatar(t) => media::avatar_arrived(app, t),
         Event::StickerThumbs(list) => stickers::thumbs_arrived(app, list),
         Event::LinkPreview { url, card } => linkcard::fetched(app, &url, card),
+        Event::Thumb(t) if t.key.starts_with(types::GALLERY_PREFIX) => gallery::thumb_arrived(t),
         Event::Thumb(t) => media::thumb_arrived(t),
+        Event::MediaLabel { key, label } if key.starts_with(types::GALLERY_PREFIX) => gallery::label_arrived(key, label),
         Event::MediaLabel { key, label } => media::label_arrived(key, label),
+        Event::Gallery { files, items, more, reset } => gallery::arrived(app, files, items, more, reset),
         Event::ViewerImage(v) => viewer::arrived(app, v),
         Event::ViewerThumb(id, index, t) => viewer::thumb_arrived(&id, index, t),
         Event::Frames(f) => anim::frames_arrived(f),
@@ -394,6 +398,7 @@ fn messages_arrived(app: &AppWindow, key: String, items: Vec<MsgDto>, paging: Pa
         app.set_menu_id(SharedString::new());
         app.set_mention_items(ModelRc::default());
         stickers::close(app);
+        gallery::close(app);
         UI.with_borrow(|ui| header_avatar(app, ui));
     }
     app.set_current_key(key.into());

@@ -16,6 +16,9 @@ pub const PHOTO_THUMB_MAX: u32 = PHOTO_BOX_TALL.1;
 
 pub const STICKER_SIZE: u32 = 180;
 
+/// A cell of a chat's media page, square, logical px (`GalleryData.cell` in the UI).
+pub const GALLERY_CELL: u32 = 120;
+
 pub fn attachment_key(ptr: &AttachmentPointer, ts: u64, idx: usize) -> String {
     match &ptr.digest {
         Some(d) if d.len() >= 12 => hex::encode(&d[..12]),
@@ -68,6 +71,22 @@ pub fn link_card(dm: &DataMessage, ts: u64) -> Option<(crate::types::LinkCard, O
 /// Attachments shown as such (the long-text one is part of the body).
 pub fn shown_attachments(dm: &DataMessage) -> impl Iterator<Item = (usize, &AttachmentPointer)> {
     dm.attachments.iter().enumerate().filter(|(_, a)| !is_long_text(a))
+}
+
+/// What a message adds to its chat's media and files: (index in `attachments`, kind). Not a
+/// view-once message's (it can't be seen again), nor voice messages, which aren't files to the user.
+pub fn gallery_items(dm: &DataMessage) -> Vec<(usize, crate::db::MediaKind)> {
+    if dm.is_view_once.unwrap_or(false) {
+        return Vec::new();
+    }
+    shown_attachments(dm)
+        .filter(|(_, a)| !is_voice(a))
+        .map(|(i, a)| (i, if is_media(a) { crate::db::MediaKind::Media } else { crate::db::MediaKind::Files }))
+        .collect()
+}
+
+fn is_voice(ptr: &AttachmentPointer) -> bool {
+    ptr.flags.unwrap_or(0) & 1 == 1
 }
 
 pub fn is_image(ptr: &AttachmentPointer) -> bool {
@@ -181,11 +200,12 @@ pub fn file_card(line: &str) -> (String, String, String) {
         n.parse::<u32>().is_ok().then_some(f)
     })()
     .unwrap_or(names);
-    let ext = std::path::Path::new(first)
-        .extension()
-        .map(|e| e.to_string_lossy().to_uppercase().chars().take(4).collect())
-        .unwrap_or_default();
-    (names.to_string(), size.to_string(), ext)
+    (names.to_string(), size.to_string(), file_ext(first))
+}
+
+/// A file's extension as its badge shows it.
+pub fn file_ext(name: &str) -> String {
+    std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_uppercase().chars().take(4).collect()).unwrap_or_default()
 }
 
 fn files_label(files: &[&AttachmentPointer]) -> String {
@@ -204,7 +224,7 @@ pub fn length_text(seconds: u32) -> String {
     }
 }
 
-pub(super) fn attachment_label(ptr: &AttachmentPointer) -> String {
+pub fn attachment_label(ptr: &AttachmentPointer) -> String {
     let ct = ptr.content_type.as_deref().unwrap_or("");
     if let Some(name) = ptr.file_name.as_deref().filter(|n| !n.is_empty()) {
         return name.to_string();
@@ -214,7 +234,7 @@ pub(super) fn attachment_label(ptr: &AttachmentPointer) -> String {
     } else if ct.starts_with("video/") {
         tr!("Video").into()
     } else if ct.starts_with("audio/") {
-        if ptr.flags.unwrap_or(0) & 1 == 1 { tr!("Voice message").into() } else { tr!("Audio").into() }
+        if is_voice(ptr) { tr!("Voice message").into() } else { tr!("Audio").into() }
     } else {
         tr!("File").into()
     }
