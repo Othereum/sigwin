@@ -12,7 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::types::{ClickedMedia, Command, Event, Find, MsgDto, Paging, ResultDto, Scroll, ThreadDto};
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
-    AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem,
+    AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem, RequestData,
     FindKind, ResultItem, ResultKind, SearchData, SettingsData, StickerItem, TextOps, Theme, ThreadItem, ThreadMenuData,
 };
 
@@ -271,10 +271,11 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             let list: Vec<SharedString> = list.iter().map(|e| e.as_str().into()).collect();
             app.set_recent_emoji(ModelRc::new(VecModel::from(list)));
         }
-        Event::Header { name, sub, request } => {
+        Event::Header { name, sub, request, common_groups } => {
             app.set_current_name(name.into());
             app.set_current_sub(sub.into());
             app.set_current_request(request);
+            app.global::<RequestData>().set_common_groups(common_groups.min(i32::MAX as usize) as i32);
         }
         Event::Members(list) => UI.with_borrow_mut(|ui| ui.members = list),
         Event::Messages { key, items, paging, scroll } => messages_arrived(app, key, items, paging, scroll),

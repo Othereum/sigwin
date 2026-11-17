@@ -503,8 +503,60 @@ msgstr "버전마다 달라진 점을 GitHub에서 볼 수 있습니다."
 msgid "Zoom"
 msgstr "크기"
 
-msgid "{} sent you a message. If you accept, they can see your name and photo, and whether you've read their messages."
-msgstr "{}님이 메시지를 보냈습니다. 수락하면 상대가 내 이름과 사진을 볼 수 있고, 메시지를 읽었는지도 알 수 있습니다."
+msgid "Review requests carefully"
+msgstr "신중하게 요청을 검토하세요"
+
+msgid "Name not verified"
+msgstr "이름이 인증되지 않음"
+
+msgid "No groups in common"
+msgstr "공통 그룹 없음"
+
+msgid "{n} group in common"
+msgid_plural "{n} groups in common"
+msgstr[0] "공통 그룹 {n}개"
+
+msgid "Safety tips"
+msgstr "안전 팁"
+
+msgid "Let this person message you and share your name and photo with them? They won't know you've seen their messages until you accept."
+msgstr "이 사용자가 나에게 메시지를 보내고, 내 이름과 사진을 볼 수 있도록 허용하시겠어요? 내가 수락하기 전까지 상대방은 내가 메시지를 확인했는지 알 수 없습니다."
+
+msgid "Don't respond to chats from Signal"
+msgstr "Signal에서 보낸 채팅에 답하지 마세요"
+
+msgid "Signal will never message you for your registration code, PIN, or recovery key. Don't reply to chats pretending to be Signal or Signal Support. Bad actors set up fake names to try to take over your account."
+msgstr "Signal은 절대 사용자의 등록 코드나 PIN, 복구 키를 요청하는 메시지를 보내지 않습니다. Signal 또는 Signal 지원팀을 사칭하는 채팅에 답장하지 마세요. 악의적인 사용자가 가짜 이름을 설정해 계정 해킹을 시도할 수 있습니다."
+
+msgid "Review names and photos"
+msgstr "이름과 사진 검토"
+
+msgid "Look out for the \"Name not verified\" notice. Everyone sets their own profile name and photo in Signal. If you're unsure who a new request is from it's safer to ignore it."
+msgstr "'이름이 인증되지 않음'과 같은 경고 메시지에 주의하세요. Signal의 프로필 이름과 사진은 각 사용자가 직접 설정합니다. 새 요청을 보낸 사람이 누구인지 확실하지 않다면, 무시하는 편이 더 안전합니다."
+
+msgid "Crypto or money scams"
+msgstr "암호화폐 또는 금융 사기"
+
+msgid "If someone you don't know messages about cryptocurrency (like Bitcoin) or a financial opportunity, be careful: it's likely spam."
+msgstr "모르는 사람으로부터 암호화폐(비트코인 등)나 금융 투자 제안 메시지를 받았다면 스팸일 가능성이 높으니 각별히 주의하세요."
+
+msgid "Vague or irrelevant messages"
+msgstr "모호하거나 관련이 없는 메시지"
+
+msgid "Spammers often start with a simple message like \"Hi\" to draw you in. If you respond they may engage you further."
+msgstr "스팸을 보내는 사람은 상대의 주의를 끌기 위해 '안녕하세요'와 같은 간단한 메시지로 대화를 시작합니다. 반응할 경우 대화에 더 말려들 수 있습니다."
+
+msgid "Messages with web links"
+msgstr "웹사이트 링크가 포함된 메시지"
+
+msgid "Be careful of messages from people you don't know that have links to websites. Never visit links from people you don't trust."
+msgstr "모르는 사람이 보낸 웹사이트 링크가 포함된 메시지에 주의하세요. 신뢰할 수 없는 출처의 링크는 절대 방문하지 마세요."
+
+msgid "Fake businesses and institutions"
+msgstr "가짜 비즈니스 또는 기관"
+
+msgid "Be careful of businesses or government agencies contacting you. Messages involving tax agencies, couriers, and more can be spam."
+msgstr "기업이나 정부 기관을 사칭한 연락에 주의하세요. 국세청 등의 공공기관이나 배송 업체와 관련된 메시지는 스팸일 가능성이 높습니다."
 
 msgid "© 2026 Othereum. Free software under the AGPL-3.0 license, with no warranty."
 msgstr "© 2026 Othereum. AGPL-3.0 라이선스로 공개된 자유 소프트웨어이며, 어떠한 보증도 하지 않습니다."

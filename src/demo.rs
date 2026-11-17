@@ -143,7 +143,7 @@ fn header(emit: &backend::Emit, threads: &[ThreadDto], key: &str, request: bool)
     let Some(t) = threads.iter().find(|t| t.key == key) else { return };
     let phone = if crate::i18n::lang() == "ko" { "+82 10-0000-0000" } else { "+1 415-555-0100" };
     let sub = if t.is_group { tr!("{n} member" | "{n} members" % 5) } else { phone.into() };
-    emit(Event::Header { name: t.name.clone(), sub, request });
+    emit(Event::Header { name: t.name.clone(), sub, request, common_groups: 0 });
 }
 
 fn resend_thumbs(emit: &backend::Emit, thumbs: &Thumbs, items: &[types::MsgDto]) {

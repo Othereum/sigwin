@@ -284,7 +284,7 @@ fn header(emit: &backend::Emit, threads: &[ThreadDto], key: &str) {
         return super::header(emit, threads, key, false);
     }
     if let Some(t) = threads.iter().find(|t| t.key == key) {
-        emit(Event::Header { name: t.name.clone(), sub: tr!("{n} member" | "{n} members" % 4), request: false });
+        emit(Event::Header { name: t.name.clone(), sub: tr!("{n} member" | "{n} members" % 4), request: false, common_groups: 0 });
     }
 }
 

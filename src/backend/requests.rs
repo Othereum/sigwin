@@ -78,6 +78,21 @@ impl App {
         }
     }
 
+    /// Groups we're in that the other side of a 1:1 chat is in too, from the stored groups:
+    /// what the request card tells about a stranger.
+    pub(super) async fn common_groups(&mut self, thread: &Thread) -> usize {
+        let Thread::Contact(ServiceId::Aci(aci)) = thread else { return 0 };
+        let them = Uuid::from(*aci);
+        let Ok(groups) = self.store.groups().await else { return 0 };
+        let mut n = 0;
+        for (k, g) in groups.flatten() {
+            if g.members.iter().any(|m| Uuid::from(m.aci) == them) && !self.store.is_group_left(k).await.unwrap_or(false) {
+                n += 1;
+            }
+        }
+        n
+    }
+
     /// We wrote in `key`, here or on another device: it's no request any more.
     pub(super) fn wrote(&mut self, key: &str) {
         self.not_written.remove(key);
@@ -231,7 +246,7 @@ impl App {
     pub(super) fn close_thread(&mut self) {
         self.current = None;
         self.typing.clear();
-        (self.emit)(Event::Header { name: String::new(), sub: String::new(), request: false });
+        (self.emit)(Event::Header { name: String::new(), sub: String::new(), request: false, common_groups: 0 });
         (self.emit)(Event::Messages { key: String::new(), items: Vec::new(), paging: Default::default(), scroll: Scroll::Bottom });
         (self.emit)(Event::Pins(Vec::new()));
     }

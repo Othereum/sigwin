@@ -503,8 +503,61 @@ msgstr "Auf GitHub kannst du sehen, was sich in jeder Version geändert hat."
 msgid "Zoom"
 msgstr "Zoom"
 
-msgid "{} sent you a message. If you accept, they can see your name and photo, and whether you've read their messages."
-msgstr "{} hat dir eine Nachricht geschickt. Wenn du annimmst, sieht der Kontakt deinen Namen und dein Foto und ob du seine Nachrichten gelesen hast."
+msgid "Review requests carefully"
+msgstr "Prüfe Anfragen sorgfältig"
+
+msgid "Name not verified"
+msgstr "Name nicht verifiziert"
+
+msgid "No groups in common"
+msgstr "Keine gemeinsamen Gruppen"
+
+msgid "{n} group in common"
+msgid_plural "{n} groups in common"
+msgstr[0] "{n} gemeinsame Gruppe"
+msgstr[1] "{n} gemeinsame Gruppen"
+
+msgid "Safety tips"
+msgstr "Sicherheitstipps"
+
+msgid "Let this person message you and share your name and photo with them? They won't know you've seen their messages until you accept."
+msgstr "Darf diese Person dir Nachrichten schreiben und deinen Namen und dein Foto sehen? Sie weiß nicht, dass du ihre Nachrichten gesehen hast, bis du die Anfrage annimmst."
+
+msgid "Don't respond to chats from Signal"
+msgstr "Antworte nicht auf angebliche Nachrichten von Signal"
+
+msgid "Signal will never message you for your registration code, PIN, or recovery key. Don't reply to chats pretending to be Signal or Signal Support. Bad actors set up fake names to try to take over your account."
+msgstr "Signal wird dich nie per Nachricht nach Registrierungscode, PIN oder Wiederherstellungsschlüssel fragen. Antworte nicht auf angebliche Nachrichten von »Signal« oder »Signal Support«. Betrüger versuchen mit Fake-Chats dein Konto zu übernehmen."
+
+msgid "Review names and photos"
+msgstr "Überprüfe Namen und Fotos"
+
+msgid "Look out for the \"Name not verified\" notice. Everyone sets their own profile name and photo in Signal. If you're unsure who a new request is from it's safer to ignore it."
+msgstr "Achte auf den Hinweis »Name nicht verifiziert«. Alle legen ihren Profilnamen und ihr Profilbild in Signal selbst fest. Wenn du nicht genau weißt, von wem eine neue Anfrage stammt, ist es sicherer, sie zu ignorieren."
+
+msgid "Crypto or money scams"
+msgstr "Krypto- oder Geldbetrug"
+
+msgid "If someone you don't know messages about cryptocurrency (like Bitcoin) or a financial opportunity, be careful: it's likely spam."
+msgstr "Wenn jemand, den du nicht kennst, Nachrichten über Kryptowährungen (wie Bitcoin) oder eine finanzielle Gelegenheit sendet, sei vorsichtig – es handelt sich wahrscheinlich um Spam."
+
+msgid "Vague or irrelevant messages"
+msgstr "Vage oder irrelevante Nachrichten"
+
+msgid "Spammers often start with a simple message like \"Hi\" to draw you in. If you respond they may engage you further."
+msgstr "Spammer beginnen oft mit einer einfachen Nachricht wie »Hallo«, um dich anzulocken. Wenn du antwortest, wirst du möglicherweise weiter kontaktiert."
+
+msgid "Messages with web links"
+msgstr "Nachrichten mit Links"
+
+msgid "Be careful of messages from people you don't know that have links to websites. Never visit links from people you don't trust."
+msgstr "Sei vorsichtig bei Nachrichten von Personen, die du nicht kennst und die Links zu Websites enthalten. Folge niemals Links von Personen, denen du nicht vertraust."
+
+msgid "Fake businesses and institutions"
+msgstr "Gefälschte Unternehmen und Institutionen"
+
+msgid "Be careful of businesses or government agencies contacting you. Messages involving tax agencies, couriers, and more can be spam."
+msgstr "Sei vorsichtig, wenn Unternehmen oder Regierungsbehörden dich kontaktieren. Nachrichten, bei denen es um Steuerbehörden, Kuriere usw. geht, können Spam sein."
 
 msgid "© 2026 Othereum. Free software under the AGPL-3.0 license, with no warranty."
 msgstr "© 2026 Othereum. Freie Software unter der AGPL-3.0-Lizenz, ohne Gewährleistung."

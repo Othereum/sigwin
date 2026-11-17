@@ -687,7 +687,8 @@ impl App {
             }
         }
         let request = self.check_request(thread).await;
-        (self.emit)(Event::Header { name, sub: parts.join(" · "), request });
+        let common_groups = if request { self.common_groups(thread).await } else { 0 };
+        (self.emit)(Event::Header { name, sub: parts.join(" · "), request, common_groups });
         let mut mentionable = Vec::new();
         let me = self.me;
         for &u in members.iter().filter(|u| **u != me) {

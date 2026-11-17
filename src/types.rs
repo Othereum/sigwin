@@ -546,8 +546,8 @@ pub enum Event {
     /// the sidebar's search or contact list (sent while one is on)
     Results(Vec<ResultDto>),
     /// `request`: a message request (someone not accepted yet wrote first): no composer, the
-    /// request bar instead
-    Header { name: String, sub: String, request: bool },
+    /// request bar instead. `common_groups`: groups the sender and we are both in (requests only)
+    Header { name: String, sub: String, request: bool, common_groups: usize },
     /// who can be @mentioned in the open thread: (uuid, name); empty outside groups
     Members(Vec<crate::mention::Member>),
     Messages { key: String, items: Vec<MsgDto>, paging: Paging, scroll: Scroll },

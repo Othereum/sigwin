@@ -1,0 +1,144 @@
+// A message request: the card in place of the composer and its safety tips.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { DangerButton, PlainButton, PrimaryButton } from "widgets.slint";
+import { Icon, Icons } from "icons.slint";
+
+// Rust fills `common-groups` with the header (`Event::Header`).
+export global RequestData {
+    // groups both of us are in
+    in property <int> common-groups;
+    in-out property <bool> tips-open;
+}
+
+export component RequestCard inherits Rectangle {
+    // 0 accept, 1 delete, 2 block
+    callback answer(int);
+    border-radius: 16px;
+    background: Theme.field;
+    VerticalLayout {
+        padding: 16px;
+        padding-top: 14px;
+        spacing: 8px;
+        HorizontalLayout {
+            alignment: center;
+            spacing: 6px;
+            Icon { y: (parent.height - self.height) / 2; size: 16px; icon: Icons.warning; tint: Theme.warning; }
+            Text { text: @tr("Review requests carefully"); color: Theme.warning; font-size: 13px; font-weight: 700; }
+        }
+        // the profile name is whatever the sender typed: a request is never someone in the
+        // address book, so it is never verified
+        HorizontalLayout {
+            alignment: center;
+            spacing: 6px;
+            Text {
+                text: @tr("Name not verified") + " · " + (RequestData.common-groups == 0 ? @tr("No groups in common") : @tr("{n} group in common" | "{n} groups in common" % RequestData.common-groups)) + " ·";
+                color: Theme.subtle;
+                font-size: 12px;
+            }
+            Text {
+                text: @tr("Safety tips");
+                color: Theme.link;
+                font-size: 12px;
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { RequestData.tips-open = true; }
+                }
+            }
+        }
+        Text {
+            text: @tr("Let this person message you and share your name and photo with them? They won't know you've seen their messages until you accept.");
+            color: Theme.text;
+            font-size: 13px;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+        }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 8px;
+            padding-top: 4px;
+            DangerButton { text: @tr("Block"); clicked => { root.answer(2); } }
+            DangerButton { text: @tr("Delete"); clicked => { root.answer(1); } }
+            PrimaryButton { text: @tr("Accept"); clicked => { root.answer(0); } }
+        }
+    }
+}
+
+component Tip inherits VerticalLayout {
+    in property <string> title;
+    in property <string> body;
+    spacing: 2px;
+    Text { text: root.title; color: Theme.text; font-size: 13px; font-weight: 700; wrap: word-wrap; }
+    Text { text: root.body; color: Theme.subtle; font-size: 13px; wrap: word-wrap; }
+}
+
+// Signal Desktop's safety tips (`SafetyTipsModal`), all on one page.
+export component SafetyTipsDialog inherits Rectangle {
+    background: Theme.scrim;
+    TouchArea {
+        clicked => { RequestData.tips-open = false; }
+    }
+    Rectangle {
+        width: min(460px, parent.width - 40px);
+        height: col.preferred-height;
+        border-radius: 12px;
+        background: Theme.pane;
+        border-width: 1px;
+        border-color: Theme.border;
+        TouchArea { }
+        // placed, so the card's size doesn't flow up to the scrim the tips' height comes from
+        col := VerticalLayout {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            padding: 18px;
+            padding-bottom: 14px;
+            spacing: 12px;
+            Text { text: @tr("Safety tips"); font-weight: 700; font-size: 15px; color: Theme.text; }
+            tips-view := ScrollView {
+                max-width: 100000px;
+                // the dialog stays inside a short window
+                height: min(tips.preferred-height, root.height - 140px);
+                content-height: tips.preferred-height;
+                tips := VerticalLayout {
+                    // clear of the scrollbar's thumb
+                    width: tips-view.visible-width - 12px;
+                    spacing: 14px;
+                    Tip {
+                        title: @tr("Don't respond to chats from Signal");
+                        body: @tr("Signal will never message you for your registration code, PIN, or recovery key. Don't reply to chats pretending to be Signal or Signal Support. Bad actors set up fake names to try to take over your account.");
+                    }
+                    Tip {
+                        title: @tr("Review names and photos");
+                        body: @tr("Look out for the \"Name not verified\" notice. Everyone sets their own profile name and photo in Signal. If you're unsure who a new request is from it's safer to ignore it.");
+                    }
+                    Tip {
+                        title: @tr("Crypto or money scams");
+                        body: @tr("If someone you don't know messages about cryptocurrency (like Bitcoin) or a financial opportunity, be careful: it's likely spam.");
+                    }
+                    Tip {
+                        title: @tr("Vague or irrelevant messages");
+                        body: @tr("Spammers often start with a simple message like \"Hi\" to draw you in. If you respond they may engage you further.");
+                    }
+                    Tip {
+                        title: @tr("Messages with web links");
+                        body: @tr("Be careful of messages from people you don't know that have links to websites. Never visit links from people you don't trust.");
+                    }
+                    Tip {
+                        title: @tr("Fake businesses and institutions");
+                        body: @tr("Be careful of businesses or government agencies contacting you. Messages involving tax agencies, couriers, and more can be spam.");
+                    }
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                PlainButton {
+                    text: @tr("Close");
+                    clicked => { RequestData.tips-open = false; }
+                }
+            }
+        }
+    }
+}
