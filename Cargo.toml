@@ -108,6 +108,8 @@ panic = "abort"
 i-slint-renderer-software = { path = "vendor/i-slint-renderer-software" }
 # StyledText passes non-link mouse events through (clickable links over a selectable TextInput): see vendor/i-slint-core, "sigwin patch"
 i-slint-core = { path = "vendor/i-slint-core" }
+# color emoji (COLR layers) lost their bottom row and right column: see vendor/swash, "sigwin patch"
+swash = { path = "vendor/swash" }
 libsqlite3-sys = { version = "0.36.0", git = "https://github.com/whisperfish/rusqlite", rev = "2a42b3354c9194700d08aa070f70a131a470e7dc" }
 
 # group sends go to the members concurrently instead of one round trip after another:

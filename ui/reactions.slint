@@ -22,8 +22,8 @@ export component ReactionCell inherits Rectangle {
     height: PickerLayout.cell;
     border-radius: PickerLayout.cell / 2;
     background: root.mine ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
-    // emoji glyphs sit high in their line box: 1px below the centre
-    if root.icon == "": Text { text: root.emoji; font-size: 20px; y: (parent.height - self.height) / 2 + 1px; }
+    // emoji glyphs sit low in their line box: 1px above the centre
+    if root.icon == "": Text { text: root.emoji; font-size: 20px; y: (parent.height - self.height) / 2 - 1px; }
     if root.icon != "": Icon {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
@@ -53,7 +53,7 @@ export component EmojiPicker inherits VerticalLayout {
             Text {
                 text: icon;
                 font-size: 18px;
-                y: (parent.height - self.height) / 2 + 1px;
+                y: (parent.height - self.height) / 2 - 1px;
                 opacity: i == root.tab ? 1.0 : (tab-ta.has-hover ? 0.85 : 0.55);
             }
             Rectangle {
