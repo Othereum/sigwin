@@ -455,8 +455,8 @@ msgstr "해제할 때까지"
 msgid "Update"
 msgstr "업데이트"
 
-msgid "Updated"
-msgstr "업데이트 완료"
+msgid "Updated to {}"
+msgstr "{} 업데이트 완료"
 
 msgid "Updates"
 msgstr "업데이트"

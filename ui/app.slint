@@ -128,8 +128,9 @@ export component AppWindow inherits Window {
     // our own photo in the sidebar header (the card on the settings page has its own)
     in property <image> me-photo;
     in property <bool> me-has-photo;
-    // "what's new" after an update: the sidebar offers the release notes until opened or dismissed
-    in-out property <bool> whatsnew-offer;
+    // "what's new" after an update: the sidebar offers the release notes until opened or dismissed.
+    // The running version ("" = no offer): the releases page lists newer ones not installed yet.
+    in-out property <string> whatsnew-version;
     // opens the release notes on GitHub
     callback open-whatsnew();
     callback dismiss-whatsnew();
@@ -531,7 +532,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 // bars docked at the sidebar's foot: flat on the sidebar, a rule above each
-                if root.whatsnew-offer: Rectangle {
+                if root.whatsnew-version != "": Rectangle {
                     height: 44px;
                     background: wn-ta.has-hover ? Theme.notice-hover : Theme.notice;
                     Rectangle { y: 0px; height: 1px; background: Theme.border; }
@@ -550,7 +551,7 @@ export component AppWindow inherits Window {
                             tint: Theme.accent;
                         }
                         Text {
-                            text: @tr("Updated");
+                            text: @tr("Updated to {}", root.whatsnew-version);
                             color: Theme.text;
                             font-size: 13px;
                             vertical-alignment: center;

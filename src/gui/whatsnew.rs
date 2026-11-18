@@ -7,8 +7,12 @@ use slint::ComponentHandle;
 use super::*;
 
 const CURRENT: &str = env!("CARGO_PKG_VERSION");
-/// every release newest first, so an update that skipped versions loses nothing
-const RELEASES: &str = "https://github.com/Othereum/sigwin/releases";
+/// every release newest first, so an update that skipped versions loses nothing; the anchor
+/// skips releases newer than the running one, not installed yet
+const RELEASES: &str = concat!(
+    "https://github.com/Othereum/sigwin/releases#release-v",
+    env!("CARGO_PKG_VERSION")
+);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Action {
@@ -43,7 +47,7 @@ pub(crate) fn on_ready(app: &AppWindow) {
     }
     let last = UI.with_borrow(|ui| ui.settings.last_seen_version.clone());
     match decide(&last, CURRENT, true) {
-        Action::Show => app.set_whatsnew_offer(true),
+        Action::Show => app.set_whatsnew_version(CURRENT.into()),
         Action::Record => record(),
         Action::Nothing => {}
     }
@@ -77,14 +81,14 @@ pub(crate) fn wire(app: &AppWindow) {
     app.on_open_whatsnew(move || {
         link::open(RELEASES);
         if let Some(app) = weak.upgrade() {
-            app.set_whatsnew_offer(false);
+            app.set_whatsnew_version("".into());
         }
         record();
     });
     let weak = app.as_weak();
     app.on_dismiss_whatsnew(move || {
         if let Some(app) = weak.upgrade() {
-            app.set_whatsnew_offer(false);
+            app.set_whatsnew_version("".into());
         }
         record();
     });

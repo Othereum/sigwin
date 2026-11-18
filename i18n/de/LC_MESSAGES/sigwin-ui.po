@@ -455,8 +455,8 @@ msgstr "Für immer"
 msgid "Update"
 msgstr "Aktualisieren"
 
-msgid "Updated"
-msgstr "Aktualisiert"
+msgid "Updated to {}"
+msgstr "Auf {} aktualisiert"
 
 msgid "Updates"
 msgstr "Aktualisierungen"

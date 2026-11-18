@@ -88,7 +88,7 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
     }
     if std::env::var_os("SIGWIN_DEMO_WHATSNEW").is_some() {
         // the "updated, what's new" offer bar
-        app.set_whatsnew_offer(true);
+        app.set_whatsnew_version(env!("CARGO_PKG_VERSION").into());
     }
     if std::env::var_os("SIGWIN_DEMO_LOADING").is_some() {
         // the loading screen as while waiting for the phone's history, which a real start passes in a blink
