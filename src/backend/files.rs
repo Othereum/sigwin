@@ -1,6 +1,7 @@
 //! Attachment and thumbnail caches (encrypted on disk), opening attachments.
 
 use futures::future::{AbortHandle, Abortable};
+use presage::proto::data_message::Sticker;
 
 use super::*;
 
@@ -15,7 +16,8 @@ pub(super) enum ThumbShape {
 impl App {
     /// `key` is what the UI knows the result by, `file_key` the attachment's files on disk.
     /// Not `auto`: it waits for a click whatever its size (a message request's).
-    /// `sticker`: (pack id, sticker id) of a sticker message, taken from the pack when installed.
+    /// `sticker`: a sticker message's, taken from its pack when installed, and from the sticker CDN
+    /// when the attachment is gone.
     pub(super) fn request_thumb(
         &self,
         key: String,
@@ -23,7 +25,7 @@ impl App {
         ptr: AttachmentPointer,
         shape: ThumbShape,
         auto: bool,
-        sticker: Option<(Vec<u8>, u32)>,
+        sticker: Option<Sticker>,
     ) {
         let thumb_path = self.paths.thumbs.join(format!("{file_key}.enc"));
         let orig_path = attachment_path(&self.paths.attachments, &file_key);
@@ -44,20 +46,16 @@ impl App {
         tokio::task::spawn_local(async move {
             let mut labelled = false;
             if !thumb_path.exists() {
-                if !orig_path.exists() && !from_installed_pack(&store, sticker, &orig_path).await {
+                if !orig_path.exists() && !from_installed_pack(&store, sticker.as_ref(), &orig_path).await {
                     labelled = true;
                     // its blurhash until it is here
                     if let Some(t) = ptr.blur_hash.as_deref().and_then(|b| blur_for(&key, b, &ptr, &shape)) {
                         emit(Event::Thumb(Arc::new(t)));
                     }
-                    if gone_path(&orig_path).exists() {
-                        emit(Event::MediaLabel { key, label: view::media::gone_label() });
-                        return;
-                    }
-                    emit(Event::MediaLabel { key: key.clone(), label: view::media::undownloaded_label(&ptr) });
-                    if manager.is_none() {
-                        return;
-                    }
+                    let gone = gone_path(&orig_path).exists();
+                    let label = if gone { view::media::gone_label() } else { view::media::undownloaded_label(&ptr) };
+                    emit(Event::MediaLabel { key: key.clone(), label });
+                    let Some(manager) = manager else { return };
                     // stopped by a click: it stays so until the next one; a big one waits for it
                     if downloads.was_stopped(&file_key) || (!downloads.is_allowed(&file_key) && !(auto && view::media::auto_fetches_image(&ptr))) {
                         tracing::debug!(stopped = downloads.was_stopped(&file_key), "picture waits for a click");
@@ -75,12 +73,18 @@ impl App {
                     };
                     // the same picture shown at another size may be getting it already: waited for
                     let show = Show::Cells(if shown.is_empty() { vec![key.clone()] } else { shown });
-                    match downloads.ensure(&file_key, &ptr, &show, &emit, &orig_path).await {
+                    let res = if gone { Err(Gone.into()) } else { downloads.ensure(&file_key, &ptr, &show, &emit, &orig_path).await };
+                    match res {
                         Ok(true) => {}
                         // stopped (it has put its label back)
                         Ok(false) => return,
-                        // its label is set: no retry, the server won't have it later either
-                        Err(e) if e.is::<Gone>() => return,
+                        // no retry: the server won't have it later either. Its label says so
+                        // unless the sticker CDN has it.
+                        Err(e) if e.is::<Gone>() => {
+                            if !from_sticker_cdn(&manager, sticker.as_ref(), &orig_path).await {
+                                return;
+                            }
+                        }
                         Err(e) => {
                             warn!("download attachment: {e:#}");
                             let _ = tx.send(Internal::ThumbFailed(key));
@@ -1065,14 +1069,38 @@ pub(super) fn make_thumb_from(
 /// Writes a sticker's bytes from its installed pack to `path`, its attachment file. The attachment
 /// CDN drops files after some weeks (old stickers 404), while an installed pack keeps every
 /// sticker; it also saves the download. Reads the whole pack row, but only once per sticker.
-async fn from_installed_pack(store: &SqliteStore, sticker: Option<(Vec<u8>, u32)>, path: &Path) -> bool {
-    let Some((pack, id)) = sticker else { return false };
-    let Ok(Some(p)) = store.sticker_pack(&pack).await else { return false };
+async fn from_installed_pack(store: &SqliteStore, sticker: Option<&Sticker>, path: &Path) -> bool {
+    let Some((pack, id)) = sticker.and_then(|s| Some((s.pack_id.as_ref()?, s.sticker_id?))) else { return false };
+    let Ok(Some(p)) = store.sticker_pack(pack).await else { return false };
     let Some(bytes) = p.manifest.stickers.into_iter().find(|s| s.id == id).and_then(|s| s.bytes) else { return false };
-    match sigwin_vault::write(path, &bytes) {
+    save_sticker(path, &bytes)
+}
+
+/// Writes a sticker's bytes from the sticker CDN to `path`, its attachment file. That CDN keeps
+/// a pack for good, unlike the attachment CDN. The pack isn't installed: installing syncs it to
+/// the user's other devices.
+async fn from_sticker_cdn(manager: &Mgr, sticker: Option<&Sticker>, path: &Path) -> bool {
+    let Some((pack, key, id)) = sticker.and_then(|s| Some((s.pack_id.as_ref()?, s.pack_key.as_ref()?, s.sticker_id?))) else {
+        return false;
+    };
+    let started = std::time::Instant::now();
+    match manager.download_sticker(pack, key, id).await {
+        Ok(bytes) => {
+            info!(kb = bytes.len() / 1024, ms = started.elapsed().as_millis() as u64, "sticker from its pack");
+            save_sticker(path, &bytes)
+        }
+        Err(e) => {
+            warn!("download sticker from its pack: {e}");
+            false
+        }
+    }
+}
+
+fn save_sticker(path: &Path, bytes: &[u8]) -> bool {
+    match sigwin_vault::write(path, bytes) {
         Ok(()) => true,
         Err(e) => {
-            warn!("save sticker from pack: {e}");
+            warn!("save sticker: {e}");
             false
         }
     }

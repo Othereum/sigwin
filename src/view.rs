@@ -163,8 +163,8 @@ pub struct Indexed {
 
 pub struct Built {
     pub items: Vec<MsgDto>,
-    /// stickers that need a thumbnail: (key, attachment, (pack id, sticker id) when the message names them)
-    pub wanted_stickers: Vec<(String, AttachmentPointer, Option<(Vec<u8>, u32)>)>,
+    /// stickers that need a thumbnail: (key, the message's sticker, which has its attachment)
+    pub wanted_stickers: Vec<(String, presage::proto::data_message::Sticker)>,
     pub wanted_cells: Vec<WantedCell>,
     /// long-text attachments not in `LongTexts::full` yet: (key, pointer)
     pub wanted_texts: Vec<(String, AttachmentPointer)>,
@@ -287,7 +287,7 @@ pub fn build(
                 // stickers with image data render as a borderless picture instead of text
                 if let Some((s, data)) = dm.sticker.as_ref().and_then(|s| Some((s, s.data.as_ref()?))) {
                     let key = attachment_key(data, *ts, 99);
-                    wanted.push((key.clone(), data.clone(), s.pack_id.clone().zip(s.sticker_id)));
+                    wanted.push((key.clone(), s.clone()));
                     m.image_key = key;
                     m.img_w = STICKER_SIZE;
                     m.img_h = STICKER_SIZE;

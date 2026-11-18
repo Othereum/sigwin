@@ -131,9 +131,9 @@ impl App {
                 self.connection("", true);
                 self.threads_dirty = true;
             }
-            Received::Contacts => {
+            Received::Contacts { complete, .. } => {
                 let n = self.store.contacts().await.map(|c| c.count()).unwrap_or(0);
-                info!(stored = n, "contact sync from the phone");
+                info!(stored = n, complete, "contact sync from the phone");
                 self.names.clear();
                 self.threads_dirty = true;
             }
@@ -459,7 +459,7 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<(u64, Outgoing)>, me: Uui
             Outgoing::Delivery { to, timestamps } => {
                 let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Delivery as i32), timestamp: timestamps };
                 match Box::pin(m.send_message(to, receipt, ts)).await {
-                    Ok(()) => drop_sent_receipt(&mut store, to, ts).await,
+                    Ok(_) => drop_sent_receipt(&mut store, to, ts).await,
                     Err(e) => debug!("delivery receipt: {e}"),
                 }
             }
@@ -467,7 +467,7 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<(u64, Outgoing)>, me: Uui
                 debug!("read receipt for {timestamps:?}");
                 let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Read as i32), timestamp: timestamps };
                 match Box::pin(m.send_message(to, receipt, ts)).await {
-                    Ok(()) => drop_sent_receipt(&mut store, to, ts).await,
+                    Ok(_) => drop_sent_receipt(&mut store, to, ts).await,
                     Err(e) => debug!("read receipt: {e}"),
                 }
             }

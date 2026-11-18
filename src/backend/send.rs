@@ -598,7 +598,9 @@ pub(super) fn now_ms() -> u64 {
 
 pub(super) async fn deliver(m: &mut Mgr, thread: Thread, mut body: ContentBody, ts: u64, group_revision: u32) -> anyhow::Result<()> {
     match thread {
-        Thread::Contact(id) => m.send_message(id, body, ts).await?,
+        Thread::Contact(id) => {
+            m.send_message(id, body, ts).await?;
+        }
         Thread::Group(key) => {
             let ctx = GroupContextV2 { master_key: Some(key.to_vec()), revision: Some(group_revision), ..Default::default() };
             match &mut body {

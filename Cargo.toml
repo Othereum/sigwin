@@ -6,8 +6,8 @@ license = "AGPL-3.0-only"
 description = "A lightweight Signal-compatible desktop client (unofficial)"
 
 [dependencies]
-presage = { git = "https://github.com/whisperfish/presage", rev = "4b81740610c301cbd54d95f4dbd4cadd692af95e" }
-presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "4b81740610c301cbd54d95f4dbd4cadd692af95e", features = ["cdsi"] }
+presage = { git = "https://github.com/whisperfish/presage", rev = "885f0647d1f8bddd44d7eaf6058481e115093c35" }
+presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "885f0647d1f8bddd44d7eaf6058481e115093c35", features = ["cdsi"] }
 
 slint = { version = "1.19.0", default-features = false, features = [
     "std",
