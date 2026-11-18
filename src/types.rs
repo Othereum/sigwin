@@ -611,6 +611,10 @@ pub enum Event {
     ProgressDone,
     /// what's going on with the connection, "" when all is well; not `at_once`: only if it lasts
     Connection { text: String, at_once: bool },
+    /// true from connecting until the server's backlog is in and the thread list rebuilt: counts
+    /// rise with messages before the read syncs behind them bring them down again
+    /// (Signal Desktop's `_hasQueueEmptied`)
+    CatchingUp(bool),
     StickerPacks(Vec<PackDto>),
     StickerGrid { pack: String, items: Vec<StickerDto> },
     /// The open chat's media page: items to add below what it has (`reset`: in place of it),

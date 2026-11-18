@@ -408,6 +408,8 @@ struct App {
     /// row the next `open_thread` opens around (`Command::RestoreAt`)
     restore_at: Option<u64>,
     synced: bool,
+    /// the UI holds its unread badges (`Event::CatchingUp`)
+    catching_up: bool,
     tx: UnboundedSender<Internal>,
     link_task: Option<JoinHandle<()>>,
     /// skips the history transfer of the link in progress
@@ -580,6 +582,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         at_bottom: true,
         restore_at: None,
         synced: false,
+        catching_up: false,
         tx,
         link_task: None,
         history_skip: None,
@@ -670,6 +673,12 @@ impl App {
     }
     fn connection(&self, s: impl Into<String>, at_once: bool) {
         (self.emit)(Event::Connection { text: s.into(), at_once });
+    }
+    fn catching_up(&mut self, on: bool) {
+        if self.catching_up != on {
+            self.catching_up = on;
+            (self.emit)(Event::CatchingUp(on));
+        }
     }
 
     async fn on_registered(&mut self, m: Mgr, fresh: bool) {
@@ -944,10 +953,15 @@ impl App {
                 (self.emit)(Event::LinkStatus(tr!("Linking failed: {}. Try again.", e)));
             }
             Internal::Received(r) => self.received(r).await,
-            Internal::Reconnected => self.connection(tr!("Syncing…"), false),
+            Internal::Reconnected => {
+                self.catching_up(true);
+                self.connection(tr!("Syncing…"), false);
+            }
             Internal::DeviceRenamed => self.emit_account().await,
             Internal::ReceiveStopped(msg) => {
                 self.synced = false;
+                // nothing arrives while offline, and reading then must still clear the badge
+                self.catching_up(false);
                 self.connection(msg, false);
             }
             Internal::Sent(ts, Ok(())) => self.sent(ts).await,

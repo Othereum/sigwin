@@ -43,6 +43,8 @@ pub(crate) struct Ui {
     pub(crate) threads: Rc<VecModel<ThreadItem>>,
     /// the backend's last thread list; `threads` is this with drafts merged in
     thread_dtos: Vec<ThreadDto>,
+    /// the badges and title keep their count meanwhile (`Event::CatchingUp`)
+    catching_up: bool,
     /// the sidebar's search or contact list, while one is on
     results: Rc<VecModel<ResultItem>>,
     result_dtos: Vec<ResultDto>,
@@ -185,6 +187,9 @@ pub(crate) fn show_open_unread(app: &AppWindow, ui: &Ui) {
 /// Unread count for the taskbar and tray badges and the window title; chats with notifications off
 /// count only when the setting says so.
 pub(crate) fn show_total_unread(app: &AppWindow, ui: &Ui) {
+    if ui.catching_up {
+        return;
+    }
     let now = view::time::now_ms();
     let all = ui.settings.badge_muted;
     let counts = |t: &&ThreadDto| !t.mute.active(now) || t.prefs.badge.unwrap_or(all);
@@ -325,6 +330,10 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::Progress(s) => notice::progress(app, &s),
         Event::ProgressDone => notice::progress_done(app),
         Event::Connection { text, at_once } => notice::connection(app, text, at_once),
+        Event::CatchingUp(on) => UI.with_borrow_mut(|ui| {
+            ui.catching_up = on;
+            show_total_unread(app, ui);
+        }),
         Event::Typing { group, who } => {
             let near_bottom = app.get_near_bottom();
             UI.with_borrow_mut(|ui| {

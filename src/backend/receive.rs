@@ -388,6 +388,10 @@ impl App {
             if let Err(e) = self.rebuild_threads().await {
                 warn!("rebuild threads: {e:#}");
             }
+            // after the rebuild, so the badges come back on a list with the read syncs in it
+            if self.synced {
+                self.catching_up(false);
+            }
         }
         if self.persist_dirty {
             self.persist_dirty = false;
