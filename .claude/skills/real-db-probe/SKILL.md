@@ -26,7 +26,7 @@ When in doubt whether a value identifies someone, print its length instead. A `{
    ```
    cargo run --profile fast --example db_probe
    ```
-4. Delete it in a separate command, before anything else: `rm -rf examples target/fast/examples/db_probe*` from Bash. Then check `git status --short` shows no `examples/`.
+4. Delete it in a separate command, before anything else: `rm -f examples/db_probe.rs && rm -rf target/fast/examples/db_probe*` from Bash. Only that file: `examples/` holds committed examples too. Then check `git status --short` shows no `examples/db_probe.rs` and no deleted (`D`) file.
 5. If the app was running, start it again: the user may be relying on it.
 6. Report numbers with what they mean, and say that the contents weren't read.
 
