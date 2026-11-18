@@ -125,6 +125,7 @@ fn open(app: &AppWindow, files: bool) {
     let d = app.global::<GalleryData>();
     d.set_rows(ModelRc::from(rows));
     d.set_loading(true);
+    d.set_indexing(false);
     d.set_tab(files as i32);
     d.set_chat(app.get_current_name());
     d.set_open(true);
@@ -146,7 +147,7 @@ pub(crate) fn shows(id: &str) -> bool {
     PAGE.with_borrow(|p| p.as_ref().is_some_and(|p| p.items.iter().any(|i| i.id == id)))
 }
 
-pub(crate) fn arrived(app: &AppWindow, files: bool, items: Vec<GalleryItemDto>, more: bool, reset: bool) {
+pub(crate) fn arrived(app: &AppWindow, files: bool, items: Vec<GalleryItemDto>, more: bool, reset: bool, indexing: bool) {
     let mine = PAGE.with_borrow_mut(|p| {
         // a late answer for the other tab
         let Some(p) = p.as_mut().filter(|p| p.files == files) else { return false };
@@ -160,7 +161,9 @@ pub(crate) fn arrived(app: &AppWindow, files: bool, items: Vec<GalleryItemDto>, 
         true
     });
     if mine {
-        app.global::<GalleryData>().set_loading(false);
+        let d = app.global::<GalleryData>();
+        d.set_loading(false);
+        d.set_indexing(indexing);
         rebuild(app);
     }
 }

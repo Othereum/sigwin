@@ -1148,3 +1148,6 @@ msgstr "Keine Fotos oder Videos in diesem Chat"
 
 msgid "No files in this chat"
 msgstr "Keine Dateien in diesem Chat"
+
+msgid "Preparing older messages…"
+msgstr "Ältere Nachrichten werden vorbereitet …"

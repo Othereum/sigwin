@@ -247,6 +247,8 @@ enum Internal {
     PackInstalled(Result<String, String>),
     ReceiptsMoved,
     PinsIndexed,
+    /// the backfill went through this thread's media
+    MediaIndexed(String),
     Swept { sweep: HashMap<String, SweepState>, changed: Vec<String> },
     Avatars(crate::avatar::Done),
     PhoneStorage(Result<Option<storage::PhoneStorage>, String>),
@@ -383,6 +385,8 @@ struct App {
     gallery_requested: Rc<RefCell<HashSet<String>>>,
     /// held while downloading a picture for the media page
     gallery_gate: Arc<tokio::sync::Semaphore>,
+    /// while the media backfill runs: the threads it's done with
+    media_backfill: Option<HashSet<String>>,
     long: view::text::LongTexts,
     pending: Vec<Pending>,
     /// the composer's link preview
@@ -569,6 +573,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         gallery: None,
         gallery_requested: Default::default(),
         gallery_gate: Arc::new(tokio::sync::Semaphore::new(2)),
+        media_backfill: None,
         long: Default::default(),
         pending: Vec::new(),
         link_draft: None,
@@ -1014,6 +1019,15 @@ impl App {
                 self.persist_dirty = true;
                 self.texts_indexed().await;
                 self.current_dirty = true;
+                // a thread the walk didn't list (no rows yet) is done too
+                self.media_backfill = None;
+                self.gallery_indexed(None).await;
+            }
+            Internal::MediaIndexed(key) => {
+                if let Some(done) = self.media_backfill.as_mut() {
+                    done.insert(key.clone());
+                }
+                self.gallery_indexed(Some(&key)).await;
             }
             Internal::ReceiptsMoved => {
                 self.persist.receipts_dropped = true;

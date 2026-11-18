@@ -39,6 +39,8 @@ export global GalleryData {
     in property <[GalleryRow]> rows;
     // the first page isn't here yet
     in property <bool> loading;
+    // the chat's older messages are still being gone through: nothing to show yet
+    in property <bool> indexing;
     in property <length> cell: 120px;
     out property <length> gap: 4px;
     out property <length> head-h: 44px;
@@ -238,11 +240,19 @@ export component GalleryPage inherits Rectangle {
                     }
                 }
             }
-            if GalleryData.loading: BusySpinner {
+            if GalleryData.loading || GalleryData.indexing: BusySpinner {
                 x: (parent.width - self.width) / 2;
                 y: 40px;
             }
-            if !GalleryData.loading && GalleryData.rows.length == 0: Text {
+            if GalleryData.indexing: Text {
+                y: 88px;
+                width: parent.width;
+                text: @tr("Preparing older messages…");
+                color: Theme.subtle;
+                font-size: 14px;
+                horizontal-alignment: center;
+            }
+            if !GalleryData.loading && !GalleryData.indexing && GalleryData.rows.length == 0: Text {
                 y: 48px;
                 width: parent.width;
                 text: GalleryData.tab == 0 ? @tr("No photos or videos in this chat") : @tr("No files in this chat");

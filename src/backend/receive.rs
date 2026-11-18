@@ -15,6 +15,9 @@ impl App {
         // a second replay could bring back a pin whose unpin is still being sent
         let (pins, edits, reactions, replies) = (!p.pins_indexed, !p.edits_indexed, !p.reactions_indexed, !p.replies_indexed);
         let (media, text) = (!p.media_indexed, !p.text_indexed);
+        if media {
+            self.media_backfill = Some(HashSet::new());
+        }
         tokio::task::spawn_local(async move {
             let started = Instant::now();
             let Ok(threads) = index.threads().await else { return };
@@ -76,6 +79,9 @@ impl App {
                         break;
                     }
                     tokio::task::yield_now().await;
+                }
+                if media {
+                    let _ = tx.send(Internal::MediaIndexed(key));
                 }
             }
             info!("indexes backfilled: {n} entries in {:?}", started.elapsed());

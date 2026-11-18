@@ -625,7 +625,8 @@ pub enum Event {
     StickerGrid { pack: String, items: Vec<StickerDto> },
     /// The open chat's media page: items to add below what it has (`reset`: in place of it),
     /// and whether older ones remain. `files`: the page's files rather than its pictures.
-    Gallery { files: bool, items: Vec<GalleryItemDto>, more: bool, reset: bool },
+    /// `indexing`: the chat's older messages haven't been gone through yet; a page follows when they have.
+    Gallery { files: bool, items: Vec<GalleryItemDto>, more: bool, reset: bool, indexing: bool },
     /// open the sticker panel on this (installed) pack
     OpenStickerPanel(String),
     /// the clicked sticker's pack is not installed: ask, then InstallPackFromMessage(msg id)

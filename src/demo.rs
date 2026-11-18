@@ -651,7 +651,7 @@ fn demo_gallery(emit: &backend::Emit, c: &Command) -> bool {
                 d
             })
             .collect();
-        emit(Event::Gallery { files, items, more: to < total, reset: from == 0 });
+        emit(Event::Gallery { files, items, more: to < total, reset: from == 0, indexing: false });
         to
     };
     match c {

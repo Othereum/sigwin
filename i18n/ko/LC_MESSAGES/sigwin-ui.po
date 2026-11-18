@@ -1136,3 +1136,6 @@ msgstr "이 대화에 사진이나 동영상이 없습니다"
 
 msgid "No files in this chat"
 msgstr "이 대화에 파일이 없습니다"
+
+msgid "Preparing older messages…"
+msgstr "이전 메시지 준비 중…"

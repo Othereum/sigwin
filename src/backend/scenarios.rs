@@ -600,7 +600,7 @@ fn replies_are_counted_and_listed() {
 /// The media page's last answer: (files, items, more, reset).
 fn last_gallery(events: &[Event]) -> Option<(bool, Vec<crate::types::GalleryItemDto>, bool, bool)> {
     events.iter().rev().find_map(|e| match e {
-        Event::Gallery { files, items, more, reset } => Some((*files, items.clone(), *more, *reset)),
+        Event::Gallery { files, items, more, reset, .. } => Some((*files, items.clone(), *more, *reset)),
         _ => None,
     })
 }
@@ -650,6 +650,46 @@ fn the_media_page_lists_what_arrived_and_drops_what_goes() {
         assert!(files && items.is_empty() && !more);
         h.cmd(Command::GalleryClose).await;
         assert!(h.app.gallery.is_none() && h.app.gallery_requested.borrow().is_empty());
+    });
+}
+
+#[test]
+fn the_media_page_waits_for_the_backfill_of_its_chat() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("gifs who=1 n=2").await;
+        h.open(1).await;
+        let key = h.app.current.as_ref().unwrap().key.clone();
+        let indexing = |ev: &[Event]| {
+            ev.iter().rev().find_map(|e| match e {
+                Event::Gallery { indexing, .. } => Some(*indexing),
+                _ => None,
+            })
+        };
+        // the backfill hasn't reached this chat: what's indexed may be only its oldest part
+        h.app.media_backfill = Some(HashSet::from(["other".to_string()]));
+        h.take_events();
+        h.cmd(Command::GalleryOpen { files: false }).await;
+        let ev = h.take_events();
+        let (_, items, more, reset) = last_gallery(&ev).expect("a page");
+        assert!(indexing(&ev) == Some(true) && items.is_empty() && !more && reset);
+
+        Box::pin(h.app.internal(Internal::MediaIndexed("another".into()))).await;
+        assert!(last_gallery(&h.take_events()).is_none(), "another chat's turn changes nothing");
+        Box::pin(h.app.internal(Internal::MediaIndexed(key))).await;
+        let ev = h.take_events();
+        let (_, items, _, reset) = last_gallery(&ev).expect("the page, now read");
+        assert!(indexing(&ev) == Some(false) && !items.is_empty() && reset);
+
+        // the walk ends: the flag goes, and a page opened later reads right away
+        h.app.persist.media_indexed = false;
+        h.app.backfill_pins();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        h.settle().await;
+        assert!(h.app.media_backfill.is_none());
+        h.cmd(Command::GalleryOpen { files: false }).await;
+        let ev = h.take_events();
+        assert!(indexing(&ev) == Some(false) && !last_gallery(&ev).unwrap().1.is_empty());
     });
 }
 

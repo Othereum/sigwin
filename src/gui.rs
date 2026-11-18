@@ -331,7 +331,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::Thumb(t) => media::thumb_arrived(t),
         Event::MediaLabel { key, label } if key.starts_with(types::GALLERY_PREFIX) => gallery::label_arrived(key, label),
         Event::MediaLabel { key, label } => media::label_arrived(key, label),
-        Event::Gallery { files, items, more, reset } => gallery::arrived(app, files, items, more, reset),
+        Event::Gallery { files, items, more, reset, indexing } => gallery::arrived(app, files, items, more, reset, indexing),
         Event::ViewerImage(v) => viewer::arrived(app, v),
         Event::ViewerThumb(id, index, t) => viewer::thumb_arrived(&id, index, t),
         Event::Frames(f) => anim::frames_arrived(f),

@@ -24,6 +24,9 @@ pub(super) struct Gallery {
     pub expires: Option<u64>,
     /// items whose thumbnails are wanted
     shown: Range<usize>,
+    /// opened before the media backfill got through this chat: nothing is read until it has,
+    /// since what's indexed so far is its oldest part
+    indexing: bool,
 }
 
 impl Gallery {
@@ -38,8 +41,17 @@ impl App {
         let (key, thread) = (open.key.clone(), open.thread.clone());
         self.gallery_close();
         let kind = if files { MediaKind::Files } else { MediaKind::Media };
-        self.gallery =
-            Some(Gallery { key, thread, kind, items: Vec::new(), msgs: HashMap::new(), more: true, expires: None, shown: 0..0 });
+        let indexing = self.media_backfill.as_ref().is_some_and(|done| !done.contains(&key));
+        let msgs = HashMap::new();
+        self.gallery = Some(Gallery { key, thread, kind, items: Vec::new(), msgs, more: true, expires: None, shown: 0..0, indexing });
+        self.gallery_page(true).await;
+    }
+
+    /// The media backfill is done with thread `key`, or with all (`None`): a page waiting for it
+    /// reads its first page now.
+    pub(super) async fn gallery_indexed(&mut self, key: Option<&str>) {
+        let Some(g) = self.gallery.as_mut().filter(|g| g.indexing && key.is_none_or(|k| k == g.key)) else { return };
+        g.indexing = false;
         self.gallery_page(true).await;
     }
 
@@ -60,6 +72,10 @@ impl App {
     async fn gallery_page(&mut self, reset: bool) {
         let Some(g) = self.gallery.as_ref() else { return };
         let (key, kind) = (g.key.clone(), g.kind);
+        if g.indexing {
+            (self.emit)(Event::Gallery { files: kind == MediaKind::Files, items: Vec::new(), more: false, reset, indexing: true });
+            return;
+        }
         let limit = if kind == MediaKind::Media { PAGE_MEDIA } else { PAGE_FILES };
         let mut after = g.items.last().copied();
         let mut got = Vec::new();
@@ -86,7 +102,7 @@ impl App {
         g.items.extend(&got);
         g.more = more;
         let items = got.iter().filter_map(|&(ts, idx)| item_dto(g, ts, idx)).collect();
-        (self.emit)(Event::Gallery { files: kind == MediaKind::Files, items, more, reset });
+        (self.emit)(Event::Gallery { files: kind == MediaKind::Files, items, more, reset, indexing: false });
     }
 
     /// Reads message `ts` into the page if it still shows attachment `idx`; one that's gone
@@ -201,7 +217,8 @@ impl App {
     fn gallery_resend(&mut self) {
         let Some(g) = self.gallery.as_ref() else { return };
         let items = g.items.iter().filter_map(|&(ts, idx)| item_dto(g, ts, idx)).collect();
-        (self.emit)(Event::Gallery { files: g.kind == MediaKind::Files, items, more: g.more, reset: true });
+        let (more, indexing) = (g.more && !g.indexing, g.indexing);
+        (self.emit)(Event::Gallery { files: g.kind == MediaKind::Files, items, more, reset: true, indexing });
         let shown = g.shown.clone();
         self.gallery_shown(shown.start, shown.end);
     }
