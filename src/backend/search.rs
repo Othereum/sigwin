@@ -4,6 +4,8 @@
 use presage::libsignal_service::prelude::phonenumber::{self, country, Mode, PhoneNumber};
 use presage::model::contacts::Contact;
 
+use std::cell::Cell;
+
 use super::threads::{note_to_self, show_number, unknown_name};
 use super::*;
 use crate::types::{Find, ResultDto};
@@ -14,12 +16,72 @@ pub(super) struct Search {
     pub query: String,
     pub contacts: bool,
     pub find: Find,
+    /// the thread whose messages alone are searched ("search in this chat")
+    pub scope: Option<String>,
+    pub hits: Hits,
+    /// how far the one-time text backfill is (%), while it runs
+    pub indexing: Option<u8>,
 }
 
 impl Search {
     fn active(&self) -> bool {
-        self.contacts || !self.query.trim().is_empty()
+        self.contacts || self.scope.is_some() || !self.query.trim().is_empty()
     }
+}
+
+/// The messages found for the search: all of them as ids, the rows for those shown so far.
+/// The rows of the last search stay until the next one's arrive, so typing doesn't blink.
+#[derive(Default)]
+pub(super) struct Hits {
+    /// what was searched for: the typed text, lowercase, and the scope
+    asked: Option<(String, Option<String>)>,
+    /// bumped by every new search: a scan still running for an older one stops
+    turn: Rc<Cell<u64>>,
+    all: Vec<(Thread, u64)>,
+    rows: Vec<ResultDto>,
+    /// how many of `all` `rows` went through
+    shown: usize,
+}
+
+/// Messages found at most: a page of rows at a time is built from them.
+const MAX_HITS: usize = 2000;
+const HITS_PAGE: usize = 30;
+/// a search waits this long for the next keystroke before scanning
+const TYPING_PAUSE: Duration = Duration::from_millis(120);
+
+/// What the index is scanned for (`instr`), the rest being checked by `hangul::find_typed`:
+/// a last Hangul character may still be in composition, so all but it. None: nothing to look
+/// for, or a lone consonant or vowel, which would match nearly every message.
+fn needle(q: &str) -> Option<String> {
+    let (last, head) = {
+        let mut cs = q.chars();
+        let last = cs.next_back()?;
+        (last, cs.as_str())
+    };
+    let hangul = ('\u{AC00}'..='\u{D7A3}').contains(&last) || ('\u{3131}'..='\u{318E}').contains(&last);
+    if !hangul {
+        return Some(q.to_string());
+    }
+    if !head.is_empty() {
+        return Some(head.to_string());
+    }
+    // a syllable alone: the messages that hold it (one still growing a final consonant is missed)
+    (!('\u{3131}'..='\u{318E}').contains(&last)).then(|| q.to_string())
+}
+
+/// The part of a one-line `text` to show for a match of `q`: from a little before it, so that
+/// it shows in a row that cuts the end off.
+pub(crate) fn excerpt(text: &str, q: &str) -> String {
+    const BEFORE: usize = 10;
+    let chars: Vec<char> = text.chars().collect();
+    let lower: String = text.to_lowercase();
+    // lowercasing can change the count of a few chars: then it's only near the match
+    let at = crate::hangul::find_typed(&lower, q).unwrap_or(0).min(chars.len());
+    if at <= BEFORE + 4 {
+        return text.to_string();
+    }
+    let from = at - BEFORE;
+    format!("…{}", chars[from..].iter().collect::<String>())
 }
 
 /// Whether `name` or `phone` (E.164, as stored) matches the query. A number matches however it
@@ -155,9 +217,120 @@ fn sort_key(name: &str) -> (bool, String) {
 }
 
 impl App {
-    pub(super) async fn set_search(&mut self, query: String, contacts: bool, find: Find) {
-        self.search = Search { query, contacts, find };
+    pub(super) async fn set_search(&mut self, query: String, contacts: bool, find: Find, scope: Option<String>) {
+        let s = &mut self.search;
+        (s.query, s.contacts, s.find, s.scope) = (query, contacts, find, scope);
+        self.search_messages();
         self.emit_results().await;
+    }
+
+    /// Starts looking for the messages the search names, if that changed, once typing pauses.
+    fn search_messages(&mut self) {
+        let s = &mut self.search;
+        let q = s.query.trim().to_lowercase();
+        let asked = (!s.contacts).then(|| (q.clone(), s.scope.clone()));
+        if asked == s.hits.asked {
+            return;
+        }
+        s.hits.asked = asked;
+        let turn = s.hits.turn.get() + 1;
+        s.hits.turn.set(turn);
+        // while older texts are still being indexed, nothing: part of the results could pass
+        // for all of them. The search runs once they're in (`texts_indexed`)
+        let needle = if s.contacts || s.indexing.is_some() { None } else { needle(&q) };
+        let Some(needle) = needle else {
+            (s.hits.all, s.hits.rows, s.hits.shown) = (Vec::new(), Vec::new(), 0);
+            return;
+        };
+        let scope = s.scope.as_deref().and_then(parse_thread_key);
+        let (index, tx, current) = (self.index.clone(), self.tx.clone(), s.hits.turn.clone());
+        tokio::task::spawn_local(async move {
+            tokio::time::sleep(TYPING_PAUSE).await;
+            if current.get() != turn {
+                return;
+            }
+            let started = Instant::now();
+            let keep = |text: &str| crate::hangul::find_typed(text, &q).is_some();
+            let gone = || current.get() != turn;
+            match index.search_text(scope.as_ref(), &needle, &keep, MAX_HITS, &gone).await {
+                Ok(list) if !gone() => {
+                    debug!("message search: {} found in {:?}", list.len(), started.elapsed());
+                    let _ = tx.send(Internal::Hits { turn, list });
+                }
+                Ok(_) => {}
+                Err(e) => warn!("message search: {e:#}"),
+            }
+        });
+    }
+
+    /// The messages search `turn` found arrived.
+    pub(super) async fn hits(&mut self, turn: u64, list: Vec<(Thread, u64)>) {
+        let h = &mut self.search.hits;
+        if h.turn.get() != turn {
+            return;
+        }
+        (h.all, h.shown) = (list, 0);
+        // built aside: the old rows stay until the new ones are all there
+        let rows = self.hit_rows(HITS_PAGE).await;
+        self.search.hits.rows = rows;
+        self.emit_results().await;
+    }
+
+    /// Builds the rows of the next page of found messages, and sends the results.
+    pub(super) async fn more_hits(&mut self) {
+        let rows = self.hit_rows(HITS_PAGE).await;
+        self.search.hits.rows.extend(rows);
+        self.emit_results().await;
+    }
+
+    /// The rows of the next `n` found messages.
+    async fn hit_rows(&mut self, n: usize) -> Vec<ResultDto> {
+        let q = self.search.query.trim().to_lowercase();
+        let next: Vec<(Thread, u64)> = self.search.hits.all.iter().skip(self.search.hits.shown).take(n).cloned().collect();
+        self.search.hits.shown += next.len();
+        let mut rows = Vec::with_capacity(next.len());
+        for (thread, ts) in next {
+            rows.extend(self.hit_row(&thread, ts, &q).await);
+        }
+        rows
+    }
+
+    /// A found message as a row: its chat, and its text from around the match.
+    async fn hit_row(&mut self, thread: &Thread, ts: u64, q: &str) -> Option<ResultDto> {
+        let key = thread_key(thread);
+        // what the list leaves out (blocked people) or doesn't show yet (requests) isn't found
+        if self.is_request(&key) {
+            return None;
+        }
+        let chat = self.threads.iter().find(|t| t.key == key)?.clone();
+        let c = self.store.message(thread, ts).await.ok().flatten()?;
+        let Kind::Msg { dm, outgoing } = view::classify(&c, self.me) else { return None };
+        let sender = c.metadata.sender.raw_uuid();
+        let dm = self.latest_edit(&key, thread, ts, sender).await.unwrap_or_else(|| dm.clone());
+        for u in view::text::mentioned(&dm) {
+            self.name(u).await;
+        }
+        let names = &self.names;
+        let text = excerpt(&view::text::one_line(&dm, &|u| names.get(u).cloned().unwrap_or_else(|| tr!("Unknown").into())), q);
+        let snippet = if outgoing {
+            tr!("You: {}", text).to_string()
+        } else if chat.is_group {
+            format!("{}: {text}", self.name(sender).await)
+        } else {
+            text
+        };
+        Some(ResultDto::Message {
+            id: ts.to_string(),
+            thread: ThreadDto {
+                snippet,
+                time: view::time::time_short(ts),
+                ts,
+                unread: 0,
+                readers: Vec::new(),
+                readers_more: 0,
+                ..chat
+            },
+        })
     }
 
     /// Sends the rows for the current search, if one is on. Called again when the thread list
@@ -166,8 +339,34 @@ impl App {
         if !self.search.active() {
             return;
         }
+        let more = self.search.hits.shown < self.search.hits.all.len();
+        // older messages may be missing while their text is indexed: said first, before any
+        // result could be taken for all there is
+        let searching = self.search.hits.asked.as_ref().is_some_and(|(q, _)| needle(q).is_some());
+        let note = self
+            .search
+            .indexing
+            .filter(|_| searching)
+            .map(|pct| ResultDto::Note(tr!("Preparing older messages for search ({}%)", pct).into()));
+        let mut rows: Vec<ResultDto> = note.into_iter().collect();
+        // a chat that left the list (deleted, blocked) takes its messages along
+        let threads = &self.threads;
+        let hits: Vec<ResultDto> = self
+            .search
+            .hits
+            .rows
+            .iter()
+            .filter(|r| !matches!(r, ResultDto::Message { thread, .. } if !threads.iter().any(|t| t.key == thread.key)))
+            .cloned()
+            .collect();
+        if self.search.scope.is_some() {
+            rows.extend(hits);
+            if more {
+                rows.push(ResultDto::More);
+            }
+            return (self.emit)(Event::Results(rows));
+        }
         let q = Query::new(&self.search.query);
-        let mut rows = Vec::new();
         // a whole number: someone already known by it, else a row to look it up
         let country = self.manager.as_ref().and_then(|m| m.registration_data().phone_number.country().id());
         match Lead::of(&self.search.query, self.search.find, self.search.contacts, country) {
@@ -192,7 +391,76 @@ impl App {
             }
             rows.extend(people.into_iter().map(ResultDto::Contact));
         }
+        if !self.search.contacts && !hits.is_empty() {
+            rows.push(ResultDto::Header(tr!("Messages").into()));
+            rows.extend(hits);
+            if more {
+                rows.push(ResultDto::More);
+            }
+        }
         (self.emit)(Event::Results(rows));
+    }
+
+    // Open results only ever change in place, so that no row moves under the pointer: a new
+    // message isn't added, an edited one keeps its row even if it no longer matches, a
+    // deleted one shows as deleted.
+
+    /// Indexes the text of stored message (or edit) `c`; an edited message shown in the
+    /// results shows its new text.
+    pub(super) async fn note_text(&mut self, thread: &Thread, c: &Content) {
+        if let Err(e) = record_text(&self.index, thread, c, self.me).await {
+            warn!("record text: {e:#}");
+        }
+        let Kind::Edit { target, .. } = view::classify(c, self.me) else { return };
+        let Some(i) = self.hit_at(thread, target) else { return };
+        let q = self.search.query.trim().to_lowercase();
+        // `hit_row` reads the newest edit by the author, so another's edit changes nothing
+        if let Some(row) = self.hit_row(thread, target, &q).await {
+            self.search.hits.rows[i] = row;
+            self.emit_results().await;
+        }
+    }
+
+    /// Message `ts` was deleted for everyone: out of the index, and shown as deleted in the
+    /// results (where it can still be opened: the chat shows where it was).
+    pub(super) async fn drop_text(&mut self, thread: &Thread, ts: u64) {
+        if let Err(e) = self.index.forget_text(thread, ts).await {
+            warn!("forget text: {e:#}");
+        }
+        let Some(i) = self.hit_at(thread, ts) else { return };
+        if let ResultDto::Message { thread, .. } = &mut self.search.hits.rows[i] {
+            thread.snippet = tr!("Deleted message").into();
+        }
+        self.emit_results().await;
+    }
+
+    /// Where message `ts` of `thread` is among the result rows.
+    fn hit_at(&self, thread: &Thread, ts: u64) -> Option<usize> {
+        if !self.search.active() {
+            return None;
+        }
+        let (key, id) = (thread_key(thread), ts.to_string());
+        self.search.hits.rows.iter().position(|r| matches!(r, ResultDto::Message { thread, id: i } if thread.key == key && *i == id))
+    }
+
+    /// The text backfill is `pct` % of the way.
+    pub(super) async fn texts_indexing(&mut self, pct: u8) {
+        if self.search.indexing.replace(pct) != Some(pct) && self.search.active() {
+            self.emit_results().await;
+        }
+    }
+
+    /// Every message's text is indexed: an open search, which showed none while they were
+    /// on their way, looks now.
+    pub(super) async fn texts_indexed(&mut self) {
+        if self.search.indexing.take().is_none() {
+            return;
+        }
+        self.search.hits.asked = None;
+        self.search_messages();
+        if self.search.active() {
+            self.emit_results().await;
+        }
     }
 
     /// The stored contact (or us) with number `p`, as a row.

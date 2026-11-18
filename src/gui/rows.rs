@@ -486,6 +486,14 @@ pub(crate) fn result_item(r: &ResultDto, avatars: &HashMap<String, Image>) -> Re
         ResultDto::Header(text) => ResultItem { kind: ResultKind::Header, text: text.as_str().into(), ready: true, thread: ThreadItem::default() },
         ResultDto::Thread(t) => ResultItem { kind: ResultKind::Thread, text: SharedString::new(), ready: true, thread: thread_item(t, avatars) },
         ResultDto::Contact(t) => ResultItem { kind: ResultKind::Contact, text: SharedString::new(), ready: true, thread: thread_item(t, avatars) },
+        ResultDto::Message { thread, id } => ResultItem { kind: ResultKind::Message, text: id.as_str().into(), ready: true, thread: thread_item(thread, avatars) },
+        ResultDto::Note(text) => ResultItem { kind: ResultKind::Note, text: text.as_str().into(), ready: true, thread: ThreadItem::default() },
+        ResultDto::More => ResultItem {
+            kind: ResultKind::More,
+            text: SharedString::new(),
+            ready: true,
+            thread: ThreadItem { name: tr!("Show more").into(), ..Default::default() },
+        },
         ResultDto::Find(f) => {
             let (name, initial, key) = match f {
                 Find::Username => (tr!("Find by username"), "@", "username"),

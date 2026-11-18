@@ -124,7 +124,23 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             FindKind::Any => Find::Any,
         };
         let query = format!("{}{}", d.get_query(), d.get_preedit());
-        s(Command::Search { query, contacts: d.get_contacts(), find });
+        let scope = Some(d.get_scope_key().to_string()).filter(|k| !k.is_empty());
+        s(Command::Search { query, contacts: d.get_contacts(), find, scope });
+    });
+    let s = send.clone();
+    app.global::<SearchData>().on_more(move || s(Command::SearchMore));
+    let s = send.clone();
+    let weak = app.as_weak();
+    app.global::<SearchData>().on_show_found(move |key, id| {
+        let Some(app) = weak.upgrade() else { return };
+        app.set_settings_open(false);
+        app.global::<SearchData>().set_picked(id.clone());
+        // another chat opens around the message; the jump then centers and flashes it
+        if key != app.get_current_key() {
+            s(Command::RestoreAt(id.to_string()));
+            app.invoke_open_thread(key);
+        }
+        s(Command::JumpTo(id.to_string()));
     });
     let weak = app.as_weak();
     app.global::<SearchData>().on_accept(move || {
@@ -132,11 +148,12 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         let first = UI.with_borrow(|ui| {
             ui.result_dtos
                 .iter()
-                .find(|r| matches!(r, ResultDto::Thread(_) | ResultDto::Contact(_) | ResultDto::Start { ready: true, .. }))
+                .find(|r| matches!(r, ResultDto::Thread(_) | ResultDto::Contact(_) | ResultDto::Start { ready: true, .. } | ResultDto::Message { .. }))
                 .cloned()
         });
         let d = app.global::<SearchData>();
         match first {
+            Some(ResultDto::Message { thread, id }) => d.invoke_show_found(thread.key.into(), id.into()),
             Some(ResultDto::Thread(t) | ResultDto::Contact(t)) => {
                 app.set_settings_open(false);
                 app.invoke_open_thread(t.key.into());

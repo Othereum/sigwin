@@ -261,7 +261,19 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 return;
             }
             let items: Vec<ResultItem> = list.iter().map(|r| result_item(r, &ui.avatars)).collect();
-            ui.results.set_vec(items);
+            // row by row, not `set_vec`: that would scroll the list back to the top when a
+            // page of found messages is added below
+            use slint::Model;
+            let shared = ui.results.row_count().min(items.len());
+            for (i, item) in items.iter().enumerate().take(shared) {
+                ui.results.set_row_data(i, item.clone());
+            }
+            while ui.results.row_count() > items.len() {
+                ui.results.remove(ui.results.row_count() - 1);
+            }
+            for item in items.into_iter().skip(shared) {
+                ui.results.push(item);
+            }
             ui.result_dtos = list;
         }),
         Event::ThreadMoved { from, to } => UI.with_borrow_mut(|ui| {

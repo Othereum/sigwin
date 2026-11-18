@@ -259,10 +259,19 @@ impl App {
                 }
                 let (key, target) = (thread_key.clone(), *target);
                 self.forget_media(&key, target).await;
+                if let Some(thread) = parse_thread_key(&key) {
+                    self.drop_text(&thread, target).await;
+                }
             }
             Some(PendingOp { op: Op::Edit { target, .. }, thread_key, .. }) => {
                 if let Err(e) = self.index.record_edit(thread_key, *target, self.me, ts).await {
                     warn!("record edit: {e:#}");
+                }
+                // the new text is in what presage stored
+                if let Some(thread) = parse_thread_key(thread_key) {
+                    if let Ok(Some(c)) = self.store.message(&thread, ts).await {
+                        self.note_text(&thread, &c).await;
+                    }
                 }
             }
             Some(PendingOp { op: Op::React { emoji, target }, thread_key, .. }) => {
@@ -373,6 +382,50 @@ pub(super) async fn record_media(index: &Index, key: &str, c: &Content, me: Uuid
         return Ok(false);
     }
     index.record_media(key, c.timestamp(), &items).await?;
+    Ok(true)
+}
+
+/// What the message search looks in: the body and captions, lowercase. Empty for no text.
+pub(super) fn search_text(dm: &DataMessage) -> String {
+    let mut t = dm.body.as_deref().unwrap_or_default().to_lowercase();
+    for cap in dm.attachments.iter().filter_map(|a| a.caption.as_deref()).filter(|c| !c.is_empty()) {
+        if !t.is_empty() {
+            t.push('\n');
+        }
+        t.push_str(&cap.to_lowercase());
+    }
+    t
+}
+
+/// What `record_text` would note of the messages (not the edits) of a page: (sent ts, text).
+pub(super) fn page_texts(msgs: &[Content], me: Uuid) -> Vec<(u64, String)> {
+    msgs.iter()
+        .filter_map(|c| match view::classify(c, me) {
+            Kind::Msg { dm, .. } if view::expires_at(c).is_none() => Some((c.timestamp(), search_text(dm))),
+            _ => None,
+        })
+        .filter(|(_, t)| !t.is_empty())
+        .collect()
+}
+
+/// Notes a stored message's text for the message search, or an edit's new text over its
+/// target's; true if it did. Disappearing messages are left out: a copy of their text would
+/// have to disappear with them.
+pub(super) async fn record_text(index: &Index, thread: &Thread, c: &Content, me: Uuid) -> anyhow::Result<bool> {
+    match view::classify(c, me) {
+        Kind::Msg { dm, .. } if view::expires_at(c).is_none() => {
+            let text = search_text(dm);
+            if text.is_empty() {
+                return Ok(false);
+            }
+            index.record_text(thread, c.timestamp(), &text).await?;
+        }
+        Kind::Edit { target, dm, .. } => {
+            let text = search_text(dm);
+            index.edit_text(thread, target, &c.metadata.sender.service_id_string(), &text).await?;
+        }
+        _ => return Ok(false),
+    }
     Ok(true)
 }
 

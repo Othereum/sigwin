@@ -3,15 +3,29 @@
 use super::*;
 
 impl App {
-    /// One-time: index pin, edit, reaction, reply and media messages presage stored before we kept our own indexes.
+    /// One-time: index pin, edit, reaction, reply, media and text messages presage stored
+    /// before we kept our own indexes; only the indexes not done yet.
     /// Walks every thread oldest first in pages, so pins and unpins apply in order.
-    pub(super) fn backfill_pins(&self) {
+    pub(super) fn backfill_pins(&mut self) {
+        if !self.persist.text_indexed {
+            self.search.indexing = Some(0);
+        }
         let (store, index, me, tx) = (self.store.clone(), self.index.clone(), self.me, self.tx.clone());
+        let p = &self.persist;
         // a second replay could bring back a pin whose unpin is still being sent
-        let pins = !self.persist.pins_indexed;
-        let media = !self.persist.media_indexed;
+        let (pins, edits, reactions, replies) = (!p.pins_indexed, !p.edits_indexed, !p.reactions_indexed, !p.replies_indexed);
+        let (media, text) = (!p.media_indexed, !p.text_indexed);
         tokio::task::spawn_local(async move {
+            let started = Instant::now();
             let Ok(threads) = index.threads().await else { return };
+            // progress by rows, not threads: the busiest threads come first and hold most of them
+            let mut total = 0u64;
+            if text {
+                for row in &threads {
+                    total += index.row_count(&row.thread).await.unwrap_or(0);
+                }
+            }
+            let (mut done, mut shown) = (0u64, 0u8);
             let mut n = 0usize;
             for row in threads {
                 let key = thread_key(&row.thread);
@@ -23,14 +37,26 @@ impl App {
                     if let Ok(msgs) = store.messages(&row.thread, first..=last).await {
                         let mut msgs: Vec<Content> = msgs.flatten().collect();
                         msgs.sort_by_key(|c| c.metadata.client_timestamp.timestamp_millis());
+                        if text {
+                            // one transaction a page: a commit per message is what makes this slow
+                            match index.record_texts(&row.thread, &page_texts(&msgs, me)).await {
+                                Ok(k) => n += k,
+                                Err(e) => warn!("index texts: {e:#}"),
+                            }
+                        }
                         for c in &msgs {
-                            let pin = if pins { record_pin(&index, &key, c, me).await } else { Ok(false) };
                             for r in [
-                                pin,
-                                record_edit(&index, &key, c, me).await,
-                                record_reaction(&index, &key, c, me).await,
-                                record_reply(&index, &key, c, me).await,
+                                if pins { record_pin(&index, &key, c, me).await } else { Ok(false) },
+                                if edits { record_edit(&index, &key, c, me).await } else { Ok(false) },
+                                if reactions { record_reaction(&index, &key, c, me).await } else { Ok(false) },
+                                if replies { record_reply(&index, &key, c, me).await } else { Ok(false) },
                                 if media { record_media(&index, &key, c, me).await } else { Ok(false) },
+                                // an edit's text goes over its target's, stored by the page above
+                                if text && matches!(view::classify(c, me), Kind::Edit { .. }) {
+                                    record_text(&index, &row.thread, c, me).await
+                                } else {
+                                    Ok(false)
+                                },
                             ] {
                                 match r {
                                     Ok(true) => n += 1,
@@ -40,13 +66,19 @@ impl App {
                             }
                         }
                     }
+                    done += tss.len() as u64;
+                    let pct = (done * 100 / total.max(1)).min(99) as u8;
+                    if text && pct != shown {
+                        shown = pct;
+                        let _ = tx.send(Internal::TextsIndexing(pct));
+                    }
                     if (tss.len() as u32) < 200 {
                         break;
                     }
                     tokio::task::yield_now().await;
                 }
             }
-            info!("pin, edit, reaction, reply and media index backfilled: {n} messages");
+            info!("indexes backfilled: {n} entries in {:?}", started.elapsed());
             let _ = tx.send(Internal::PinsIndexed);
         });
     }
@@ -273,6 +305,7 @@ impl App {
                 warn!("forget replies: {e:#}");
             }
             self.forget_media(&key, target).await;
+            self.drop_text(&thread, target).await;
         }
         if let Err(e) = record_pin(&self.index, &key, &c, self.me).await {
             warn!("record pin: {e:#}");
@@ -289,6 +322,7 @@ impl App {
         if let Err(e) = record_media(&self.index, &key, &c, self.me).await {
             warn!("record media: {e:#}");
         }
+        self.note_text(&thread, &c).await;
         let kind = view::classify(&c, self.me);
         match kind {
             Kind::Msg { outgoing: false, .. } => {

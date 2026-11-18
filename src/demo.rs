@@ -507,8 +507,15 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                         .collect();
                     emit(Event::Replies(list));
                 }
-                if let Command::Search { query, contacts, find } = &c {
-                    emit(Event::Results(demo_results(&threads, query, *contacts, *find)));
+                if let Command::Search { query, contacts, find, scope } = &c {
+                    let mut rows: Vec<ResultDto> = if *contacts { None } else { demo_indexing(query) }.into_iter().collect();
+                    if scope.is_none() {
+                        rows.extend(demo_results(&threads, query, *contacts, *find));
+                    }
+                    if !contacts {
+                        rows.extend(demo_hits(&threads, &items, query, scope.is_none()));
+                    }
+                    emit(Event::Results(rows));
                 }
                 if let Command::SetMute { key, set } = &c {
                     demo_mute(&mut threads, key, *set);
@@ -775,6 +782,43 @@ fn demo_results(threads: &[ThreadDto], query: &str, contacts: bool, find: types:
     }
     rows.extend(people.into_iter().map(ResultDto::Contact));
     rows
+}
+
+/// The message search over the demo thread's rows (they show under every thread): newest
+/// first, with a header in the search over everything.
+fn demo_hits(threads: &[ThreadDto], items: &[MsgDto], query: &str, header: bool) -> Vec<ResultDto> {
+    let q = query.trim().to_lowercase();
+    let Some(chat) = threads.iter().find(|t| t.key == "c:demo-1") else { return Vec::new() };
+    if q.is_empty() {
+        return Vec::new();
+    }
+    let mut rows: Vec<ResultDto> = items
+        .iter()
+        .rev()
+        .filter(|m| m.text.to_lowercase().contains(&q))
+        .take(30)
+        .map(|m| {
+            let text = crate::backend::excerpt(&m.text.replace('\n', " "), &q);
+            ResultDto::Message {
+                id: m.id.to_string(),
+                thread: ThreadDto { snippet: if m.outgoing { format!("나: {text}") } else { text }, time: m.time.to_string(), unread: 0, readers: Vec::new(), readers_more: 0, ..chat.clone() },
+            }
+        })
+        .collect();
+    if header && !rows.is_empty() {
+        rows.insert(0, ResultDto::Header("메시지".into()));
+    }
+    // the "more" row's look, always: the demo has no further pages
+    if !rows.is_empty() {
+        rows.push(ResultDto::More);
+    }
+    rows
+}
+
+/// `SIGWIN_DEMO_INDEXING=<pct>`: the note that leads the results while the text backfill runs.
+fn demo_indexing(query: &str) -> Option<ResultDto> {
+    let pct = std::env::var("SIGWIN_DEMO_INDEXING").ok()?.parse::<u8>().ok()?;
+    (!query.trim().is_empty()).then(|| ResultDto::Note(tr!("Preparing older messages for search ({}%)", pct).into()))
 }
 
 /// `App::set_mute` on the demo list.

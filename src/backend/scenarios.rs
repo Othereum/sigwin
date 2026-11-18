@@ -232,7 +232,7 @@ fn searching_leaves_the_thread_list_whole() {
         h.op("seed who=2 name=영희 n=2").await;
         h.settle().await;
         h.take_events();
-        h.cmd(Command::Search { query: "철수".into(), contacts: false, find: Default::default() }).await;
+        h.cmd(Command::Search { query: "철수".into(), contacts: false, find: Default::default(), scope: None }).await;
         let ev = h.take_events();
         let results = ev.iter().rev().find_map(|e| match e {
             Event::Results(r) => Some(r),
@@ -249,6 +249,174 @@ fn searching_leaves_the_thread_list_whole() {
         assert_eq!(names, ["철수"]);
         // the unread badge and the rest count from the whole list
         assert!(!ev.iter().any(|e| matches!(e, Event::Threads(l) if l.len() < 2)), "the thread list was cut to the search");
+    });
+}
+
+/// What the message search finds for `query`: the snippets of the found messages, once the
+/// scan (which waits for a pause in typing) is done.
+async fn found(h: &mut Harness, query: &str, scope: Option<u32>) -> Vec<String> {
+    let scope = scope.map(|who| thread_key(&Thread::Contact(ServiceId::Aci(super::fixture::contact(who).into()))));
+    h.cmd(Command::Search { query: query.into(), contacts: false, find: Default::default(), scope }).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    h.settle().await;
+    let ev = h.take_events();
+    let rows = ev.iter().rev().find_map(|e| match e {
+        Event::Results(r) => Some(r.clone()),
+        _ => None,
+    });
+    rows.unwrap_or_default()
+        .into_iter()
+        .filter_map(|r| match r {
+            ResultDto::Message { thread, .. } => Some(thread.snippet),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn messages_are_found_as_they_now_read() {
+    use presage::libsignal_service::content::ContentBody;
+    use presage::proto::EditMessage;
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        // stored before the index existed: found once the backfill has run
+        h.op("seed who=1 name=철수 n=2").await;
+        h.op("recv who=1 n=2").await;
+        h.op("recv who=2 n=1").await;
+        assert_eq!(found(&mut h, "새 메시지", None).await, ["새 메시지 1", "새 메시지 2", "새 메시지 1"]);
+        // the last syllable may still be in composition
+        assert_eq!(found(&mut h, "새 멧", None).await.len(), 3);
+        assert_eq!(found(&mut h, "새 메시지", Some(2)).await, ["새 메시지 1"], "only that chat");
+        assert!(found(&mut h, "메시지 2", None).await.iter().all(|s| s.starts_with('새')), "seeded rows aren't indexed yet");
+
+        h.app.backfill_pins();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        h.settle().await;
+        assert_eq!(found(&mut h, "시지 2", None).await, ["새 메시지 2", "메시지 2"]);
+
+        let thread = Thread::Contact(ServiceId::Aci(super::fixture::contact(1).into()));
+        let newest: Vec<u64> = h.app.index.page(&thread, i64::MAX, 10).await.unwrap().into_iter().map(|r| r.1).collect();
+        let me = h.app.me;
+        // an edit by its author changes what's found
+        let (edit_ts, target) = (newest[0] + 10, newest[0]);
+        let mut edit = super::fixture::incoming_dm(1, DataMessage { timestamp: Some(edit_ts), ..Default::default() }, me);
+        edit.body = ContentBody::EditMessage(EditMessage {
+            target_sent_timestamp: Some(target),
+            data_message: Some(DataMessage { body: Some("고친 글".into()), timestamp: Some(edit_ts), ..Default::default() }),
+        });
+        h.app.store.save_message(&thread, edit.clone()).await.unwrap();
+        h.app.content(edit).await;
+        assert_eq!(found(&mut h, "고친", None).await, ["고친 글"]);
+        assert!(found(&mut h, "새 메시지 2", None).await.is_empty());
+
+        // deleted for everyone: gone
+        let del_ts = newest[1] + 20;
+        let del = super::fixture::incoming_dm(
+            1,
+            DataMessage { delete: Some(Delete { target_sent_timestamp: Some(newest[1]) }), timestamp: Some(del_ts), ..Default::default() },
+            me,
+        );
+        h.app.content(del).await;
+        assert_eq!(found(&mut h, "새 메시지 1", None).await.len(), 1, "only the other chat's");
+
+        // a disappearing message isn't indexed at all
+        let ts = newest[0] + 30;
+        let gone = super::fixture::incoming_dm(1, DataMessage { body: Some("사라질 비밀".into()), expire_timer: Some(3600), timestamp: Some(ts), ..Default::default() }, me);
+        h.app.store.save_message(&thread, gone.clone()).await.unwrap();
+        h.app.content(gone).await;
+        assert!(found(&mut h, "비밀", None).await.is_empty());
+
+        // nor is anything left of a deleted chat (the index itself: the list would hide it anyway)
+        let left = || h.app.index.search_text(Some(&thread), "글", &|_| true, 10, &|| false);
+        assert_eq!(left().await.unwrap().len(), 1);
+        h.app.store.clear_thread(&thread).await.unwrap();
+        assert!(left().await.unwrap().is_empty());
+    });
+}
+
+/// The snippets of the found messages in the last results sent.
+/// The snippets of the found messages in the last results sent, if any were.
+fn shown_hits(h: &Harness) -> Option<Vec<String>> {
+    let ev = h.take_events();
+    let rows = ev.iter().rev().find_map(|e| match e {
+        Event::Results(r) => Some(r.clone()),
+        _ => None,
+    })?;
+    Some(
+        rows.into_iter()
+            .filter_map(|r| match r {
+                ResultDto::Message { thread, .. } => Some(thread.snippet),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
+#[test]
+fn open_results_change_only_in_place() {
+    use presage::libsignal_service::content::ContentBody;
+    use presage::proto::EditMessage;
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("recv who=1 n=2").await;
+        assert_eq!(found(&mut h, "새 메시지", None).await, ["새 메시지 2", "새 메시지 1"]);
+
+        // a new match isn't added: rows would move under the pointer
+        h.op("recv who=1 n=1").await;
+        assert!(shown_hits(&h).is_none_or(|s| s.len() == 2));
+
+        let thread = Thread::Contact(ServiceId::Aci(super::fixture::contact(1).into()));
+        let tss: Vec<u64> = h.app.index.page(&thread, i64::MAX, 10).await.unwrap().into_iter().map(|r| r.1).collect();
+        let me = h.app.me;
+        // edited away from the query: the row stays, with the new text
+        let edit_ts = tss[0] + 10;
+        let mut edit = super::fixture::incoming_dm(1, DataMessage { timestamp: Some(edit_ts), ..Default::default() }, me);
+        edit.body = ContentBody::EditMessage(EditMessage {
+            target_sent_timestamp: Some(tss[1]),
+            data_message: Some(DataMessage { body: Some("다른 말".into()), timestamp: Some(edit_ts), ..Default::default() }),
+        });
+        h.app.store.save_message(&thread, edit.clone()).await.unwrap();
+        h.app.content(edit).await;
+        h.settle().await;
+        assert_eq!(shown_hits(&h).unwrap(), ["다른 말", "새 메시지 1"]);
+
+        // deleted for everyone: the row stays, shown as deleted
+        let del = super::fixture::incoming_dm(
+            1,
+            DataMessage { delete: Some(Delete { target_sent_timestamp: Some(tss[2]) }), timestamp: Some(edit_ts + 10), ..Default::default() },
+            me,
+        );
+        h.app.content(del).await;
+        h.settle().await;
+        assert_eq!(shown_hits(&h).unwrap(), ["다른 말", "Deleted message"]);
+    });
+}
+
+#[test]
+fn no_messages_are_found_until_older_ones_are_indexed() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("recv who=1 n=1").await;
+        h.app.search.indexing = Some(5);
+        let ev = {
+            h.cmd(Command::Search { query: "새 메시지".into(), contacts: false, find: Default::default(), scope: None }).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            h.settle().await;
+            h.take_events()
+        };
+        let rows = ev.iter().rev().find_map(|e| match e {
+            Event::Results(r) => Some(r.clone()),
+            _ => None,
+        });
+        let rows = rows.expect("results");
+        assert!(matches!(rows.first(), Some(ResultDto::Note(_))), "the note leads");
+        assert!(!rows.iter().any(|r| matches!(r, ResultDto::Message { .. })), "a part could pass for all");
+
+        // done: the open search looks now
+        h.app.texts_indexed().await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        h.settle().await;
+        assert_eq!(shown_hits(&h).unwrap(), ["새 메시지 1"]);
     });
 }
 

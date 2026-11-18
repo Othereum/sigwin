@@ -10,6 +10,14 @@ pub fn find(name: &str, query: &str) -> Option<usize> {
     composing(&n, &q).or_else(|| initials(&n, &q))
 }
 
+/// `find` without the initials: for message text, where consonants alone would match almost
+/// anything. `text` and `query` are lowercase already.
+pub fn find_typed(text: &str, query: &str) -> Option<usize> {
+    let t: Vec<char> = text.chars().collect();
+    let q: Vec<char> = query.chars().collect();
+    composing(&t, &q)
+}
+
 /// All but the query's last char match exactly, the last one's keystrokes are a prefix of the
 /// keystrokes from there on. A final consonant may still move to the next syllable
 /// ("윚" → "위진"), and a vowel may still grow ("우" → "위").

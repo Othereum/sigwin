@@ -112,7 +112,7 @@ fn fixture_gif(tag: u8) -> Vec<u8> {
 }
 
 /// A message from `who` to us.
-fn incoming_dm(who: u32, dm: DataMessage, me: Uuid) -> Content {
+pub(super) fn incoming_dm(who: u32, dm: DataMessage, me: Uuid) -> Content {
     let sender = ServiceId::Aci(contact(who).into());
     let ts = dm.timestamp.unwrap_or_default();
     let at = chrono::DateTime::from_timestamp_millis(ts as i64).unwrap_or_default();

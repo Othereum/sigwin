@@ -55,7 +55,7 @@ mod requests;
 #[cfg(test)]
 mod scenarios;
 mod search;
-pub(crate) use search::Lead;
+pub(crate) use search::{excerpt, Lead};
 mod send;
 mod stickers;
 mod storage;
@@ -158,6 +158,9 @@ struct Persist {
     /// attachments stored before the media index existed have been indexed
     #[serde(default)]
     media_indexed: bool,
+    /// texts stored before the message search existed have been indexed
+    #[serde(default)]
+    text_indexed: bool,
     /// layout of the attachment and thumbnail caches on disk (`CACHE_FORMAT` once converted)
     #[serde(default)]
     cache_format: u32,
@@ -249,6 +252,10 @@ enum Internal {
     PhoneStorage(Result<Option<storage::PhoneStorage>, String>),
     /// what a lookup from the search found
     Found(search::Found),
+    /// messages the search with this turn found (`search::Hits`)
+    Hits { turn: u64, list: Vec<(Thread, u64)> },
+    /// how far the text backfill is (% of rows)
+    TextsIndexing(u8),
     /// a fixture operation (`fixture.rs`); the sender hears back once it and the flush after it are done
     Fixture(fixture::FxOp, std::sync::mpsc::Sender<String>),
 }
@@ -704,6 +711,7 @@ impl App {
             || !self.persist.reactions_indexed
             || !self.persist.replies_indexed
             || !self.persist.media_indexed
+            || !self.persist.text_indexed
         {
             self.backfill_pins();
         }
@@ -785,7 +793,8 @@ impl App {
                     self.emit_messages(Scroll::Keep).await;
                 }
             }
-            Command::Search { query, contacts, find } => self.set_search(query, contacts, find).await,
+            Command::Search { query, contacts, find, scope } => self.set_search(query, contacts, find, scope).await,
+            Command::SearchMore => self.more_hits().await,
             Command::StartChat(target) => self.start_chat(target),
             Command::AnswerRequest { key, answer } => self.answer_request(&key, answer).await,
             Command::WindowFocus(f) => {
@@ -1001,7 +1010,9 @@ impl App {
                 self.persist.reactions_indexed = true;
                 self.persist.replies_indexed = true;
                 self.persist.media_indexed = true;
+                self.persist.text_indexed = true;
                 self.persist_dirty = true;
+                self.texts_indexed().await;
                 self.current_dirty = true;
             }
             Internal::ReceiptsMoved => {
@@ -1025,6 +1036,8 @@ impl App {
             }
             Internal::PhoneStorage(res) => self.phone_storage(res).await,
             Internal::Found(found) => self.found(found).await,
+            Internal::Hits { turn, list } => self.hits(turn, list).await,
+            Internal::TextsIndexing(pct) => self.texts_indexing(pct).await,
             Internal::Fixture(op, ack) => {
                 let out = self.fixture_op(op).await;
                 // what the op queued goes out now, so the ack means "done and shown"

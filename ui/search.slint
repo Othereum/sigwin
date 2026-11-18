@@ -1,19 +1,20 @@
-// The sidebar's search: threads and contacts from the thread list, or the contact list the ✎
-// button opens to start a conversation.
+// The sidebar's search: threads, contacts and messages, the messages of one chat ("search in
+// this chat"), or the contact list the ✎ button opens to start a conversation.
 
 import { ThreadItem } from "types.slint";
 import { Theme } from "theme.slint";
 import { ThreadRow } from "thread_row.slint";
 import { Icon, Icons } from "icons.slint";
 
-export enum ResultKind { header, thread, contact, start, find }
+export enum ResultKind { header, thread, contact, start, find, message, more, note }
 
 // what the contact list's search box is for (its "Find by" rows pick one)
 export enum FindKind { any, phone, username }
 
 export struct ResultItem {
     kind: ResultKind,
-    // a header's title; what a start row looks up; a find row's kind ("phone", "username")
+    // a header's title; what a start row looks up; a find row's kind ("phone", "username");
+    // a found message's id
     text: string,
     // a start row whose text is whole (a dim one can't be clicked yet)
     ready: bool,
@@ -27,15 +28,40 @@ export global SearchData {
     // the contact list (✎) instead of the search over everything
     in-out property <bool> contacts;
     in-out property <FindKind> find;
+    // "search in this chat": the thread whose messages alone are searched, and its name
+    in-out property <string> scope-key;
+    in-out property <string> scope-name;
+    // the found message last opened, marked in the list
+    in-out property <string> picked;
     in property <[ResultItem]> results;
     // the list shows the results instead of the threads
-    out property <bool> active: query != "" || preedit != "" || contacts;
+    out property <bool> active: query != "" || preedit != "" || contacts || scope-key != "";
     // the query or the scope changed
     callback changed();
     // Enter: the first row that opens something
     callback accept();
     // a start row: look up whom it names (its `text`) and open the conversation
     callback start(string);
+    // a found message: open its chat (key) at it (id)
+    callback show-found(string, string);
+    // the next page of found messages
+    callback more();
+
+    public function search-in(key: string, name: string) {
+        leave-contacts();
+        scope-key = key;
+        scope-name = name;
+        query = "";
+        changed();
+    }
+
+    public function leave-scope() {
+        if (scope-key != "") {
+            scope-key = "";
+            scope-name = "";
+            changed();
+        }
+    }
 
     public function leave-contacts() {
         if (contacts) {
@@ -46,11 +72,13 @@ export global SearchData {
         }
     }
 
-    // Esc: what's typed, then the "Find by" kind, then the contact list
+    // Esc: what's typed, then the chat searched in, then the "Find by" kind, then the contact list
     public function back() {
         if (query != "") {
             query = "";
             changed();
+        } else if (scope-key != "") {
+            leave-scope();
         } else if (find != FindKind.any) {
             find = FindKind.any;
             changed();
@@ -82,7 +110,8 @@ export component ResultRow inherits Rectangle {
     in property <bool> selected;
     callback clicked;
     callback menu(length, length);
-    height: item.kind == ResultKind.header ? 30px : item.kind == ResultKind.find ? 48px : 64px;
+    height: item.kind == ResultKind.header ? 30px : item.kind == ResultKind.find || item.kind == ResultKind.more ? 48px
+        : item.kind == ResultKind.note ? max(40px, note-text.preferred-height + 16px) : 64px;
     opacity: item.kind == ResultKind.start && !item.ready ? 0.5 : 1;
     if item.kind == ResultKind.header: Text {
         x: 18px;
@@ -135,7 +164,40 @@ export component ResultRow inherits Rectangle {
             }
         }
     }
-    if item.kind != ResultKind.header && item.kind != ResultKind.find: ThreadRow {
+    // dim, centered, wrapping: not something to click. Not in an `if`: the row's height reads it
+    note-text := Text {
+        visible: item.kind == ResultKind.note;
+        x: 18px;
+        width: parent.width - 36px;
+        height: parent.height;
+        text: item.kind == ResultKind.note ? item.text : "";
+        color: Theme.subtle;
+        font-size: 12px;
+        wrap: word-wrap;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    // the next page of found messages: one centered line in the accent color
+    if item.kind == ResultKind.more: Rectangle {
+        x: 8px;
+        y: 1px;
+        width: parent.width - 16px;
+        height: parent.height - 2px;
+        border-radius: 10px;
+        background: more-ta.has-hover ? Theme.hover : transparent;
+        more-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.clicked(); }
+        }
+        Text {
+            text: root.item.thread.name;
+            color: Theme.accent;
+            font-size: 13px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    if item.kind != ResultKind.header && item.kind != ResultKind.find && item.kind != ResultKind.more && item.kind != ResultKind.note: ThreadRow {
         x: 0;
         y: 0;
         width: parent.width;

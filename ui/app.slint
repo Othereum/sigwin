@@ -268,6 +268,12 @@ export component AppWindow inherits Window {
     public function focus-composer() {
         composer.focus();
     }
+    // the header's search button and Ctrl+F: the search box, over the open chat's messages
+    function search-in-chat() {
+        root.settings-open = false;
+        SearchData.search-in(root.current-key, root.current-name);
+        search-edit.focus();
+    }
     public function blur-composer() {
         composer.clear-focus();
     }
@@ -426,7 +432,8 @@ export component AppWindow inherits Window {
                     search-edit := Field {
                         y: (parent.height - self.height) / 2;
                         icon: Icons.search;
-                        placeholder: !SearchData.contacts ? @tr("Search")
+                        placeholder: SearchData.scope-key != "" ? @tr("Search this chat")
+                            : !SearchData.contacts ? @tr("Search")
                             : SearchData.find == FindKind.phone ? @tr("Enter a phone number")
                             : SearchData.find == FindKind.username ? @tr("Username (e.g. name.42)")
                             : @tr("Name, phone number, username");
@@ -458,6 +465,41 @@ export component AppWindow inherits Window {
                             SearchData.query = "";
                             SearchData.changed();
                             search-edit.focus();
+                        }
+                    }
+                }
+                // "search in this chat": which one, and the way back to searching everything
+                if SearchData.scope-key != "": Rectangle {
+                    height: 34px;
+                    Rectangle {
+                        x: 8px;
+                        width: parent.width - 16px;
+                        height: 30px;
+                        border-radius: 8px;
+                        background: Theme.selected;
+                    }
+                    HorizontalLayout {
+                        padding-left: 20px;
+                        padding-right: 12px;
+                        spacing: 4px;
+                        Text {
+                            text: @tr("Searching in {}", SearchData.scope-name);
+                            color: Theme.text;
+                            font-size: 13px;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: Icons.close;
+                            icon-size: 14px;
+                            width: 24px;
+                            height: 24px;
+                            clicked => {
+                                SearchData.leave-scope();
+                                search-edit.focus();
+                            }
                         }
                     }
                 }
@@ -497,9 +539,14 @@ export component AppWindow inherits Window {
                         }
                     }
                     if SearchData.active: ListView {
+                        // a new search starts at the top (rows are updated in place, so the
+                        // list keeps its place for the next page of the same one)
+                        property <string> asked: SearchData.query + SearchData.preedit + SearchData.scope-key;
+                        changed asked => { self.content-y = 0; }
                         for r in SearchData.results: ResultRow {
                             item: r;
-                            selected: (r.kind == ResultKind.thread || r.kind == ResultKind.contact) && r.thread.key == root.current-key;
+                            selected: ((r.kind == ResultKind.thread || r.kind == ResultKind.contact) && r.thread.key == root.current-key)
+                                || (r.kind == ResultKind.message && r.text == SearchData.picked && r.thread.key == root.current-key);
                             clicked => {
                                 if (r.kind == ResultKind.find) {
                                     SearchData.pick-find(r.text);
@@ -508,6 +555,12 @@ export component AppWindow inherits Window {
                                     if (r.ready) {
                                         SearchData.start(r.text);
                                     }
+                                } else if (r.kind == ResultKind.more) {
+                                    SearchData.more();
+                                } else if (r.kind == ResultKind.message) {
+                                    // the results stay, to go through them one by one
+                                    GalleryData.close();
+                                    SearchData.show-found(r.thread.key, r.text);
                                 } else if (r.kind != ResultKind.header) {
                                     root.settings-open = false;
                                     GalleryData.close();
@@ -526,7 +579,9 @@ export component AppWindow inherits Window {
                         y: 24px;
                         width: parent.width;
                         horizontal-alignment: center;
-                        text: SearchData.contacts && SearchData.query == "" ? @tr("No contacts") : @tr("No results");
+                        text: SearchData.contacts && SearchData.query == "" ? @tr("No contacts")
+                            : SearchData.scope-key != "" && SearchData.query == "" && SearchData.preedit == "" ? ""
+                            : @tr("No results");
                         color: Theme.subtle;
                         font-size: 13px;
                     }
@@ -688,6 +743,12 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                         Text { text: root.current-name; color: Theme.text; font-size: 15px; font-weight: 700; overflow: elide; }
                         if root.current-sub != "": Text { text: root.current-sub; color: Theme.subtle; font-size: 12px; overflow: elide; }
+                    }
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
+                        icon: Icons.search;
+                        active: SearchData.scope-key == root.current-key;
+                        clicked => { root.search-in-chat(); }
                     }
                     IconButton {
                         y: (parent.height - self.height) / 2;
@@ -1325,6 +1386,10 @@ export component AppWindow inherits Window {
                                         if (root.paste-files()) {
                                             return accept;
                                         }
+                                    }
+                                    if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && (event.text == "f" || event.text == "F")) {
+                                        root.search-in-chat();
+                                        return accept;
                                     }
                                     // text styles (Signal Desktop's shortcuts): wrap the selection in markers
                                     if (event.modifiers.control && !event.modifiers.alt) {

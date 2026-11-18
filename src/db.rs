@@ -144,6 +144,59 @@ fn json_list(tss: &[u64]) -> String {
     format!("[{}]", tss.iter().map(u64::to_string).collect::<Vec<_>>().join(","))
 }
 
+/// The thread a `threads` row stands for; `pni`: its recipient is a PNI (`ls_pni`).
+fn thread_of(gk: Option<Vec<u8>>, rid: Option<Vec<u8>>, pni: bool) -> Option<Thread> {
+    match (gk, rid) {
+        (Some(gk), _) => Some(Thread::Group(gk.try_into().ok()?)),
+        (None, Some(rid)) => {
+            let u = uuid::Uuid::from_slice(&rid).ok()?;
+            crate::types::parse_thread_key(&format!("{}:{u}", if pni { "p" } else { "c" }))
+        }
+        _ => None,
+    }
+}
+
+/// The message search's text (`Index::record_text`), and the trigger that drops it with its
+/// message, so that no way of deleting one (expiry, a deleted chat) leaves text behind.
+/// presage keys the table by (thread_id, ts) too; `ls_order.seq` is renumbered by
+/// `order_by_sent`, so it can't be the key. A rowid table: a body can be far bigger than a page.
+async fn ensure_text(pool: &SqlitePool) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS ls_text (
+            thread_id INTEGER NOT NULL,
+            ts INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            UNIQUE (thread_id, ts)
+        )",
+    )
+    .execute(&mut *tx)
+    .await?;
+    let trigger: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'thread_messages' AND name = 'ls_text_del'",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if trigger == 1 {
+        return Ok(tx.commit().await?);
+    }
+    // first run, or a presage migration rebuilt the table and dropped the trigger
+    sqlx::query(
+        "DELETE FROM ls_text WHERE NOT EXISTS
+            (SELECT 1 FROM thread_messages m WHERE m.thread_id = ls_text.thread_id AND m.ts = ls_text.ts)",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "CREATE TRIGGER IF NOT EXISTS ls_text_del AFTER DELETE ON thread_messages BEGIN
+            DELETE FROM ls_text WHERE thread_id = old.thread_id AND ts = old.ts;
+        END",
+    )
+    .execute(&mut *tx)
+    .await?;
+    Ok(tx.commit().await?)
+}
+
 fn unzip(thread: &Thread) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
     match thread {
         Thread::Group(key) => (Some(key.to_vec()), None),
@@ -378,8 +431,177 @@ impl Index {
         .execute(&pool)
         .await?;
         ensure_order(&pool).await?;
+        ensure_text(&pool).await?;
         migrate(&pool).await?;
         Ok(Self { pool })
+    }
+
+    /// Message `ts` reads `text` (lowercase body and captions), for the message search.
+    pub async fn record_text(&self, thread: &Thread, ts: u64, text: &str) -> anyhow::Result<()> {
+        let (gk, rid) = unzip(thread);
+        sqlx::query(
+            "INSERT OR REPLACE INTO ls_text (thread_id, ts, text)
+             SELECT id, ?, ? FROM threads WHERE group_master_key = ? OR recipient_id = ?",
+        )
+        .bind(ts as i64)
+        .bind(text)
+        .bind(gk)
+        .bind(rid)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// How many rows the thread holds (through `ls_order`'s thread index, without reading them).
+    pub async fn row_count(&self, thread: &Thread) -> anyhow::Result<u64> {
+        let (gk, rid) = unzip(thread);
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ls_order WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)",
+        )
+        .bind(gk)
+        .bind(rid)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(n as u64)
+    }
+
+    /// `record_text` for many messages of one thread, in one transaction; how many.
+    pub async fn record_texts(&self, thread: &Thread, texts: &[(u64, String)]) -> anyhow::Result<usize> {
+        if texts.is_empty() {
+            return Ok(0);
+        }
+        let (gk, rid) = unzip(thread);
+        let mut tx = self.pool.begin().await?;
+        let Some(id): Option<i64> = sqlx::query_scalar("SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?")
+            .bind(gk)
+            .bind(rid)
+            .fetch_optional(&mut *tx)
+            .await?
+        else {
+            return Ok(0);
+        };
+        for (ts, text) in texts {
+            sqlx::query("INSERT OR REPLACE INTO ls_text (thread_id, ts, text) VALUES (?, ?, ?)")
+                .bind(id)
+                .bind(*ts as i64)
+                .bind(text)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(texts.len())
+    }
+
+    /// An edit by `sender` (`service_id_string`) gives message `ts` new text. Only that
+    /// message's own author can, and only a message already indexed (not one that disappears).
+    pub async fn edit_text(&self, thread: &Thread, ts: u64, sender: &str, text: &str) -> anyhow::Result<()> {
+        let (gk, rid) = unzip(thread);
+        sqlx::query(
+            "UPDATE ls_text SET text = ?1
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ?2 OR recipient_id = ?3) AND ts = ?4
+               AND EXISTS (SELECT 1 FROM thread_messages m
+                           WHERE m.thread_id = ls_text.thread_id AND m.ts = ls_text.ts AND m.sender_service_id = ?5)",
+        )
+        .bind(text)
+        .bind(gk)
+        .bind(rid)
+        .bind(ts as i64)
+        .bind(sender)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Message `ts` was deleted for everyone: presage replaces it in place, which the delete
+    /// trigger doesn't see.
+    pub async fn forget_text(&self, thread: &Thread, ts: u64) -> anyhow::Result<()> {
+        let (gk, rid) = unzip(thread);
+        sqlx::query(
+            "DELETE FROM ls_text WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?) AND ts = ?",
+        )
+        .bind(gk)
+        .bind(rid)
+        .bind(ts as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Messages whose text contains `needle` and passes `keep`, newest first, at most `cap`:
+    /// (thread, sent ts). In `thread` only, if given. Read in chunks, so other queries get the
+    /// connection in between and `cancelled` can stop a search the user has moved on from.
+    pub async fn search_text(
+        &self,
+        thread: Option<&Thread>,
+        needle: &str,
+        keep: &dyn Fn(&str) -> bool,
+        cap: usize,
+        cancelled: &dyn Fn() -> bool,
+    ) -> anyhow::Result<Vec<(Thread, u64)>> {
+        const CHUNK: i64 = 20_000;
+        let only: Option<i64> = match thread {
+            Some(t) => {
+                let (gk, rid) = unzip(t);
+                let id = sqlx::query_scalar("SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?")
+                    .bind(gk)
+                    .bind(rid)
+                    .fetch_optional(&self.pool)
+                    .await?;
+                if id.is_none() {
+                    return Ok(Vec::new());
+                }
+                id
+            }
+            None => None,
+        };
+        let top: i64 = sqlx::query_scalar("SELECT IFNULL(MAX(rowid), 0) FROM ls_text").fetch_one(&self.pool).await?;
+        let mut hits: Vec<(i64, i64)> = Vec::new();
+        let mut from = 0;
+        while from <= top {
+            if cancelled() {
+                return Ok(Vec::new());
+            }
+            let rows = sqlx::query(
+                "SELECT thread_id, ts, text FROM ls_text
+                 WHERE rowid >= ?1 AND rowid < ?2 AND (?3 IS NULL OR thread_id = ?3) AND instr(text, ?4) > 0",
+            )
+            .bind(from)
+            .bind(from + CHUNK)
+            .bind(only)
+            .bind(needle)
+            .fetch_all(&self.pool)
+            .await?;
+            for r in rows {
+                let text: &str = r.try_get("text")?;
+                if keep(text) {
+                    hits.push((r.try_get("thread_id")?, r.try_get("ts")?));
+                }
+            }
+            from += CHUNK;
+            tokio::task::yield_now().await;
+        }
+        hits.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+        hits.truncate(cap);
+        let threads = self.threads_by_id().await?;
+        Ok(hits.into_iter().filter_map(|(id, ts)| Some((threads.get(&id)?.clone(), ts as u64))).collect())
+    }
+
+    /// Every thread by its DB id.
+    async fn threads_by_id(&self) -> anyhow::Result<HashMap<i64, Thread>> {
+        let rows = sqlx::query(
+            "SELECT t.id, t.group_master_key AS gk, t.recipient_id AS rid,
+                EXISTS (SELECT 1 FROM ls_pni p WHERE p.pni = t.recipient_id) AS pni
+             FROM threads t",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out = HashMap::new();
+        for row in rows {
+            if let Some(t) = thread_of(row.try_get("gk")?, row.try_get("rid")?, row.try_get("pni")?) {
+                out.insert(row.try_get("id")?, t);
+            }
+        }
+        Ok(out)
     }
 
     /// The pointer of an earlier upload of `hash` to `thread` made at or after `since` (ms).
@@ -462,6 +684,20 @@ impl Index {
         let ((fg, fr), (tg, tr)) = (unzip(from), unzip(to));
         sqlx::query(
             "UPDATE OR IGNORE ls_order SET thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND EXISTS (SELECT 1 FROM threads WHERE group_master_key = ? OR recipient_id = ?)",
+        )
+        .bind(&tg)
+        .bind(&tr)
+        .bind(&fg)
+        .bind(&fr)
+        .bind(&tg)
+        .bind(&tr)
+        .execute(&self.pool)
+        .await?;
+        // the moved copies are new rows of `to`: the text goes with them
+        sqlx::query(
+            "UPDATE OR IGNORE ls_text SET thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
              WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
                AND EXISTS (SELECT 1 FROM threads WHERE group_master_key = ? OR recipient_id = ?)",
         )
@@ -895,20 +1131,7 @@ impl Index {
             let last_ts: i64 = row.try_get("last_ts")?;
             let tail_ts: Option<i64> = row.try_get("tail_ts")?;
             let pni: bool = row.try_get("pni")?;
-            let thread = match (gk, rid) {
-                (Some(gk), _) => match gk.try_into() {
-                    Ok(key) => Thread::Group(key),
-                    Err(_) => continue,
-                },
-                (None, Some(rid)) => match uuid::Uuid::from_slice(&rid) {
-                    Ok(u) => match crate::types::parse_thread_key(&format!("{}:{u}", if pni { "p" } else { "c" })) {
-                        Some(t) => t,
-                        None => continue,
-                    },
-                    Err(_) => continue,
-                },
-                _ => continue,
-            };
+            let Some(thread) = thread_of(gk, rid, pni) else { continue };
             out.push(ThreadRow { thread, last_ts: last_ts as u64, tail_ts: tail_ts.unwrap_or(last_ts) as u64 });
         }
         Ok(out)

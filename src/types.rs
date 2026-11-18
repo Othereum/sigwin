@@ -57,6 +57,12 @@ pub enum ResultDto {
     Start { label: String, sub: String, target: String, ready: bool, phone: bool },
     /// "전화번호로 찾기" / "사용자 이름으로 찾기": sets the search box to that
     Find(Find),
+    /// a found message `id` (sent timestamp): its chat, `snippet` the text around the match
+    Message { thread: ThreadDto, id: String },
+    /// shows the next page of found messages (`Command::SearchMore`)
+    More,
+    /// a line of dim text about the results
+    Note(String),
 }
 
 #[derive(Debug, Clone)]
@@ -707,8 +713,11 @@ pub enum Command {
     SaveViewed { id: String, index: usize, owner: isize },
     /// "더 읽기" on a row: show more of its text
     ReadMore(String),
-    /// the sidebar's search; `contacts`: the contact list the ✎ button opens
-    Search { query: String, contacts: bool, find: Find },
+    /// the sidebar's search; `contacts`: the contact list the ✎ button opens; `scope`: the
+    /// thread whose messages alone are searched
+    Search { query: String, contacts: bool, find: Find, scope: Option<String> },
+    /// the next page of found messages
+    SearchMore,
     /// look up whom a `ResultDto::Start` row names and open the conversation with them
     StartChat(String),
     /// the request bar of message request `key`
