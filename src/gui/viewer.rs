@@ -90,6 +90,10 @@ struct Viewer {
     patch_busy: Cell<bool>,
     /// at the last press: the cursor on the screen and the window's position, physical px
     press: Cell<Option<((i32, i32), (i32, i32))>>,
+    /// a view-once picture (`ViewerImage::once`)
+    once: bool,
+    /// the backend heard the view-once picture was shown
+    seen: Cell<bool>,
 }
 
 thread_local! {
@@ -137,14 +141,23 @@ pub(crate) fn close() {
 
 /// After a message list update: the message was deleted or expired, or another thread was opened.
 pub(crate) fn close_if_gone() {
-    let id = VIEWER.with_borrow(|v| v.as_ref().map(|v| v.id.clone()));
-    if id.is_some_and(|id| !row_has_image(&id)) {
+    let shown = VIEWER.with_borrow(|v| v.as_ref().map(|v| (v.id.clone(), v.once)));
+    if shown.is_some_and(|(id, once)| !row_has_image(&id, once)) {
         close();
     }
 }
 
-fn row_has_image(id: &str) -> bool {
-    UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && !m.cells.is_empty())) || super::gallery::shows(id)
+/// A view-once row has no cells, and once shown it reads as viewed: it only has to be there.
+fn row_has_image(id: &str, once: bool) -> bool {
+    UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && (once || !m.cells.is_empty()))) || super::gallery::shows(id)
+}
+
+/// The picture itself is on screen: a view-once one is used up now, not when it was asked for
+/// (the window may be closed while it downloads).
+fn mark_seen(v: &Viewer) {
+    if v.once && v.pending.borrow().is_empty() && !v.seen.replace(true) {
+        send_cmd(Command::ViewOnceSeen(v.id.clone()));
+    }
 }
 
 pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
@@ -152,7 +165,7 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
     if !same {
         let wanted = PENDING.with_borrow_mut(|p| if p.as_ref().is_some_and(|(id, _)| *id == img.id) { p.take() } else { None });
         let Some((_, clicked)) = wanted else { return };
-        if !row_has_image(&img.id) {
+        if !row_has_image(&img.id, img.once) {
             return;
         }
         if let Err(e) = create(app, img, clicked) {
@@ -172,6 +185,7 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
         v.animated.set(img.animated);
         show_details(&v.win, &img);
         set_pending(v, &img.pending);
+        mark_seen(v);
         if arrived && v.count > 1 {
             // its blurhash in the strip becomes the picture
             send_cmd(Command::ViewerThumbs { id: v.id.clone(), px: strip_px(&v.win) });
@@ -280,6 +294,7 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
     win.set_zoom_hint_on(zoom_hint);
     win.set_top_on(true);
     win.set_intro_on(true);
+    win.set_once(img.once);
     let hide_top = slint::Timer::default();
     hide_top.start(slint::TimerMode::SingleShot, TOP_SHOWN, || with_current(|v| v.win.set_top_on(false)));
     let hint_shown = if close_hint && zoom_hint { HINTS_SHOWN } else { HINT_SHOWN };
@@ -375,9 +390,14 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
             patch_id: Cell::new(0),
             patch_busy: Cell::new(false),
             press: Cell::new(None),
+            once: img.once,
+            seen: Cell::new(false),
         });
     });
-    with_current(|v| set_pending(v, &pending));
+    with_current(|v| {
+        set_pending(v, &pending);
+        mark_seen(v);
+    });
     Ok(())
 }
 

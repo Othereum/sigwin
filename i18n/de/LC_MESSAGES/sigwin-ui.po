@@ -1042,8 +1042,29 @@ msgstr "[Geteilter Kontakt]"
 msgid "[Sticker {}]"
 msgstr "[Sticker {}]"
 
-msgid "[View-once media — open it on your phone]"
-msgstr "[Einmalansicht – öffne sie auf deinem Telefon]"
+msgid "View-once media"
+msgstr "Medien zur Einmalansicht"
+
+msgid "View-once photo"
+msgstr "Foto zur Einmalansicht"
+
+msgid "Click to view"
+msgstr "Zum Ansehen klicken"
+
+msgid "Open it on your phone"
+msgstr "Öffne es auf deinem Telefon"
+
+msgid "Viewed"
+msgstr "Angesehen"
+
+msgid "This view-once media can't be opened anymore."
+msgstr "Diese Medien zur Einmalansicht können nicht mehr geöffnet werden."
+
+msgid "This picture can't be shown here. Open it on your phone."
+msgstr "Dieses Bild kann hier nicht angezeigt werden. Öffne es auf deinem Telefon."
+
+msgid "Couldn't tell your phone it was viewed. It can still be opened there"
+msgstr "Dein Telefon konnte nicht informiert werden, dass es angesehen wurde. Dort lässt es sich noch öffnen"
 
 msgid "edited"
 msgstr "bearbeitet"

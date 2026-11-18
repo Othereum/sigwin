@@ -25,20 +25,27 @@ impl App {
                 // keeps the quoted @mentions readable on the other side
                 body_ranges: dm.body_ranges.clone(),
                 // a sticker or photo without text: tell the other side what is quoted
-                // (the original's pointer doubles as the thumbnail: no new upload, like Desktop's reuse)
-                attachments: dm
-                    .sticker
-                    .as_ref()
-                    .and_then(|s| s.data.as_ref())
-                    .or_else(|| view::media::shown_attachments(&dm).next().map(|(_, a)| a))
-                    .map(|a| {
-                        vec![presage::proto::data_message::quote::QuotedAttachment {
-                            content_type: a.content_type.clone(),
-                            file_name: a.file_name.clone(),
-                            thumbnail: Some(a.clone()),
-                        }]
-                    })
-                    .unwrap_or_default(),
+                // (the original's pointer doubles as the thumbnail: no new upload, like Desktop's reuse).
+                // A view-once one: only that it is one, never the picture (as Desktop does)
+                attachments: if dm.is_view_once.unwrap_or(false) {
+                    vec![presage::proto::data_message::quote::QuotedAttachment {
+                        content_type: Some("image/jpeg".into()),
+                        ..Default::default()
+                    }]
+                } else {
+                    dm.sticker
+                        .as_ref()
+                        .and_then(|s| s.data.as_ref())
+                        .or_else(|| view::media::shown_attachments(&dm).next().map(|(_, a)| a))
+                        .map(|a| {
+                            vec![presage::proto::data_message::quote::QuotedAttachment {
+                                content_type: a.content_type.clone(),
+                                file_name: a.file_name.clone(),
+                                thumbnail: Some(a.clone()),
+                            }]
+                        })
+                        .unwrap_or_default()
+                },
                 ..Default::default()
             })
         });

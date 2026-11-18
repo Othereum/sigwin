@@ -915,3 +915,80 @@ fn send_timestamps_never_repeat() {
         assert!(tss.windows(2).all(|w| w[0] < w[1]));
     });
 }
+
+/// The view-once card of the last list's last row.
+fn last_once(events: &[Event]) -> Option<crate::types::ViewOnce> {
+    last_list(events).and_then(|(items, _)| items.last()).map(|m| m.view_once)
+}
+
+#[test]
+fn a_view_once_picture_shows_once() {
+    use crate::types::ViewOnce;
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=2").await;
+        h.op("once who=1").await;
+        h.open(1).await;
+        let ev = h.take_events();
+        let row = last_list(&ev).and_then(|(items, _)| items.last()).expect("a row").clone();
+        assert_eq!(row.view_once, ViewOnce::Photo);
+        assert!(row.cells.is_empty() && row.attachment.is_empty(), "never shown as an ordinary picture");
+        let id = row.id;
+        let file = h.app.paths.attachments.clone();
+        let cached = || std::fs::read_dir(&file).map_or(0, |d| d.count());
+        assert_eq!(cached(), 1);
+
+        // neither saved nor handed to another app
+        assert!(h.app.viewed(&id, 0).is_none());
+
+        h.cmd(Command::ViewImage { id: id.clone(), index: 0, fit: (800, 600) }).await;
+        let mut shown = None;
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            h.settle().await;
+            shown = h.take_events().into_iter().find_map(|e| match e {
+                Event::ViewerImage(v) => Some(v),
+                _ => None,
+            });
+            if shown.is_some() {
+                break;
+            }
+        }
+        let shown = shown.expect("the picture");
+        assert!(shown.once && shown.pending.is_empty() && shown.count == 1);
+        // asked for but not yet on screen: nothing is used up
+        assert_eq!(h.query("answers", 1), "");
+
+        h.cmd(Command::ViewOnceSeen(id.clone())).await;
+        assert_eq!(last_once(&h.take_events()), Some(ViewOnce::Viewed));
+        assert_eq!(h.query("answers", 1), "Viewed,ViewOnceOpen");
+        assert_eq!(cached(), 0, "the cached copy goes");
+        // erased in the store too, pointer and key with it
+        let thread = Thread::Contact(ServiceId::Aci(super::fixture::contact(1).into()));
+        let stored = h.app.store.message(&thread, id.parse().unwrap()).await.unwrap().expect("the row stays");
+        assert!(view::data_message(&stored).is_some_and(|dm| dm.attachments.is_empty() && dm.is_view_once == Some(true)));
+
+        h.cmd(Command::ViewImage { id, index: 0, fit: (800, 600) }).await;
+        let ev = h.take_events();
+        assert!(!ev.iter().any(|e| matches!(e, Event::ViewerImage(_))));
+        assert!(ev.iter().any(|e| matches!(e, Event::Notice(_))));
+    });
+}
+
+#[test]
+fn a_view_once_message_opened_on_the_phone_or_a_video_is_not_opened_here() {
+    use crate::types::ViewOnce;
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("once who=1").await;
+        h.open(1).await;
+        assert_eq!(last_once(&h.take_events()), Some(ViewOnce::Photo));
+        h.op("phone-opened who=1").await;
+        assert_eq!(last_once(&h.take_events()), Some(ViewOnce::Viewed));
+        // the phone sends what goes out: nothing from here
+        assert_eq!(h.query("answers", 1), "");
+
+        h.op("once who=1 video=1").await;
+        assert_eq!(last_once(&h.take_events()), Some(ViewOnce::Phone));
+    });
+}

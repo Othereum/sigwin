@@ -1,6 +1,6 @@
 // A message bubble and its parts.
 
-import { MsgItem } from "types.slint";
+import { MsgItem, ViewOnce } from "types.slint";
 import { Anim, Links, Theme } from "theme.slint";
 import { Avatar } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
@@ -464,6 +464,8 @@ export component Bubble inherits VerticalLayout {
     callback attachment-clicked(string, int);
     // the file line (a photo is `attachment-clicked`)
     callback file-clicked(string);
+    // a view-once picture's card
+    callback view-once-clicked(string);
     // the hover toolbar's save: every picture, video and file of the message
     callback save-clicked(string);
     // the file line's files are on their way to be saved
@@ -698,6 +700,54 @@ export component Bubble inherits VerticalLayout {
                     r-br: root.r-br;
                     attachment-clicked(id, index) => { root.attachment-clicked(id, index); }
                     menu(id, x, y) => { root.menu(id, x, y); }
+                }
+                if m.view-once != ViewOnce.none: Rectangle {
+                    property <bool> live: m.view-once == ViewOnce.photo;
+                    border-radius: 6px;
+                    background: live && vta.has-hover ? (m.outgoing ? #ffffff30 : Theme.hover) : transparent;
+                    vta := TouchArea {
+                        mouse-cursor: live ? pointer : default;
+                        clicked => {
+                            if (live) {
+                                root.view-once-clicked(m.id);
+                            }
+                        }
+                        pointer-event(e) => {
+                            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                                root.menu(m.id, self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        padding: 4px;
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            y: 0px;
+                            border-radius: 20px;
+                            background: live ? Theme.accent : m.outgoing ? #ffffff40 : Theme.inset;
+                            Icon {
+                                icon: m.view-once == ViewOnce.phone ? Icons.phone : m.view-once == ViewOnce.viewed ? Icons.check : Icons.gallery;
+                                size: 22px;
+                                tint: live || m.outgoing ? white : Theme.subtle;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 1px;
+                            Text {
+                                text: live ? @tr("View-once photo") : @tr("View-once media");
+                                color: m.outgoing ? white : Theme.text;
+                                font-size: 14px;
+                            }
+                            if m.view-once != ViewOnce.sent: Text {
+                                text: live ? @tr("Click to view") : m.view-once == ViewOnce.phone ? @tr("Open it on your phone") : @tr("Viewed");
+                                color: m.outgoing ? #ffffffc0 : Theme.subtle;
+                                font-size: 12px;
+                            }
+                        }
+                    }
                 }
                 if m.attachment != "": Rectangle {
                     border-radius: 6px;

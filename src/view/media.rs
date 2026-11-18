@@ -68,17 +68,46 @@ pub fn link_card(dm: &DataMessage, ts: u64) -> Option<(crate::types::LinkCard, O
     Some((card, wanted))
 }
 
-/// Attachments shown as such (the long-text one is part of the body).
+/// Attachments shown as such (the long-text one is part of the body). None of a view-once
+/// message: it is seen once, through `view_once_photo`, and must not show, download, save or be
+/// quoted as an ordinary picture.
 pub fn shown_attachments(dm: &DataMessage) -> impl Iterator<Item = (usize, &AttachmentPointer)> {
-    dm.attachments.iter().enumerate().filter(|(_, a)| !is_long_text(a))
+    let once = dm.is_view_once.unwrap_or(false);
+    dm.attachments.iter().enumerate().filter(move |(_, a)| !once && !is_long_text(a))
 }
 
-/// What a message adds to its chat's media and files: (index in `attachments`, kind). Not a
-/// view-once message's (it can't be seen again), nor voice messages, which aren't files to the user.
-pub fn gallery_items(dm: &DataMessage) -> Vec<(usize, crate::db::MediaKind)> {
-    if dm.is_view_once.unwrap_or(false) {
-        return Vec::new();
+/// How long a view-once message can be opened, from its send time: Signal's clients erase it
+/// then, opened or not (`global.messageQueueTimeInSeconds`, a month by default).
+pub const VIEW_ONCE_KEPT_MS: u64 = 30 * 24 * 3600 * 1000;
+
+/// The picture of a view-once message that can still be opened here. Videos and other kinds are
+/// left to the phone: they'd play in an outside app, which could keep a copy.
+pub fn view_once_photo(dm: &DataMessage, ts: u64, now: u64) -> Option<(usize, &AttachmentPointer)> {
+    if !dm.is_view_once.unwrap_or(false) || ts.saturating_add(VIEW_ONCE_KEPT_MS) <= now {
+        return None;
     }
+    dm.attachments.iter().enumerate().find(|(_, a)| !is_long_text(a)).filter(|(_, a)| is_image(a))
+}
+
+/// What a view-once message's card says, `None` for any other message.
+pub fn view_once_state(dm: &DataMessage, outgoing: bool, ts: u64, now: u64) -> crate::types::ViewOnce {
+    use crate::types::ViewOnce;
+    if !dm.is_view_once.unwrap_or(false) {
+        ViewOnce::None
+    } else if outgoing {
+        ViewOnce::Sent
+    } else if view_once_photo(dm, ts, now).is_some() {
+        ViewOnce::Photo
+    } else if dm.attachments.iter().any(|a| !is_long_text(a)) && ts.saturating_add(VIEW_ONCE_KEPT_MS) > now {
+        ViewOnce::Phone
+    } else {
+        ViewOnce::Viewed
+    }
+}
+
+/// What a message adds to its chat's media and files: (index in `attachments`, kind). Not voice
+/// messages, which aren't files to the user.
+pub fn gallery_items(dm: &DataMessage) -> Vec<(usize, crate::db::MediaKind)> {
     shown_attachments(dm)
         .filter(|(_, a)| !is_voice(a))
         .map(|(i, a)| (i, if is_media(a) { crate::db::MediaKind::Media } else { crate::db::MediaKind::Files }))

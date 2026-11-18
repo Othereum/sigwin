@@ -72,6 +72,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/backend/send.rs` | sending text and attachments, pending rows |
 | `src/backend/linkpreview.rs` | link previews on outgoing messages: fetching, attaching, stopping presage's own fetch |
 | `src/backend/ops.rs` | reactions, edits, deletes, pins |
+| `src/backend/once.rs` | view-once pictures: used up when shown, here or on another device |
 | `src/backend/typing.rs` | typing indicators |
 | `src/backend/stickers.rs` | sticker packs: picker, sending, installing |
 | `src/backend/gallery.rs` | a chat's media page: pages from the media index, the messages it loaded (the viewer finds them there), its thumbnails |

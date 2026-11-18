@@ -1038,8 +1038,29 @@ msgstr "[연락처 공유]"
 msgid "[Sticker {}]"
 msgstr "[스티커 {}]"
 
-msgid "[View-once media — open it on your phone]"
-msgstr "[한 번 보기 미디어 — 휴대폰에서 확인하세요]"
+msgid "View-once media"
+msgstr "한 번만 볼 수 있는 미디어"
+
+msgid "View-once photo"
+msgstr "한 번만 볼 수 있는 사진"
+
+msgid "Click to view"
+msgstr "클릭하여 보기"
+
+msgid "Open it on your phone"
+msgstr "휴대폰에서 볼 수 있습니다"
+
+msgid "Viewed"
+msgstr "조회함"
+
+msgid "This view-once media can't be opened anymore."
+msgstr "이 미디어는 더 이상 열 수 없습니다."
+
+msgid "This picture can't be shown here. Open it on your phone."
+msgstr "이 사진은 여기서 표시할 수 없습니다. 휴대폰에서 볼 수 있습니다."
+
+msgid "Couldn't tell your phone it was viewed. It can still be opened there"
+msgstr "본 것을 휴대폰에 알리지 못했습니다. 휴대폰에서는 아직 열 수 있습니다"
 
 msgid "edited"
 msgstr "수정됨"

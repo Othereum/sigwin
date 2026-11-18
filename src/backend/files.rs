@@ -377,16 +377,20 @@ impl App {
         self.gallery.as_ref()?.message(ts).map(|dm| (ts, dm))
     }
 
-    /// Image `index` of row `id`: cache path and pointer.
+    /// Image `index` of row `id`, to save or open elsewhere: cache path and pointer. Never a
+    /// view-once one.
     pub(super) fn viewed(&self, id: &str, index: usize) -> Option<(PathBuf, AttachmentPointer)> {
+        if self.row_message(id)?.1.is_view_once.unwrap_or(false) {
+            return None;
+        }
         let (_, path, ptr) = self.viewed_key(id, index)?;
         Some((path, ptr))
     }
 
-    /// `viewed`, with the attachment's file key too.
+    /// `viewed`, with the attachment's file key too, and a view-once picture's.
     fn viewed_key(&self, id: &str, index: usize) -> Option<(String, PathBuf, AttachmentPointer)> {
         let (ts, dm) = self.row_message(id)?;
-        let (i, a) = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a)).nth(index)?;
+        let (i, a) = viewer_images(dm, ts).into_iter().nth(index)?;
         let key = view::media::attachment_key(a, ts, i);
         let path = attachment_path(&self.paths.attachments, &key);
         Some((key, path, a.clone()))
@@ -402,13 +406,22 @@ impl App {
     }
 
     pub(super) fn view_image(&mut self, id: &str, index: usize, fit: (u32, u32)) {
-        let Some((_, dm)) = self.row_message(id) else { return };
-        let count = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a)).count();
+        let Some((ts, dm)) = self.row_message(id) else { return };
+        let once = dm.is_view_once.unwrap_or(false);
+        let count = viewer_images(dm, ts).len();
         if count == 0 {
+            if once {
+                // opened on another device meanwhile, or past its time
+                self.notice(tr!("This view-once media can't be opened anymore."));
+            }
             return;
         }
         let index = index.min(count - 1);
-        let Some((file_key, path, ptr)) = self.viewed_key(id, index) else { return };
+        let Some((file_key, path, mut ptr)) = self.viewed_key(id, index) else { return };
+        if once {
+            // the blurhash would be a preview of what is meant to be seen once
+            ptr.blur_hash = None;
+        }
         let id = id.to_string();
         let emit = self.emit.clone();
         let tx = self.tx.clone();
@@ -428,12 +441,14 @@ impl App {
                 }
                 let pending = crate::types::viewer_key(&file_key);
                 let pixels = placeholder(&ptr, fit);
-                emit(Event::ViewerImage(crate::types::ViewerImage { id: id.clone(), index, count, pixels, animated: false, pending: pending.clone() }));
+                emit(Event::ViewerImage(crate::types::ViewerImage { id: id.clone(), index, count, pixels, animated: false, pending: pending.clone(), once }));
                 keys.push(pending);
                 match downloads.ensure(&file_key, &ptr, &Show::Cells(keys), &emit, &path).await {
                     Ok(true) => {
                         // the list makes its thumbnails from it now
-                        let _ = tx.send(Internal::Fetched(file_key));
+                        if !once {
+                            let _ = tx.send(Internal::Fetched(file_key));
+                        }
                     }
                     // stopped: the blurhash stays, and its mark starts it again
                     Ok(false) => return,
@@ -465,12 +480,12 @@ impl App {
             match decoded {
                 Ok(Ok(Some(Decoded::Still(pixels)))) => {
                     let _ = tx.send(Internal::ProgressDone);
-                    emit(Event::ViewerImage(crate::types::ViewerImage { id, index, count, pixels, animated: false, pending: String::new() }));
+                    emit(Event::ViewerImage(crate::types::ViewerImage { id, index, count, pixels, animated: false, pending: String::new(), once }));
                 }
                 Ok(Ok(Some(Decoded::Gif(bytes, pixels)))) => {
                     let _ = tx.send(Internal::ProgressDone);
                     let px = pixels.full().0.max(pixels.full().1);
-                    emit(Event::ViewerImage(crate::types::ViewerImage { id: id.clone(), index, count, pixels, animated: true, pending: String::new() }));
+                    emit(Event::ViewerImage(crate::types::ViewerImage { id: id.clone(), index, count, pixels, animated: true, pending: String::new(), once }));
                     if !stop.load(std::sync::atomic::Ordering::Relaxed) {
                         let slot = Arc::new(crate::types::GifSlot::new(id, super::gif::next_gen(), crate::types::GifTarget::Viewer(index)));
                         super::gif::stream(bytes, px, slot, stop, emit, None);
@@ -479,6 +494,12 @@ impl App {
                 other => {
                     if let Ok(Err(e)) = other {
                         warn!("view image: {e:#}");
+                    }
+                    if once {
+                        // an outside app could keep a copy: not used up, the phone can still open it
+                        let _ = std::fs::remove_file(&path);
+                        let _ = tx.send(Internal::Notice(tr!("This picture can't be shown here. Open it on your phone.").into()));
+                        return;
                     }
                     // animated (not a GIF), huge or undecodable: an outside app may do better
                     open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
@@ -491,7 +512,7 @@ impl App {
     /// viewed.
     pub(super) fn viewer_thumbs(&self, id: &str, px: u32) {
         let Some((ts, dm)) = self.row_message(id) else { return };
-        let images = view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a));
+        let images = viewer_images(dm, ts).into_iter();
         let jobs: Vec<(String, Option<String>)> = images.map(|(i, a)| (view::media::attachment_key(a, ts, i), a.blur_hash.clone())).collect();
         let id = id.to_string();
         let emit = self.emit.clone();
@@ -967,6 +988,15 @@ fn blur_thumb(key: &str, hash: &str, w: u32, h: u32) -> Option<Thumb> {
 /// The blurhash of a picture shown with `shape`, at the size its box has in the list.
 /// What the viewer shows of a picture on its way: its blurhash (or plain dark without one) at
 /// the size the picture will have, within `fit`.
+/// The pictures the viewer steps through: (index in `attachments`, pointer). A view-once
+/// message's one picture while it can still be opened.
+fn viewer_images(dm: &DataMessage, ts: u64) -> Vec<(usize, &AttachmentPointer)> {
+    if dm.is_view_once.unwrap_or(false) {
+        return view::media::view_once_photo(dm, ts, view::time::now_ms()).into_iter().collect();
+    }
+    view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a)).collect()
+}
+
 fn placeholder(ptr: &AttachmentPointer, fit: (u32, u32)) -> crate::types::ViewerPixels {
     let (w, h) = match (ptr.width, ptr.height) {
         (Some(w), Some(h)) if w > 0 && h > 0 => (w, h),

@@ -66,7 +66,9 @@ fn classify_data<'a>(dm: &'a DataMessage, outgoing: bool) -> Kind<'a> {
         || !dm.contact.is_empty()
         || dm.payment.is_some()
         || dm.poll_create.is_some()
-        || dm.gift_badge.is_some();
+        || dm.gift_badge.is_some()
+        // opened, its picture gone: it still shows, as viewed
+        || dm.is_view_once.unwrap_or(false);
     if has_content {
         return Kind::Msg { outgoing, dm };
     }
@@ -312,6 +314,7 @@ pub fn build(
                     set_quote(&mut m, q, *ts, me, name_of, &mut wanted_cells);
                 }
                 set_attachments(&mut m, dm, *ts, &mut wanted_cells);
+                m.view_once = media::view_once_state(dm, outgoing, *ts, now);
                 // not next to attachments (Signal's clients don't send that), and it would give
                 // away what a spoiler in the text hides
                 if !m.sticker && m.attachment.is_empty() && m.cells.is_empty() && !m.styles.iter().any(|s| s.2 == STYLE_SPOILER) {

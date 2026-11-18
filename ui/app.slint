@@ -17,7 +17,7 @@ import { FindKind, ResultRow, ResultKind, SearchData } from "search.slint";
 import { GalleryData, GalleryPage } from "gallery.slint";
 
 // Structs and globals the Rust side uses.
-export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, ReplyItem, MentionItem, PackItem, StickerItem } from "types.slint";
+export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, ReplyItem, MentionItem, PackItem, StickerItem, ViewOnce } from "types.slint";
 export { Anim, Links, Theme } from "theme.slint";
 export { ImageViewer } from "viewer.slint";
 export { SettingsData } from "settings.slint";
@@ -118,6 +118,7 @@ export component AppWindow inherits Window {
     // the message and which of its images
     callback attachment-clicked(string, int);
     callback file-clicked(string);
+    callback view-once-clicked(string);
     callback save-clicked(string);
     callback reply(string);
     callback cancel-reply();
@@ -927,6 +928,7 @@ export component AppWindow inherits Window {
                         attachment-clicked(id, index) => { root.attachment-clicked(id, index); }
                         day-label(d) => { return root.day-label(d); }
                         file-clicked(id) => { root.file-clicked(id); }
+                        view-once-clicked(id) => { root.view-once-clicked(id); }
                         save-clicked(id) => { root.save-clicked(id); }
                         quote-clicked(id) => { root.show-message(id); }
                         reply(id) => { root.reply(id); }

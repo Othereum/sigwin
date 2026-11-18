@@ -458,6 +458,13 @@ pub(crate) fn to_item(
         collapse_below: m.collapse_below,
         more: m.more,
         typing: false,
+        view_once: match m.view_once {
+            types::ViewOnce::None => sigwin_ui::ViewOnce::None,
+            types::ViewOnce::Photo => sigwin_ui::ViewOnce::Photo,
+            types::ViewOnce::Phone => sigwin_ui::ViewOnce::Phone,
+            types::ViewOnce::Viewed => sigwin_ui::ViewOnce::Viewed,
+            types::ViewOnce::Sent => sigwin_ui::ViewOnce::Sent,
+        },
     }
 }
 

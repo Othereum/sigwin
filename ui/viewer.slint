@@ -107,6 +107,8 @@ export component ImageViewer inherits Window {
     callback next();
     callback save();
     callback open-outside();
+    // a view-once picture: nothing to save it or hand it on with
+    in property <bool> once;
     callback dismiss();
     // closed by a click or Esc, before `dismiss`
     callback quick-closed();
@@ -279,7 +281,7 @@ export component ImageViewer inherits Window {
             border-radius: 10px;
             background: #000000c0;
             opacity: root.top-shown ? 1 : 0;
-            visible: self.opacity > 0;
+            visible: self.opacity > 0 && !root.once;
             animate opacity { duration: root.top-shown ? 100ms : 250ms; }
             // clicks between the buttons don't close the window
             TouchArea {}

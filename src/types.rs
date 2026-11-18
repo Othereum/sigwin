@@ -292,6 +292,23 @@ pub struct MsgDto {
     pub readers: Vec<(String, String)>,
     /// the text is cut short: "더 읽기" shows more
     pub more: bool,
+    pub view_once: ViewOnce,
+}
+
+/// A view-once message's card.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ViewOnce {
+    /// not a view-once message
+    #[default]
+    None,
+    /// a picture that can be opened here, once
+    Photo,
+    /// a video or other kind: only on the phone
+    Phone,
+    /// opened (here or on another device), or kept past its time
+    Viewed,
+    /// ours: there is nothing to open on the sending side
+    Sent,
 }
 
 impl MsgDto {
@@ -424,6 +441,8 @@ pub struct ViewerImage {
     /// not here yet: `pixels` is its blurhash while it downloads, and this the `MediaLabel` key
     /// that says how far. Empty: the picture itself
     pub pending: String,
+    /// a view-once picture: it can't be saved or opened elsewhere, and showing it uses it up
+    pub once: bool,
 }
 
 /// The `MediaLabel` key the viewer follows a picture's download by.
@@ -693,6 +712,8 @@ pub enum Command {
     OpenVideo { id: String, index: usize },
     /// image `index` (among the row's images) isn't here: stops its download, or starts it
     ToggleImageDownload { id: String, index: usize },
+    /// the viewer showed row `id`'s view-once picture: it is used up
+    ViewOnceSeen(String),
     /// row `id`'s files are being downloaded to be saved: that stops, and nothing more is saved
     StopFileSave { id: String },
     /// Square thumbnails of `px` physical px of all images of a message for the viewer. The ones

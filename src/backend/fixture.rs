@@ -38,8 +38,13 @@ pub(crate) enum FxOp {
     /// one new message from `who` with a picture past the size that is downloaded by itself, not
     /// cached. `gif`: a GIF, which a hover would play once it's here
     Big { who: u32, gif: bool },
+    /// one new view-once message from `who`: a picture already in the cache, or with `video` a
+    /// video
+    Once { who: u32, video: bool },
     /// the phone read `who`'s thread up to its newest message
     PhoneRead { who: u32 },
+    /// the phone opened `who`'s newest message, a view-once one
+    PhoneOpened { who: u32 },
     /// `n` read receipts from `who` for messages of ours elsewhere (a group), filed under `who`'s
     /// 1:1 thread. `old`: only stored, as before they were dropped as they came; `mine`: ours to
     /// `who`, stored as presage stores what it sends (no sending offline)
@@ -58,12 +63,13 @@ impl FxOp {
         let cmd = words.next().ok_or_else(|| anyhow::anyhow!("empty fixture op"))?;
         let mut what = String::new();
         let (mut who, mut n, mut unread, mut name) = (1u32, 1u32, 0u32, String::new());
-        let (mut same, mut gif, mut old, mut mine) = (false, false, false, false);
+        let (mut same, mut gif, mut old, mut mine, mut video) = (false, false, false, false, false);
         let (mut accepted, mut blocked) = (false, false);
         for w in words {
             match w.split_once('=') {
                 Some(("same", v)) => same = v != "0",
                 Some(("gif", v)) => gif = v != "0",
+                Some(("video", v)) => video = v != "0",
                 Some(("old", v)) => old = v != "0",
                 Some(("mine", v)) => mine = v != "0",
                 Some(("accepted", v)) => accepted = v != "0",
@@ -81,7 +87,9 @@ impl FxOp {
             "recv" => Self::Recv { who, n },
             "gifs" => Self::Gifs { who, n, same },
             "big" => Self::Big { who, gif },
+            "once" => Self::Once { who, video },
             "phone-read" => Self::PhoneRead { who },
+            "phone-opened" => Self::PhoneOpened { who },
             "receipts" => Self::Receipts { who, n, old, mine },
             "phone-storage" => Self::PhoneStorage { who, accepted, blocked },
             "query" => Self::Query { what, who },
@@ -276,6 +284,45 @@ impl App {
                 self.store.save_message(&thread, c.clone()).await?;
                 self.content(c).await;
             }
+            FxOp::Once { who, video } => {
+                use sha2::Digest;
+                let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));
+                let ts = self.fx_ts();
+                let mut png = Vec::new();
+                image::RgbaImage::from_pixel(64, 48, image::Rgba([30, 120, 200, 255]))
+                    .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+                let ptr = AttachmentPointer {
+                    content_type: Some(if video { "video/mp4" } else { "image/png" }.into()),
+                    digest: Some(sha2::Sha256::digest(&png).to_vec()),
+                    size: Some(png.len() as u32),
+                    width: Some(64),
+                    height: Some(48),
+                    ..Default::default()
+                };
+                if !video {
+                    let key = view::media::attachment_key(&ptr, ts, 0);
+                    sigwin_vault::write(&files::attachment_path(&self.paths.attachments, &key), &png)?;
+                }
+                let dm = DataMessage { attachments: vec![ptr], is_view_once: Some(true), timestamp: Some(ts), ..Default::default() };
+                let c = incoming_dm(who, dm, me);
+                self.store.save_message(&thread, c.clone()).await?;
+                self.content(c).await;
+            }
+            FxOp::PhoneOpened { who } => {
+                let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));
+                let rows = self.index.page(&thread, i64::MAX, 1).await?;
+                let ts = rows.first().map(|r| r.1).ok_or_else(|| anyhow::anyhow!("thread {who} is empty"))?;
+                let mut c = read_sync(who, ts, me);
+                c.body = ContentBody::SynchronizeMessage(SyncMessage {
+                    content: Some(SyncContent::ViewOnceOpen(presage::proto::sync_message::ViewOnceOpen {
+                        sender_aci: None,
+                        timestamp: Some(ts),
+                        sender_aci_binary: Some(contact(who).as_bytes().to_vec()),
+                    })),
+                    ..Default::default()
+                });
+                self.content(c).await;
+            }
             FxOp::PhoneRead { who } => {
                 let thread = Thread::Contact(ServiceId::Aci(contact(who).into()));
                 let rows = self.index.page(&thread, i64::MAX, 1).await?;
@@ -332,12 +379,12 @@ impl App {
                         Outgoing::Delivery { timestamps, .. } => delivery += timestamps.len(),
                         Outgoing::Read { timestamps, .. } => read += timestamps.len(),
                         Outgoing::ReadSync(v) => sync += v.len(),
-                        Outgoing::RequestAnswer { .. } | Outgoing::ProfileKey(_) => {}
+                        _ => {}
                     }
                 }
                 format!("delivery={delivery} read={read} sync={sync}")
             }
-            // message request answers and profile keys that went out, in order
+            // message request answers, profile keys and what a view-once open sends, in order
             "answers" => self
                 .offline
                 .iter()
@@ -345,6 +392,8 @@ impl App {
                 .filter_map(|o| match o {
                     Outgoing::RequestAnswer { answer, .. } => Some(format!("{answer:?}")),
                     Outgoing::ProfileKey(_) => Some("ProfileKey".into()),
+                    Outgoing::Viewed { .. } => Some("Viewed".into()),
+                    Outgoing::ViewOnceOpen { .. } => Some("ViewOnceOpen".into()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()

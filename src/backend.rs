@@ -48,6 +48,7 @@ mod gif;
 mod history;
 mod mute;
 pub(crate) mod notify;
+mod once;
 mod ops;
 mod pni;
 mod receive;
@@ -780,6 +781,7 @@ impl App {
             Command::SaveFiles { id, owner, all } => self.save_files(&id, owner, all),
             Command::OpenVideo { id, index } => self.open_video(&id, index).await,
             Command::ToggleImageDownload { id, index } => self.toggle_image_download(&id, index).await,
+            Command::ViewOnceSeen(id) => self.view_once_seen(&id).await,
             Command::StopFileSave { id } => self.attachment_downloads.stop_save(&id),
             Command::PlayGif { id, index, seq, size } => self.play_gif(&id, index, seq, size),
             Command::StopGif => self.stop_gif(),

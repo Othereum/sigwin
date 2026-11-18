@@ -241,9 +241,6 @@ pub(super) fn body_text_spans(
     styles: &mut Vec<(usize, usize, u8)>,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if dm.is_view_once.unwrap_or(false) {
-        parts.push(tr!("[View-once media — open it on your phone]").into());
-    }
     if let Some(s) = &dm.sticker {
         parts.push(tr!("[Sticker {}]", s.emoji.as_deref().unwrap_or("")));
     }
@@ -294,7 +291,9 @@ pub fn snippet(c: &Content, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> Opti
 /// A message's text on one line, or what it carries when it has no text.
 pub fn one_line(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
     let mut t = body_text(dm, name_of);
-    if t.is_empty() {
+    if t.is_empty() && dm.is_view_once.unwrap_or(false) {
+        t = tr!("View-once media").into();
+    } else if t.is_empty() {
         t = shown_attachments(dm)
             .next()
             .map(|(_, a)| {
@@ -397,7 +396,7 @@ mod tests {
         let dm = DataMessage {
             body: Some(text.into()),
             body_ranges: vec![r(0, a), r(5, b)],
-            is_view_once: Some(true),
+            contact: vec![Default::default()],
             ..Default::default()
         };
         let mut spans = Vec::new();

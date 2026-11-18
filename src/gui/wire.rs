@@ -736,6 +736,13 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
     });
 
+    let weak = app.as_weak();
+    app.on_view_once_clicked(move |id| {
+        if let Some(app) = weak.upgrade() {
+            viewer::open(&app, id.to_string(), 0);
+        }
+    });
+
     app.on_notice_action_clicked(notice::reveal);
 
     let weak = app.as_weak();

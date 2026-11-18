@@ -70,6 +70,9 @@ export struct ReactionItem {
     who: string,
 }
 
+// `types::ViewOnce`
+export enum ViewOnce { none, photo, phone, viewed, sent }
+
 export struct MsgItem {
     id: string,
     sender: string,
@@ -153,6 +156,8 @@ export struct MsgItem {
     more: bool,
     // the "someone is typing" bubble at the end of the list
     typing: bool,
+    // a view-once message's card (none: not one)
+    view-once: ViewOnce,
 }
 
 export struct PinItem {

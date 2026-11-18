@@ -221,6 +221,13 @@ impl App {
             return;
         }
 
+        if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::ViewOnceOpen(v)), .. }) = &c.body {
+            if c.metadata.sender.raw_uuid() == self.me {
+                self.view_once_opened(v).await;
+            }
+            return;
+        }
+
         if let ContentBody::SynchronizeMessage(SyncMessage { content: Some(SyncContent::MessageRequestResponse(r)), .. }) = &c.body {
             // it deletes and blocks: only our own devices get a say
             if c.metadata.sender.raw_uuid() == self.me {
@@ -468,6 +475,10 @@ pub(crate) enum Outgoing {
     RequestAnswer { uuid: Uuid, answer: crate::types::RequestAnswer },
     /// our profile key to `uuid`, whose request was accepted: they see our name and photo
     ProfileKey(Uuid),
+    /// viewed receipt: a view-once message was opened
+    Viewed { to: ServiceId, timestamps: Vec<u64> },
+    /// tells our other devices that the view-once message `sender` sent at `timestamp` was opened
+    ViewOnceOpen { sender: ServiceId, timestamp: u64 },
 }
 
 /// Delivery receipts, then read receipts (unless turned off on the phone, and not to `quiet`
@@ -513,6 +524,27 @@ pub(super) async fn send_outgoing(mut m: Mgr, out: Vec<(u64, Outgoing)>, me: Uui
                 match Box::pin(m.send_message(to, receipt, ts)).await {
                     Ok(_) => drop_sent_receipt(&mut store, to, ts).await,
                     Err(e) => debug!("read receipt: {e}"),
+                }
+            }
+            Outgoing::Viewed { to, timestamps } => {
+                let receipt = ReceiptMessage { r#type: Some(receipt_message::Type::Viewed as i32), timestamp: timestamps };
+                match Box::pin(m.send_message(to, receipt, ts)).await {
+                    Ok(_) => drop_sent_receipt(&mut store, to, ts).await,
+                    Err(e) => debug!("viewed receipt: {e}"),
+                }
+            }
+            Outgoing::ViewOnceOpen { sender, timestamp } => {
+                let sync = SyncMessage {
+                    content: Some(SyncContent::ViewOnceOpen(presage::proto::sync_message::ViewOnceOpen {
+                        sender_aci: Some(sender.service_id_string()),
+                        timestamp: Some(timestamp),
+                        sender_aci_binary: Some(sender.raw_uuid().as_bytes().to_vec()),
+                    })),
+                    ..Default::default()
+                };
+                if let Err(e) = Box::pin(m.send_message(ServiceId::Aci(me.into()), sync, ts)).await {
+                    warn!("view-once sync: {e}");
+                    let _ = tx.send(Internal::Notice(tr!("Couldn't tell your phone it was viewed. It can still be opened there").into()));
                 }
             }
             Outgoing::ReadSync(read) => {

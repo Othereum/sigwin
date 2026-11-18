@@ -262,7 +262,7 @@ pub(super) fn demo_real(emit: backend::Emit, thumbs: Thumbs, mut cmd_rx: tokio::
                     let Ok(png) = sigwin_thumb::png_rgba(&scene(size.0, size.1, variants[index])) else { continue };
                     let Ok(Some(view)) = sigwin_thumb::decode_view(&png, fit.0, fit.1, u64::MAX) else { continue };
                     let pixels = types::ViewerPixels::from(view);
-                    emit(Event::ViewerImage(types::ViewerImage { id, index, count: variants.len(), pixels, animated: false, pending: String::new() }));
+                    emit(Event::ViewerImage(types::ViewerImage { id, index, count: variants.len(), pixels, animated: false, pending: String::new(), once: false }));
                 }
                 Command::ViewerThumbs { id, px } => {
                     let Some((variants, _)) = viewed(&current, &id) else { continue };
