@@ -98,6 +98,15 @@ impl App {
             let bytes = other_files.iter().map(|f| std::fs::metadata(f).ok().map(|m| m.len())).sum();
             view::media::file_line(&file_label(first), other_files.len() - 1, bytes)
         });
+        // where each file's upload shows how far it is: its photo's cell, or the file line
+        let shown = files
+            .iter()
+            .map(|f| match photo_paths.iter().position(|p| p == f) {
+                _ if view_once => String::new(),
+                Some(n) => pending_photo_key(ts, n, photos.len() == 1),
+                None => crate::types::file_line_key(&ts.to_string()),
+            })
+            .collect();
         // shown as the sent card it becomes: no copy of the picture on screen, as it won't stay
         if view_once {
             photos.clear();
@@ -117,8 +126,9 @@ impl App {
             image_key: String::new(),
             link: link.card(),
             error: None,
+            canceled: false,
             after_seq: None,
-            job: SendJob::Text { body, body_ranges, files, quote, link, quality, view_once },
+            job: SendJob::Text { body, body_ranges, files, shown, quote, link, quality, view_once },
         });
         self.emit_messages(Scroll::Bottom).await;
         self.start_send(ts).await;
@@ -189,16 +199,21 @@ impl App {
         self.threads_dirty = true;
     }
 
-    /// Sending `ts` failed: an op is taken back, a message stays as a failed row to retry.
-    pub(super) async fn send_failed(&mut self, ts: u64, e: String) {
-        warn!("send {ts} failed: {e}");
+    /// Sending `ts` failed, or the user `canceled` it: an op is taken back, a message stays as a
+    /// failed row to retry.
+    pub(super) async fn send_failed(&mut self, ts: u64, e: String, canceled: bool) {
+        if canceled {
+            info!(ts, "send canceled");
+        } else {
+            warn!("send {ts} failed: {e}");
+        }
         if self.op_failed(ts, &e).await {
             self.emit_messages(Scroll::KeepIfNotAtBottom).await;
             return;
         }
         // the open thread shows it on the row
         let open = self.current.as_ref().map(|c| c.key.as_str());
-        if self.pending.iter().any(|p| p.ts == ts && Some(p.thread_key.as_str()) != open) {
+        if !canceled && self.pending.iter().any(|p| p.ts == ts && Some(p.thread_key.as_str()) != open) {
             self.notice(tr!("A message to another chat couldn't be sent"));
         }
         let thread = self.pending.iter().find(|p| p.ts == ts).and_then(|p| parse_thread_key(&p.thread_key));
@@ -208,6 +223,7 @@ impl App {
         };
         if let Some(p) = self.pending.iter_mut().find(|p| p.ts == ts) {
             p.error = Some(e);
+            p.canceled = canceled;
             p.after_seq = Some(after_seq.unwrap_or(0));
         }
         self.emit_messages(Scroll::KeepIfNotAtBottom).await;
@@ -222,17 +238,41 @@ impl App {
         let tx = self.tx.clone();
         let dir = self.paths.attachments.clone();
         let uploads = Uploads { index: self.index.clone(), thread: key.clone() };
+        // cancelable until its files are uploaded: nobody has it before that
+        let (abort, registration) = futures::future::AbortHandle::new_pair();
+        if matches!(&job, SendJob::Text { files, .. } if !files.is_empty()) {
+            self.uploading.borrow_mut().insert(ts, abort);
+        }
+        let progress = UploadProgress { emit: self.emit.clone(), places: Default::default(), uploading: self.uploading.clone(), ts };
         let (turn, done) = self.send_turn(&key);
         tokio::task::spawn_local(async move {
             let _done = done;
-            if let Some(turn) = turn {
-                let _ = turn.await;
-            }
             let started = std::time::Instant::now();
-            let res = send_job(manager, thread, job, group_revision, ts, dir, uploads).await;
+            let job = async {
+                if let Some(turn) = turn {
+                    let _ = turn.await;
+                }
+                send_job(manager, thread, job, group_revision, ts, dir, uploads, &progress).await
+            };
+            let res = futures::future::Abortable::new(job, registration).await;
+            progress.uploads_done();
+            progress.clear();
+            let Ok(res) = res else {
+                let _ = tx.send(Internal::SendCanceled(ts));
+                return;
+            };
             info!(ms = started.elapsed().as_millis() as u64, ok = res.is_ok(), "message sent");
             let _ = tx.send(Internal::Sent(ts, res.map_err(|e| format!("{e:#}"))));
         });
+    }
+
+    /// A click on the upload of pending row `id`: the send stops, if its files are still on
+    /// their way.
+    pub(super) fn cancel_send(&mut self, id: &str) {
+        let Ok(ts) = id.parse::<u64>() else { return };
+        if let Some(abort) = self.uploading.borrow_mut().remove(&ts) {
+            abort.abort();
+        }
     }
 
     /// Sends a failed row again with its timestamp, the message's id: recipients who got it
@@ -242,6 +282,7 @@ impl App {
         let Some(i) = self.pending.iter().position(|p| p.ts == ts && p.error.is_some()) else { return };
         let mut p = self.pending.remove(i);
         p.error = None;
+        p.canceled = false;
         p.after_seq = None;
         self.pending.push(p);
         self.emit_messages(Scroll::Bottom).await;
@@ -275,7 +316,8 @@ impl App {
 /// What a pending row sends.
 #[derive(Clone)]
 pub(super) enum SendJob {
-    Text { body: String, body_ranges: Vec<BodyRange>, files: Vec<PathBuf>, quote: Option<Quote>, link: LinkSend, quality: Quality, view_once: bool },
+    /// `shown`: for each file, the key of the place on the row that shows its upload ("": none)
+    Text { body: String, body_ranges: Vec<BodyRange>, files: Vec<PathBuf>, shown: Vec<String>, quote: Option<Quote>, link: LinkSend, quality: Quality, view_once: bool },
     Sticker(StickerSend),
 }
 
@@ -358,15 +400,90 @@ impl Uploads {
     }
 }
 
+/// How far the uploads of a pending row are, on the places that show them (a photo's cell, the
+/// file line). Several files on one place count together. Lives on the backend thread.
+pub(super) struct UploadProgress {
+    emit: Emit,
+    /// place -> (sent, total) of each upload shown there, and the percent shown last
+    places: RefCell<HashMap<String, (Vec<(u64, u64)>, Option<u8>)>>,
+    /// `App::uploading`: the send's entry goes once its files are uploaded
+    uploading: Rc<RefCell<HashMap<u64, futures::future::AbortHandle>>>,
+    ts: u64,
+}
+
+/// One upload's entry in `UploadProgress`: its place and index there. None: shown nowhere.
+type Slot = Option<(String, usize)>;
+
+impl UploadProgress {
+    fn track(&self, place: &str, total: u64) -> Slot {
+        if place.is_empty() {
+            return None;
+        }
+        let i = {
+            let mut places = self.places.borrow_mut();
+            let (uploads, _) = places.entry(place.to_string()).or_default();
+            uploads.push((0, total));
+            uploads.len() - 1
+        };
+        self.show(place);
+        Some((place.to_string(), i))
+    }
+
+    fn set(&self, slot: &Slot, sent: u64) {
+        let Some((place, i)) = slot else { return };
+        if let Some(u) = self.places.borrow_mut().get_mut(place).and_then(|(u, _)| u.get_mut(*i)) {
+            u.0 = sent.min(u.1);
+        }
+        self.show(place);
+    }
+
+    /// Shows the place's progress, when its percent changed.
+    fn show(&self, place: &str) {
+        let label = {
+            let mut places = self.places.borrow_mut();
+            let Some((uploads, shown)) = places.get_mut(place) else { return };
+            let (sent, total) = uploads.iter().fold((0, 0), |(s, t), u| (s + u.0, t + u.1));
+            let percent = if total == 0 { 0 } else { (sent * 100 / total) as u8 };
+            if *shown == Some(percent) {
+                return;
+            }
+            *shown = Some(percent);
+            let text = format!("{} / {}", view::media::size_text(sent), view::media::size_text(total));
+            // not on the server yet: the mark a download has, and a click stops it the same way
+            crate::types::MediaLabel { text, undownloaded: true, progress: Some(percent) }
+        };
+        (self.emit)(Event::MediaLabel { key: place.to_string(), label });
+    }
+
+    /// The files are uploaded: what's left of the send can't be canceled, since it may have
+    /// reached someone by the time a click comes.
+    fn uploads_done(&self) {
+        self.uploading.borrow_mut().remove(&self.ts);
+    }
+
+    /// Every place goes back to how it shows without an upload.
+    fn clear(&self) {
+        for place in self.places.borrow_mut().drain().map(|(k, _)| k) {
+            (self.emit)(Event::MediaLabel { key: place, label: Default::default() });
+        }
+    }
+}
+
 /// Pointers for `specs`, in order: an earlier upload where there is one, the rest uploaded now.
 /// Each upload is remembered right away, so a send that fails later doesn't upload it again.
 /// Without `uploads` (a view-once photo) nothing is reused or remembered: its pointer must not
 /// outlive the message, nor be mixed with the same photo sent normally.
-async fn upload_all(m: &Mgr, specs: Vec<(AttachmentSpec, upload::Source)>, uploads: Option<&Uploads>) -> anyhow::Result<Vec<AttachmentPointer>> {
+/// Each spec comes with the place on the row that shows its upload (`UploadProgress`).
+async fn upload_all(m: &Mgr, specs: Vec<(AttachmentSpec, upload::Source, String)>, uploads: Option<&Uploads>, progress: &UploadProgress) -> anyhow::Result<Vec<AttachmentPointer>> {
     let mut slots: Vec<Option<AttachmentPointer>> = Vec::with_capacity(specs.len());
     let mut todo = Vec::new();
     let mut todo_hashes = Vec::new();
-    for (spec, data) in specs {
+    // all of them show at 0% from the start: reading a large file for its hash takes a while
+    let specs: Vec<_> = specs.into_iter().map(|(spec, data, place)| {
+        let slot = progress.track(&place, data.len());
+        (spec, data, slot)
+    }).collect();
+    for (spec, data, slot) in specs {
         let hash = Uploads::hash(&spec, &data).await?;
         let found = match uploads {
             Some(u) => u.find(&hash).await,
@@ -374,6 +491,7 @@ async fn upload_all(m: &Mgr, specs: Vec<(AttachmentSpec, upload::Source)>, uploa
         };
         match found {
             Some(mut ptr) => {
+                progress.set(&slot, data.len());
                 // same bytes, maybe another name
                 ptr.file_name = spec.file_name;
                 slots.push(Some(ptr));
@@ -381,13 +499,16 @@ async fn upload_all(m: &Mgr, specs: Vec<(AttachmentSpec, upload::Source)>, uploa
             None => {
                 slots.push(None);
                 todo_hashes.push(hash);
-                todo.push((spec, data));
+                todo.push((spec, data, slot));
             }
         }
     }
     let (reused, uploaded) = (slots.len() - todo.len(), todo.len());
-    let reg = m.registration_data().clone();
-    let mut results = futures::future::join_all(todo.into_iter().map(|(spec, src)| upload_one(m, &reg, spec, src))).await;
+    let reg = &m.registration_data().clone();
+    let mut results = futures::future::join_all(todo.into_iter().map(|(spec, src, slot)| async move {
+        upload_one(m, reg, spec, src, &|sent| progress.set(&slot, sent)).await
+    }))
+    .await;
     let mut failed = None;
     let mut fresh = Vec::with_capacity(results.len());
     for (res, hash) in results.drain(..).zip(&todo_hashes) {
@@ -411,9 +532,10 @@ async fn upload_all(m: &Mgr, specs: Vec<(AttachmentSpec, upload::Source)>, uploa
 
 /// Streamed from the file on CDN 3 (`upload.rs`); presage uploads it, from memory, where the
 /// server hands out another CDN.
-async fn upload_one(m: &Mgr, reg: &presage::manager::RegistrationData, spec: AttachmentSpec, src: upload::Source) -> anyhow::Result<AttachmentPointer> {
+/// `progress` gets the bytes sent so far (not from presage, which doesn't say).
+async fn upload_one(m: &Mgr, reg: &presage::manager::RegistrationData, spec: AttachmentSpec, src: upload::Source, progress: &dyn Fn(u64)) -> anyhow::Result<AttachmentPointer> {
     match upload::form(reg, src.len()).await? {
-        Some(form) => upload::upload(form, spec, src).await,
+        Some(form) => upload::upload(form, spec, src, progress).await,
         None => {
             let data = src.into_bytes()?;
             Ok(m.upload_attachments(vec![(spec, data)]).await?.into_iter().next().context("no upload result")??)
@@ -421,12 +543,14 @@ async fn upload_one(m: &Mgr, reg: &presage::manager::RegistrationData, spec: Att
     }
 }
 
-async fn send_job(m: Mgr, thread: Thread, job: SendJob, group_revision: u32, ts: u64, dir: PathBuf, uploads: Uploads) -> anyhow::Result<()> {
+#[allow(clippy::too_many_arguments)]
+async fn send_job(m: Mgr, thread: Thread, job: SendJob, group_revision: u32, ts: u64, dir: PathBuf, uploads: Uploads, progress: &UploadProgress) -> anyhow::Result<()> {
     let mut tries = 0;
     loop {
         let res = match job.clone() {
-            SendJob::Text { body, body_ranges, files, quote, link, quality, view_once } => {
-                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, link, quality, view_once, group_revision, ts, dir.clone(), uploads.clone())).await
+            SendJob::Text { body, body_ranges, files, shown, quote, link, quality, view_once } => {
+                let files = files.into_iter().zip(shown.into_iter().chain(std::iter::repeat(String::new()))).collect();
+                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, link, quality, view_once, group_revision, ts, dir.clone(), uploads.clone(), progress)).await
             }
             SendJob::Sticker(s) => Box::pin(send_sticker_task(m.clone(), thread.clone(), s, group_revision, dir.clone(), ts)).await,
         };
@@ -453,7 +577,7 @@ pub(super) async fn send_task(
     thread: Thread,
     text: String,
     body_ranges: Vec<BodyRange>,
-    files: Vec<PathBuf>,
+    files: Vec<(PathBuf, String)>,
     quote: Option<Quote>,
     link: LinkSend,
     quality: Quality,
@@ -462,11 +586,12 @@ pub(super) async fn send_task(
     ts: u64,
     attachments_dir: PathBuf,
     uploads: Uploads,
+    progress: &UploadProgress,
 ) -> anyhow::Result<()> {
     let mut text = text;
     let long = long_body(&mut m, &mut text, &attachments_dir).await?;
     let mut specs = Vec::new();
-    for path in &files {
+    for (path, place) in &files {
         let mut ct = mime_guess::from_path(path).first_or_octet_stream().to_string();
         let len = std::fs::metadata(path).with_context(|| tr!("Couldn't read {}", path.display()))?.len();
         // read as it uploads, unless it is a photo prepared here
@@ -517,11 +642,16 @@ pub(super) async fn send_task(
                 blur_hash,
             },
             data,
+            place.clone(),
         ));
     }
     let mut attachments: Vec<AttachmentPointer> = long.into_iter().collect();
     if !specs.is_empty() {
-        attachments.extend(upload_all(&m, specs, (!view_once).then_some(&uploads)).await?);
+        let uploaded = upload_all(&m, specs, (!view_once).then_some(&uploads), progress).await;
+        progress.uploads_done();
+        // no more to show, nor to stop: the row goes back to how a message being sent looks
+        progress.clear();
+        attachments.extend(uploaded?);
     }
     let preview = Box::pin(for_message(&m, &text, !files.is_empty(), link, ts, &attachments_dir)).await;
     let dm = DataMessage {
@@ -650,6 +780,12 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
         None => {
             m.status = tr!("Sending").into();
             m.receipt_info = tr!("Sending to the server.").into();
+        }
+        Some(_) if p.canceled => {
+            m.status = tr!("Canceled").into();
+            m.failed = true;
+            m.canceled = true;
+            m.receipt_info = tr!("Sending was canceled before anyone received it.").into();
         }
         Some(e) => {
             m.status = tr!("Failed").into();

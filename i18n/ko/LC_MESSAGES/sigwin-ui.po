@@ -716,6 +716,12 @@ msgstr "오류: {}"
 msgid "Failed"
 msgstr "실패"
 
+msgid "Canceled"
+msgstr "취소됨"
+
+msgid "Sending was canceled before anyone received it."
+msgstr "아무도 받기 전에 전송을 취소했습니다."
+
 msgid "File"
 msgstr "파일"
 

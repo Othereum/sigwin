@@ -147,6 +147,8 @@ export struct MsgItem {
     pending: bool,
     // the send failed: "Retry" / "Delete" below the bubble
     failed: bool,
+    // failed because the user canceled it: said without the alarm
+    canceled: bool,
     // collapsed with the next row: no time / status footer
     hide-time: bool,
     // same run as the row above / below: flatter corners on that side, tighter spacing

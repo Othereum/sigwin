@@ -229,6 +229,7 @@ impl App {
             photos: Vec::new(),
             link: None,
             error: None,
+            canceled: false,
             after_seq: None,
             job: SendJob::Sticker(s),
         });

@@ -244,6 +244,8 @@ enum Internal {
     DeviceRenamed,
     Linked(Result<(Mgr, Option<History>), String>),
     Sent(u64, Result<(), String>),
+    /// the user stopped the send while its files were uploading
+    SendCanceled(u64),
     LinkFetched(String, Option<Box<(Fetched, Vec<crate::types::Thumb>)>>),
     ThumbFailed(String),
     /// a long message's full text: (attachment key, text)
@@ -320,6 +322,8 @@ struct Pending {
     /// the link preview going with it; its thumbnail is the composer's, already emitted
     link: Option<crate::types::LinkCard>,
     error: Option<String>,
+    /// the user stopped it while its files were uploading: nobody got it
+    canceled: bool,
     /// failed: last message stored at that moment, the row stays right below it
     after_seq: Option<i64>,
     /// what to send, again if it fails
@@ -443,6 +447,8 @@ struct App {
     recv_task: Option<JoinHandle<()>>,
     /// delivery receipts to send, batched per sender
     pending_receipts: HashMap<ServiceId, Vec<u64>>,
+    /// sends whose files are still uploading, by timestamp: what canceling one stops
+    uploading: Rc<RefCell<HashMap<u64, futures::future::AbortHandle>>>,
     /// incoming messages seen in the focused open thread: read receipts + read sync to our devices
     pending_reads: Vec<(ServiceId, u64)>,
     /// threads whose photo was loaded (or is queued) this session
@@ -615,6 +621,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         link_name: String::new(),
         recv_task: None,
         pending_receipts: HashMap::new(),
+        uploading: Default::default(),
         pending_reads: Vec::new(),
         avatars_done: HashSet::new(),
         last_outgoing: HashMap::new(),
@@ -801,6 +808,7 @@ impl App {
             Command::ToggleImageDownload { id, index } => self.toggle_image_download(&id, index).await,
             Command::ViewOnceSeen(id) => self.view_once_seen(&id).await,
             Command::StopFileSave { id } => self.attachment_downloads.stop_save(&id),
+            Command::CancelSend { id } => self.cancel_send(&id),
             Command::PlayGif { id, index, seq, size } => self.play_gif(&id, index, seq, size),
             Command::StopGif => self.stop_gif(),
             Command::PlayPendingGif { path, seq, tile } => self.play_pending_gif(path, seq, tile),
@@ -999,7 +1007,8 @@ impl App {
                 self.connection(msg, false);
             }
             Internal::Sent(ts, Ok(())) => self.sent(ts).await,
-            Internal::Sent(ts, Err(e)) => self.send_failed(ts, e).await,
+            Internal::Sent(ts, Err(e)) => self.send_failed(ts, e, false).await,
+            Internal::SendCanceled(ts) => self.send_failed(ts, tr!("Canceled").into(), true).await,
             Internal::LinkFetched(url, res) => self.link_fetched(url, res),
             Internal::ThumbFailed(key) => {
                 // allow a retry next time the thread is opened, or the cell comes back on screen

@@ -729,9 +729,16 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
                 let key = m.cells.get(index as usize).map_or("", |c| c.key.as_str());
                 // not here: the picture says so, and the viewer has nothing to show
                 let missing = ui.media_labels.undownloaded(key);
-                (m.sticker, m.clicked_media(index as usize), missing)
+                let uploading = m.pending && ui.media_labels.downloading(key);
+                (m.sticker, m.clicked_media(index as usize), missing, uploading)
             })
         });
+        // a picture being sent: the click stops the send, as it stops a download
+        if let Some((.., true)) = row {
+            s(Command::CancelSend { id: id.to_string() });
+            return;
+        }
+        let row = row.map(|(sticker, media, missing, _)| (sticker, media, missing));
         match row {
             Some((true, ..)) => s(Command::StickerClicked(id.to_string())),
             Some((_, ClickedMedia::Video(index), _)) => s(Command::OpenVideo { id: id.to_string(), index }),
@@ -758,9 +765,13 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     let save = move |weak: &slint::Weak<AppWindow>, id: &str, all: bool| {
         let Some(app) = weak.upgrade() else { return };
-        // while its files are on their way, a click stops that, as on a picture
-        if UI.with_borrow(|ui| ui.media_labels.downloading(&crate::types::file_line_key(id))) {
-            send_cmd(Command::StopFileSave { id: id.to_string() });
+        // while its files are on their way, a click stops that, as on a picture: a download to
+        // save them, or the upload of a message being sent
+        let (loading, pending) = UI.with_borrow(|ui| {
+            (ui.media_labels.downloading(&crate::types::file_line_key(id)), ui.last.iter().any(|m| m.id == id && m.pending))
+        });
+        if loading {
+            send_cmd(if pending { Command::CancelSend { id: id.to_string() } } else { Command::StopFileSave { id: id.to_string() } });
             return;
         }
         let danger = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && m.file_danger));

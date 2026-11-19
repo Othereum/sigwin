@@ -79,8 +79,9 @@ pub(super) async fn form(reg: &RegistrationData, len: u64) -> anyhow::Result<Opt
     Ok((form.cdn == 3).then_some(form))
 }
 
-/// Encrypts `src` and uploads it on CDN 3 with `form`.
-pub(super) async fn upload(form: AttachmentUploadForm, spec: AttachmentSpec, src: Source) -> anyhow::Result<AttachmentPointer> {
+/// Encrypts `src` and uploads it on CDN 3 with `form`. `progress` gets the bytes the server has
+/// so far, as best known (what the request has taken).
+pub(super) async fn upload(form: AttachmentUploadForm, spec: AttachmentSpec, src: Source, progress: &dyn Fn(u64)) -> anyhow::Result<AttachmentPointer> {
     let mut key = [0u8; 64];
     let mut iv = [0u8; 16];
     getrandom::fill(&mut key).map_err(|e| anyhow::anyhow!("getrandom: {e}"))?;
@@ -114,7 +115,7 @@ pub(super) async fn upload(form: AttachmentUploadForm, spec: AttachmentSpec, src
             // the server has it all already: only the digest is missing
             drain(body).await
         } else {
-            patch(&client, &cfg, &form, &location, offset, total, body).await
+            patch(&client, &cfg, &form, &location, offset, total, body, progress).await
         };
         let mut last = match res {
             Ok(()) => break digest.await.context("encrypting the file stopped")??,
@@ -189,13 +190,14 @@ impl Failed {
 }
 
 /// Sends the bytes from `offset` on; dropped when nothing moves for `STALL`.
-async fn patch(client: &reqwest::Client, cfg: &ServiceConfiguration, form: &AttachmentUploadForm, location: &Url, offset: u64, total: u64, body: Body) -> Result<(), Failed> {
+#[allow(clippy::too_many_arguments)]
+async fn patch(client: &reqwest::Client, cfg: &ServiceConfiguration, form: &AttachmentUploadForm, location: &Url, offset: u64, total: u64, body: Body, progress: &dyn Fn(u64)) -> Result<(), Failed> {
     let url = Endpoint::cdn(3, location.path()).into_url(cfg).map_err(|e| Failed { error: e.into(), retry: false })?;
     let mut req = client.patch(url);
     for (k, v) in &form.headers {
         req = req.header(k, v);
     }
-    let moved = body.moved.clone();
+    let (moved, taken) = (body.moved.clone(), body.taken.clone());
     let send = req
         .header("Tus-Resumable", "1.0.0")
         .header("Upload-Offset", offset)
@@ -207,7 +209,8 @@ async fn patch(client: &reqwest::Client, cfg: &ServiceConfiguration, form: &Atta
     let started = Instant::now();
     let stalled = async {
         loop {
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            progress(offset + taken.load(Ordering::Relaxed));
             let last = Duration::from_millis(moved.load(Ordering::Relaxed));
             if started.elapsed().saturating_sub(last) > STALL {
                 return;
@@ -240,6 +243,8 @@ struct Body {
     chunks: futures::stream::BoxStream<'static, std::io::Result<Vec<u8>>>,
     /// ms after the request started that the last chunk was taken: how `patch` sees progress
     moved: Arc<AtomicU64>,
+    /// bytes the request has taken
+    taken: Arc<AtomicU64>,
 }
 
 async fn drain(mut body: Body) -> Result<(), Failed> {
@@ -273,17 +278,21 @@ fn stream(src: Arc<Source>, key: [u8; 64], iv: [u8; 16], skip: u64) -> (Body, on
         let _ = digest_tx.send(res);
     });
     let moved = Arc::new(AtomicU64::new(0));
+    let taken = Arc::new(AtomicU64::new(0));
     let started = Instant::now();
-    let seen = moved.clone();
+    let (seen, counted) = (moved.clone(), taken.clone());
     let chunks = futures::stream::unfold(rx, move |mut rx| {
-        let seen = seen.clone();
+        let (seen, counted) = (seen.clone(), counted.clone());
         async move {
             let c = rx.recv().await?;
             seen.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+            if let Ok(c) = &c {
+                counted.fetch_add(c.len() as u64, Ordering::Relaxed);
+            }
             Some((c, rx))
         }
     });
-    (Body { chunks: Box::pin(chunks), moved }, digest_rx)
+    (Body { chunks: Box::pin(chunks), moved, taken }, digest_rx)
 }
 
 /// Signal's attachment encryption of `src`, given to `out` a chunk at a time: the IV, the plain

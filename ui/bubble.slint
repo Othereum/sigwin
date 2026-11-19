@@ -499,7 +499,11 @@ export component Bubble inherits VerticalLayout {
     out property <length> r-bl: !m.outgoing && m.collapse-below ? 4px : 18px;
     out property <length> r-br: m.outgoing && m.collapse-below ? 4px : 18px;
     spacing: 4px;
-    opacity: m.pending && !m.failed ? 0.6 : 1.0;
+    // dimmed while it is being sent, but not while its upload shows its own progress: that would
+    // dim the ring and the stop on it too. A row's uploads show and end together, so its first
+    // picture or its file line tells.
+    property <bool> uploading: root.file-loading || (m.cells.length > 0 && m.cells[0].state.length > 0 && m.cells[0].state[0].progress >= 0);
+    opacity: m.pending && !m.failed && !uploading ? 0.6 : 1.0;
     // reactions and the reply count hang below the bubble as chips
     property <bool> has-chips: m.reactions.length > 0 || m.replies > 0;
     // plain text: the time sits at the right of the last line instead of below
@@ -1054,10 +1058,10 @@ export component Bubble inherits VerticalLayout {
         alignment: end;
         spacing: 12px;
         Text {
-            text: @tr("Send failed");
+            text: m.canceled ? @tr("Canceled") : @tr("Send failed");
             font-size: 12px;
             font-weight: 700;
-            color: Theme.failed;
+            color: m.canceled ? Theme.subtle : Theme.failed;
             TouchArea {
                 mouse-cursor: pointer;
                 clicked => { root.show-info(m.receipt-info); }

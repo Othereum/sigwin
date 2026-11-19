@@ -718,6 +718,12 @@ msgstr "Fehler: {}"
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
+msgid "Canceled"
+msgstr "Abgebrochen"
+
+msgid "Sending was canceled before anyone received it."
+msgstr "Das Senden wurde abgebrochen, bevor jemand die Nachricht erhalten hat."
+
 msgid "File"
 msgstr "Datei"
 

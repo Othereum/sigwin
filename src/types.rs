@@ -269,6 +269,8 @@ pub struct MsgDto {
     pub pending: bool,
     /// pending and the send failed: can be sent again or discarded
     pub failed: bool,
+    /// failed because the user canceled it
+    pub canceled: bool,
     /// our own reaction on this message, empty if none
     pub my_reaction: String,
     /// ours, text only, young enough to edit / delete for everyone
@@ -719,6 +721,8 @@ pub enum Command {
     ViewOnceSeen(String),
     /// row `id`'s files are being downloaded to be saved: that stops, and nothing more is saved
     StopFileSave { id: String },
+    /// pending row `id`'s files are uploading: the send stops there, and the row stays to retry
+    CancelSend { id: String },
     /// Square thumbnails of `px` physical px of all images of a message for the viewer. The ones
     /// that aren't here yet stay blank: nothing but the list downloads a picture.
     ViewerThumbs { id: String, px: u32 },

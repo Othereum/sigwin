@@ -992,6 +992,7 @@ fn a_view_once_photo_we_send_keeps_nothing_of_it() {
             body: String::new(),
             body_ranges: Vec::new(),
             files: vec!["photo.png".into()],
+            shown: vec![String::new()],
             quote: None,
             link: LinkSend::None,
             quality: sigwin_thumb::photo::Quality::from_index(0),
@@ -1009,6 +1010,7 @@ fn a_view_once_photo_we_send_keeps_nothing_of_it() {
             photos: Vec::new(),
             link: None,
             error: None,
+            canceled: false,
             after_seq: None,
             job,
         });
