@@ -58,7 +58,8 @@ file.
 - Notes of past releases stay as they are.
 
 ### In the app
-After an update the sidebar offers "what's new" once (`gui/whatsnew.rs`); it and Settings > 정보
+After an update the sidebar offers "what's new" once (`gui/whatsnew.rs`), for a few seconds of
+the user looking at the window, then it goes away by itself; it and Settings > 정보
 open the GitHub releases page, which lists every version newest first, so an update that skipped
 versions loses nothing. The app carries no notes: embedding them took a history asset chained
 across releases, which one release made without the script would break (releases up to 0.2.11

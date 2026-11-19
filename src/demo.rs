@@ -87,8 +87,18 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         app.global::<SettingsData>().set_update_available(v.into());
     }
     if std::env::var_os("SIGWIN_DEMO_WHATSNEW").is_some() {
-        // the "updated, what's new" offer bar
+        // the "updated, what's new" offer bar; it comes back a second after it leaves, to watch
+        // it run out again
         app.set_whatsnew_version(env!("CARGO_PKG_VERSION").into());
+        let weak = app.as_weak();
+        let timer = Box::leak(Box::new(slint::Timer::default()));
+        timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), move || {
+            if let Some(app) = weak.upgrade()
+                && app.get_whatsnew_version().is_empty()
+            {
+                app.set_whatsnew_version(env!("CARGO_PKG_VERSION").into());
+            }
+        });
     }
     if std::env::var_os("SIGWIN_DEMO_LOADING").is_some() {
         // the loading screen as while waiting for the phone's history, which a real start passes in a blink

@@ -588,10 +588,31 @@ export component AppWindow inherits Window {
                     }
                 }
                 // bars docked at the sidebar's foot: flat on the sidebar, a rule above each
-                if root.whatsnew-version != "": Rectangle {
+                if root.whatsnew-version != "": wn-bar := Rectangle {
+                    // it goes away by itself, so nobody has to close it. The time runs only while
+                    // the user can see it (the window in front) and starts over while the cursor
+                    // is on it; only its last stretch shows, as a ring that drains around the close
+                    // button, so the bar sits still until it is about to leave.
+                    property <duration> wn-total: 12s;
+                    property <duration> wn-warn: 10s;
+                    property <duration> wn-step: 50ms;
+                    property <duration> wn-elapsed: 0ms;
+                    property <duration> wn-left: wn-total - wn-elapsed;
                     height: 44px;
                     background: wn-ta.has-hover ? Theme.notice-hover : Theme.notice;
                     Rectangle { y: 0px; height: 1px; background: Theme.border; }
+                    Timer {
+                        interval: parent.wn-step;
+                        running: !root.inactive;
+                        triggered => {
+                            if (wn-ta.has-hover || wn-close.hovered) {
+                                parent.wn-elapsed = 0ms;
+                            } else {
+                                parent.wn-elapsed += parent.wn-step;
+                                if (parent.wn-elapsed >= parent.wn-total) { root.dismiss-whatsnew(); }
+                            }
+                        }
+                    }
                     wn-ta := TouchArea {
                         mouse-cursor: pointer;
                         clicked => { root.open-whatsnew(); }
@@ -621,10 +642,35 @@ export component AppWindow inherits Window {
                             font-weight: 700;
                             vertical-alignment: center;
                         }
-                        IconButton {
+                        Rectangle {
                             y: (parent.height - self.height) / 2;
-                            icon: Icons.close;
-                            clicked => { root.dismiss-whatsnew(); }
+                            width: 36px;
+                            height: 36px;
+                            wn-close := IconButton {
+                                icon: Icons.close;
+                                icon-size: 16px;
+                                clicked => { root.dismiss-whatsnew(); }
+                            }
+                            // drains clockwise from the top (short of 360°: a full turn would end
+                            // where it starts and draw nothing)
+                            if wn-bar.wn-left <= wn-bar.wn-warn: Path {
+                                property <angle> left: min(359.9deg, 360deg * wn-bar.wn-left / wn-bar.wn-warn);
+                                width: 36px;
+                                height: 36px;
+                                viewbox-width: 36;
+                                viewbox-height: 36;
+                                stroke: Theme.subtle;
+                                stroke-width: 1.5px;
+                                MoveTo { x: 18; y: 6; }
+                                ArcTo {
+                                    x: 18 + 12 * Math.sin(parent.left);
+                                    y: 18 - 12 * Math.cos(parent.left);
+                                    radius-x: 12;
+                                    radius-y: 12;
+                                    large-arc: parent.left > 180deg;
+                                    sweep: true;
+                                }
+                            }
                         }
                     }
                 }
