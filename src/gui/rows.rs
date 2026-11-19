@@ -428,7 +428,6 @@ pub(crate) fn to_item(
         attachment: m.attachment.as_str().into(),
         file_name: file.0.into(),
         file_size: file.1.into(),
-        file_ext: file.2.into(),
         file_danger: m.file_danger,
         // shared and changed in place, like a picture's: no row is drawn again for a percent
         file_state: if !m.attachment.is_empty() {

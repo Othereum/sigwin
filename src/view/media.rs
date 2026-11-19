@@ -210,9 +210,9 @@ pub fn is_dangerous_file(name: &str) -> bool {
     name.rsplit_once('.').is_some_and(|(_, e)| KINDS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
-/// What a message's file card shows, taken from its [`file_line`]: the name (with "and N more"), its
-/// size, and the extension of the first file for the badge.
-pub fn file_card(line: &str) -> (String, String, String) {
+/// What a message's file card shows, taken from its [`file_line`]: the name (with "and N more")
+/// and its size.
+pub fn file_card(line: &str) -> (String, String) {
     let sized = |s: &str| {
         let n = s.strip_suffix("KB").or_else(|| s.strip_suffix("MB")).or_else(|| s.strip_suffix("GB"));
         n.is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == '.'))
@@ -221,20 +221,7 @@ pub fn file_card(line: &str) -> (String, String, String) {
         Some((n, s)) if sized(s) => (n, s),
         _ => (line, ""),
     };
-    // undo the "and N more" of `file_line`, in this run's language
-    let first = (|| {
-        let (pre, rest) = tr!("{} and {} more").split_once("{}")?;
-        let (mid, post) = rest.split_once("{}")?;
-        let (f, n) = names.strip_prefix(pre)?.strip_suffix(post)?.rsplit_once(mid)?;
-        n.parse::<u32>().is_ok().then_some(f)
-    })()
-    .unwrap_or(names);
-    (names.to_string(), size.to_string(), file_ext(first))
-}
-
-/// A file's extension as its badge shows it.
-pub fn file_ext(name: &str) -> String {
-    std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_uppercase().chars().take(4).collect()).unwrap_or_default()
+    (names.to_string(), size.to_string())
 }
 
 fn files_label(files: &[&AttachmentPointer]) -> String {
@@ -412,11 +399,11 @@ mod tests {
     #[test]
     fn file_card_takes_its_line_apart() {
         let card = |l: &str| file_card(l);
-        assert_eq!(card("보고서.pdf · 2.4MB"), ("보고서.pdf".into(), "2.4MB".into(), "PDF".into()));
-        assert_eq!(card("a.zip and 2 more · 13MB"), ("a.zip and 2 more".into(), "13MB".into(), "ZIP".into()));
+        assert_eq!(card("보고서.pdf · 2.4MB"), ("보고서.pdf".into(), "2.4MB".into()));
+        assert_eq!(card("a.zip and 2 more · 13MB"), ("a.zip and 2 more".into(), "13MB".into()));
         // no size known; a " · " in the name isn't a size
-        assert_eq!(card("a · b.txt"), ("a · b.txt".into(), String::new(), "TXT".into()));
-        assert_eq!(card("File"),(tr!("File").into(), String::new(), String::new()));
+        assert_eq!(card("a · b.txt"), ("a · b.txt".into(), String::new()));
+        assert_eq!(card("File"), (tr!("File").into(), String::new()));
     }
 
     #[test]

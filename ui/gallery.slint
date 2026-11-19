@@ -26,7 +26,6 @@ export struct GalleryRow {
     index: int,
     name: string,
     sub: string,
-    ext: string,
     danger: bool,
 }
 
@@ -129,19 +128,17 @@ component FileRow inherits Rectangle {
             padding-left: 8px;
             padding-right: 8px;
             spacing: 12px;
+            // the file card's mark in a message (`bubble.slint`), as on an incoming one
             Rectangle {
                 y: (parent.height - self.height) / 2;
                 width: 40px;
                 height: 40px;
-                border-radius: 6px;
-                background: root.r.danger ? Theme.warning : Theme.accent;
-                Text {
-                    text: root.r.ext != "" ? root.r.ext : "FILE";
-                    color: #ffffff;
-                    font-size: 11px;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                border-radius: 20px;
+                background: root.r.danger ? Theme.warning : Theme.inset;
+                Icon {
+                    icon: root.r.danger ? Icons.warning : Icons.file;
+                    size: 22px;
+                    tint: root.r.danger ? white : Theme.subtle;
                 }
             }
             VerticalLayout {

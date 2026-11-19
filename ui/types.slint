@@ -108,10 +108,9 @@ export struct MsgItem {
     replies: int,
     big-emoji: bool,
     attachment: string,
-    // the file card: name, size and the badge text
+    // the file card: name and size
     file-name: string,
     file-size: string,
-    file-ext: string,
     // a kind that can run or change the system: marked
     file-danger: bool,
     // how far saving the files has come (one, while it is on its way), as a picture's `state`.
@@ -186,8 +185,8 @@ export struct MentionItem {
 
 // an attachment waiting in the composer
 export struct PendingFile {
-    // the extension, drawn when there is no picture
-    ext: string,
+    // a video, which shows its icon: it has no picture here
+    video: bool,
     thumb: image,
     has-thumb: bool,
     // plays while the pointer is on it

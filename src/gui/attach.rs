@@ -11,13 +11,8 @@ const TILE: u32 = 120;
 /// Past this a file isn't opened for a tile.
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 
-fn ext(p: &Path) -> SharedString {
-    let e = p.extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
-    e.chars().take(4).collect::<String>().into()
-}
-
 /// Whether a tile shows the file's picture: GIFs and the rest are left to decode, like any image,
-/// while videos and other files get their extension.
+/// while videos and other files get an icon.
 fn has_picture(p: &Path) -> bool {
     mime_guess::from_path(p).first_or_octet_stream().type_() == "image"
 }
@@ -107,7 +102,7 @@ pub(crate) fn show(app: &AppWindow, files: &[PathBuf]) {
                     String::new()
                 };
                 PendingFile {
-                    ext: ext(p),
+                    video: mime_guess::from_path(p).first_or_octet_stream().type_() == "video",
                     has_thumb: thumb.is_some(),
                     gif: is_gif(p),
                     playing: false,

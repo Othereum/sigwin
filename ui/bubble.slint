@@ -768,12 +768,13 @@ export component Bubble inherits VerticalLayout {
                     HorizontalLayout {
                         spacing: 10px;
                         padding: 4px;
+                        // round like the view-once card and the ring that takes its place; the
+                        // accent stays off an incoming one (it's for actions), a dangerous kind warns
                         Rectangle {
                             width: 40px;
                             height: 40px;
-                            y: 0px;
-                            border-radius: 6px;
-                            background: m.file-danger ? Theme.warning : m.outgoing ? #ffffff40 : Theme.accent;
+                            border-radius: 20px;
+                            background: m.file-danger ? Theme.warning : m.outgoing ? #ffffff40 : Theme.inset;
                             // on its way: the picture's mark, a ring and the stop it takes
                             if root.file-loading: VideoMark {
                                 undownloaded: true;
@@ -781,13 +782,10 @@ export component Bubble inherits VerticalLayout {
                                 ring: m.file-state[0].ring;
                                 hovered: ata.has-hover;
                             }
-                            if !root.file-loading: Text {
-                                text: m.file-ext != "" ? m.file-ext : "FILE";
-                                color: #ffffff;
-                                font-size: 11px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            if !root.file-loading: Icon {
+                                icon: m.file-danger ? Icons.warning : Icons.file;
+                                size: 22px;
+                                tint: m.file-danger || m.outgoing ? white : Theme.subtle;
                             }
                         }
                         VerticalLayout {

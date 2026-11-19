@@ -651,7 +651,6 @@ fn demo_gallery(emit: &backend::Emit, c: &Command) -> bool {
                 let mut d = types::GalleryItemDto { id: ts(i).to_string(), index: 0, month: view::time::month_label(ts(i)), ..Default::default() };
                 if files {
                     d.name = names[i % names.len()].into();
-                    d.ext = view::media::file_ext(&d.name);
                     d.danger = view::media::is_dangerous_file(&d.name);
                     d.sub = format!("{} · {}", view::media::size_text(((i * 7919) % 20_000_000) as u64 + 30_000), view::time::day_short(ts(i)));
                 } else {

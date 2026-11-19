@@ -1202,20 +1202,18 @@ export component AppWindow inherits Window {
                     height: 64px;
                     border-radius: 16px;
                     background: Theme.pane;
+                    // the file card's mark in a message (`bubble.slint`)
                     Rectangle {
                         x: 12px;
                         y: 12px;
                         width: 40px;
                         height: 40px;
-                        border-radius: 6px;
-                        background: root.pending-files[0].danger ? Theme.warning : Theme.accent;
-                        Text {
-                            text: root.pending-files[0].ext;
-                            color: #ffffff;
-                            font-size: 11px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                        border-radius: 20px;
+                        background: root.pending-files[0].danger ? Theme.warning : Theme.inset;
+                        Icon {
+                            icon: root.pending-files[0].danger ? Icons.warning : Icons.file;
+                            size: 22px;
+                            tint: root.pending-files[0].danger ? white : Theme.subtle;
                         }
                     }
                     VerticalLayout {
@@ -1299,13 +1297,9 @@ export component AppWindow inherits Window {
                                     property <bool> hovered: self.has-hover;
                                     changed hovered => { root.pending-gif-hover(i, self.hovered); }
                                 }
-                                if !f.has-thumb: Text {
-                                    text: f.ext;
-                                    color: Theme.subtle;
-                                    font-size: 12px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                if !f.has-thumb: Icon {
+                                    icon: f.video ? Icons.video : Icons.gallery;
+                                    size: 32px;
                                 }
                                 Rectangle {
                                     x: parent.width - self.width - 3px;

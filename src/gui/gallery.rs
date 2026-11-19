@@ -212,7 +212,6 @@ fn row(p: &Page, items: Range<usize>) -> GalleryRow {
             index: it.index as i32,
             name: it.name.as_str().into(),
             sub: it.sub.as_str().into(),
-            ext: it.ext.as_str().into(),
             danger: it.danger,
             ..Default::default()
         };

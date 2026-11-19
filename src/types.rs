@@ -360,11 +360,9 @@ pub struct GalleryItemDto {
     pub key: String,
     pub video: bool,
     pub nth: usize,
-    /// files: name, "size · day", the extension for the badge, and whether opening it could
-    /// run something
+    /// files: name, "size · day", and whether opening it could run something
     pub name: String,
     pub sub: String,
-    pub ext: String,
     pub danger: bool,
 }
 
