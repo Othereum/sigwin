@@ -245,6 +245,12 @@ msgstr "Neuer QR-Code"
 msgid "New message notifications"
 msgstr "Benachrichtigungen bei neuen Nachrichten"
 
+msgid "New version available"
+msgstr "Neue Version verfügbar"
+
+msgid "New version ready"
+msgstr "Neue Version bereit"
+
 msgid "No contacts"
 msgstr "Keine Kontakte"
 
@@ -454,7 +460,6 @@ msgstr "Für immer"
 
 msgid "Update"
 msgstr "Aktualisieren"
-
 msgid "Updated to {}"
 msgstr "Auf {} aktualisiert"
 
@@ -464,15 +469,8 @@ msgstr "Aktualisierungen"
 msgid "Username (e.g. name.42)"
 msgstr "Nutzername (z. B. name.42)"
 
-msgid "Version {} available"
-msgstr "Version {} verfügbar"
-
 msgid "Version {} is available. Update from the bottom left."
 msgstr "Version {} ist verfügbar. Aktualisiere unten links."
-
-msgid "Version {} ready"
-msgstr "Version {} bereit"
-
 msgid "View"
 msgstr "Anzeigen"
 

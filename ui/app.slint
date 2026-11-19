@@ -629,7 +629,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 if SettingsData.update-version == "" && SettingsData.update-available != "": Rectangle {
-                    height: 44px;
+                    height: 52px;
                     background: avail-ta.has-hover && !SettingsData.update-installing ? Theme.notice-hover : Theme.notice;
                     Rectangle { y: 0px; height: 1px; background: Theme.border; }
                     avail-ta := TouchArea {
@@ -651,13 +651,21 @@ export component AppWindow inherits Window {
                             icon: Icons.download;
                             tint: Theme.accent;
                         }
-                        Text {
-                            text: @tr("Version {} available", SettingsData.update-available);
-                            color: Theme.text;
-                            font-size: 13px;
-                            vertical-alignment: center;
+                        VerticalLayout {
                             horizontal-stretch: 1;
-                            overflow: elide;
+                            alignment: center;
+                            Text {
+                                text: @tr("New version available");
+                                color: Theme.text;
+                                font-size: 13px;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: SettingsData.current-version + " → " + SettingsData.update-available;
+                                color: Theme.subtle;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
                         }
                         Text {
                             text: SettingsData.update-installing ? @tr("Downloading…") : @tr("Update");
@@ -669,7 +677,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 if SettingsData.update-version != "": Rectangle {
-                    height: 44px;
+                    height: 52px;
                     background: upd-ta.has-hover ? Theme.notice-hover : Theme.notice;
                     Rectangle { y: 0px; height: 1px; background: Theme.border; }
                     upd-ta := TouchArea {
@@ -686,13 +694,21 @@ export component AppWindow inherits Window {
                             icon: Icons.download;
                             tint: Theme.accent;
                         }
-                        Text {
-                            text: @tr("Version {} ready", SettingsData.update-version);
-                            color: Theme.text;
-                            font-size: 13px;
-                            vertical-alignment: center;
+                        VerticalLayout {
                             horizontal-stretch: 1;
-                            overflow: elide;
+                            alignment: center;
+                            Text {
+                                text: @tr("New version ready");
+                                color: Theme.text;
+                                font-size: 13px;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: SettingsData.current-version + " → " + SettingsData.update-version;
+                                color: Theme.subtle;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
                         }
                         Text {
                             text: @tr("Restart");

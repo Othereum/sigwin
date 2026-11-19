@@ -245,6 +245,12 @@ msgstr "QR 다시 만들기"
 msgid "New message notifications"
 msgstr "새 메시지 알림"
 
+msgid "New version available"
+msgstr "새 버전 있음"
+
+msgid "New version ready"
+msgstr "새 버전 준비됨"
+
 msgid "No contacts"
 msgstr "연락처가 없습니다"
 
@@ -454,7 +460,6 @@ msgstr "해제할 때까지"
 
 msgid "Update"
 msgstr "업데이트"
-
 msgid "Updated to {}"
 msgstr "{} 업데이트 완료"
 
@@ -464,15 +469,8 @@ msgstr "업데이트"
 msgid "Username (e.g. name.42)"
 msgstr "사용자 이름 (예: name.42)"
 
-msgid "Version {} available"
-msgstr "새 버전 {} 있음"
-
 msgid "Version {} is available. Update from the bottom left."
 msgstr "새 버전 {}이(가) 있습니다. 왼쪽 아래에서 업데이트하세요."
-
-msgid "Version {} ready"
-msgstr "새 버전 {} 준비됨"
-
 msgid "View"
 msgstr "보기"
 

@@ -141,6 +141,7 @@ fn load_ui_state(app: &AppWindow, cmd_tx: UnboundedSender<Command>) {
     let lang = settings::LANGUAGES.iter().position(|l| *l == prefs.language).unwrap_or(0) as i32;
     app.global::<SettingsData>().set_language_at_start(lang);
     app.global::<SettingsData>().set_version(version_label().into());
+    app.global::<SettingsData>().set_current_version(env!("CARGO_PKG_VERSION").into());
     // dev builds: commit hash in the title (the icon: `gui::window::set_dev_icon`, tray)
     #[cfg(sigwin_dev)]
     app.set_dev_tag(match env!("SIGWIN_GIT_HASH") {
