@@ -63,6 +63,7 @@ mod stickers;
 mod storage;
 mod threads;
 mod typing;
+mod upload;
 mod window;
 
 use files::*;

@@ -314,13 +314,31 @@ const REUSE_UPLOAD_FOR: u64 = 7 * 24 * 3600 * 1000;
 
 impl Uploads {
     /// Of the bytes as they would be uploaded; the type goes in too, as it's part of the pointer.
-    fn hash(spec: &AttachmentSpec, data: &[u8]) -> Vec<u8> {
+    /// A file is read a piece at a time, off the backend thread.
+    async fn hash(spec: &AttachmentSpec, src: &upload::Source) -> anyhow::Result<Vec<u8>> {
         use sha2::Digest;
         let mut h = sha2::Sha256::new();
         h.update((spec.content_type.len() as u64).to_le_bytes());
         h.update(spec.content_type.as_bytes());
-        h.update(data);
-        h.finalize().to_vec()
+        match src {
+            upload::Source::Bytes(b) => h.update(b),
+            upload::Source::File { path, .. } => {
+                let path = path.clone();
+                h = tokio::task::spawn_blocking(move || -> std::io::Result<_> {
+                    use std::io::Read;
+                    let mut file = std::fs::File::open(path)?;
+                    let mut buf = vec![0u8; 256 * 1024];
+                    loop {
+                        match file.read(&mut buf)? {
+                            0 => return Ok(h),
+                            n => h.update(&buf[..n]),
+                        }
+                    }
+                })
+                .await??;
+            }
+        }
+        Ok(h.finalize().to_vec())
     }
 
     async fn find(&self, hash: &[u8]) -> Option<AttachmentPointer> {
@@ -344,12 +362,12 @@ impl Uploads {
 /// Each upload is remembered right away, so a send that fails later doesn't upload it again.
 /// Without `uploads` (a view-once photo) nothing is reused or remembered: its pointer must not
 /// outlive the message, nor be mixed with the same photo sent normally.
-async fn upload_all(m: &mut Mgr, specs: Vec<(AttachmentSpec, Vec<u8>)>, uploads: Option<&Uploads>) -> anyhow::Result<Vec<AttachmentPointer>> {
+async fn upload_all(m: &Mgr, specs: Vec<(AttachmentSpec, upload::Source)>, uploads: Option<&Uploads>) -> anyhow::Result<Vec<AttachmentPointer>> {
     let mut slots: Vec<Option<AttachmentPointer>> = Vec::with_capacity(specs.len());
     let mut todo = Vec::new();
     let mut todo_hashes = Vec::new();
     for (spec, data) in specs {
-        let hash = Uploads::hash(&spec, &data);
+        let hash = Uploads::hash(&spec, &data).await?;
         let found = match uploads {
             Some(u) => u.find(&hash).await,
             None => None,
@@ -368,7 +386,8 @@ async fn upload_all(m: &mut Mgr, specs: Vec<(AttachmentSpec, Vec<u8>)>, uploads:
         }
     }
     let (reused, uploaded) = (slots.len() - todo.len(), todo.len());
-    let mut results = if todo.is_empty() { Vec::new() } else { m.upload_attachments(todo).await? };
+    let reg = m.registration_data().clone();
+    let mut results = futures::future::join_all(todo.into_iter().map(|(spec, src)| upload_one(m, &reg, spec, src))).await;
     let mut failed = None;
     let mut fresh = Vec::with_capacity(results.len());
     for (res, hash) in results.drain(..).zip(&todo_hashes) {
@@ -383,11 +402,23 @@ async fn upload_all(m: &mut Mgr, specs: Vec<(AttachmentSpec, Vec<u8>)>, uploads:
         }
     }
     if let Some(e) = failed {
-        return Err(e.into());
+        return Err(e);
     }
     info!(reused, uploaded, "attachments ready");
     let mut fresh = fresh.into_iter();
     Ok(slots.into_iter().filter_map(|s| s.or_else(|| fresh.next())).collect())
+}
+
+/// Streamed from the file on CDN 3 (`upload.rs`); presage uploads it, from memory, where the
+/// server hands out another CDN.
+async fn upload_one(m: &Mgr, reg: &presage::manager::RegistrationData, spec: AttachmentSpec, src: upload::Source) -> anyhow::Result<AttachmentPointer> {
+    match upload::form(reg, src.len()).await? {
+        Some(form) => upload::upload(form, spec, src).await,
+        None => {
+            let data = src.into_bytes()?;
+            Ok(m.upload_attachments(vec![(spec, data)]).await?.into_iter().next().context("no upload result")??)
+        }
+    }
 }
 
 async fn send_job(m: Mgr, thread: Thread, job: SendJob, group_revision: u32, ts: u64, dir: PathBuf, uploads: Uploads) -> anyhow::Result<()> {
@@ -437,17 +468,17 @@ pub(super) async fn send_task(
     let mut specs = Vec::new();
     for path in &files {
         let mut ct = mime_guess::from_path(path).first_or_octet_stream().to_string();
-        let mut data = std::fs::read(path).with_context(|| tr!("Couldn't read {}", path.display()))?;
+        let len = std::fs::metadata(path).with_context(|| tr!("Couldn't read {}", path.display()))?.len();
+        // read as it uploads, unless it is a photo prepared here
+        let mut data = upload::Source::File { path: path.clone(), len };
         let mut file_name = path.file_name().map(|s| s.to_string_lossy().to_string());
         let mut facts = None;
-        if ct.starts_with("image/") {
-            // a photo is shrunk and loses its EXIF; one this can't handle goes as it is
-            match prepare_photo(data, quality).await? {
-                (orig, Ok(None)) => data = orig,
-                (orig, Err(e)) => {
-                    warn!("prepare photo: {e:#}");
-                    data = orig;
-                }
+        // a photo is shrunk and loses its EXIF; one this can't handle goes as it is
+        if ct.starts_with("image/") && len <= PREPARE_MAX_BYTES as u64 {
+            let bytes = std::fs::read(path).with_context(|| tr!("Couldn't read {}", path.display()))?;
+            match prepare_photo(bytes, quality).await? {
+                (_, Ok(None)) => {}
+                (_, Err(e)) => warn!("prepare photo: {e:#}"),
                 (_, Ok(Some(p))) => {
                     if p.content_type != ct {
                         ct = p.content_type.to_string();
@@ -461,7 +492,7 @@ pub(super) async fn send_task(
                     if let Some(size) = p.size {
                         facts = Some((Some(size), p.blurhash));
                     }
-                    data = p.bytes;
+                    data = upload::Source::Bytes(p.bytes);
                 }
             }
         }
@@ -475,7 +506,7 @@ pub(super) async fn send_task(
         specs.push((
             AttachmentSpec {
                 content_type: ct,
-                length: data.len(),
+                length: data.len() as usize,
                 file_name,
                 preview: None,
                 voice_note: None,
@@ -490,7 +521,7 @@ pub(super) async fn send_task(
     }
     let mut attachments: Vec<AttachmentPointer> = long.into_iter().collect();
     if !specs.is_empty() {
-        attachments.extend(upload_all(&mut m, specs, (!view_once).then_some(&uploads)).await?);
+        attachments.extend(upload_all(&m, specs, (!view_once).then_some(&uploads)).await?);
     }
     let preview = Box::pin(for_message(&m, &text, !files.is_empty(), link, ts, &attachments_dir)).await;
     let dm = DataMessage {

@@ -610,7 +610,7 @@ const VIEW_MAX_PIXELS: u64 = 100_000_000;
 
 /// What presage calls itself to the CDN: its own constant is private, and a download that says
 /// something else would stand out for no reason.
-const PRESAGE_USER_AGENT: &str = "presage-rs-0.8.0-dev";
+pub(super) const PRESAGE_USER_AGENT: &str = "presage-rs-0.8.0-dev";
 
 /// For downloads: the CDN takes no credentials.
 pub(super) fn cdn_service() -> presage::libsignal_service::push_service::PushService {

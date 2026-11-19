@@ -28,6 +28,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 directories = "6"
 futures = "0.3"
 sha2 = "0.11"
+# streamed attachment encryption (backend/upload.rs); the versions libsignal-service uses
+aes = "0.9"
+cbc = "0.2"
+hmac = "0.13"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 mime_guess = "2"
