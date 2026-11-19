@@ -919,8 +919,8 @@ msgstr "대화 기록의 형식이 잘못되었습니다"
 msgid "The chat history is too large"
 msgstr "대화 기록이 너무 큽니다"
 
-msgid "The file is too large. You can send up to 100MB."
-msgstr "파일이 너무 큽니다. 최대 100MB까지 보낼 수 있습니다."
+msgid "The file is too large. You can send up to {}."
+msgstr "파일이 너무 큽니다. 최대 {}까지 보낼 수 있습니다."
 
 msgid "The official Signal app may not accept files of this kind."
 msgstr "이런 종류의 파일은 상대의 공식 앱에서 받지 못할 수 있습니다."

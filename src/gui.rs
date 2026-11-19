@@ -73,6 +73,8 @@ pub(crate) struct Ui {
     /// rows seen in a window that is only watched, with when: they count as read after a while
     dwell: Vec<(String, std::time::Instant)>,
     files: Vec<PathBuf>,
+    /// the server's attachment size limit; None: the default (`attach::admit`)
+    send_limit: Option<u64>,
     /// pictures of `files` for the composer: None while being cut (or when there is none)
     pending_thumbs: HashMap<PathBuf, Option<Image>>,
     /// the GIF playing in a composer tile: (playback number, file), and the last number used
@@ -285,6 +287,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 app.set_current_key(to.into());
             }
         }),
+        Event::SendLimit(limit) => UI.with_borrow_mut(|ui| ui.send_limit = limit),
         Event::RecentReactions(list) => {
             let list: Vec<SharedString> = list.iter().map(|e| e.as_str().into()).collect();
             app.set_recent_emoji(ModelRc::new(VecModel::from(list)));

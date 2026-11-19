@@ -589,6 +589,8 @@ pub enum Event {
     LinkQr(String),
     LinkStatus(String),
     Ready,
+    /// how large an attachment the server takes (padded and encrypted); None: the default
+    SendLimit(Option<u64>),
     Threads(Vec<ThreadDto>),
     /// thread `from` is now `to` (a PNI thread joined its person's): what the UI keeps by key
     /// (draft, place) moves along, and an open `from` stays open as `to`

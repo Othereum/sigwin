@@ -28,16 +28,18 @@ fn is_media(p: &Path) -> bool {
 }
 
 /// Which of `new` may join `have`, in order, and why the first refused one was refused.
-pub(crate) fn admit(have: &[PathBuf], new: Vec<PathBuf>) -> (Vec<PathBuf>, Option<&'static str>) {
+/// `limit`: the server's attachment size limit, if known.
+pub(crate) fn admit(have: &[PathBuf], new: Vec<PathBuf>, limit: Option<u64>) -> (Vec<PathBuf>, Option<String>) {
+    let limit = limit.unwrap_or(SEND_MAX_BYTES);
     let mut all = have.to_vec();
     let mut why = None;
     for p in new {
         if all.iter().any(|f| !is_media(f)) {
-            why.get_or_insert(tr!("You can send only one file at a time."));
+            why.get_or_insert_with(|| tr!("You can send only one file at a time.").to_string());
         } else if !is_media(&p) && !all.is_empty() {
-            why.get_or_insert(tr!("Photos or videos and files can't be sent together."));
-        } else if too_big(&p) {
-            why.get_or_insert(tr!("The file is too large. You can send up to 100MB."));
+            why.get_or_insert_with(|| tr!("Photos or videos and files can't be sent together.").to_string());
+        } else if std::fs::metadata(&p).is_ok_and(|m| sent_size(m.len()) > limit) {
+            why.get_or_insert_with(|| tr!("The file is too large. You can send up to {}.", crate::view::media::size_text(limit)));
         } else {
             all.push(p);
         }
@@ -45,13 +47,9 @@ pub(crate) fn admit(have: &[PathBuf], new: Vec<PathBuf>) -> (Vec<PathBuf>, Optio
     (all.split_off(have.len()), why)
 }
 
-/// What the server takes of one attachment, as the official app assumes it (its own setting
-/// can differ). Compared on the encrypted, padded size, like the official app does.
+/// What the server takes of one attachment when its config doesn't say, as the official app
+/// assumes it. Compared on the encrypted, padded size, like the official app does.
 const SEND_MAX_BYTES: u64 = 100 * 1024 * 1024;
-
-fn too_big(p: &Path) -> bool {
-    std::fs::metadata(p).is_ok_and(|m| sent_size(m.len()) > SEND_MAX_BYTES)
-}
 
 /// The size on the wire: padded up in 5% steps, plus the IV and the MAC.
 fn sent_size(plain: u64) -> u64 {
@@ -186,32 +184,47 @@ mod tests {
 
     #[test]
     fn media_go_together() {
-        let (ok, why) = admit(&[p("a.jpg")], vec![p("b.mp4"), p("c.gif")]);
+        let (ok, why) = admit(&[p("a.jpg")], vec![p("b.mp4"), p("c.gif")], None);
         assert_eq!(ok.len(), 2);
         assert!(why.is_none());
     }
 
     #[test]
     fn file_refused_after_media() {
-        let (ok, why) = admit(&[p("a.jpg")], vec![p("b.pdf")]);
+        let (ok, why) = admit(&[p("a.jpg")], vec![p("b.pdf")], None);
         assert!(ok.is_empty());
         assert!(why.unwrap().contains("together"));
     }
 
     #[test]
     fn media_refused_after_file() {
-        let (ok, why) = admit(&[p("a.pdf")], vec![p("b.jpg"), p("c.zip")]);
+        let (ok, why) = admit(&[p("a.pdf")], vec![p("b.jpg"), p("c.zip")], None);
         assert!(ok.is_empty());
         assert!(why.unwrap().contains("only one"));
     }
 
     #[test]
     fn first_of_a_mixed_batch_decides() {
-        let (ok, why) = admit(&[], vec![p("a.pdf"), p("b.jpg")]);
+        let (ok, why) = admit(&[], vec![p("a.pdf"), p("b.jpg")], None);
         assert_eq!(ok, vec![p("a.pdf")]);
         assert!(why.is_some());
-        let (ok, _) = admit(&[], vec![p("a.jpg"), p("b.pdf"), p("c.png")]);
+        let (ok, _) = admit(&[], vec![p("a.jpg"), p("b.pdf"), p("c.png")], None);
         assert_eq!(ok, vec![p("a.jpg"), p("c.png")]);
+    }
+
+    #[test]
+    fn the_servers_limit_decides() {
+        let dir = std::env::temp_dir().join(format!("sigwin-attach-limit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.bin");
+        std::fs::write(&file, vec![0u8; 2000]).unwrap();
+        let (ok, why) = admit(&[], vec![file.clone()], None);
+        assert_eq!(ok.len(), 1);
+        assert!(why.is_none());
+        let (ok, why) = admit(&[], vec![file.clone()], Some(1500));
+        assert!(ok.is_empty());
+        assert!(why.unwrap().contains("2KB"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

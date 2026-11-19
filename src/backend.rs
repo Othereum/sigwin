@@ -40,6 +40,7 @@ use crate::types::{
 use crate::view::media::THUMB_MAX;
 use crate::view::{self, Kind};
 
+mod config;
 pub(crate) mod files;
 pub(crate) mod fixture;
 pub(crate) mod linkpreview;
@@ -212,6 +213,14 @@ struct Persist {
     /// emoji we reacted with, newest first (the reaction picker's recent row)
     #[serde(default)]
     recent_reactions: Vec<String>,
+    /// the server's attachment size limit (`config.rs`); None: not known, the default applies
+    #[serde(default)]
+    send_limit: Option<u64>,
+    /// the remote config's ETag, and when it was last asked for (ms)
+    #[serde(default)]
+    config_etag: Option<String>,
+    #[serde(default)]
+    config_at: u64,
 }
 
 #[derive(Default, Clone, Copy, Serialize, Deserialize)]
@@ -253,6 +262,7 @@ enum Internal {
     Swept { sweep: HashMap<String, SweepState>, changed: Vec<String> },
     Avatars(crate::avatar::Done),
     PhoneStorage(Result<Option<storage::PhoneStorage>, String>),
+    Config(Result<config::Config, String>),
     /// what a lookup from the search found
     Found(search::Found),
     /// messages the search with this turn found (`search::Hits`)
@@ -447,6 +457,7 @@ struct App {
     /// a thread's "notifications off" runs out then (the list shows it)
     mute_due: Option<u64>,
     storage_syncing: bool,
+    config_fetching: bool,
     /// thread keys that are message requests now (`requests.rs`)
     requests: HashSet<String>,
     /// request threads found to hold nothing of ours (asked of the DB once per session)
@@ -611,6 +622,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         notes: Default::default(),
         mute_due: None,
         storage_syncing: false,
+        config_fetching: false,
         requests: HashSet::new(),
         not_written: HashSet::new(),
         logged_requests: None,
@@ -669,7 +681,10 @@ async fn run(dir: PathBuf, mut cmd_rx: UnboundedReceiver<Command>, emit: Emit, o
                 }
                 memticks = memticks.wrapping_add(1);
             }
-            _ = sweeptick.tick() => app.sweep(),
+            _ = sweeptick.tick() => {
+                app.sweep();
+                app.refresh_config();
+            }
             _ = agetick.tick() => app.retime_threads().await,
         }
     }
@@ -699,6 +714,7 @@ impl App {
         self.manager = Some(m);
         (self.emit)(Event::Ready);
         (self.emit)(Event::RecentReactions(self.persist.recent_reactions.clone()));
+        (self.emit)(Event::SendLimit(self.persist.send_limit));
         self.threads_dirty = true;
         if fresh {
             if let Some(m) = self.manager.as_mut() {
@@ -1051,6 +1067,7 @@ impl App {
                 self.run_avatars();
             }
             Internal::PhoneStorage(res) => self.phone_storage(res).await,
+            Internal::Config(res) => self.config_fetched(res),
             Internal::Found(found) => self.found(found).await,
             Internal::Hits { turn, list } => self.hits(turn, list).await,
             Internal::TextsIndexing(pct) => self.texts_indexing(pct).await,

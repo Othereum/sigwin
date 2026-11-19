@@ -985,14 +985,14 @@ pub(crate) fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
         return;
     }
     let (all, why, danger) = UI.with_borrow_mut(|ui| {
-        let (ok, why) = attach::admit(&ui.files, files);
+        let (ok, why) = attach::admit(&ui.files, files, ui.send_limit);
         let name = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let danger = ok.iter().any(|p| view::media::is_dangerous_file(&name(p)));
         ui.files.extend(ok);
         (ui.files.clone(), why, danger)
     });
     if let Some(why) = why {
-        notice::show(app, why);
+        notice::show(app, &why);
     } else if danger {
         notice::show(app, tr!("The official Signal app may not accept files of this kind."));
     }

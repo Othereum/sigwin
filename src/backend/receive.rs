@@ -164,6 +164,7 @@ impl App {
                     self.sweep();
                     crate::update::start();
                     self.sync_phone_storage();
+                    self.refresh_config();
                 }
                 self.synced = true;
                 self.connection("", true);

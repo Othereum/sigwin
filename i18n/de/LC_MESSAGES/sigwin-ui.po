@@ -923,8 +923,8 @@ msgstr "Der Chatverlauf hat ein ungültiges Format"
 msgid "The chat history is too large"
 msgstr "Der Chatverlauf ist zu groß"
 
-msgid "The file is too large. You can send up to 100MB."
-msgstr "Die Datei ist zu groß. Du kannst bis zu 100 MB senden."
+msgid "The file is too large. You can send up to {}."
+msgstr "Die Datei ist zu groß. Du kannst bis zu {} senden."
 
 msgid "The official Signal app may not accept files of this kind."
 msgstr "Die offizielle Signal-App nimmt Dateien dieser Art möglicherweise nicht an."
