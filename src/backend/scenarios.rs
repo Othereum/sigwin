@@ -975,6 +975,70 @@ fn a_view_once_picture_shows_once() {
     });
 }
 
+/// A view-once photo we send shows as its sent card from the start, and once sent nothing of the
+/// picture stays here: the stored pointer (with its key) and any cached copy go.
+#[test]
+fn a_view_once_photo_we_send_keeps_nothing_of_it() {
+    use crate::types::ViewOnce;
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=2").await;
+        h.open(1).await;
+        h.take_events();
+        let me = h.app.me;
+        let ts = h.app.next_send_ts();
+        let key = h.app.current.as_ref().unwrap().key.clone();
+        let job = SendJob::Text {
+            body: String::new(),
+            body_ranges: Vec::new(),
+            files: vec!["photo.png".into()],
+            quote: None,
+            link: LinkSend::None,
+            quality: sigwin_thumb::photo::Quality::from_index(0),
+            view_once: true,
+        };
+        h.app.pending.push(Pending {
+            ts,
+            thread_key: key,
+            text: String::new(),
+            quote: String::new(),
+            quote_author: String::new(),
+            quote_id: String::new(),
+            attachment: String::new(),
+            image_key: String::new(),
+            photos: Vec::new(),
+            link: None,
+            error: None,
+            after_seq: None,
+            job,
+        });
+        h.app.emit_messages(Scroll::Bottom).await;
+        let ev = h.take_events();
+        let row = last_list(&ev).and_then(|(items, _)| items.last()).expect("the pending row").clone();
+        assert_eq!(row.view_once, ViewOnce::Sent);
+        assert!(row.cells.is_empty() && row.image_key.is_empty() && row.attachment.is_empty());
+
+        // what presage stores once it went out
+        let them = ServiceId::Aci(super::fixture::contact(1).into());
+        let thread = Thread::Contact(them);
+        let ptr = AttachmentPointer { content_type: Some("image/png".into()), digest: Some(vec![7; 32]), key: Some(vec![9; 64]), ..Default::default() };
+        let cached = files::attachment_path(&h.app.paths.attachments, &view::media::attachment_key(&ptr, ts, 0));
+        sigwin_vault::write(&cached, b"png").unwrap();
+        let dm = DataMessage { attachments: vec![ptr], is_view_once: Some(true), timestamp: Some(ts), ..Default::default() };
+        let mut c = super::fixture::incoming_dm(1, dm, me);
+        c.metadata.sender = ServiceId::Aci(me.into());
+        c.metadata.destination = them;
+        h.app.store.save_message(&thread, c).await.unwrap();
+        h.app.sent(ts).await;
+
+        let stored = h.app.store.message(&thread, ts).await.unwrap().expect("the row stays");
+        assert!(view::data_message(&stored).is_some_and(|dm| dm.attachments.is_empty() && dm.is_view_once == Some(true)));
+        assert!(!cached.exists());
+        h.app.emit_messages(Scroll::Keep).await;
+        assert_eq!(last_once(&h.take_events()), Some(ViewOnce::Sent));
+    });
+}
+
 #[test]
 fn a_view_once_message_opened_on_the_phone_or_a_video_is_not_opened_here() {
     use crate::types::ViewOnce;

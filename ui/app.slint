@@ -96,6 +96,12 @@ export component AppWindow inherits Window {
     in property <[PendingFile]> pending-files;
     // a photo is among them: the quality it goes at can be picked
     in property <bool> pending-has-photo;
+    // they are one photo, which can go as a view-once message
+    in property <bool> pending-view-once-able;
+    // the photo goes as a view-once message, alone: the text stays hidden in the composer (as
+    // Signal Desktop does), and a reply or an edit can't be one
+    in-out property <bool> view-once;
+    property <bool> view-once-on: view-once && pending-view-once-able && reply-preview == "" && edit-preview == "";
     in-out property <string> draft;
 
     callback start-link(string);
@@ -1404,7 +1410,7 @@ export component AppWindow inherits Window {
                             padding-bottom: 7px;
                             FocusScope {
                                 // FocusScope and Rectangle don't take their child's size: grow with wrapped lines
-                                min-height: min(composer.preferred-height, 140px);
+                                min-height: root.view-once-on ? 20px : min(composer.preferred-height, 140px);
                                 capture-key-pressed(event) => {
                                     if (root.mention-items.length > 0) {
                                         if (event.text == Key.UpArrow) {
@@ -1479,8 +1485,10 @@ export component AppWindow inherits Window {
                                         // only while it shows: the width sets the wrapped height,
                                         // which decides whether it shows
                                         width: composer-flick.visible-width - 10px;
-                                        height: self.preferred-height;
+                                        height: root.view-once-on ? 20px : self.preferred-height;
                                         text <=> root.draft;
+                                        // kept, not sent, while a view-once photo is to go
+                                        read-only: root.view-once-on;
                                         edited => {
                                             // over the 64KB a message can carry: the new part is cut to fit
                                             let cut = root.clamp-draft(self.text);
@@ -1508,14 +1516,14 @@ export component AppWindow inherits Window {
                                         }
                                         single-line: false;
                                         wrap: word-wrap;
-                                        color: Theme.text;
+                                        color: root.view-once-on ? transparent : Theme.text;
                                         font-size: 14px;
                                     }
                                     // hide as soon as IME composition starts (preedit isn't in text yet)
-                                    if root.draft == "" && composer.preedit-text == "": Text {
+                                    if (root.draft == "" && composer.preedit-text == "") || root.view-once-on: Text {
                                         x: 0;
                                         y: 0;
-                                        text: root.edit-preview != "" ? @tr("Edit message (Esc to cancel)") : @tr("Message");
+                                        text: root.view-once-on ? @tr("View-once photo") : root.edit-preview != "" ? @tr("Edit message (Esc to cancel)") : @tr("Message");
                                         color: Theme.subtle;
                                         font-size: 14px;
                                     }
@@ -1533,6 +1541,66 @@ export component AppWindow inherits Window {
                             icon: Icons.sticker;
                             active: root.sticker-open;
                             clicked => { root.toggle-stickers(); }
+                        }
+                        // drawn like the quality button next to it: crossed out when off, lit when on
+                        if root.pending-view-once-able && root.reply-preview == "" && root.edit-preview == "": once-btn := Rectangle {
+                            width: 34px;
+                            height: 34px;
+                            border-radius: 17px;
+                            background: once-area.has-hover ? Theme.field-off : transparent;
+                            property <bool> tip-ready;
+                            Timer {
+                                running: once-area.has-hover && !once-btn.tip-ready;
+                                interval: 400ms;
+                                triggered => { once-btn.tip-ready = true; }
+                            }
+                            once-area := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.view-once = !root.view-once;
+                                    composer.focus();
+                                }
+                                changed has-hover => {
+                                    if (!self.has-hover) {
+                                        once-btn.tip-ready = false;
+                                    }
+                                }
+                            }
+                            Icon {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                size: 20px;
+                                icon: Icons.view-once;
+                                tint: root.view-once ? Theme.accent : Theme.subtle;
+                            }
+                            if !root.view-once: Path {
+                                width: 34px;
+                                height: 34px;
+                                viewbox-width: 34;
+                                viewbox-height: 34;
+                                commands: "M 7 7 L 27 27";
+                                stroke: Theme.subtle;
+                                stroke-width: 1.5px;
+                                stroke-line-cap: round;
+                            }
+                            // ends at the button's right edge: the button sits by the window's
+                            if once-area.has-hover && once-btn.tip-ready: Rectangle {
+                                x: parent.width - self.width;
+                                y: -self.height - 8px;
+                                width: once-tip.preferred-width + 20px;
+                                height: once-tip.preferred-height + 14px;
+                                border-radius: 6px;
+                                background: Theme.sidebar;
+                                border-width: 1px;
+                                border-color: Theme.border;
+                                once-tip := Text {
+                                    x: 10px;
+                                    y: 7px;
+                                    text: root.view-once ? @tr("Sending as view once: it can be opened one time\nClick to send normally") : @tr("Sending normally\nClick to send as view once");
+                                    color: Theme.text;
+                                    font-size: 12px;
+                                }
+                            }
                         }
                         // drawn like its neighbors (an outline, no fill), crossed out when off and lit
                         // with the accent when on
@@ -1586,8 +1654,9 @@ export component AppWindow inherits Window {
                                 stroke-width: 1.5px;
                                 stroke-line-cap: round;
                             }
+                            // ends at the button's right edge: the button sits by the window's
                             if hd-area.has-hover && hd-btn.tip-ready: Rectangle {
-                                x: 0px;
+                                x: parent.width - self.width;
                                 y: -self.height - 8px;
                                 width: hd-tip.preferred-width + 20px;
                                 height: hd-tip.preferred-height + 14px;

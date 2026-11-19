@@ -690,7 +690,8 @@ pub enum Command {
     UnreadButton,
     /// `mentions`: members picked in the composer, their "@name"s become mentions
     /// `link`: the url to preview on the message
-    Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String>, quality: sigwin_thumb::photo::Quality },
+    /// `view_once`: the one photo in `files` goes as a view-once message, without the text
+    Send { text: String, files: Vec<PathBuf>, quote: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String>, quality: sigwin_thumb::photo::Quality, view_once: bool },
     /// the composer's link changed: fetch this one's preview (contacts its site), None cancels
     LinkPreview(Option<String>),
     /// play image `index` (among the row's images) of row `id` in its cell, `size` physical px big,

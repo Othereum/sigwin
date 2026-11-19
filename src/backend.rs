@@ -776,7 +776,7 @@ impl App {
                     warn!("unread button: {e:#}");
                 }
             }
-            Command::Send { text, files, quote, mentions, link, quality } => self.send(text, files, quote, mentions, link, quality).await,
+            Command::Send { text, files, quote, mentions, link, quality, view_once } => self.send(text, files, quote, mentions, link, quality, view_once).await,
             Command::ViewImage { id, index, fit } => self.view_image(&id, index, fit),
             Command::SaveFiles { id, owner, all } => self.save_files(&id, owner, all),
             Command::OpenVideo { id, index } => self.open_video(&id, index).await,

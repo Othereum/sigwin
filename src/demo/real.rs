@@ -1,10 +1,11 @@
 //! `SIGWIN_DEMO_REAL=1`: a believable chat list and conversations, for the README's pictures
 //! (`scripts/readme-media.ps1`). The people and the chats follow the UI's language. A 1:1 chat
 //! shows a photo, a reply and a link preview; a group shows senders, a photo grid and who read
-//! our message. Sending works, with a link getting its preview after the message is on screen,
+//! our message, and another chat has view-once photos both ways. Sending works, with a link getting its preview after the message is on screen,
 //! and photos open in the viewer.
 
 use super::*;
+use crate::types::ViewOnce;
 use std::collections::HashMap;
 
 /// The chat open at start (the README's main picture) and the group.
@@ -12,6 +13,10 @@ const CHAT: &str = "c:demo-1";
 const GROUP: &str = "c:demo-2";
 /// A team whose members have Korean names in either language, for @mentions typed with an IME.
 const TEAM: &str = "c:demo-4";
+/// View-once photos both ways: one still to open, one viewed, ours, a video left to the phone.
+const ONCE: &str = "c:demo-6";
+/// The view-once photo there that can still be opened, and its scene variant.
+const ONCE_PHOTO: (&str, usize) = ("3", 1);
 
 /// A photo of the gallery in the 1:1 chat, and a trip's photos in the group (scene variants).
 const CHAT_PHOTO: (&str, usize) = ("real-photo", 0);
@@ -174,6 +179,32 @@ fn data(ko: bool) -> Data {
         .collect();
     chats.insert(CHAT.into(), chat);
     chats.insert(GROUP.into(), group);
+
+    // view-once photos, sent and received (not in the README's pictures)
+    let yuna = (rows[5].0, "demo-y");
+    let mut once = vec![
+        msg(0, Some(yuna), t("Want to see what I made?", "제가 만든 거 볼래요?"), 8, 50),
+        msg(1, Some(yuna), "", 8, 51),
+        msg(2, None, t("Whoa, that's amazing. Here's mine", "와 대박이다. 제 것도 보여 줄게요"), 8, 55),
+        msg(3, None, "", 8, 56),
+        msg(4, Some(yuna), "", 9, 5),
+        msg(5, Some(yuna), "", 9, 8),
+        msg(6, Some(yuna), t("Thanks :)", "고마워요 :)"), 9, 12),
+    ];
+    once[1].view_once = ViewOnce::Viewed;
+    once[3].view_once = ViewOnce::Sent;
+    once[4].view_once = ViewOnce::Photo;
+    once[5].view_once = ViewOnce::Phone;
+    // the one still to open is the one the viewer shows
+    once[4].id = ONCE_PHOTO.0.into();
+    once[3].id = "4".into();
+    // yesterday, as the chat list says
+    for m in &mut once {
+        m.ts -= 24 * 3600 * 1000;
+        m.day = view::time::day_num(&view::time::local(m.ts));
+    }
+    view::mark_runs(&mut once, false);
+    chats.insert(ONCE.into(), once);
     let sent_link = (
         t("Tickets for Saturday", "토요일 관람권").to_string(),
         t("Light & Land: Landscapes at Dusk. Saturday, 11:00. 2 tickets.", "빛과 땅: 해 질 녘의 풍경. 토요일 11:00, 2매.").to_string(),
@@ -218,11 +249,14 @@ pub(super) fn demo_real(emit: backend::Emit, thumbs: Thumbs, mut cmd_rx: tokio::
                     let c = card(&url, &sent_link.0, &sent_link.1, "real-sent");
                     emit(Event::LinkPreview { url, card: Some(c) });
                 }
-                Command::Send { text, link, .. } => {
+                Command::Send { text, link, view_once, .. } => {
                     let Some(items) = chats.get_mut(&current) else { continue };
                     let ts = view::time::now_ms();
                     let mut m = view::outgoing_stub(ts, items.last().map(|m| m.ts));
                     m.text = text.trim_end().into();
+                    if view_once {
+                        m.view_once = ViewOnce::Sent;
+                    }
                     items.push(m);
                     let show = |items: &mut Vec<MsgDto>| {
                         view::mark_runs(items, current == GROUP);
@@ -257,12 +291,24 @@ pub(super) fn demo_real(emit: backend::Emit, thumbs: Thumbs, mut cmd_rx: tokio::
                     }
                 }
                 Command::ViewImage { id, index, fit } => {
+                    let once = current == ONCE;
+                    if once && chats[ONCE].iter().any(|m| m.id == id && m.view_once != ViewOnce::Photo) {
+                        emit(Event::Notice(tr!("This view-once media can't be opened anymore.").into()));
+                        continue;
+                    }
                     let Some((variants, size)) = viewed(&current, &id) else { continue };
                     let index = index.min(variants.len() - 1);
                     let Ok(png) = sigwin_thumb::png_rgba(&scene(size.0, size.1, variants[index])) else { continue };
                     let Ok(Some(view)) = sigwin_thumb::decode_view(&png, fit.0, fit.1, u64::MAX) else { continue };
                     let pixels = types::ViewerPixels::from(view);
-                    emit(Event::ViewerImage(types::ViewerImage { id, index, count: variants.len(), pixels, animated: false, pending: String::new(), once: false }));
+                    emit(Event::ViewerImage(types::ViewerImage { id, index, count: variants.len(), pixels, animated: false, pending: String::new(), once }));
+                }
+                // shown once: it reads as viewed from now on
+                Command::ViewOnceSeen(id) => {
+                    let Some(items) = chats.get_mut(&current) else { continue };
+                    let Some(m) = items.iter_mut().find(|m| m.id == id && m.view_once == ViewOnce::Photo) else { continue };
+                    m.view_once = ViewOnce::Viewed;
+                    emit(Event::Messages { key: current.clone(), items: items.clone(), paging: Paging::default(), scroll: Scroll::KeepIfNotAtBottom });
                 }
                 Command::ViewerThumbs { id, px } => {
                     let Some((variants, _)) = viewed(&current, &id) else { continue };
@@ -293,6 +339,7 @@ fn viewed(thread: &str, id: &str) -> Option<(&'static [usize], (u32, u32))> {
     match (thread, id) {
         (CHAT, "2") => Some((std::slice::from_ref(&CHAT_PHOTO.1), (2400, 1800))),
         (GROUP, "4") => Some((&GROUP_PHOTOS, (1800, 1800))),
+        (ONCE, id) if id == ONCE_PHOTO.0 => Some((std::slice::from_ref(&ONCE_PHOTO.1), (1600, 2000))),
         _ => None,
     }
 }

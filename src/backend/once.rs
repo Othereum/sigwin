@@ -43,7 +43,7 @@ impl App {
 
     /// Drops what the message held of the picture, its pointer (with the key) and any cached
     /// copy, keeping the row: it then reads as viewed, as a backup's viewed ones do.
-    async fn erase_view_once(&mut self, thread: &Thread, mut c: Content) {
+    pub(super) async fn erase_view_once(&mut self, thread: &Thread, mut c: Content) {
         let ts = c.metadata.client_timestamp.timestamp_millis() as u64;
         remove_files(&c, ts, &self.paths.attachments, &self.paths.thumbs);
         let dm = match &mut c.body {

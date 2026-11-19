@@ -4,12 +4,16 @@ use super::*;
 use sigwin_thumb::photo::{self, Quality};
 
 impl App {
-    pub(super) async fn send(&mut self, text: String, files: Vec<PathBuf>, quote_id: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String>, quality: Quality) {
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn send(&mut self, text: String, files: Vec<PathBuf>, quote_id: Option<String>, mentions: Vec<crate::mention::Member>, link: Option<String>, quality: Quality, view_once: bool) {
         let link = self.link_for_send(link);
         if self.manager.is_none() {
             return;
         }
         let Some(open) = self.current.as_ref() else { return };
+        // a view-once message is the photo alone (as Signal's apps send it)
+        let view_once = view_once && files.len() == 1;
+        let (text, quote_id, mentions) = if view_once { (String::new(), None, Vec::new()) } else { (text, quote_id, mentions) };
         let text = text.trim_end().to_string();
         if text.trim().is_empty() && files.is_empty() {
             return;
@@ -94,7 +98,13 @@ impl App {
             let bytes = other_files.iter().map(|f| std::fs::metadata(f).ok().map(|m| m.len())).sum();
             view::media::file_line(&file_label(first), other_files.len() - 1, bytes)
         });
-        self.spawn_pending_thumbs(ts, photo_paths, &photos);
+        // shown as the sent card it becomes: no copy of the picture on screen, as it won't stay
+        if view_once {
+            photos.clear();
+        } else {
+            self.spawn_pending_thumbs(ts, photo_paths, &photos);
+        }
+        let attachment = if view_once { String::new() } else { attachment };
         self.pending.push(Pending {
             photos,
             ts,
@@ -108,7 +118,7 @@ impl App {
             link: link.card(),
             error: None,
             after_seq: None,
-            job: SendJob::Text { body, body_ranges, files, quote, link, quality },
+            job: SendJob::Text { body, body_ranges, files, quote, link, quality, view_once },
         });
         self.emit_messages(Scroll::Bottom).await;
         self.start_send(ts).await;
@@ -162,6 +172,11 @@ impl App {
         }
         if let Some((thread, c)) = stored {
             self.note_text(&thread, &c).await;
+            // nothing of a view-once photo stays with its sender, its key included (as Signal
+            // Desktop erases it once sent)
+            if view::data_message(&c).is_some_and(|dm| dm.is_view_once.unwrap_or(false)) {
+                self.erase_view_once(&thread, c).await;
+            }
         }
         if let Some(key) = self.pending.iter().find(|p| p.ts == ts).map(|p| p.thread_key.clone()) {
             self.wrote(&key);
@@ -260,7 +275,7 @@ impl App {
 /// What a pending row sends.
 #[derive(Clone)]
 pub(super) enum SendJob {
-    Text { body: String, body_ranges: Vec<BodyRange>, files: Vec<PathBuf>, quote: Option<Quote>, link: LinkSend, quality: Quality },
+    Text { body: String, body_ranges: Vec<BodyRange>, files: Vec<PathBuf>, quote: Option<Quote>, link: LinkSend, quality: Quality, view_once: bool },
     Sticker(StickerSend),
 }
 
@@ -327,13 +342,19 @@ impl Uploads {
 
 /// Pointers for `specs`, in order: an earlier upload where there is one, the rest uploaded now.
 /// Each upload is remembered right away, so a send that fails later doesn't upload it again.
-async fn upload_all(m: &mut Mgr, specs: Vec<(AttachmentSpec, Vec<u8>)>, uploads: &Uploads) -> anyhow::Result<Vec<AttachmentPointer>> {
+/// Without `uploads` (a view-once photo) nothing is reused or remembered: its pointer must not
+/// outlive the message, nor be mixed with the same photo sent normally.
+async fn upload_all(m: &mut Mgr, specs: Vec<(AttachmentSpec, Vec<u8>)>, uploads: Option<&Uploads>) -> anyhow::Result<Vec<AttachmentPointer>> {
     let mut slots: Vec<Option<AttachmentPointer>> = Vec::with_capacity(specs.len());
     let mut todo = Vec::new();
     let mut todo_hashes = Vec::new();
     for (spec, data) in specs {
         let hash = Uploads::hash(&spec, &data);
-        match uploads.find(&hash).await {
+        let found = match uploads {
+            Some(u) => u.find(&hash).await,
+            None => None,
+        };
+        match found {
             Some(mut ptr) => {
                 // same bytes, maybe another name
                 ptr.file_name = spec.file_name;
@@ -353,7 +374,9 @@ async fn upload_all(m: &mut Mgr, specs: Vec<(AttachmentSpec, Vec<u8>)>, uploads:
     for (res, hash) in results.drain(..).zip(&todo_hashes) {
         match res {
             Ok(ptr) => {
-                uploads.put(hash, &ptr).await;
+                if let Some(u) = uploads {
+                    u.put(hash, &ptr).await;
+                }
                 fresh.push(ptr);
             }
             Err(e) => failed = failed.or(Some(e)),
@@ -371,8 +394,8 @@ async fn send_job(m: Mgr, thread: Thread, job: SendJob, group_revision: u32, ts:
     let mut tries = 0;
     loop {
         let res = match job.clone() {
-            SendJob::Text { body, body_ranges, files, quote, link, quality } => {
-                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, link, quality, group_revision, ts, dir.clone(), uploads.clone())).await
+            SendJob::Text { body, body_ranges, files, quote, link, quality, view_once } => {
+                Box::pin(send_task(m.clone(), thread.clone(), body, body_ranges, files, quote, link, quality, view_once, group_revision, ts, dir.clone(), uploads.clone())).await
             }
             SendJob::Sticker(s) => Box::pin(send_sticker_task(m.clone(), thread.clone(), s, group_revision, dir.clone(), ts)).await,
         };
@@ -403,6 +426,7 @@ pub(super) async fn send_task(
     quote: Option<Quote>,
     link: LinkSend,
     quality: Quality,
+    view_once: bool,
     group_revision: u32,
     ts: u64,
     attachments_dir: PathBuf,
@@ -466,7 +490,7 @@ pub(super) async fn send_task(
     }
     let mut attachments: Vec<AttachmentPointer> = long.into_iter().collect();
     if !specs.is_empty() {
-        attachments.extend(upload_all(&mut m, specs, &uploads).await?);
+        attachments.extend(upload_all(&mut m, specs, (!view_once).then_some(&uploads)).await?);
     }
     let preview = Box::pin(for_message(&m, &text, !files.is_empty(), link, ts, &attachments_dir)).await;
     let dm = DataMessage {
@@ -476,6 +500,7 @@ pub(super) async fn send_task(
         preview,
         quote,
         timestamp: Some(ts),
+        is_view_once: view_once.then_some(true),
         ..Default::default()
     };
     deliver(&mut m, thread, dm.into(), ts, group_revision).await
@@ -571,6 +596,9 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     m.quote_id = p.quote_id.clone();
     m.attachment = p.attachment.clone();
     m.link = p.link.clone();
+    if matches!(p.job, SendJob::Text { view_once: true, .. }) {
+        m.view_once = crate::types::ViewOnce::Sent;
+    }
     match p.photos[..] {
         [] => {}
         [(w, h)] => view::media::set_single_photo(&mut m, pending_photo_key(p.ts, 0, true), view::media::fit(Some(w), Some(h))),

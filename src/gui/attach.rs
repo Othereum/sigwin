@@ -63,13 +63,26 @@ fn file_name(p: &Path) -> SharedString {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default().into()
 }
 
+fn is_photo(p: &Path) -> bool {
+    let t = mime_guess::from_path(p).first_or_octet_stream();
+    t.type_() == "image" && t.subtype() != "gif"
+}
+
+/// Whether `files` can go as a view-once message (with no reply, which the composer checks):
+/// one photo, the only kind Sigwin opens when it gets one.
+pub(crate) fn view_once_able(files: &[PathBuf]) -> bool {
+    matches!(files, [p] if is_photo(p))
+}
+
 /// Shows `files` as the composer's attachments.
 pub(crate) fn show(app: &AppWindow, files: &[PathBuf]) {
-    let photo = files.iter().any(|p| {
-        let t = mime_guess::from_path(p).first_or_octet_stream();
-        t.type_() == "image" && t.subtype() != "gif"
-    });
+    let photo = files.iter().any(|p| is_photo(p));
     app.set_pending_has_photo(photo);
+    app.set_pending_view_once_able(view_once_able(files));
+    // turned on for one photo, it doesn't carry over to the next one attached
+    if !view_once_able(files) {
+        app.set_view_once(false);
+    }
     // the quality button takes the sticker button's place
     if photo && app.get_sticker_open() {
         stickers::close(app);

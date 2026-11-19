@@ -336,20 +336,30 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         if text.trim().is_empty() && files.is_empty() {
             return;
         }
-        let mentions = UI.with_borrow_mut(|ui| {
-            let picked = std::mem::take(&mut ui.picked);
-            super::rows::sync_composer_styles(ui);
-            picked
-        });
+        // the same test as the composer's toggle
+        let view_once = app.get_view_once() && quote.is_none() && attach::view_once_able(&files);
+        app.set_view_once(false);
+        // a view-once photo goes alone: the text it hid stays in the composer, with its mentions
+        let (text, mentions) = if view_once {
+            (SharedString::new(), Vec::new())
+        } else {
+            let mentions = UI.with_borrow_mut(|ui| {
+                let picked = std::mem::take(&mut ui.picked);
+                super::rows::sync_composer_styles(ui);
+                picked
+            });
+            app.set_mention_items(ModelRc::default());
+            app.set_draft(SharedString::new());
+            (text, mentions)
+        };
         // `files` were taken above: with attachments there is no preview
         let link = linkcard::take_for_send(&app, if files.is_empty() { &text } else { "" });
         let quality = sigwin_thumb::photo::Quality::from_index(UI.with_borrow(|ui| ui.settings.photo_quality));
-        s(Command::Send { text: text.to_string(), files, quote, mentions, link, quality });
-        app.set_mention_items(ModelRc::default());
-        app.set_draft(SharedString::new());
+        s(Command::Send { text: text.to_string(), files, quote, mentions, link, quality, view_once });
         attach::stop_gif(&app);
         app.set_pending_files(ModelRc::default());
         app.set_pending_has_photo(false);
+        app.set_pending_view_once_able(false);
         UI.with_borrow_mut(|ui| ui.pending_thumbs.clear());
         app.set_reply_preview(SharedString::new());
         drafts::drop_if_empty(&app);

@@ -16,6 +16,8 @@ pub(crate) struct Draft {
     /// replying to: (message id, preview line)
     pub(crate) quote: Option<(String, String)>,
     pub(crate) files: Vec<PathBuf>,
+    /// the photo goes as a view-once message
+    pub(crate) view_once: bool,
     /// when the draft last changed (ms); it replaces the snippet unless a newer message came in
     pub(crate) ts: u64,
 }
@@ -26,7 +28,7 @@ impl Draft {
     }
 
     fn same_content(&self, o: &Draft) -> bool {
-        self.text == o.text && self.mentions == o.mentions && self.quote == o.quote && self.files == o.files
+        self.text == o.text && self.mentions == o.mentions && self.quote == o.quote && self.files == o.files && self.view_once == o.view_once
     }
 
     /// The thread list line after "작성 중:" (Signal's `getDraftPreview`).
@@ -86,6 +88,7 @@ fn capture(app: &AppWindow, ui: &Ui) -> Option<Draft> {
         mentions: ui.picked.clone(),
         quote: ui.reply_to.clone().map(|id| (id, preview)),
         files: ui.files.clone(),
+        view_once: app.get_view_once(),
         ts: 0,
     })
 }
@@ -146,6 +149,7 @@ pub(crate) fn restore(app: &AppWindow, d: Draft) {
     set_reply(app, &d.quote.map(|q| q.1).unwrap_or_default());
     app.set_edit_preview(SharedString::new());
     attach::show(app, &d.files);
+    app.set_view_once(d.view_once);
     app.invoke_composer_to_end();
 }
 

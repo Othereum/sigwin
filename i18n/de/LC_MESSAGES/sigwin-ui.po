@@ -383,6 +383,12 @@ msgstr "Wird in hoher Qualität gesendet\nKlicke, um zu Standard zu wechseln"
 msgid "Sending in standard quality\nClick to switch to high"
 msgstr "Wird in Standardqualität gesendet\nKlicke, um zu Hoch zu wechseln"
 
+msgid "Sending as view once: it can be opened one time\nClick to send normally"
+msgstr "Wird zur Einmalansicht gesendet: nur einmal zu öffnen\nKlicke, um normal zu senden"
+
+msgid "Sending normally\nClick to send as view once"
+msgstr "Wird normal gesendet\nKlicke, um zur Einmalansicht zu senden"
+
 msgid "Sends photos at a higher resolution. Details like location are removed."
 msgstr "Sendet Fotos in höherer Auflösung. Angaben wie der Standort werden entfernt."
 
@@ -1051,6 +1057,9 @@ msgstr "Zum Ansehen klicken"
 
 msgid "Open it on your phone"
 msgstr "Öffne es auf deinem Telefon"
+
+msgid "Sent"
+msgstr "Gesendet"
 
 msgid "Viewed"
 msgstr "Angesehen"

@@ -724,11 +724,11 @@ export component Bubble inherits VerticalLayout {
                         Rectangle {
                             width: 40px;
                             height: 40px;
-                            y: 0px;
                             border-radius: 20px;
                             background: live ? Theme.accent : m.outgoing ? #ffffff40 : Theme.inset;
                             Icon {
-                                icon: m.view-once == ViewOnce.phone ? Icons.phone : m.view-once == ViewOnce.viewed ? Icons.check : Icons.gallery;
+                                // ours reads like a viewed one: nothing left to open here
+                                icon: m.view-once == ViewOnce.phone ? Icons.phone : live ? Icons.gallery : Icons.check;
                                 size: 22px;
                                 tint: live || m.outgoing ? white : Theme.subtle;
                             }
@@ -741,8 +741,8 @@ export component Bubble inherits VerticalLayout {
                                 color: m.outgoing ? white : Theme.text;
                                 font-size: 14px;
                             }
-                            if m.view-once != ViewOnce.sent: Text {
-                                text: live ? @tr("Click to view") : m.view-once == ViewOnce.phone ? @tr("Open it on your phone") : @tr("Viewed");
+                            Text {
+                                text: live ? @tr("Click to view") : m.view-once == ViewOnce.phone ? @tr("Open it on your phone") : m.view-once == ViewOnce.sent ? @tr("Sent") : @tr("Viewed");
                                 color: m.outgoing ? #ffffffc0 : Theme.subtle;
                                 font-size: 12px;
                             }

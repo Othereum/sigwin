@@ -383,6 +383,12 @@ msgstr "높은 화질로 보냅니다\n눌러서 표준으로 바꿀 수 있습�
 msgid "Sending in standard quality\nClick to switch to high"
 msgstr "표준 화질로 보냅니다\n눌러서 높은 화질로 바꿀 수 있습니다"
 
+msgid "Sending as view once: it can be opened one time\nClick to send normally"
+msgstr "한 번만 볼 수 있게 보냅니다\n눌러서 일반으로 보낼 수 있습니다"
+
+msgid "Sending normally\nClick to send as view once"
+msgstr "일반으로 보냅니다\n눌러서 한 번만 볼 수 있게 보낼 수 있습니다"
+
 msgid "Sends photos at a higher resolution. Details like location are removed."
 msgstr "큰 해상도로 보냅니다. 위치 같은 정보는 지워집니다."
 
@@ -1047,6 +1053,9 @@ msgstr "클릭하여 보기"
 
 msgid "Open it on your phone"
 msgstr "휴대폰에서 볼 수 있습니다"
+
+msgid "Sent"
+msgstr "보냄"
 
 msgid "Viewed"
 msgstr "조회함"
