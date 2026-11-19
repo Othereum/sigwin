@@ -139,6 +139,11 @@ pub fn write(path: &Path, data: &[u8]) -> io::Result<()> {
     replace(path, true, |f| encrypt(data, f))
 }
 
+/// `write` from a reader, for what is too large to hold. A read error leaves nothing at `path`.
+pub fn write_from(path: &Path, r: impl Read) -> io::Result<()> {
+    replace(path, true, |f| encrypt(r, f))
+}
+
 /// `write` for files that can be regenerated (thumbnails): no flush to the disk.
 pub fn write_cache(path: &Path, data: &[u8]) -> io::Result<()> {
     replace(path, false, |f| encrypt(data, f))

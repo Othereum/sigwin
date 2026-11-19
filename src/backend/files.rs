@@ -771,18 +771,10 @@ impl AttachmentDownloads {
         };
         show_now(view::media::downloading_label(ptr, 0, 0));
         let started = std::time::Instant::now();
-        let res = Abortable::new(download(ptr, |got, percent| show_now(view::media::downloading_label(ptr, got, percent))), registration).await;
         // saved before it counts as done: whoever waits for it finds the file
+        let res = Abortable::new(download(ptr, dest, |got, percent| show_now(view::media::downloading_label(ptr, got, percent))), registration).await;
         let res = match res {
-            Ok(Ok(data)) => {
-                let dest = dest.to_path_buf();
-                let saved = tokio::task::spawn_blocking(move || sigwin_vault::write(&dest, &data)).await;
-                Ok(match saved {
-                    Ok(Ok(())) => Ok(()),
-                    Ok(Err(e)) => Err(anyhow::anyhow!(tr!("Save failed: {}", e))),
-                    Err(e) => Err(anyhow::anyhow!(tr!("Save failed: {}", e))),
-                })
-            }
+            Ok(Ok(())) => Ok(Ok(())),
             Ok(Err(e)) if is_not_found(&e) => {
                 if let Err(e) = std::fs::write(gone_path(dest), []) {
                     warn!("save gone marker: {e}");
@@ -827,8 +819,10 @@ impl AttachmentDownloads {
     }
 }
 
-/// `progress` gets the bytes so far and their percent, each time that goes up.
-async fn download(ptr: &AttachmentPointer, mut progress: impl FnMut(u64, u8)) -> anyhow::Result<Vec<u8>> {
+/// Downloads the attachment into the vault file `dest`, decrypted and sealed again a piece at a
+/// time on a thread of its own, so a large one is never whole in memory. `progress` gets the
+/// bytes so far and their percent, each time that goes up.
+async fn download(ptr: &AttachmentPointer, dest: &Path, mut progress: impl FnMut(u64, u8)) -> anyhow::Result<()> {
     use futures::AsyncReadExt;
     // history imported at link time has none for media the phone had downloaded: the MAC
     // checked on decrypting still authenticates it
@@ -839,42 +833,39 @@ async fn download(ptr: &AttachmentPointer, mut progress: impl FnMut(u64, u8)) ->
     let mut service = cdn_service();
     let mut download = service.get_attachment(ptr).await?;
     let total = download.content_length.or(ptr.size.map(u64::from));
-    let mut data = Vec::with_capacity(total.unwrap_or(0) as usize);
-    let mut chunk = vec![0; 64 * 1024];
+    let (tx, rx) = tokio::sync::mpsc::channel(4);
+    let size = ptr.size.map(u64::from);
+    let dest = dest.to_path_buf();
+    // a download that ends early drops `tx` before its end mark: the file is dropped with it
+    let write = tokio::task::spawn_blocking(move || sigwin_vault::write_from(&dest, opening::Opening::new(opening::Pieces(rx), key, digest, size)));
+    let mut got = 0u64;
     let mut last = 0;
     loop {
+        let mut chunk = vec![0; 64 * 1024];
         let n = download.stream.read(&mut chunk).await.context("read attachment")?;
         if n == 0 {
             break;
         }
-        data.extend_from_slice(&chunk[..n]);
-        let now = percent(data.len() as u64, total);
+        chunk.truncate(n);
+        got += n as u64;
+        // the writer gave up: its error says why
+        if tx.send(Some(chunk)).await.is_err() {
+            break;
+        }
+        let now = percent(got, total);
         if now != last {
             last = now;
-            progress(data.len() as u64, now);
+            progress(got, now);
         }
     }
-    let size = ptr.size.and_then(|s| usize::try_from(s).ok());
-    tokio::task::spawn_blocking(move || open_download(data, digest.as_deref(), key, size)).await.context("decrypt attachment")?
+    let _ = tx.send(None).await;
+    drop(tx);
+    Ok(write.await.context("decrypt attachment")??)
 }
 
 /// How much of `total` bytes `got` is. An unknown total stays at 0.
 fn percent(got: u64, total: Option<u64>) -> u8 {
     total.filter(|t| *t > 0).map_or(0, |t| (got.saturating_mul(100) / t).min(100) as u8)
-}
-
-/// Checks a downloaded attachment against its message and decrypts it.
-fn open_download(mut data: Vec<u8>, digest: Option<&[u8]>, key: [u8; 64], size: Option<usize>) -> anyhow::Result<Vec<u8>> {
-    use sha2::Digest;
-    if let Some(digest) = digest {
-        anyhow::ensure!(sha2::Sha256::digest(&data)[..] == *digest, "attachment digest doesn't match");
-    }
-    presage::libsignal_service::attachment_cipher::decrypt_in_place(key, &mut data)?;
-    // what's past the size is padding
-    if let Some(size) = size.filter(|s| *s < data.len()) {
-        data.truncate(size);
-    }
-    Ok(data)
 }
 
 /// Decrypts a cached attachment to `open/` and opens it with the default app.
@@ -1272,23 +1263,6 @@ mod tests {
         std::fs::write(dir.join("a (2).pdf"), b"x").unwrap();
         assert_eq!(free_name(&dir, "a.pdf"), dir.join("a (3).pdf"));
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn downloads_are_checked_decrypted_and_unpadded() {
-        use presage::libsignal_service::attachment_cipher::encrypt_in_place;
-        use sha2::Digest;
-        let key = [5; 64];
-        let mut cipher = b"hello video\0\0\0\0\0".to_vec();
-        encrypt_in_place([9; 16], key, &mut cipher);
-        let digest = sha2::Sha256::digest(&cipher).to_vec();
-
-        assert_eq!(open_download(cipher.clone(), Some(&digest), key, Some(11)).unwrap(), b"hello video");
-        assert_eq!(open_download(cipher.clone(), Some(&digest), key, None).unwrap().len(), 16);
-        // a size past the end doesn't pad
-        assert_eq!(open_download(cipher.clone(), Some(&digest), key, Some(99)).unwrap().len(), 16);
-        assert!(open_download(cipher.clone(), Some(&[0; 32]), key, None).is_err());
-        assert!(open_download(cipher, Some(&digest), [6; 64], None).is_err());
     }
 
     #[test]

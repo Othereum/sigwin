@@ -50,6 +50,7 @@ mod history;
 mod mute;
 pub(crate) mod notify;
 mod once;
+mod opening;
 mod ops;
 mod pni;
 mod receive;
