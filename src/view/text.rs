@@ -92,6 +92,28 @@ pub fn quote_author(q: &Quote) -> Option<Uuid> {
         .or_else(|| q.author_aci.as_deref()?.parse().ok())
 }
 
+/// What a quote says: its text, or for one without text what it quotes, as Signal Desktop labels
+/// it: the kind of a picture, video or sound, a file's name.
+pub fn quote_text(q: &Quote, name_of: &dyn Fn(&Uuid) -> String) -> String {
+    if let Some(t) = q.text.as_deref().filter(|t| !t.is_empty()) {
+        return with_mentions(t, &q.body_ranges, name_of);
+    }
+    let Some(a) = q.attachments.first() else { return tr!("(attachment)").into() };
+    let ct = a.content_type.as_deref().unwrap_or("");
+    let voice = a.thumbnail.as_ref().is_some_and(super::media::is_voice);
+    if ct == "image/gif" {
+        "GIF".into()
+    } else if ct.starts_with("image/") {
+        tr!("Photo").into()
+    } else if ct.starts_with("video/") {
+        tr!("Video").into()
+    } else if ct.starts_with("audio/") {
+        if voice { tr!("Voice message").into() } else { tr!("Audio").into() }
+    } else {
+        a.file_name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| tr!("File").into())
+    }
+}
+
 /// The name shown above a quote: "You" for our own messages.
 pub fn quote_author_name(q: &Quote, me: Uuid, name_of: &dyn Fn(&Uuid) -> String) -> String {
     match quote_author(q) {
@@ -403,6 +425,31 @@ mod tests {
         let t = body_text_spans(&dm, &name, &mut spans, &mut Vec::new());
         let got: Vec<&str> = spans.iter().map(|&(s, e, _)| &t[s..e]).collect();
         assert_eq!(got, ["@철수", "@영희"]);
+    }
+
+    #[test]
+    fn quotes_without_text_say_what_they_quote() {
+        use presage::proto::data_message::quote::QuotedAttachment;
+        let name = |_: &Uuid| String::new();
+        let quote = |ct: &str, file: Option<&str>, voice: bool| Quote {
+            attachments: vec![QuotedAttachment {
+                content_type: Some(ct.into()),
+                file_name: file.map(Into::into),
+                thumbnail: voice.then(|| AttachmentPointer { flags: Some(1), ..Default::default() }),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(quote_text(&quote("image/jpeg", Some("a.jpg"), false), &name), tr!("Photo"));
+        assert_eq!(quote_text(&quote("image/gif", None, false), &name), "GIF");
+        assert_eq!(quote_text(&quote("video/mp4", None, false), &name), tr!("Video"));
+        assert_eq!(quote_text(&quote("audio/aac", None, true), &name), tr!("Voice message"));
+        assert_eq!(quote_text(&quote("audio/mpeg", Some("a.mp3"), false), &name), tr!("Audio"));
+        assert_eq!(quote_text(&quote("application/pdf", Some("보고서.pdf"), false), &name), "보고서.pdf");
+        assert_eq!(quote_text(&quote("application/octet-stream", None, false), &name), tr!("File"));
+        assert_eq!(quote_text(&Quote::default(), &name), tr!("(attachment)"));
+        // text wins
+        let q = Quote { text: Some("봐 줘".into()), ..quote("image/jpeg", None, false) };
+        assert_eq!(quote_text(&q, &name), "봐 줘");
     }
 
     #[test]

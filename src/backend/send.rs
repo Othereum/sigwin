@@ -58,15 +58,7 @@ impl App {
         // same labels as view::build gives the stored row
         let (quote_label, quote_author) = quote
             .as_ref()
-            .map(|q| {
-                let label = q
-                    .text
-                    .as_deref()
-                    .filter(|t| !t.is_empty())
-                    .map(|t| view::text::with_mentions(t, &q.body_ranges, &name_of))
-                    .unwrap_or_else(|| tr!("(attachment)").into());
-                (label, view::text::quote_author_name(q, self.me, &name_of))
-            })
+            .map(|q| (view::text::quote_text(q, &name_of), view::text::quote_author_name(q, self.me, &name_of)))
             .unwrap_or_default();
         let (body, body_ranges) = crate::mention::encode(&text, &mentions);
         if body.len() > view::text::MAX_LONG_TEXT_BYTES {

@@ -114,7 +114,7 @@ pub fn gallery_items(dm: &DataMessage) -> Vec<(usize, crate::db::MediaKind)> {
         .collect()
 }
 
-fn is_voice(ptr: &AttachmentPointer) -> bool {
+pub(super) fn is_voice(ptr: &AttachmentPointer) -> bool {
     ptr.flags.unwrap_or(0) & 1 == 1
 }
 

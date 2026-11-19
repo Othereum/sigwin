@@ -19,7 +19,7 @@ use presage::store::ContentExt;
 use crate::types::MsgDto;
 use media::{attachment_key, link_card, set_attachments, shown_attachments, WantedCell, STICKER_SIZE};
 use text::{
-    body_text_spans, cut_for_read_more, long_text, pin_label, push_with_mentions, quote_author_name, with_mentions, LongTexts,
+    body_text_spans, cut_for_read_more, long_text, pin_label, push_with_mentions, quote_author_name, LongTexts,
     READ_MORE_AT, STYLE_SPOILER,
 };
 use time::{ampm, day_num, local, now_ms, timer_label};
@@ -387,12 +387,7 @@ pub fn build(
 
 /// The quote at the top of a reply: its text, author, target and picture.
 fn set_quote(m: &mut MsgDto, q: &Quote, ts: u64, me: Uuid, name_of: &dyn Fn(&Uuid) -> String, wanted_cells: &mut Vec<WantedCell>) {
-    m.quote = q
-        .text
-        .as_deref()
-        .filter(|t| !t.is_empty())
-        .map(|t| with_mentions(t, &q.body_ranges, name_of))
-        .unwrap_or_else(|| tr!("(attachment)").into());
+    m.quote = text::quote_text(q, name_of);
     m.quote_author = quote_author_name(q, me, name_of);
     m.quote_id = q.id.map(|i| i.to_string()).unwrap_or_default();
     // the quoted message's picture, as the sender's app cut it
