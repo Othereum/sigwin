@@ -35,8 +35,6 @@ Large images (synthetic JPEG, headless, opaque): 100MP peaks at 765MB and holds 
 
 The viewer keeps the original from the moment it opens instead of decoding it again on the first zoom. Whoever opens an image usually zooms it, so waiting would decode most images twice and delay the first smoothing by as long as a decode (200MP: 1.3s), to save memory that returns on close anyway.
 
-`fast_image_resize` (5.5.0 and 6.1.0) has a crash reachable from safe code: when enlarging with a kernel that is zero at whole numbers (Catmull-Rom), a first output pixel centered exactly on a source pixel trims its bound past the next pixel's, `b.start -= x_first` underflows and it reads out of bounds. `viewer::patch_crop` can't produce such a crop, and a test holds it to that.
-
 Going to another image of an album decodes it on the spot. 12MP in the `fast` build took 220ms: 50ms decoding and fitting, 118ms copying into the UI's buffer and 50ms freeing the previous image, those two slow because the main crate is unoptimized there. `decode_view` now fills the UI's buffer itself, in the optimized crate. Measured on a synthetic JPEG with everything optimized, that barely changes the time (73ms to 70ms) but lowers the peak (103MB to 84MB). Decoding the neighbouring images ahead would remove the rest of the wait, at about 96MB more while the viewer is open; not done, it's fast enough.
 
 ## Link previews

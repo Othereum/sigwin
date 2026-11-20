@@ -417,8 +417,7 @@ fn resample(img: RgbaImage, px: u32) -> RgbaImage {
     }
 }
 
-/// Center-crops to the shape of `w` x `h` and resamples to exactly that. Cropped first: enlarging
-/// from a crop can make `fast_image_resize` read out of bounds (see `viewer::patch_crop`).
+/// Center-crops to the shape of `w` x `h` and resamples to exactly that.
 pub fn cover(img: &RgbaImage, w: u32, h: u32) -> RgbaImage {
     let (sw, sh) = img.dimensions();
     if sw == 0 || sh == 0 || w == 0 || h == 0 {
@@ -429,11 +428,11 @@ pub fn cover(img: &RgbaImage, w: u32, h: u32) -> RgbaImage {
     } else {
         (sw, ((sw as u64 * h as u64 / w as u64) as u32).max(1))
     };
-    let cropped = image::imageops::crop_imm(img, (sw - cw) / 2, (sh - ch) / 2, cw, ch).to_image();
+    let (left, top) = ((sw - cw) / 2, (sh - ch) / 2);
     let mut out = RgbaImage::new(w, h);
-    match resize_into(cropped.as_raw(), (cw, ch), (0.0, 0.0, cw as f64, ch as f64), (w, h), &mut out, false) {
+    match resize_into(img.as_raw(), (sw, sh), (left as f64, top as f64, cw as f64, ch as f64), (w, h), &mut out, false) {
         Some(()) => out,
-        None => cropped,
+        None => image::imageops::crop_imm(img, left, top, cw, ch).to_image(),
     }
 }
 

@@ -6,7 +6,8 @@ license = "AGPL-3.0-only"
 description = "Pixel work for sigwin (decode, resample), kept out of the main crate so it is optimized in every profile"
 
 [dependencies]
-fast_image_resize = "6"
+# 6.2 fixes an out-of-bounds read when enlarging from a crop
+fast_image_resize = "6.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 slint = { version = "1.19.0", default-features = false, features = ["std", "compat-1-2"] }
 # APNG encoder for animated stickers (same version the image crate uses)

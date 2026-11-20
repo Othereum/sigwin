@@ -658,9 +658,7 @@ fn refit() {
 
 /// The part of the original (left, top, width, height) that `area` of an image drawn at `target`
 /// shows. Uses the renderer's step through the source (see `zoom`), so the patch lands on its
-/// pixels. Also keeps `resize_view` from crashing: `fast_image_resize` (5.5 and 6.1) reads out of
-/// bounds when enlarging from a crop whose first output pixel centers exactly on a source pixel.
-/// With a step of k/256 below 1 that can't happen: (a + 0.5) * k / 256 never ends in .5.
+/// pixels.
 fn patch_crop(area: (u32, u32, u32, u32), full: (u32, u32), target: (u32, u32)) -> (f64, f64, f64, f64) {
     let step = |full: u32, target: u32| (full as f64 * 256.0 / target as f64).floor() / 256.0;
     let (sx, sy) = (step(full.0, target.0), step(full.1, target.1));
@@ -884,25 +882,5 @@ mod tests {
         let out = wheel_scale(1.0, 0.1);
         assert!(out > 1.0 && out < 1.05);
         assert!(wheel_scale(out, 0.1) > out);
-    }
-
-    #[test]
-    fn patch_crops_avoid_the_resizer_crash() {
-        for full in [37u32, 101, 257] {
-            let px = vec![128u8; full as usize * 8 * 4];
-            for target in (full / 2).max(1)..full * 4 {
-                for a in (0..target).step_by(1 + target as usize / 13) {
-                    for w in [1, 3, 64, target] {
-                        let w = w.min(target - a);
-                        let crop = patch_crop((a, 0, w, 16), (full, 8), (target, 16));
-                        let scale = crop.2 / w as f64;
-                        // what crashes it (a step of 1 needs no horizontal pass)
-                        let center = crop.0 + scale / 2.0;
-                        assert!(scale >= 1.0 || center.fract() != 0.5, "{full} {target} {a} {w}");
-                        assert!(sigwin_thumb::resize_view(&px, (full, 8), crop, (w, 16), true).is_some());
-                    }
-                }
-            }
-        }
     }
 }
