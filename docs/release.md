@@ -48,12 +48,9 @@ file.
 - English first, as `## New` and `## Fixes`, leaving out an empty one. Only what differs from the
   last release.
 - Several lines about one feature become one line naming it, with the changes indented under it.
-- Then every other UI language, each folded in `<details><summary>Language name</summary>` (a blank
-  line after the summary, so the Markdown inside renders): Korean first, the maintainer's language
-  and most users', then the rest in alphabetical order of language name.
-  The releases page lists every version and the app can't point at one language, so folding keeps
-  the page as short as one language however many are added. Each language carries the same
-  content, with setting and screen names as its catalog spells them.
+- Then Korean, the maintainer's language, folded in `<details><summary>한국어</summary>`
+  (a blank line after the summary, so the Markdown inside renders),
+  with the same content and setting and screen names as its catalog spells them.
 - A MINOR release (no going back to older versions) says so first.
 - No account data, and nothing about a conversation it was found in.
 - No `@word` outside backticks: GitHub takes it for a user (`@erwähnen` mentions `erw`), notifies
