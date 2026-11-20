@@ -48,7 +48,7 @@ fn search_filter(d: &SearchData) -> types::SearchFilter {
         _ => None,
     };
     let sender = Some(d.get_sender_key().to_string()).filter(|k| !k.is_empty());
-    types::SearchFilter { sender, until, kind }
+    types::SearchFilter { sender, until, kind, mentions: d.get_mentions() }
 }
 
 /// ↑ (-1) / ↓ (1) in the search box: opens the found message before or after the one picked

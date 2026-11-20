@@ -647,6 +647,9 @@ msgstr "Fotos und Videos"
 msgid "Links"
 msgstr "Links"
 
+msgid "Mentions me"
+msgstr "Erwähnt mich"
+
 msgid "Couldn't add the sticker pack: {}"
 msgstr "Sticker-Set konnte nicht hinzugefügt werden: {}"
 

@@ -385,26 +385,38 @@ pub(super) async fn record_media(index: &Index, key: &str, c: &Content, me: Uuid
     Ok(true)
 }
 
-/// What the message search looks in: the body and captions, lowercase. Empty for no text.
+/// What the message search looks in: the body, captions and the names of files (not of
+/// pictures and videos, which are mostly camera numbers), lowercase. Empty for no text.
 pub(super) fn search_text(dm: &DataMessage) -> String {
     let mut t = dm.body.as_deref().unwrap_or_default().to_lowercase();
-    for cap in dm.attachments.iter().filter_map(|a| a.caption.as_deref()).filter(|c| !c.is_empty()) {
+    let captions = dm.attachments.iter().filter_map(|a| a.caption.as_deref());
+    let files = view::media::gallery_items(dm)
+        .into_iter()
+        .filter(|(_, k)| *k == crate::db::MediaKind::Files)
+        .filter_map(|(i, _)| dm.attachments[i].file_name.as_deref());
+    for s in captions.chain(files).filter(|s| !s.is_empty()) {
         if !t.is_empty() {
             t.push('\n');
         }
-        t.push_str(&cap.to_lowercase());
+        t.push_str(&s.to_lowercase());
     }
     t
 }
 
-/// What `record_text` would note of the messages (not the edits) of a page: (sent ts, text).
-pub(super) fn page_texts(msgs: &[Content], me: Uuid) -> Vec<(u64, String)> {
+/// Whether the message's body @mentions us.
+fn mentions(dm: &DataMessage, me: Uuid) -> bool {
+    dm.body_ranges.iter().filter_map(view::text::mention_uuid).any(|u| u == me)
+}
+
+/// What `record_text` would note of the messages (not the edits) of a page: (sent ts, text,
+/// mentions us).
+pub(super) fn page_texts(msgs: &[Content], me: Uuid) -> Vec<(u64, String, bool)> {
     msgs.iter()
         .filter_map(|c| match view::classify(c, me) {
-            Kind::Msg { dm, .. } if view::expires_at(c).is_none() => Some((c.timestamp(), search_text(dm))),
+            Kind::Msg { dm, .. } if view::expires_at(c).is_none() => Some((c.timestamp(), search_text(dm), mentions(dm, me))),
             _ => None,
         })
-        .filter(|(_, t)| !t.is_empty())
+        .filter(|(_, t, _)| !t.is_empty())
         .collect()
 }
 
@@ -418,11 +430,11 @@ pub(super) async fn record_text(index: &Index, thread: &Thread, c: &Content, me:
             if text.is_empty() {
                 return Ok(false);
             }
-            index.record_text(thread, c.timestamp(), &text).await?;
+            index.record_text(thread, c.timestamp(), &text, mentions(dm, me)).await?;
         }
         Kind::Edit { target, dm, .. } => {
             let text = search_text(dm);
-            index.edit_text(thread, target, &c.metadata.sender.service_id_string(), &text).await?;
+            index.edit_text(thread, target, &c.metadata.sender.service_id_string(), &text, mentions(dm, me)).await?;
         }
         _ => return Ok(false),
     }

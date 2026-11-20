@@ -7,14 +7,14 @@ impl App {
     /// before we kept our own indexes; only the indexes not done yet.
     /// Walks every thread oldest first in pages, so pins and unpins apply in order.
     pub(super) fn backfill_pins(&mut self) {
-        if !self.persist.text_indexed {
+        if self.persist.text_format < TEXT_FORMAT {
             self.search.indexing = Some(0);
         }
         let (store, index, me, tx) = (self.store.clone(), self.index.clone(), self.me, self.tx.clone());
         let p = &self.persist;
         // a second replay could bring back a pin whose unpin is still being sent
         let (pins, edits, reactions, replies) = (!p.pins_indexed, !p.edits_indexed, !p.reactions_indexed, !p.replies_indexed);
-        let (media, text) = (!p.media_indexed, !p.text_indexed);
+        let (media, text) = (!p.media_indexed, p.text_format < TEXT_FORMAT);
         if media {
             self.media_backfill = Some(HashSet::new());
         }

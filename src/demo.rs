@@ -858,6 +858,7 @@ fn demo_hits(threads: &[ThreadDto], items: &[MsgDto], query: &str, filter: &type
             Some(types::SearchKind::Links) => !crate::link::find(&m.text).is_empty(),
             None => true,
         })
+        .filter(|m| !filter.mentions || (!m.outgoing && !m.mentions.is_empty()))
         .take(30)
         .map(|m| {
             let text = crate::backend::excerpt(&m.text.replace('\n', " "), &q);

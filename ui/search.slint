@@ -36,13 +36,15 @@ export global SearchData {
     in property <[ResultItem]> results;
     // the filters: who sent it ("c:<uuid>") and their name; up to which day (`until-day`, a local
     // day number, 0 none; Rust labels it `until-label`): only that end, since the results run
-    // newest first; what (`kind`: 0 anything, 1 photos and videos, 2 files, 3 links)
+    // newest first; what (`kind`: 0 anything, 1 photos and videos, 2 files, 3 links); only those
+    // that @mention us (`mentions`)
     in-out property <string> sender-key;
     in-out property <string> sender-name;
     in-out property <int> until-day;
     in-out property <string> until-label;
     in-out property <int> kind;
-    out property <bool> filtered: sender-key != "" || until-day != 0 || kind != 0;
+    in-out property <bool> mentions;
+    out property <bool> filtered: sender-key != "" || until-day != 0 || kind != 0 || mentions;
     // the list is who sent messages, to pick the sender filter from: the box takes their name,
     // the search's own words wait in `held-query`
     in-out property <bool> picking;
@@ -132,11 +134,17 @@ export global SearchData {
         changed();
     }
 
+    public function set-mentions(on: bool) {
+        mentions = on;
+        changed();
+    }
+
     public function clear-filters() {
         sender-key = "";
         sender-name = "";
         until-day = 0;
         kind = 0;
+        mentions = false;
         changed();
     }
 
@@ -185,11 +193,16 @@ export component FilterChip inherits Rectangle {
     in property <bool> set;
     // false: only its clear button does anything (the chat searched in)
     in property <bool> clickable: true;
+    // false: an on/off chip, turned on by a click, with no menu to open
+    in property <bool> menu: true;
+    // one of `Icons`, before the label
+    in property <string> icon;
     callback clicked();
     callback clear();
     property <length> label-w: min(lbl.preferred-width, 150px);
+    property <length> label-x: icon != "" ? 30px : 12px;
     height: 28px;
-    width: 12px + label-w + (set ? 28px : clickable ? 26px : 12px);
+    width: label-x + label-w + (set ? 28px : clickable && menu ? 26px : 12px);
     border-radius: 14px;
     background: set ? Theme.selected : ta.has-hover ? Theme.field-off : Theme.field;
     ta := TouchArea {
@@ -197,8 +210,15 @@ export component FilterChip inherits Rectangle {
         mouse-cursor: self.enabled ? pointer : default;
         clicked => { root.clicked(); }
     }
+    if root.icon != "": Icon {
+        x: 10px;
+        y: (parent.height - self.height) / 2;
+        size: 16px;
+        icon: root.icon;
+        tint: Theme.text;
+    }
     lbl := Text {
-        x: 12px;
+        x: root.label-x;
         width: root.label-w;
         text: root.text;
         color: Theme.text;
@@ -206,7 +226,7 @@ export component FilterChip inherits Rectangle {
         overflow: elide;
         vertical-alignment: center;
     }
-    if !root.set && root.clickable: Icon {
+    if !root.set && root.clickable && root.menu: Icon {
         x: parent.width - self.width - 10px;
         y: (parent.height - self.height) / 2;
         size: 14px;

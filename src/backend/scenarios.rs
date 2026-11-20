@@ -340,6 +340,7 @@ fn messages_are_found_as_they_now_read() {
             sender: None,
             until: None,
             kind: None,
+            mentions: false,
         };
         let left = || h.app.index.search(&searched, 10, &|| false);
         assert_eq!(left().await.unwrap().len(), 1);
@@ -388,6 +389,57 @@ fn searches_narrow_by_words_sender_date_and_kind() {
         let links = SearchFilter { kind: Some(SearchKind::Links), ..Default::default() };
         assert_eq!(found_by(&mut h, "", None, links.clone()).await, ["볼 것 www.example.com"]);
         assert!(found_by(&mut h, "메시지", None, links).await.is_empty());
+    });
+}
+
+#[test]
+fn mentions_of_us_and_file_names_are_found() {
+    use presage::libsignal_service::content::ContentBody;
+    use presage::proto::body_range::AssociatedValue;
+    use presage::proto::{AttachmentPointer, BodyRange, EditMessage};
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("recv who=2 n=1").await;
+        let two = Thread::Contact(ServiceId::Aci(super::fixture::contact(2).into()));
+        let newest = h.app.index.page(&two, i64::MAX, 10).await.unwrap()[0].1;
+        let me = h.app.me;
+        let mention = |u: Uuid| BodyRange { start: Some(0), length: Some(1), associated_value: Some(AssociatedValue::MentionAci(u.to_string())) };
+        let (asked, other, file) = (newest + 10, newest + 20, newest + 30);
+        let body = |ts, who| DataMessage { body: Some("\u{fffc} 봐 줘".into()), body_ranges: vec![mention(who)], timestamp: Some(ts), ..Default::default() };
+        let pdf = AttachmentPointer { file_name: Some("분기보고서.PDF".into()), content_type: Some("application/pdf".into()), ..Default::default() };
+        for dm in [
+            body(asked, me),
+            body(other, super::fixture::contact(1)),
+            DataMessage { attachments: vec![pdf], timestamp: Some(file), ..Default::default() },
+        ] {
+            let c = super::fixture::incoming_dm(2, dm, me);
+            h.app.store.save_message(&two, c.clone()).await.unwrap();
+            h.app.content(c).await;
+        }
+
+        let mentions = SearchFilter { mentions: true, ..Default::default() };
+        assert_eq!(found_by(&mut h, "", None, mentions.clone()).await.len(), 1, "only the one that names us");
+        assert_eq!(found_by(&mut h, "봐", None, mentions.clone()).await.len(), 1);
+        assert!(found_by(&mut h, "메시지", None, mentions.clone()).await.is_empty());
+        let with_links = SearchFilter { kind: Some(SearchKind::Links), ..mentions.clone() };
+        assert!(found_by(&mut h, "", None, with_links).await.is_empty(), "with the other filters");
+        let from_two = SearchFilter { sender: Some(thread_key(&two)), ..mentions.clone() };
+        assert_eq!(found_by(&mut h, "", None, from_two).await.len(), 1);
+
+        // a file's name, however it's cased
+        assert_eq!(found(&mut h, "보고서.pdf", None).await, ["📄 분기보고서.PDF"]);
+        let files = SearchFilter { kind: Some(SearchKind::Files), ..Default::default() };
+        assert_eq!(found_by(&mut h, "분기", None, files).await.len(), 1);
+
+        // an edit that drops the mention takes it out
+        let mut edit = super::fixture::incoming_dm(2, DataMessage { timestamp: Some(file + 10), ..Default::default() }, me);
+        edit.body = ContentBody::EditMessage(EditMessage {
+            target_sent_timestamp: Some(asked),
+            data_message: Some(DataMessage { body: Some("다 봤어".into()), timestamp: Some(file + 10), ..Default::default() }),
+        });
+        h.app.store.save_message(&two, edit.clone()).await.unwrap();
+        h.app.content(edit).await;
+        assert!(found_by(&mut h, "", None, mentions).await.is_empty());
     });
 }
 

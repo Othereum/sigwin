@@ -21,7 +21,7 @@ use crate::types::SearchKind;
 ///   again over moving columns;
 /// - `ls_deleted_mine` has no source to rebuild from (which deleted rows were ours): its data
 ///   must be carried over.
-const SCHEMA: i64 = 1;
+const SCHEMA: i64 = 2;
 
 async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query("CREATE TABLE IF NOT EXISTS ls_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID")
@@ -49,9 +49,14 @@ async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 /// One migration step up from `v`; returns the new version. Run in order, each exactly once.
-async fn step(_pool: &SqlitePool, v: i64) -> anyhow::Result<i64> {
+async fn step(pool: &SqlitePool, v: i64) -> anyhow::Result<i64> {
     match v {
-        // 1 => { DROP TABLE ls_pins; CREATE the new one; reset `Persist.pins_indexed`; Ok(2) }
+        // whether a text mentions us. Rows keep 0 until the text backfill runs again
+        // (`TEXT_FORMAT`): the texts stay searchable meanwhile
+        1 => {
+            sqlx::query("ALTER TABLE ls_text ADD COLUMN mention INTEGER NOT NULL DEFAULT 0").execute(pool).await?;
+            Ok(2)
+        }
         _ => anyhow::bail!("db: no migration from schema {v}"),
     }
 }
@@ -76,6 +81,15 @@ pub struct Searched<'a> {
     /// sent before (ms)
     pub until: Option<u64>,
     pub kind: Option<SearchKind>,
+    /// only those that @mention us
+    pub mentions: bool,
+}
+
+impl Searched<'_> {
+    /// Asks for what only a text holds, so a message without text can't pass.
+    fn in_text(&self) -> bool {
+        self.mentions || self.kind == Some(SearchKind::Links)
+    }
 }
 
 #[derive(Clone)]
@@ -457,15 +471,17 @@ impl Index {
         Ok(Self { pool })
     }
 
-    /// Message `ts` reads `text` (lowercase body and captions), for the message search.
-    pub async fn record_text(&self, thread: &Thread, ts: u64, text: &str) -> anyhow::Result<()> {
+    /// Message `ts` reads `text` (lowercase body, captions and file names), for the message
+    /// search; `mention`: it mentions us.
+    pub async fn record_text(&self, thread: &Thread, ts: u64, text: &str, mention: bool) -> anyhow::Result<()> {
         let (gk, rid) = unzip(thread);
         sqlx::query(
-            "INSERT OR REPLACE INTO ls_text (thread_id, ts, text)
-             SELECT id, ?, ? FROM threads WHERE group_master_key = ? OR recipient_id = ?",
+            "INSERT OR REPLACE INTO ls_text (thread_id, ts, text, mention)
+             SELECT id, ?, ?, ? FROM threads WHERE group_master_key = ? OR recipient_id = ?",
         )
         .bind(ts as i64)
         .bind(text)
+        .bind(mention)
         .bind(gk)
         .bind(rid)
         .execute(&self.pool)
@@ -487,7 +503,7 @@ impl Index {
     }
 
     /// `record_text` for many messages of one thread, in one transaction; how many.
-    pub async fn record_texts(&self, thread: &Thread, texts: &[(u64, String)]) -> anyhow::Result<usize> {
+    pub async fn record_texts(&self, thread: &Thread, texts: &[(u64, String, bool)]) -> anyhow::Result<usize> {
         if texts.is_empty() {
             return Ok(0);
         }
@@ -501,11 +517,12 @@ impl Index {
         else {
             return Ok(0);
         };
-        for (ts, text) in texts {
-            sqlx::query("INSERT OR REPLACE INTO ls_text (thread_id, ts, text) VALUES (?, ?, ?)")
+        for (ts, text, mention) in texts {
+            sqlx::query("INSERT OR REPLACE INTO ls_text (thread_id, ts, text, mention) VALUES (?, ?, ?, ?)")
                 .bind(id)
                 .bind(*ts as i64)
                 .bind(text)
+                .bind(mention)
                 .execute(&mut *tx)
                 .await?;
         }
@@ -515,10 +532,10 @@ impl Index {
 
     /// An edit by `sender` (`service_id_string`) gives message `ts` new text. Only that
     /// message's own author can, and only a message already indexed (not one that disappears).
-    pub async fn edit_text(&self, thread: &Thread, ts: u64, sender: &str, text: &str) -> anyhow::Result<()> {
+    pub async fn edit_text(&self, thread: &Thread, ts: u64, sender: &str, text: &str, mention: bool) -> anyhow::Result<()> {
         let (gk, rid) = unzip(thread);
         sqlx::query(
-            "UPDATE ls_text SET text = ?1
+            "UPDATE ls_text SET text = ?1, mention = ?6
              WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ?2 OR recipient_id = ?3) AND ts = ?4
                AND EXISTS (SELECT 1 FROM thread_messages m
                            WHERE m.thread_id = ls_text.thread_id AND m.ts = ls_text.ts AND m.sender_service_id = ?5)",
@@ -528,6 +545,7 @@ impl Index {
         .bind(rid)
         .bind(ts as i64)
         .bind(sender)
+        .bind(mention)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -581,8 +599,8 @@ impl Index {
         if let Some(sender) = s.sender {
             // theirs alone are fewer than the texts or attachments to go through
             hits = self.search_sender(s, sender, only, media, &threads, cap, cancelled).await?;
-        } else if s.needle.is_some() || media.is_none() {
-            // a needle, links or every text: the texts. Attachments alone have none, so without
+        } else if s.needle.is_some() || media.is_none() || s.mentions {
+            // a needle, links, mentions or every text: the texts. Attachments alone have none, so without
             // a needle they come from `ls_media`. What `with_media` drops is unknown here, so
             // it needs them all
             let enough = if media.is_some() { usize::MAX } else { cap };
@@ -591,7 +609,7 @@ impl Index {
                 hits = self.with_media(hits, &threads, kind, cap, cancelled).await?;
             }
         }
-        if s.sender.is_none() && s.needle.is_none() && s.kind != Some(SearchKind::Links) {
+        if s.sender.is_none() && s.needle.is_none() && !s.in_text() {
             let ids: HashMap<String, i64> = threads.iter().map(|(id, t)| (crate::types::thread_key(t), *id)).collect();
             hits.extend(self.search_media(s, media, &ids, cap, cancelled).await?);
         }
@@ -617,6 +635,7 @@ impl Index {
         // tiny in tests, so that they cross spans
         const CHUNK: i64 = if cfg!(test) { 2 } else { 20_000 };
         let links = s.kind == Some(SearchKind::Links);
+        let mention = s.mentions;
         let mut hits = Vec::new();
         let mut before = s.until.map_or(i64::MAX, |t| t as i64);
         while hits.len() < enough {
@@ -633,13 +652,15 @@ impl Index {
                 "SELECT thread_id, ts, text FROM ls_text
                  WHERE ts < ?1 AND ts >= ?2 AND (?3 IS NULL OR thread_id = ?3)
                     AND (?4 IS NULL OR instr(text, ?4) > 0)
-                    AND (?5 = 0 OR instr(text, 'http') > 0 OR instr(text, 'www.') > 0)",
+                    AND (?5 = 0 OR instr(text, 'http') > 0 OR instr(text, 'www.') > 0)
+                    AND (?6 = 0 OR mention)",
             )
             .bind(before)
             .bind(from.unwrap_or(i64::MIN))
             .bind(only)
             .bind(s.needle)
             .bind(links)
+            .bind(mention)
             .fetch_all(&self.pool)
             .await?;
             for r in rows {
@@ -704,8 +725,9 @@ impl Index {
     ) -> anyhow::Result<Vec<(i64, i64)>> {
         const PAGE: i64 = 500;
         let links = s.kind == Some(SearchKind::Links);
+        let mention = s.mentions;
         // a kind asks for its attachment; with nothing asked, a message without text needs one
-        let attached = if media.is_some() || (s.needle.is_none() && !links) {
+        let attached = if media.is_some() || (s.needle.is_none() && !s.in_text()) {
             Some(self.attached(s, media, threads).await?)
         } else {
             None
@@ -723,6 +745,7 @@ impl Index {
                  WHERE m.sender_service_id = ?1 AND m.ts < ?2 AND (?3 IS NULL OR m.thread_id = ?3)
                     AND (?4 IS NULL OR instr(t.text, ?4) > 0)
                     AND (?5 = 0 OR instr(t.text, 'http') > 0 OR instr(t.text, 'www.') > 0)
+                    AND (?7 = 0 OR t.mention)
                  ORDER BY m.ts DESC LIMIT ?6",
             )
             .bind(sender)
@@ -731,6 +754,7 @@ impl Index {
             .bind(s.needle)
             .bind(links)
             .bind(PAGE)
+            .bind(mention)
             .fetch_all(&self.pool)
             .await?;
             let last = rows.len() < PAGE as usize;

@@ -608,6 +608,20 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
+                            FilterChip {
+                                text: @tr("Mentions me");
+                                icon: Icons.at;
+                                menu: false;
+                                set: SearchData.mentions;
+                                clicked => {
+                                    SearchData.set-mentions(!SearchData.mentions);
+                                    search-edit.focus();
+                                }
+                                clear => {
+                                    SearchData.set-mentions(false);
+                                    search-edit.focus();
+                                }
+                            }
                         }
                     }
                 }
@@ -650,7 +664,7 @@ export component AppWindow inherits Window {
                         // a new search starts at the top (rows are updated in place, so the
                         // list keeps its place for the next page of the same one)
                         property <string> asked: SearchData.query + SearchData.preedit + SearchData.scope-key
-                            + SearchData.sender-key + SearchData.until-day + SearchData.kind + (SearchData.picking ? "p" : "");
+                            + SearchData.sender-key + SearchData.until-day + SearchData.kind + (SearchData.mentions ? "m" : "") + (SearchData.picking ? "p" : "");
                         changed asked => { self.content-y = 0; }
                         // ↑/↓ moved to a found message: it shows
                         changed reveal-n => { self.ensure-row-visible(SearchData.reveal-row, ScrollBehavior.instant); }

@@ -124,6 +124,9 @@ impl Paths {
     }
 }
 
+/// 1: body and captions. 2: names of files too, and whether a text mentions us.
+const TEXT_FORMAT: u32 = 2;
+
 #[derive(Default, Serialize, Deserialize)]
 struct Persist {
     unread: HashMap<String, u32>,
@@ -162,9 +165,10 @@ struct Persist {
     /// attachments stored before the media index existed have been indexed
     #[serde(default)]
     media_indexed: bool,
-    /// texts stored before the message search existed have been indexed
+    /// what the message search's texts hold (`TEXT_FORMAT` once every stored message is
+    /// indexed that way)
     #[serde(default)]
-    text_indexed: bool,
+    text_format: u32,
     /// layout of the attachment and thumbnail caches on disk (`CACHE_FORMAT` once converted)
     #[serde(default)]
     cache_format: u32,
@@ -742,7 +746,7 @@ impl App {
             || !self.persist.reactions_indexed
             || !self.persist.replies_indexed
             || !self.persist.media_indexed
-            || !self.persist.text_indexed
+            || self.persist.text_format < TEXT_FORMAT
         {
             self.backfill_pins();
         }
@@ -1051,7 +1055,7 @@ impl App {
                 self.persist.reactions_indexed = true;
                 self.persist.replies_indexed = true;
                 self.persist.media_indexed = true;
-                self.persist.text_indexed = true;
+                self.persist.text_format = TEXT_FORMAT;
                 self.persist_dirty = true;
                 self.texts_indexed().await;
                 self.current_dirty = true;

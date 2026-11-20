@@ -363,6 +363,7 @@ impl App {
                 sender: sender.as_deref(),
                 until: filter.until,
                 kind: filter.kind,
+                mentions: filter.mentions,
             };
             match index.search(&searched, MAX_HITS, &gone).await {
                 Ok(list) if !gone() => {

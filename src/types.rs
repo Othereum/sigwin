@@ -52,6 +52,8 @@ pub struct SearchFilter {
     /// their tail
     pub until: Option<u64>,
     pub kind: Option<SearchKind>,
+    /// only those that @mention us
+    pub mentions: bool,
 }
 
 impl SearchFilter {
