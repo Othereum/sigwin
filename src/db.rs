@@ -1,11 +1,13 @@
 //! Small read-only queries on presage's sqlite schema that the `Store` trait doesn't offer:
 //! listing threads by recency and paging messages in display order without loading whole threads.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use presage::store::Thread;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
+
+use crate::types::SearchKind;
 
 /// Version of our `ls_*` tables (presage's own tables migrate themselves). Kept in our `ls_meta`
 /// table rather than `PRAGMA user_version`, which the DB shares with presage.
@@ -60,6 +62,20 @@ pub enum MediaKind {
     /// pictures and videos
     Media = 0,
     Files = 1,
+}
+
+/// What `Index::search` looks for.
+pub struct Searched<'a> {
+    /// in this thread only
+    pub thread: Option<&'a Thread>,
+    /// what a text must hold, then pass `keep`; None: any text, and attachments
+    pub needle: Option<&'a str>,
+    pub keep: &'a dyn Fn(&str) -> bool,
+    /// as stored: `ServiceId::service_id_string`
+    pub sender: Option<&'a str>,
+    /// sent before (ms)
+    pub until: Option<u64>,
+    pub kind: Option<SearchKind>,
 }
 
 #[derive(Clone)]
@@ -172,6 +188,11 @@ async fn ensure_text(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .execute(&mut *tx)
     .await?;
+    // the search reads newest first and stops once it has enough
+    sqlx::query("CREATE INDEX IF NOT EXISTS ls_text_ts ON ls_text (ts)").execute(&mut *tx).await?;
+    // a search by sender reads only theirs, newest first. On presage's table: here, on every
+    // open, since a presage migration that rebuilds the table drops it
+    sqlx::query("CREATE INDEX IF NOT EXISTS ls_by_sender ON thread_messages (sender_service_id, ts)").execute(&mut *tx).await?;
     let trigger: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'thread_messages' AND name = 'ls_text_del'",
     )
@@ -527,63 +548,303 @@ impl Index {
         Ok(())
     }
 
-    /// Messages whose text contains `needle` and passes `keep`, newest first, at most `cap`:
-    /// (thread, sent ts). In `thread` only, if given. Read in chunks, so other queries get the
-    /// connection in between and `cancelled` can stop a search the user has moved on from.
-    pub async fn search_text(
-        &self,
-        thread: Option<&Thread>,
-        needle: &str,
-        keep: &dyn Fn(&str) -> bool,
-        cap: usize,
-        cancelled: &dyn Fn() -> bool,
-    ) -> anyhow::Result<Vec<(Thread, u64)>> {
-        const CHUNK: i64 = 20_000;
-        let only: Option<i64> = match thread {
-            Some(t) => {
-                let (gk, rid) = unzip(t);
-                let id = sqlx::query_scalar("SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?")
-                    .bind(gk)
-                    .bind(rid)
-                    .fetch_optional(&self.pool)
-                    .await?;
-                if id.is_none() {
-                    return Ok(Vec::new());
-                }
-                id
-            }
+    /// The DB id of `thread`, if it has one.
+    async fn thread_id(&self, thread: &Thread) -> anyhow::Result<Option<i64>> {
+        let (gk, rid) = unzip(thread);
+        Ok(sqlx::query_scalar("SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?")
+            .bind(gk)
+            .bind(rid)
+            .fetch_optional(&self.pool)
+            .await?)
+    }
+
+    /// The messages `s` asks for, newest first, at most `cap`: (thread, sent ts). Texts are
+    /// read in chunks, so other queries get the connection in between and `cancelled` can stop
+    /// a search the user has moved on from.
+    ///
+    /// Without `needle`, messages with attachments are found too, though they have no text.
+    pub async fn search(&self, s: &Searched<'_>, cap: usize, cancelled: &dyn Fn() -> bool) -> anyhow::Result<Vec<(Thread, u64)>> {
+        let only = match s.thread {
+            Some(t) => match self.thread_id(t).await? {
+                Some(id) => Some(id),
+                None => return Ok(Vec::new()),
+            },
             None => None,
         };
-        let top: i64 = sqlx::query_scalar("SELECT IFNULL(MAX(rowid), 0) FROM ls_text").fetch_one(&self.pool).await?;
+        let threads = self.threads_by_id().await?;
         let mut hits: Vec<(i64, i64)> = Vec::new();
-        let mut from = 0;
-        while from <= top {
+        let media = match s.kind {
+            Some(SearchKind::Media) => Some(MediaKind::Media),
+            Some(SearchKind::Files) => Some(MediaKind::Files),
+            _ => None,
+        };
+        if let Some(sender) = s.sender {
+            // theirs alone are fewer than the texts or attachments to go through
+            hits = self.search_sender(s, sender, only, media, &threads, cap, cancelled).await?;
+        } else if s.needle.is_some() || media.is_none() {
+            // a needle, links or every text: the texts. Attachments alone have none, so without
+            // a needle they come from `ls_media`. What `with_media` drops is unknown here, so
+            // it needs them all
+            let enough = if media.is_some() { usize::MAX } else { cap };
+            hits = self.search_texts(s, only, enough, cancelled).await?;
+            if let Some(kind) = media {
+                hits = self.with_media(hits, &threads, kind, cap, cancelled).await?;
+            }
+        }
+        if s.sender.is_none() && s.needle.is_none() && s.kind != Some(SearchKind::Links) {
+            let ids: HashMap<String, i64> = threads.iter().map(|(id, t)| (crate::types::thread_key(t), *id)).collect();
+            hits.extend(self.search_media(s, media, &ids, cap, cancelled).await?);
+        }
+        if cancelled() {
+            return Ok(Vec::new());
+        }
+        hits.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        hits.dedup();
+        hits.truncate(cap);
+        Ok(hits.into_iter().filter_map(|(id, ts)| Some((threads.get(&id)?.clone(), ts as u64))).collect())
+    }
+
+    /// The texts holding `needle` (all, without one) that pass `keep` and the filters, read
+    /// newest first in spans of `CHUNK` texts; done once `enough` are found, since all the rest
+    /// are older.
+    async fn search_texts(
+        &self,
+        s: &Searched<'_>,
+        only: Option<i64>,
+        enough: usize,
+        cancelled: &dyn Fn() -> bool,
+    ) -> anyhow::Result<Vec<(i64, i64)>> {
+        // tiny in tests, so that they cross spans
+        const CHUNK: i64 = if cfg!(test) { 2 } else { 20_000 };
+        let links = s.kind == Some(SearchKind::Links);
+        let mut hits = Vec::new();
+        let mut before = s.until.map_or(i64::MAX, |t| t as i64);
+        while hits.len() < enough {
             if cancelled() {
                 return Ok(Vec::new());
             }
+            // the span's oldest ts, found on the index alone; None: the rest fit in one span
+            let from: Option<i64> = sqlx::query_scalar("SELECT ts FROM ls_text WHERE ts < ?1 ORDER BY ts DESC LIMIT 1 OFFSET ?2")
+                .bind(before)
+                .bind(CHUNK - 1)
+                .fetch_optional(&self.pool)
+                .await?;
             let rows = sqlx::query(
                 "SELECT thread_id, ts, text FROM ls_text
-                 WHERE rowid >= ?1 AND rowid < ?2 AND (?3 IS NULL OR thread_id = ?3) AND instr(text, ?4) > 0",
+                 WHERE ts < ?1 AND ts >= ?2 AND (?3 IS NULL OR thread_id = ?3)
+                    AND (?4 IS NULL OR instr(text, ?4) > 0)
+                    AND (?5 = 0 OR instr(text, 'http') > 0 OR instr(text, 'www.') > 0)",
             )
-            .bind(from)
-            .bind(from + CHUNK)
+            .bind(before)
+            .bind(from.unwrap_or(i64::MIN))
             .bind(only)
-            .bind(needle)
+            .bind(s.needle)
+            .bind(links)
             .fetch_all(&self.pool)
             .await?;
             for r in rows {
                 let text: &str = r.try_get("text")?;
-                if keep(text) {
+                if (s.keep)(text) && (!links || !crate::link::find(text).is_empty()) {
                     hits.push((r.try_get("thread_id")?, r.try_get("ts")?));
                 }
             }
-            from += CHUNK;
+            match from {
+                Some(ts) => before = ts,
+                None => break,
+            }
             tokio::task::yield_now().await;
         }
+        Ok(hits)
+    }
+
+    /// Whether the message `thread`/`ts` carries an attachment (of `kind`, if given).
+    async fn has_media(&self, thread: &Thread, ts: i64, kind: Option<MediaKind>) -> anyhow::Result<bool> {
+        let has: Option<i64> = sqlx::query_scalar("SELECT 1 FROM ls_media WHERE thread = ?1 AND ts = ?2 AND (?3 IS NULL OR kind = ?3) LIMIT 1")
+            .bind(crate::types::thread_key(thread))
+            .bind(ts)
+            .bind(kind.map(|k| k as i64))
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(has.is_some())
+    }
+
+    /// The messages (thread id, ts) with an attachment (of `kind`, if given), in `s.thread` if it
+    /// names one: ids only, so that a search checks its candidates without a query each.
+    async fn attached(&self, s: &Searched<'_>, kind: Option<MediaKind>, threads: &HashMap<i64, Thread>) -> anyhow::Result<HashSet<(i64, i64)>> {
+        use futures::TryStreamExt;
+        let ids: HashMap<String, i64> = threads.iter().map(|(id, t)| (crate::types::thread_key(t), *id)).collect();
+        let scope = s.thread.map(crate::types::thread_key);
+        let mut set = HashSet::new();
+        let mut rows = sqlx::query("SELECT thread, ts FROM ls_media WHERE (?1 IS NULL OR kind = ?1) AND (?2 IS NULL OR thread = ?2)")
+            .bind(kind.map(|k| k as i64))
+            .bind(scope.as_deref())
+            .fetch(&self.pool);
+        while let Some(r) = rows.try_next().await? {
+            let key: &str = r.try_get("thread")?;
+            if let Some(&id) = ids.get(key) {
+                set.insert((id, r.try_get::<i64, _>("ts")?));
+            }
+        }
+        Ok(set)
+    }
+
+    /// The newest `cap` messages `sender` sent that pass the rest of `s`, read newest first
+    /// through `ls_by_sender`. Their rows that aren't messages (reactions, edits) have neither
+    /// text nor attachment, so they drop out.
+    #[allow(clippy::too_many_arguments)]
+    async fn search_sender(
+        &self,
+        s: &Searched<'_>,
+        sender: &str,
+        only: Option<i64>,
+        media: Option<MediaKind>,
+        threads: &HashMap<i64, Thread>,
+        cap: usize,
+        cancelled: &dyn Fn() -> bool,
+    ) -> anyhow::Result<Vec<(i64, i64)>> {
+        const PAGE: i64 = 500;
+        let links = s.kind == Some(SearchKind::Links);
+        // a kind asks for its attachment; with nothing asked, a message without text needs one
+        let attached = if media.is_some() || (s.needle.is_none() && !links) {
+            Some(self.attached(s, media, threads).await?)
+        } else {
+            None
+        };
+        let mut hits = Vec::new();
+        let mut before = s.until.map_or(i64::MAX, |t| t as i64);
+        while hits.len() < cap {
+            if cancelled() {
+                return Ok(Vec::new());
+            }
+            // the needle and links narrow in SQL, as in `search_texts`
+            let rows = sqlx::query(
+                "SELECT m.thread_id, m.ts, t.text FROM thread_messages m
+                 LEFT JOIN ls_text t ON t.thread_id = m.thread_id AND t.ts = m.ts
+                 WHERE m.sender_service_id = ?1 AND m.ts < ?2 AND (?3 IS NULL OR m.thread_id = ?3)
+                    AND (?4 IS NULL OR instr(t.text, ?4) > 0)
+                    AND (?5 = 0 OR instr(t.text, 'http') > 0 OR instr(t.text, 'www.') > 0)
+                 ORDER BY m.ts DESC LIMIT ?6",
+            )
+            .bind(sender)
+            .bind(before)
+            .bind(only)
+            .bind(s.needle)
+            .bind(links)
+            .bind(PAGE)
+            .fetch_all(&self.pool)
+            .await?;
+            let last = rows.len() < PAGE as usize;
+            for r in &rows {
+                let (id, ts): (i64, i64) = (r.try_get("thread_id")?, r.try_get("ts")?);
+                before = ts;
+                let text: Option<&str> = r.try_get("text")?;
+                if !threads.contains_key(&id) {
+                    continue;
+                }
+                if text.is_some_and(|x| !(s.keep)(x)) || (links && !text.is_some_and(|x| !crate::link::find(x).is_empty())) {
+                    continue;
+                }
+                if let Some(set) = &attached {
+                    if (media.is_some() || text.is_none()) && !set.contains(&(id, ts)) {
+                        continue;
+                    }
+                }
+                hits.push((id, ts));
+                if hits.len() >= cap {
+                    break;
+                }
+            }
+            if last {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        Ok(hits)
+    }
+
+    /// The newest `cap` of `hits` that carry an attachment of `kind`.
+    async fn with_media(
+        &self,
+        mut hits: Vec<(i64, i64)>,
+        threads: &HashMap<i64, Thread>,
+        kind: MediaKind,
+        cap: usize,
+        cancelled: &dyn Fn() -> bool,
+    ) -> anyhow::Result<Vec<(i64, i64)>> {
         hits.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-        hits.truncate(cap);
-        let threads = self.threads_by_id().await?;
-        Ok(hits.into_iter().filter_map(|(id, ts)| Some((threads.get(&id)?.clone(), ts as u64))).collect())
+        let mut kept = Vec::new();
+        for (i, (id, ts)) in hits.into_iter().enumerate() {
+            if kept.len() >= cap || cancelled() {
+                break;
+            }
+            let Some(t) = threads.get(&id) else { continue };
+            if self.has_media(t, ts, Some(kind)).await? {
+                kept.push((id, ts));
+            }
+            if i % 200 == 199 {
+                tokio::task::yield_now().await;
+            }
+        }
+        Ok(kept)
+    }
+
+    /// The newest `cap` messages with an attachment (of `kind`, if given) that pass the
+    /// filters. `ids`: thread ids by thread key.
+    async fn search_media(
+        &self,
+        s: &Searched<'_>,
+        kind: Option<MediaKind>,
+        ids: &HashMap<String, i64>,
+        cap: usize,
+        cancelled: &dyn Fn() -> bool,
+    ) -> anyhow::Result<Vec<(i64, i64)>> {
+        const PAGE: i64 = 500;
+        let scope = s.thread.map(crate::types::thread_key);
+        let mut hits = Vec::new();
+        let mut before = s.until.map_or(i64::MAX, |t| t as i64);
+        while hits.len() < cap {
+            if cancelled() {
+                return Ok(Vec::new());
+            }
+            let rows = sqlx::query(
+                "SELECT thread, ts FROM ls_media
+                 WHERE ts < ?1 AND (?2 IS NULL OR kind = ?2) AND (?3 IS NULL OR thread = ?3)
+                 GROUP BY thread, ts ORDER BY ts DESC LIMIT ?4",
+            )
+            .bind(before)
+            .bind(kind.map(|k| k as i64))
+            .bind(scope.as_deref())
+            .bind(PAGE)
+            .fetch_all(&self.pool)
+            .await?;
+            let last = rows.len() < PAGE as usize;
+            for r in &rows {
+                let (key, ts): (String, i64) = (r.try_get("thread")?, r.try_get("ts")?);
+                before = ts;
+                let Some(&id) = ids.get(&key) else { continue };
+                hits.push((id, ts));
+            }
+            if last {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        Ok(hits)
+    }
+
+    /// Who sent rows to `thread` (to any, without one), as stored (`ServiceId::service_id_string`).
+    pub async fn senders(&self, thread: Option<&Thread>) -> anyhow::Result<Vec<String>> {
+        let only = match thread {
+            Some(t) => match self.thread_id(t).await? {
+                Some(id) => Some(id),
+                None => return Ok(Vec::new()),
+            },
+            None => None,
+        };
+        Ok(sqlx::query_scalar("SELECT DISTINCT sender_service_id FROM thread_messages WHERE ?1 IS NULL OR thread_id = ?1")
+            .bind(only)
+            .fetch_all(&self.pool)
+            .await?)
     }
 
     /// Every thread by its DB id.

@@ -34,10 +34,29 @@ export global SearchData {
     // the found message last opened, marked in the list
     in-out property <string> picked;
     in property <[ResultItem]> results;
+    // the filters: who sent it ("c:<uuid>") and their name; up to which day (`until-day`, a local
+    // day number, 0 none; Rust labels it `until-label`): only that end, since the results run
+    // newest first; what (`kind`: 0 anything, 1 photos and videos, 2 files, 3 links)
+    in-out property <string> sender-key;
+    in-out property <string> sender-name;
+    in-out property <int> until-day;
+    in-out property <string> until-label;
+    in-out property <int> kind;
+    out property <bool> filtered: sender-key != "" || until-day != 0 || kind != 0;
+    // the list is who sent messages, to pick the sender filter from: the box takes their name,
+    // the search's own words wait in `held-query`
+    in-out property <bool> picking;
+    in-out property <string> held-query;
     // the list shows the results instead of the threads
-    out property <bool> active: query != "" || preedit != "" || contacts || scope-key != "";
-    // the query or the scope changed
+    out property <bool> active: query != "" || preedit != "" || contacts || scope-key != "" || filtered || picking;
+    // the query, the scope or a filter changed
     callback changed();
+    // ↑ (-1) / ↓ (1) in the search box: open the found message before or after the one picked
+    callback step(int);
+    // the results list scrolls to show row `reveal-row`; `reveal-n` counts the requests, so the
+    // same row can be asked again
+    in property <int> reveal-row;
+    in property <int> reveal-n;
     // Enter: the first row that opens something
     callback accept();
     // a start row: look up whom it names (its `text`) and open the conversation
@@ -49,6 +68,10 @@ export global SearchData {
 
     public function search-in(key: string, name: string) {
         leave-contacts();
+        if (picking) {
+            picking = false;
+            held-query = "";
+        }
         scope-key = key;
         scope-name = name;
         query = "";
@@ -72,11 +95,61 @@ export global SearchData {
         }
     }
 
-    // Esc: what's typed, then the chat searched in, then the "Find by" kind, then the contact list
+    public function pick-sender() {
+        if (!picking) {
+            held-query = query;
+            query = "";
+            picking = true;
+            changed();
+        }
+    }
+
+    // out of picking, with `key` and `name` as the sender, or as it was ("")
+    public function end-picking(key: string, name: string) {
+        if (key != "") {
+            sender-key = key;
+            sender-name = name;
+        }
+        picking = false;
+        query = held-query;
+        held-query = "";
+        changed();
+    }
+
+    public function clear-sender() {
+        sender-key = "";
+        sender-name = "";
+        changed();
+    }
+
+    public function clear-until() {
+        until-day = 0;
+        changed();
+    }
+
+    public function set-kind(k: int) {
+        kind = k;
+        changed();
+    }
+
+    public function clear-filters() {
+        sender-key = "";
+        sender-name = "";
+        until-day = 0;
+        kind = 0;
+        changed();
+    }
+
+    // Esc: picking a sender, what's typed, the filters, the chat searched in, the "Find by"
+    // kind, the contact list
     public function back() {
-        if (query != "") {
+        if (picking) {
+            end-picking("", "");
+        } else if (query != "") {
             query = "";
             changed();
+        } else if (filtered) {
+            clear-filters();
         } else if (scope-key != "") {
             leave-scope();
         } else if (find != FindKind.any) {
@@ -102,6 +175,105 @@ export global SearchData {
         find = kind == "username" ? FindKind.username : FindKind.phone;
         query = "";
         changed();
+    }
+}
+
+// A filter of the search: grey with a chevron while it's off, its value on the selection color
+// with a clear button once set. A menu it opens goes inside it (`@children`).
+export component FilterChip inherits Rectangle {
+    in property <string> text;
+    in property <bool> set;
+    // false: only its clear button does anything (the chat searched in)
+    in property <bool> clickable: true;
+    callback clicked();
+    callback clear();
+    property <length> label-w: min(lbl.preferred-width, 150px);
+    height: 28px;
+    width: 12px + label-w + (set ? 28px : clickable ? 26px : 12px);
+    border-radius: 14px;
+    background: set ? Theme.selected : ta.has-hover ? Theme.field-off : Theme.field;
+    ta := TouchArea {
+        enabled: root.clickable;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    lbl := Text {
+        x: 12px;
+        width: root.label-w;
+        text: root.text;
+        color: Theme.text;
+        font-size: 13px;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    if !root.set && root.clickable: Icon {
+        x: parent.width - self.width - 10px;
+        y: (parent.height - self.height) / 2;
+        size: 14px;
+        icon: Icons.chevron-down;
+        tint: Theme.subtle;
+    }
+    if root.set: Rectangle {
+        x: parent.width - self.width - 4px;
+        y: (parent.height - self.height) / 2;
+        width: 22px;
+        height: 22px;
+        border-radius: 11px;
+        background: xta.has-hover ? Theme.hover : transparent;
+        xta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.clear(); }
+        }
+        Icon {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            size: 12px;
+            icon: Icons.close;
+            tint: Theme.text;
+        }
+    }
+    @children
+}
+
+// a menu card hanging from a `FilterChip` (place it under the chip), its choices as `ChipMenuRow`s
+export component ChipMenu inherits PopupWindow {
+    width: 200px;
+    height: col.preferred-height;
+    // the rows close it themselves: closing on any click dropped the row's click
+    close-policy: close-on-click-outside;
+    Rectangle {
+        border-radius: 12px;
+        background: Theme.pane;
+        border-width: 1px;
+        border-color: Theme.border;
+        drop-shadow-blur: 12px;
+        drop-shadow-color: Theme.shadow;
+        col := VerticalLayout {
+            padding: 6px;
+            spacing: 2px;
+            @children
+        }
+    }
+}
+
+export component ChipMenuRow inherits Rectangle {
+    in property <string> text;
+    in property <bool> current;
+    callback clicked();
+    height: 32px;
+    border-radius: 6px;
+    background: current ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Text {
+        x: 10px;
+        text: root.text;
+        color: Theme.text;
+        font-size: 13px;
+        font-weight: root.current ? 700 : 400;
+        vertical-alignment: center;
     }
 }
 

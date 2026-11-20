@@ -243,7 +243,7 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, paging: Paging, scr
         Scroll::News => {}
         Scroll::KeepIfNotAtBottom | Scroll::Keep | Scroll::Older => {}
     }
-    if rebuild && scroll != Scroll::Older {
+    if rebuild && scroll != Scroll::Older && !UI.with_borrow_mut(|ui| std::mem::take(&mut ui.stepping)) {
         app.invoke_focus_composer();
     }
 }

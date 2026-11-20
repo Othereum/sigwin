@@ -37,6 +37,57 @@ fn reply_thumb(src: &Image) -> Option<Image> {
     Some(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(small.as_raw(), size, size)))
 }
 
+/// The message search's filters as the chips set them.
+fn search_filter(d: &SearchData) -> types::SearchFilter {
+    // the day picked is in
+    let until = Some(d.get_until_day()).filter(|&day| day != 0).and_then(|day| view::time::day_start_ms(day + 1));
+    let kind = match d.get_kind() {
+        1 => Some(types::SearchKind::Media),
+        2 => Some(types::SearchKind::Files),
+        3 => Some(types::SearchKind::Links),
+        _ => None,
+    };
+    let sender = Some(d.get_sender_key().to_string()).filter(|k| !k.is_empty());
+    types::SearchFilter { sender, until, kind }
+}
+
+/// ↑ (-1) / ↓ (1) in the search box: opens the found message before or after the one picked
+/// (↓ with none picked: the first), and scrolls the results to show it. Past the last one
+/// loaded, the next page comes, for the next press.
+fn step_found(app: &AppWindow, by: i32) {
+    let d = app.global::<SearchData>();
+    let (picked, current) = (d.get_picked(), app.get_current_key());
+    let found = UI.with_borrow(|ui| {
+        let msgs: Vec<usize> = ui.result_dtos.iter().enumerate().filter(|(_, r)| matches!(r, ResultDto::Message { .. })).map(|(i, _)| i).collect();
+        let at = msgs.iter().position(|&i| {
+            matches!(&ui.result_dtos[i], ResultDto::Message { thread, id } if id.as_str() == picked.as_str() && thread.key.as_str() == current.as_str())
+        });
+        let next = match at {
+            Some(p) => p as i64 + by as i64,
+            None if by > 0 => 0,
+            None => return Err(false),
+        };
+        let Some(&row) = usize::try_from(next).ok().and_then(|n| msgs.get(n)) else {
+            return Err(next >= 0 && ui.result_dtos.iter().any(|r| matches!(r, ResultDto::More)));
+        };
+        let ResultDto::Message { thread, id } = &ui.result_dtos[row] else { return Err(false) };
+        Ok((thread.key.clone(), id.clone(), row))
+    });
+    match found {
+        Ok((key, id, row)) => {
+            if key != current.as_str() {
+                UI.with_borrow_mut(|ui| ui.stepping = true);
+            }
+            app.global::<sigwin_ui::GalleryData>().invoke_close();
+            d.invoke_show_found(key.into(), id.into());
+            d.set_reveal_row(row as i32);
+            d.set_reveal_n(d.get_reveal_n().wrapping_add(1));
+        }
+        Err(true) => d.invoke_more(),
+        Err(false) => {}
+    }
+}
+
 /// Linking, the thread list, search and paging.
 fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let s = send.clone();
@@ -126,10 +177,16 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         };
         let query = format!("{}{}", d.get_query(), d.get_preedit());
         let scope = Some(d.get_scope_key().to_string()).filter(|k| !k.is_empty());
-        s(Command::Search { query, contacts: d.get_contacts(), find, scope });
+        s(Command::Search { query, contacts: d.get_contacts(), find, scope, filter: search_filter(&d), pick_sender: d.get_picking() });
     });
     let s = send.clone();
     app.global::<SearchData>().on_more(move || s(Command::SearchMore));
+    let weak = app.as_weak();
+    app.global::<SearchData>().on_step(move |by| {
+        if let Some(app) = weak.upgrade() {
+            step_found(&app, by);
+        }
+    });
     let s = send.clone();
     let weak = app.as_weak();
     app.global::<SearchData>().on_show_found(move |key, id| {

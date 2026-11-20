@@ -3,7 +3,7 @@
 //! at the events that come out, the counts and the receipts that would have gone out.
 
 use super::fixture::harness::Harness;
-use crate::types::ResultDto;
+use crate::types::{ResultDto, SearchFilter, SearchKind};
 use super::*;
 
 /// Runs a scenario the way the backend runs: a thread with its big stack (the presage futures
@@ -232,7 +232,8 @@ fn searching_leaves_the_thread_list_whole() {
         h.op("seed who=2 name=영희 n=2").await;
         h.settle().await;
         h.take_events();
-        h.cmd(Command::Search { query: "철수".into(), contacts: false, find: Default::default(), scope: None }).await;
+        h.cmd(Command::Search { query: "철수".into(), contacts: false, find: Default::default(), scope: None, filter: Default::default(), pick_sender: false })
+            .await;
         let ev = h.take_events();
         let results = ev.iter().rev().find_map(|e| match e {
             Event::Results(r) => Some(r),
@@ -255,8 +256,13 @@ fn searching_leaves_the_thread_list_whole() {
 /// What the message search finds for `query`: the snippets of the found messages, once the
 /// scan (which waits for a pause in typing) is done.
 async fn found(h: &mut Harness, query: &str, scope: Option<u32>) -> Vec<String> {
+    found_by(h, query, scope, SearchFilter::default()).await
+}
+
+/// `found`, narrowed by `filter`.
+async fn found_by(h: &mut Harness, query: &str, scope: Option<u32>, filter: SearchFilter) -> Vec<String> {
     let scope = scope.map(|who| thread_key(&Thread::Contact(ServiceId::Aci(super::fixture::contact(who).into()))));
-    h.cmd(Command::Search { query: query.into(), contacts: false, find: Default::default(), scope }).await;
+    h.cmd(Command::Search { query: query.into(), contacts: false, find: Default::default(), scope, filter, pick_sender: false }).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     h.settle().await;
     let ev = h.take_events();
@@ -327,14 +333,104 @@ fn messages_are_found_as_they_now_read() {
         assert!(found(&mut h, "비밀", None).await.is_empty());
 
         // nor is anything left of a deleted chat (the index itself: the list would hide it anyway)
-        let left = || h.app.index.search_text(Some(&thread), "글", &|_| true, 10, &|| false);
+        let searched = crate::db::Searched {
+            thread: Some(&thread),
+            needle: Some("글"),
+            keep: &|_| true,
+            sender: None,
+            until: None,
+            kind: None,
+        };
+        let left = || h.app.index.search(&searched, 10, &|| false);
         assert_eq!(left().await.unwrap().len(), 1);
         h.app.store.clear_thread(&thread).await.unwrap();
         assert!(left().await.unwrap().is_empty());
     });
 }
 
-/// The snippets of the found messages in the last results sent.
+#[test]
+fn searches_narrow_by_words_sender_date_and_kind() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("recv who=1 n=2").await;
+        let one = Thread::Contact(ServiceId::Aci(super::fixture::contact(1).into()));
+        let after_one = h.app.index.page(&one, i64::MAX, 10).await.unwrap()[0].1 + 1;
+        h.op("recv who=2 n=1").await;
+        h.op("big who=1").await;
+        let me = h.app.me;
+        let ts = after_one + 100_000;
+        let link = super::fixture::incoming_dm(2, DataMessage { body: Some("볼 것 www.example.com".into()), timestamp: Some(ts), ..Default::default() }, me);
+        let two = Thread::Contact(ServiceId::Aci(super::fixture::contact(2).into()));
+        h.app.store.save_message(&two, link.clone()).await.unwrap();
+        h.app.content(link).await;
+
+        // every word, in any order; a quoted phrase as written
+        assert_eq!(found(&mut h, "2 메시지", None).await, ["새 메시지 2"]);
+        assert!(found(&mut h, "\"메시지 새\"", None).await.is_empty());
+        assert_eq!(found(&mut h, "\"새 메시지\" 1", None).await.len(), 2);
+
+        let from_two = SearchFilter { sender: Some(thread_key(&two)), ..Default::default() };
+        assert_eq!(found_by(&mut h, "메시지", None, from_two.clone()).await, ["새 메시지 1"]);
+        // a filter alone finds what passes it, attachments too
+        assert_eq!(found_by(&mut h, "", None, from_two).await, ["볼 것 www.example.com", "새 메시지 1"]);
+        let until = SearchFilter { until: Some(after_one), ..Default::default() };
+        assert_eq!(found_by(&mut h, "새", None, until).await, ["새 메시지 2", "새 메시지 1"]);
+
+        let media = SearchFilter { kind: Some(SearchKind::Media), ..Default::default() };
+        assert_eq!(found_by(&mut h, "", None, media.clone()).await.len(), 1);
+        let older_media = SearchFilter { until: Some(after_one), ..media.clone() };
+        assert!(found_by(&mut h, "", None, older_media).await.is_empty(), "the photo came later");
+        let from_one = |kind| SearchFilter { sender: Some(thread_key(&one)), kind, ..Default::default() };
+        assert_eq!(found_by(&mut h, "", None, from_one(Some(SearchKind::Media))).await.len(), 1);
+        assert!(found_by(&mut h, "", None, from_one(Some(SearchKind::Links))).await.is_empty());
+        assert_eq!(found_by(&mut h, "", None, from_one(None)).await.len(), 3, "two texts and the photo");
+        assert!(found_by(&mut h, "", Some(2), media).await.is_empty(), "only that chat's");
+        let links = SearchFilter { kind: Some(SearchKind::Links), ..Default::default() };
+        assert_eq!(found_by(&mut h, "", None, links.clone()).await, ["볼 것 www.example.com"]);
+        assert!(found_by(&mut h, "메시지", None, links).await.is_empty());
+    });
+}
+
+#[test]
+fn the_sender_list_holds_who_sent_in_the_scope() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 name=철수 n=1").await;
+        h.op("seed who=2 name=영희 n=1").await;
+        h.settle().await;
+        let names = |h: &Harness| -> Vec<String> {
+            let ev = h.take_events();
+            let rows = ev.iter().rev().find_map(|e| match e {
+                Event::Results(r) => Some(r.clone()),
+                _ => None,
+            });
+            rows.unwrap_or_default()
+                .into_iter()
+                .filter_map(|r| match r {
+                    ResultDto::Contact(t) => Some(t.name),
+                    _ => None,
+                })
+                .collect()
+        };
+        let pick = |query: &str, scope: Option<String>| Command::Search {
+            query: query.into(),
+            contacts: false,
+            find: Default::default(),
+            scope,
+            filter: Default::default(),
+            pick_sender: true,
+        };
+        h.take_events();
+        h.cmd(pick("", None)).await;
+        assert_eq!(names(&h), ["You", "영희", "철수"]);
+        h.cmd(pick("영", None)).await;
+        assert_eq!(names(&h), ["영희"]);
+        let one = thread_key(&Thread::Contact(ServiceId::Aci(super::fixture::contact(1).into())));
+        h.cmd(pick("", Some(one))).await;
+        assert_eq!(names(&h), ["You", "철수"]);
+    });
+}
+
 /// The snippets of the found messages in the last results sent, if any were.
 fn shown_hits(h: &Harness) -> Option<Vec<String>> {
     let ev = h.take_events();
@@ -399,7 +495,15 @@ fn no_messages_are_found_until_older_ones_are_indexed() {
         h.op("recv who=1 n=1").await;
         h.app.search.indexing = Some(5);
         let ev = {
-            h.cmd(Command::Search { query: "새 메시지".into(), contacts: false, find: Default::default(), scope: None }).await;
+            h.cmd(Command::Search {
+                query: "새 메시지".into(),
+                contacts: false,
+                find: Default::default(),
+                scope: None,
+                filter: Default::default(),
+                pick_sender: false,
+            })
+            .await;
             tokio::time::sleep(Duration::from_millis(300)).await;
             h.settle().await;
             h.take_events()

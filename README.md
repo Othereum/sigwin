@@ -68,7 +68,7 @@ Set notification content, sound and badge for each chat, and override the settin
 </picture>
 
 ## Features
-- **Chats**: 1:1 and groups, starting a chat, message requests, replies, edits, deletes, reactions, @mentions, text formatting, pinned messages, read receipts, message search, jump to a date
+- **Chats**: 1:1 and groups, starting a chat, message requests, replies, edits, deletes, reactions, @mentions, text formatting, pinned messages, read receipts, message search with filters, jump to a date
 - **Attachments**: photos, videos and files, stickers, animated GIF, WebP and APNG, view-once photos, all of a chat's media and files in one place
 - **Notifications**: Windows notifications, unread badge
 - **Always on**: keeps running in the tray when the window is closed, opens at login, updates itself

@@ -58,7 +58,7 @@ mod requests;
 #[cfg(test)]
 mod scenarios;
 mod search;
-pub(crate) use search::{excerpt, Lead};
+pub(crate) use search::{excerpt, Lead, Terms};
 mod send;
 mod stickers;
 mod storage;
@@ -826,7 +826,9 @@ impl App {
                     self.emit_messages(Scroll::Keep).await;
                 }
             }
-            Command::Search { query, contacts, find, scope } => self.set_search(query, contacts, find, scope).await,
+            Command::Search { query, contacts, find, scope, filter, pick_sender } => {
+                self.set_search(query, contacts, find, scope, filter, pick_sender).await
+            }
             Command::SearchMore => self.more_hits().await,
             Command::StartChat(target) => self.start_chat(target),
             Command::AnswerRequest { key, answer } => self.answer_request(&key, answer).await,

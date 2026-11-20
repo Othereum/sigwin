@@ -206,6 +206,7 @@ export component Field inherits Rectangle {
     in-out property <string> text;
     // what the IME is composing, not in `text` yet
     out property <string> preedit: input.preedit-text;
+    out property <bool> focused: input.has-focus;
     callback edited();
     callback preedit-changed();
     callback accepted();

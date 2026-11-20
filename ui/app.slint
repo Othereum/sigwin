@@ -13,7 +13,7 @@ import { ThreadMenu, ThreadMenuData, ThreadPrefsDialog } from "thread_menu.slint
 import { LinkPage } from "link.slint";
 import { RepliesData, RepliesDialog } from "replies.slint";
 import { RequestCard, RequestData, SafetyTipsDialog } from "request.slint";
-import { FindKind, ResultRow, ResultKind, SearchData } from "search.slint";
+import { ChipMenu, ChipMenuRow, FilterChip, FindKind, ResultRow, ResultKind, SearchData } from "search.slint";
 import { GalleryData, GalleryPage } from "gallery.slint";
 import { CalendarData, CalendarPopup } from "calendar.slint";
 
@@ -283,6 +283,9 @@ export component AppWindow inherits Window {
         SearchData.search-in(root.current-key, root.current-name);
         search-edit.focus();
     }
+    public function focus-search() {
+        search-edit.focus();
+    }
     public function blur-composer() {
         composer.clear-focus();
     }
@@ -441,7 +444,8 @@ export component AppWindow inherits Window {
                     search-edit := Field {
                         y: (parent.height - self.height) / 2;
                         icon: Icons.search;
-                        placeholder: SearchData.scope-key != "" ? @tr("Search this chat")
+                        placeholder: SearchData.picking ? @tr("Sender's name")
+                            : SearchData.scope-key != "" ? @tr("Search this chat")
                             : !SearchData.contacts ? @tr("Search")
                             : SearchData.find == FindKind.phone ? @tr("Enter a phone number")
                             : SearchData.find == FindKind.username ? @tr("Username (e.g. name.42)")
@@ -458,11 +462,16 @@ export component AppWindow inherits Window {
                         }
                         accepted => { SearchData.accept(); }
                         key-pressed(event) => {
-                            if (event.text != Key.Escape) {
-                                return reject;
+                            if (event.text == Key.Escape) {
+                                SearchData.back();
+                                return accept;
                             }
-                            SearchData.back();
-                            accept
+                            // through the found messages, one by one
+                            if (!SearchData.contacts && !SearchData.picking && (event.text == Key.UpArrow || event.text == Key.DownArrow)) {
+                                SearchData.step(event.text == Key.UpArrow ? -1 : 1);
+                                return accept;
+                            }
+                            reject
                         }
                     }
                     // start a conversation: the contact list
@@ -477,8 +486,8 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                // "search in this chat": which one, and the way back to searching everything
-                if SearchData.scope-key != "": Rectangle {
+                // picking the sender filter: what the list is, and the way back
+                if SearchData.picking: Rectangle {
                     height: 34px;
                     Rectangle {
                         x: 8px;
@@ -492,7 +501,7 @@ export component AppWindow inherits Window {
                         padding-right: 12px;
                         spacing: 4px;
                         Text {
-                            text: @tr("Searching in {}", SearchData.scope-name);
+                            text: @tr("Who sent it?");
                             color: Theme.text;
                             font-size: 13px;
                             overflow: elide;
@@ -506,8 +515,98 @@ export component AppWindow inherits Window {
                             width: 24px;
                             height: 24px;
                             clicked => {
-                                SearchData.leave-scope();
+                                SearchData.end-picking("", "");
                                 search-edit.focus();
+                            }
+                        }
+                    }
+                }
+                // the message search's filters, the chat searched in first. Shown while the box
+                // has the focus too, so that a search can start from a filter; a menu or the
+                // date picker takes the focus while open
+                chips := Rectangle {
+                    property <bool> shown: !SearchData.contacts && !SearchData.picking
+                        && (SearchData.active || search-edit.focused || kind-menu.is-open || (CalendarData.open && CalendarData.until));
+                    height: self.shown ? 36px : 0px;
+                    visible: self.shown;
+                    HStrip {
+                        x: 8px;
+                        width: parent.width - 16px;
+                        height: 28px;
+                        y: 2px;
+                        content-width: chip-row.preferred-width;
+                        chip-row := HorizontalLayout {
+                            spacing: 6px;
+                            if SearchData.scope-key != "": FilterChip {
+                                text: SearchData.scope-name;
+                                set: true;
+                                clickable: false;
+                                clear => {
+                                    SearchData.leave-scope();
+                                    search-edit.focus();
+                                }
+                            }
+                            FilterChip {
+                                text: SearchData.sender-key != "" ? SearchData.sender-name : @tr("Sender");
+                                set: SearchData.sender-key != "";
+                                clicked => {
+                                    SearchData.pick-sender();
+                                    search-edit.focus();
+                                }
+                                clear => {
+                                    SearchData.clear-sender();
+                                    search-edit.focus();
+                                }
+                            }
+                            date-chip := FilterChip {
+                                text: SearchData.until-day != 0 ? SearchData.until-label : @tr("Date");
+                                set: SearchData.until-day != 0;
+                                clicked => {
+                                    CalendarData.show-until(date-chip.absolute-position.x + 100px,
+                                        date-chip.absolute-position.y + date-chip.height + 4px);
+                                }
+                                clear => {
+                                    SearchData.clear-until();
+                                    search-edit.focus();
+                                }
+                            }
+                            kind-chip := FilterChip {
+                                text: SearchData.kind == 1 ? @tr("Photos and videos") : SearchData.kind == 2 ? @tr("Files")
+                                    : SearchData.kind == 3 ? @tr("Links") : @tr("Type");
+                                set: SearchData.kind != 0;
+                                clicked => { kind-menu.show(); }
+                                clear => {
+                                    SearchData.set-kind(0);
+                                    search-edit.focus();
+                                }
+                                kind-menu := ChipMenu {
+                                    x: 0px;
+                                    y: parent.height + 4px;
+                                    ChipMenuRow {
+                                        text: @tr("Photos and videos");
+                                        current: SearchData.kind == 1;
+                                        clicked => {
+                                            SearchData.set-kind(1);
+                                            kind-menu.close();
+                                        }
+                                    }
+                                    ChipMenuRow {
+                                        text: @tr("Files");
+                                        current: SearchData.kind == 2;
+                                        clicked => {
+                                            SearchData.set-kind(2);
+                                            kind-menu.close();
+                                        }
+                                    }
+                                    ChipMenuRow {
+                                        text: @tr("Links");
+                                        current: SearchData.kind == 3;
+                                        clicked => {
+                                            SearchData.set-kind(3);
+                                            kind-menu.close();
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -550,14 +649,23 @@ export component AppWindow inherits Window {
                     if SearchData.active: ListView {
                         // a new search starts at the top (rows are updated in place, so the
                         // list keeps its place for the next page of the same one)
-                        property <string> asked: SearchData.query + SearchData.preedit + SearchData.scope-key;
+                        property <string> asked: SearchData.query + SearchData.preedit + SearchData.scope-key
+                            + SearchData.sender-key + SearchData.until-day + SearchData.kind + (SearchData.picking ? "p" : "");
                         changed asked => { self.content-y = 0; }
+                        // ↑/↓ moved to a found message: it shows
+                        changed reveal-n => { self.ensure-row-visible(SearchData.reveal-row, ScrollBehavior.instant); }
+                        property <int> reveal-n: SearchData.reveal-n;
                         for r in SearchData.results: ResultRow {
                             item: r;
-                            selected: ((r.kind == ResultKind.thread || r.kind == ResultKind.contact) && r.thread.key == root.current-key)
+                            selected: (!SearchData.picking && (r.kind == ResultKind.thread || r.kind == ResultKind.contact) && r.thread.key == root.current-key)
                                 || (r.kind == ResultKind.message && r.text == SearchData.picked && r.thread.key == root.current-key);
                             clicked => {
-                                if (r.kind == ResultKind.find) {
+                                if (SearchData.picking) {
+                                    if (r.kind == ResultKind.contact) {
+                                        SearchData.end-picking(r.thread.key, r.thread.name);
+                                        search-edit.focus();
+                                    }
+                                } else if (r.kind == ResultKind.find) {
                                     SearchData.pick-find(r.text);
                                     search-edit.focus();
                                 } else if (r.kind == ResultKind.start) {
@@ -589,7 +697,7 @@ export component AppWindow inherits Window {
                         width: parent.width;
                         horizontal-alignment: center;
                         text: SearchData.contacts && SearchData.query == "" ? @tr("No contacts")
-                            : SearchData.scope-key != "" && SearchData.query == "" && SearchData.preedit == "" ? ""
+                            : SearchData.scope-key != "" && SearchData.query == "" && SearchData.preedit == "" && !SearchData.filtered ? ""
                             : @tr("No results");
                         color: Theme.subtle;
                         font-size: 13px;
@@ -824,7 +932,7 @@ export component AppWindow inherits Window {
                     IconButton {
                         y: (parent.height - self.height) / 2;
                         icon: Icons.calendar;
-                        active: CalendarData.open;
+                        active: CalendarData.open && !CalendarData.until;
                         clicked => {
                             CalendarData.show(0, self.absolute-position.x + self.width / 2, self.absolute-position.y + self.height + 4px);
                         }
@@ -2014,7 +2122,13 @@ export component AppWindow inherits Window {
     }
 
     if CalendarData.open: CalendarPopup {
-        closed => { root.focus-composer(); }
+        closed => {
+            if (CalendarData.until) {
+                search-edit.focus();
+            } else {
+                root.focus-composer();
+            }
+        }
     }
     if ThreadMenuData.key != "": ThreadMenu { }
     if ThreadMenuData.prefs-key != "": ThreadPrefsDialog { }

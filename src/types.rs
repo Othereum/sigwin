@@ -43,6 +43,31 @@ pub enum Find {
     Username,
 }
 
+/// What the message search narrows to, besides its words.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SearchFilter {
+    /// who sent it: "c:<uuid>", as in a thread key
+    pub sender: Option<String>,
+    /// sent before (ms); no lower bound: the results run newest first, so it would only cut
+    /// their tail
+    pub until: Option<u64>,
+    pub kind: Option<SearchKind>,
+}
+
+impl SearchFilter {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SearchKind {
+    /// pictures and videos
+    Media,
+    Files,
+    Links,
+}
+
 /// A row of the sidebar's search, or of its contact list.
 #[derive(Debug, Clone)]
 pub enum ResultDto {
@@ -744,8 +769,9 @@ pub enum Command {
     /// "더 읽기" on a row: show more of its text
     ReadMore(String),
     /// the sidebar's search; `contacts`: the contact list the ✎ button opens; `scope`: the
-    /// thread whose messages alone are searched
-    Search { query: String, contacts: bool, find: Find, scope: Option<String> },
+    /// thread whose messages alone are searched; `pick_sender`: the list is the people to
+    /// pick the sender filter from, `query` their name
+    Search { query: String, contacts: bool, find: Find, scope: Option<String>, filter: SearchFilter, pick_sender: bool },
     /// the next page of found messages
     SearchMore,
     /// look up whom a `ResultDto::Start` row names and open the conversation with them

@@ -608,8 +608,8 @@ msgstr "연결 실패. {}초 후 재시도"
 msgid "Contacts"
 msgstr "연락처"
 
-msgid "Messages"
-msgstr "메시지"
+msgid "Messages · {}"
+msgstr "메시지 · {}"
 
 msgid "Show more"
 msgstr "더 보기"
@@ -620,8 +620,30 @@ msgstr "이전 메시지 검색 준비 중 ({}%)"
 msgid "Search this chat"
 msgstr "이 대화에서 검색"
 
-msgid "Searching in {}"
-msgstr "검색 범위: {}"
+msgid "Who sent it?"
+msgstr "누가 보냈나요?"
+
+msgid "Sender's name"
+msgstr "보낸 사람 이름"
+
+msgid "Sender"
+msgstr "보낸 사람"
+
+msgid "Date"
+msgstr "날짜"
+
+msgid "Type"
+msgstr "종류"
+
+
+msgid "Until {}"
+msgstr "{}까지"
+
+msgid "Photos and videos"
+msgstr "사진·동영상"
+
+msgid "Links"
+msgstr "링크"
 
 msgid "Couldn't add the sticker pack: {}"
 msgstr "스티커 팩 추가 실패: {}"

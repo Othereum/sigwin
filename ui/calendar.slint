@@ -34,6 +34,10 @@ export global CalendarData {
     in property <bool> can-next;
     // open on day `day` (0: the day at the top of the message list), hanging from (x, y)
     callback show(int, length, length);
+    // open for the search's "until" date, any day up to today, hanging from (x, y)
+    callback show-until(length, length);
+    // picking the search's "until" date rather than a day to go to
+    in property <bool> until;
     // the previous (-1) or next (1) month or year
     callback step(int);
     // from a month's days to its year's months

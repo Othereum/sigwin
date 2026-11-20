@@ -1,9 +1,10 @@
 //! The date picker (`ui/calendar.slint`): a month's days or a year's months, the ones holding
 //! no messages dimmed. Which do comes from the backend, one view at a time
-//! (`Command::CalendarMarks`); a pick goes through `show-day`, like the date pill did.
+//! (`Command::CalendarMarks`); a pick goes through `show-day`, like the date pill did. It also
+//! picks the search's "until" date, then with every day up to today open.
 
 use chrono::{Datelike, Local, NaiveDate};
-use sigwin_ui::{CalendarCell, CalendarData};
+use sigwin_ui::{CalendarCell, CalendarData, SearchData};
 
 use super::*;
 use crate::view::time;
@@ -17,6 +18,8 @@ enum View {
 struct Cal {
     /// the thread it was opened for
     key: String,
+    /// picking the search's "until" date: every day up to today, no marks to ask for
+    until: bool,
     view: View,
     /// the day highlighted: the one on screen when it opened (0: none)
     selected: i32,
@@ -36,6 +39,12 @@ pub(crate) fn wire(app: &AppWindow) {
     d.on_show(move |day, x, y| {
         if let Some(app) = weak.upgrade() {
             open(&app, day, x, y);
+        }
+    });
+    let weak = app.as_weak();
+    d.on_show_until(move |x, y| {
+        if let Some(app) = weak.upgrade() {
+            open_until(&app, x, y);
         }
     });
     let weak = app.as_weak();
@@ -60,9 +69,18 @@ pub(crate) fn wire(app: &AppWindow) {
     let weak = app.as_weak();
     d.on_pick(move |value| {
         let Some(app) = weak.upgrade() else { return };
-        let Some(view) = CAL.with_borrow(|c| c.as_ref().map(|c| c.view)) else { return };
+        let Some((view, until)) = CAL.with_borrow(|c| c.as_ref().map(|c| (c.view, c.until))) else { return };
         match view {
             View::Months { year } => change(&app, |_| View::Days { year, month: value.clamp(0, 11) as u32 + 1 }),
+            View::Days { .. } if until => {
+                close(&app);
+                let s = app.global::<SearchData>();
+                let label = time::day_start_ms(value).map(time::day_short).unwrap_or_default();
+                s.set_until_day(value);
+                s.set_until_label(tr!("Until {}", label).into());
+                s.invoke_changed();
+                app.invoke_focus_search();
+            }
             View::Days { .. } => {
                 close(&app);
                 app.invoke_focus_composer();
@@ -87,15 +105,35 @@ fn open(app: &AppWindow, day: i32, x: f32, y: f32) {
     let day = if day > 0 { day } else { top_day(app) };
     let today = today();
     let d = NaiveDate::from_num_days_from_ce_opt(if day > 0 { day } else { today }).unwrap_or_default();
-    CAL.set(Some(Cal { key, view: View::Days { year: d.year(), month: d.month() }, selected: day.max(0), marks: None, first: None }));
+    CAL.set(Some(Cal { key, until: false, view: View::Days { year: d.year(), month: d.month() }, selected: day.max(0), marks: None, first: None }));
+    show(app, x, y, false);
+    ask();
+}
+
+/// Opens for the search's "until" date, on the one picked before, else today.
+fn open_until(app: &AppWindow, x: f32, y: f32) {
+    let picked = app.global::<SearchData>().get_until_day();
+    let d = NaiveDate::from_num_days_from_ce_opt(if picked > 0 { picked } else { today() }).unwrap_or_default();
+    CAL.set(Some(Cal {
+        key: String::new(),
+        until: true,
+        view: View::Days { year: d.year(), month: d.month() },
+        selected: picked.max(0),
+        marks: None,
+        first: None,
+    }));
+    show(app, x, y, true);
+}
+
+fn show(app: &AppWindow, x: f32, y: f32, until: bool) {
     let data = app.global::<CalendarData>();
     data.set_anchor_x(x);
     data.set_anchor_y(y);
+    data.set_until(until);
     let heads: Vec<SharedString> = time::weekday_heads().iter().map(|&h| h.into()).collect();
     data.set_heads(ModelRc::new(VecModel::from(heads)));
     data.set_open(true);
     render(app);
-    ask();
 }
 
 pub(crate) fn close(app: &AppWindow) {
@@ -127,7 +165,9 @@ fn change(app: &AppWindow, f: impl FnOnce(View) -> View) {
     });
     if changed {
         render(app);
-        ask();
+        if !CAL.with_borrow(|c| c.as_ref().is_some_and(|c| c.until)) {
+            ask();
+        }
     }
 }
 
@@ -174,7 +214,8 @@ fn render(app: &AppWindow) {
         let (start, end) = (b[0], b[b.len() - 1]);
         let mark = |i: usize| c.marks.as_ref().map(|m| m.get(i).copied().unwrap_or(false));
         let cell = |i: usize, label: String, value: i32, selected: bool, is_today: bool| {
-            let mark = mark(i);
+            // a day after today can't be picked; a month view's cells are all months
+            let mark = if c.until { Some(matches!(c.view, View::Months { .. }) || value <= today) } else { mark(i) };
             CalendarCell {
                 label: label.into(),
                 value,
@@ -219,7 +260,7 @@ fn render(app: &AppWindow) {
         data.set_months(matches!(c.view, View::Months { .. }));
         data.set_cells(ModelRc::new(VecModel::from(cells)));
         // nothing before the oldest message (while unknown, the way back stays open) or after today
-        data.set_can_prev(c.first.is_none_or(|f| f < start));
+        data.set_can_prev(c.until || c.first.is_none_or(|f| f < start));
         data.set_can_next(end <= today);
     });
 }

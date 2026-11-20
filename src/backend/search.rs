@@ -8,7 +8,7 @@ use std::cell::Cell;
 
 use super::threads::{note_to_self, show_number, unknown_name};
 use super::*;
-use crate::types::{Find, ResultDto};
+use crate::types::{Find, ResultDto, SearchFilter};
 
 /// What the sidebar searches: everything from the thread list, or only people (the ✎ list).
 #[derive(Default)]
@@ -18,6 +18,12 @@ pub(super) struct Search {
     pub find: Find,
     /// the thread whose messages alone are searched ("search in this chat")
     pub scope: Option<String>,
+    pub filter: SearchFilter,
+    /// the list is who sent messages (in the scope), to pick the sender filter from; `query`
+    /// is their name, the search's own words wait in the UI
+    pub pick_sender: bool,
+    /// who sent messages in the scope (key, name), while picking; read once per picking
+    senders: Option<Vec<(String, String)>>,
     pub hits: Hits,
     /// how far the one-time text backfill is (%), while it runs
     pub indexing: Option<u8>,
@@ -25,7 +31,93 @@ pub(super) struct Search {
 
 impl Search {
     fn active(&self) -> bool {
-        self.contacts || self.scope.is_some() || !self.query.trim().is_empty()
+        self.contacts || self.pick_sender || self.scope.is_some() || !self.filter.is_empty() || !self.query.trim().is_empty()
+    }
+}
+
+/// Whether messages are looked for: words to look for, or no words and a filter. A lone
+/// consonant or vowel would match nearly every message, so it waits for more.
+fn looks(q: &str, filter: &SearchFilter) -> bool {
+    if q.trim().is_empty() { !filter.is_empty() } else { Terms::new(q).needle().is_some() }
+}
+
+/// The words of a message search: a message must hold all of them, in any order. A quoted
+/// part is one, spaces and all; an unclosed quote runs to the end.
+pub(crate) struct Terms {
+    words: Vec<String>,
+    /// the last word may still be in composition (`hangul::find_typed`): not a closed quote
+    typing: bool,
+}
+
+impl Terms {
+    /// `q` is lowercase.
+    pub(crate) fn new(q: &str) -> Self {
+        let (mut words, mut typing) = (Vec::new(), false);
+        let mut rest = q;
+        loop {
+            rest = rest.trim_start();
+            if rest.is_empty() {
+                break;
+            }
+            let word = if let Some(r) = rest.strip_prefix('"') {
+                match r.find('"') {
+                    Some(end) => {
+                        rest = &r[end + 1..];
+                        typing = false;
+                        &r[..end]
+                    }
+                    None => {
+                        rest = "";
+                        typing = true;
+                        r
+                    }
+                }
+            } else {
+                let end = rest.find(|c: char| c.is_whitespace() || c == '"').unwrap_or(rest.len());
+                let w = &rest[..end];
+                rest = &rest[end..];
+                typing = true;
+                w
+            };
+            if !word.trim().is_empty() {
+                words.push(word.to_string());
+            }
+        }
+        Self { words, typing }
+    }
+
+    fn typed(&self, i: usize) -> bool {
+        self.typing && i + 1 == self.words.len()
+    }
+
+    /// What the index is scanned for (`instr`): the longest word, of the last only what's
+    /// surely typed (`needle`). A last word of one syllable, which may still grow a final
+    /// consonant, only when it's alone. None: nothing to look for.
+    fn needle(&self) -> Option<String> {
+        let alone = self.words.len() == 1;
+        self.words
+            .iter()
+            .enumerate()
+            .filter_map(|(i, w)| match self.typed(i) {
+                true if !alone && w.chars().count() == 1 => None,
+                true => needle(w),
+                false => Some(w.clone()),
+            })
+            .max_by_key(|w| w.chars().count())
+    }
+
+    /// Whether `text` (lowercase) holds every word.
+    pub(crate) fn keep(&self, text: &str) -> bool {
+        self.words.iter().enumerate().all(|(i, w)| if self.typed(i) { crate::hangul::find_typed(text, w).is_some() } else { text.contains(w.as_str()) })
+    }
+
+    /// Where in `text` (lowercase) the first word found starts, in chars.
+    fn first_at(&self, text: &str) -> Option<usize> {
+        self.words
+            .iter()
+            .enumerate()
+            .filter_map(|(i, w)| if self.typed(i) { crate::hangul::find_typed(text, w) } else { text.find(w.as_str()).map(|b| text[..b].chars().count()) })
+            .min()
     }
 }
 
@@ -33,8 +125,8 @@ impl Search {
 /// The rows of the last search stay until the next one's arrive, so typing doesn't blink.
 #[derive(Default)]
 pub(super) struct Hits {
-    /// what was searched for: the typed text, lowercase, and the scope
-    asked: Option<(String, Option<String>)>,
+    /// what was searched for: the typed text, lowercase, the scope and the filter
+    asked: Option<(String, Option<String>, SearchFilter)>,
     /// bumped by every new search: a scan still running for an older one stops
     turn: Rc<Cell<u64>>,
     all: Vec<(Thread, u64)>,
@@ -76,7 +168,7 @@ pub(crate) fn excerpt(text: &str, q: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let lower: String = text.to_lowercase();
     // lowercasing can change the count of a few chars: then it's only near the match
-    let at = crate::hangul::find_typed(&lower, q).unwrap_or(0).min(chars.len());
+    let at = Terms::new(q).first_at(&lower).unwrap_or(0).min(chars.len());
     if at <= BEFORE + 4 {
         return text.to_string();
     }
@@ -217,10 +309,16 @@ fn sort_key(name: &str) -> (bool, String) {
 }
 
 impl App {
-    pub(super) async fn set_search(&mut self, query: String, contacts: bool, find: Find, scope: Option<String>) {
+    pub(super) async fn set_search(&mut self, query: String, contacts: bool, find: Find, scope: Option<String>, filter: SearchFilter, pick_sender: bool) {
         let s = &mut self.search;
-        (s.query, s.contacts, s.find, s.scope) = (query, contacts, find, scope);
-        self.search_messages();
+        if !pick_sender || s.scope != scope {
+            s.senders = None;
+        }
+        (s.query, s.contacts, s.find, s.scope, s.filter, s.pick_sender) = (query, contacts, find, scope, filter, pick_sender);
+        // while picking, the query is a name: the messages found stay for when it's done
+        if !pick_sender {
+            self.search_messages();
+        }
         self.emit_results().await;
     }
 
@@ -228,7 +326,7 @@ impl App {
     fn search_messages(&mut self) {
         let s = &mut self.search;
         let q = s.query.trim().to_lowercase();
-        let asked = (!s.contacts).then(|| (q.clone(), s.scope.clone()));
+        let asked = (!s.contacts).then(|| (q.clone(), s.scope.clone(), s.filter.clone()));
         if asked == s.hits.asked {
             return;
         }
@@ -237,12 +335,12 @@ impl App {
         s.hits.turn.set(turn);
         // while older texts are still being indexed, nothing: part of the results could pass
         // for all of them. The search runs once they're in (`texts_indexed`)
-        let needle = if s.contacts || s.indexing.is_some() { None } else { needle(&q) };
-        let Some(needle) = needle else {
+        if s.contacts || s.indexing.is_some() || !looks(&q, &s.filter) {
             (s.hits.all, s.hits.rows, s.hits.shown) = (Vec::new(), Vec::new(), 0);
             return;
-        };
+        }
         let scope = s.scope.as_deref().and_then(parse_thread_key);
+        let filter = s.filter.clone();
         let (index, tx, current) = (self.index.clone(), self.tx.clone(), s.hits.turn.clone());
         tokio::task::spawn_local(async move {
             tokio::time::sleep(TYPING_PAUSE).await;
@@ -250,9 +348,23 @@ impl App {
                 return;
             }
             let started = Instant::now();
-            let keep = |text: &str| crate::hangul::find_typed(text, &q).is_some();
+            let terms = Terms::new(&q);
+            let needle = terms.needle();
+            let keep = |text: &str| terms.keep(text);
             let gone = || current.get() != turn;
-            match index.search_text(scope.as_ref(), &needle, &keep, MAX_HITS, &gone).await {
+            let sender = filter.sender.as_deref().and_then(parse_thread_key).and_then(|t| match t {
+                Thread::Contact(id @ ServiceId::Aci(_)) => Some(id.service_id_string()),
+                _ => None,
+            });
+            let searched = crate::db::Searched {
+                thread: scope.as_ref(),
+                needle: needle.as_deref(),
+                keep: &keep,
+                sender: sender.as_deref(),
+                until: filter.until,
+                kind: filter.kind,
+            };
+            match index.search(&searched, MAX_HITS, &gone).await {
                 Ok(list) if !gone() => {
                     debug!("message search: {} found in {:?}", list.len(), started.elapsed());
                     let _ = tx.send(Internal::Hits { turn, list });
@@ -339,10 +451,14 @@ impl App {
         if !self.search.active() {
             return;
         }
+        if self.search.pick_sender {
+            let rows = self.sender_rows().await;
+            return (self.emit)(Event::Results(rows));
+        }
         let more = self.search.hits.shown < self.search.hits.all.len();
         // older messages may be missing while their text is indexed: said first, before any
         // result could be taken for all there is
-        let searching = self.search.hits.asked.as_ref().is_some_and(|(q, _)| needle(q).is_some());
+        let searching = self.search.hits.asked.as_ref().is_some_and(|(q, _, f)| looks(q, f));
         let note = self
             .search
             .indexing
@@ -359,11 +475,20 @@ impl App {
             .filter(|r| !matches!(r, ResultDto::Message { thread, .. } if !threads.iter().any(|t| t.key == thread.key)))
             .cloned()
             .collect();
-        if self.search.scope.is_some() {
-            rows.extend(hits);
-            if more {
-                rows.push(ResultDto::More);
+        let found = self.search.hits.all.len();
+        let count = if found >= MAX_HITS { format!("{MAX_HITS}+") } else { found.to_string() };
+        let messages = |rows: &mut Vec<ResultDto>| {
+            if !hits.is_empty() {
+                rows.push(ResultDto::Header(tr!("Messages · {}", count).into()));
+                rows.extend(hits);
+                if more {
+                    rows.push(ResultDto::More);
+                }
             }
+        };
+        // filtered, or no words: only messages are looked for
+        if self.search.scope.is_some() || !self.search.filter.is_empty() || self.search.query.trim().is_empty() && !self.search.contacts {
+            messages(&mut rows);
             return (self.emit)(Event::Results(rows));
         }
         let q = Query::new(&self.search.query);
@@ -391,14 +516,45 @@ impl App {
             }
             rows.extend(people.into_iter().map(ResultDto::Contact));
         }
-        if !self.search.contacts && !hits.is_empty() {
-            rows.push(ResultDto::Header(tr!("Messages").into()));
-            rows.extend(hits);
-            if more {
-                rows.push(ResultDto::More);
-            }
+        if !self.search.contacts {
+            messages(&mut rows);
         }
         (self.emit)(Event::Results(rows));
+    }
+
+    /// Who sent messages in the search's scope (everywhere, without one) and matches the
+    /// name typed: us first, then the rest as a contact list reads.
+    async fn sender_rows(&mut self) -> Vec<ResultDto> {
+        if self.search.senders.is_none() {
+            let scope = self.search.scope.as_deref().and_then(parse_thread_key);
+            let stored = match self.index.senders(scope.as_ref()).await {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("senders: {e:#}");
+                    Vec::new()
+                }
+            };
+            let mut people = Vec::new();
+            for s in stored {
+                let Some(ServiceId::Aci(aci)) = ServiceId::parse_from_service_id_string(&s) else { continue };
+                let uuid = Uuid::from(aci);
+                if uuid == self.me || uuid.is_nil() {
+                    continue;
+                }
+                let name = self.name(uuid).await;
+                // nothing to call them by: not someone to pick from a list
+                if name != unknown_name(uuid) {
+                    people.push((format!("c:{uuid}"), name));
+                }
+            }
+            people.sort_by_cached_key(|(_, name)| sort_key(name));
+            people.insert(0, (format!("c:{}", self.me), tr!("You").into()));
+            self.search.senders = Some(people);
+        }
+        let q = Query::new(&self.search.query);
+        let list: Vec<(String, String)> =
+            self.search.senders.iter().flatten().filter(|(_, name)| matches(&q, name, "")).cloned().collect();
+        list.into_iter().map(|(key, name)| ResultDto::Contact(person_row(self, key, name, String::new()))).collect()
     }
 
     // Open results only ever change in place, so that no row moves under the pointer: a new
@@ -682,6 +838,25 @@ mod tests {
         assert!(matches!(lead("alice.42", Find::Any, false), Lead::Start(Start::Username(_))));
         // looking for the other kind
         assert_eq!(lead("alice.42", Find::Phone, true), Lead::Partial { phone: true });
+    }
+
+    #[test]
+    fn every_word_is_looked_for_in_any_order() {
+        let keeps = |q: &str, text: &str| Terms::new(q).keep(text);
+        assert!(keeps("회의 내일", "내일 회의 몇 시?"));
+        assert!(!keeps("회의 모레", "내일 회의 몇 시?"));
+        // quoted: as written
+        assert!(keeps("\"내일 회의\"", "내일 회의 몇 시?"));
+        assert!(!keeps("\"회의 내일\"", "내일 회의 몇 시?"));
+        assert!(keeps("\"내일 회", "내일 회의"), "an unclosed quote is still being typed");
+        // only the last word may still be in composition
+        assert!(keeps("회의 냉", "내일 회의"));
+        assert!(!keeps("횧 내일", "내일 회의"));
+        // scanned for: the longest, of the last only what's surely typed
+        assert_eq!(Terms::new("a 회의록 냉").needle().as_deref(), Some("회의록"));
+        assert_eq!(Terms::new("ㅎ").needle(), None);
+        assert_eq!(Terms::new("\"\"").needle(), None);
+        assert_eq!(excerpt("앞에 긴 글이 한참 이어지고 나서야 내일 회의 얘기가 나온다", "회의 내일"), "… 이어지고 나서야 내일 회의 얘기가 나온다");
     }
 
     #[test]

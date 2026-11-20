@@ -524,13 +524,18 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                         .collect();
                     emit(Event::Replies(list));
                 }
-                if let Command::Search { query, contacts, find, scope } = &c {
+                if let Command::Search { query, contacts, find, scope, filter, pick_sender } = &c {
+                    if *pick_sender {
+                        emit(Event::Results(demo_senders(query)));
+                        continue;
+                    }
                     let mut rows: Vec<ResultDto> = if *contacts { None } else { demo_indexing(query) }.into_iter().collect();
-                    if scope.is_none() {
+                    let words = !query.trim().is_empty();
+                    if scope.is_none() && filter.is_empty() && (words || *contacts) {
                         rows.extend(demo_results(&threads, query, *contacts, *find));
                     }
                     if !contacts {
-                        rows.extend(demo_hits(&threads, &items, query, scope.is_none()));
+                        rows.extend(demo_hits(&threads, &items, query, filter));
                     }
                     emit(Event::Results(rows));
                 }
@@ -801,18 +806,58 @@ fn demo_results(threads: &[ThreadDto], query: &str, contacts: bool, find: types:
     rows
 }
 
+/// Whom the demo's sender filter offers: us, then the people who write in the demo thread.
+const DEMO_SENDERS: [&str; 4] = ["나", "김민준", "이서연", "Alice Kim"];
+
+fn demo_senders(query: &str) -> Vec<ResultDto> {
+    let q = query.trim().to_lowercase();
+    DEMO_SENDERS
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.to_lowercase().contains(&q))
+        .map(|(i, n)| {
+            ResultDto::Contact(ThreadDto {
+                key: format!("c:demo-sender-{i}"),
+                name: n.to_string(),
+                snippet: String::new(),
+                time: String::new(),
+                ts: 0,
+                unread: 0,
+                is_group: false,
+                mute: Mute::default(),
+                prefs: ThreadPrefs::default(),
+                phone_mentions: None,
+                readers: Vec::new(),
+                readers_more: 0,
+            })
+        })
+        .collect()
+}
+
 /// The message search over the demo thread's rows (they show under every thread): newest
-/// first, with a header in the search over everything.
-fn demo_hits(threads: &[ThreadDto], items: &[MsgDto], query: &str, header: bool) -> Vec<ResultDto> {
+/// first, under a header with their count. The date filter isn't applied.
+fn demo_hits(threads: &[ThreadDto], items: &[MsgDto], query: &str, filter: &types::SearchFilter) -> Vec<ResultDto> {
     let q = query.trim().to_lowercase();
     let Some(chat) = threads.iter().find(|t| t.key == "c:demo-1") else { return Vec::new() };
-    if q.is_empty() {
+    if q.is_empty() && filter.is_empty() {
         return Vec::new();
     }
+    let terms = crate::backend::Terms::new(&q);
+    let sender = filter.sender.as_deref().and_then(|k| k.strip_prefix("c:demo-sender-")).and_then(|i| i.parse::<usize>().ok());
     let mut rows: Vec<ResultDto> = items
         .iter()
         .rev()
-        .filter(|m| m.text.to_lowercase().contains(&q))
+        .filter(|m| terms.keep(&m.text.to_lowercase()))
+        .filter(|m| match sender {
+            Some(0) => m.outgoing,
+            Some(i) => !m.outgoing && DEMO_SENDERS.get(i).is_some_and(|n| m.sender == *n),
+            None => true,
+        })
+        .filter(|m| match filter.kind {
+            Some(types::SearchKind::Media | types::SearchKind::Files) => !m.attachment.is_empty(),
+            Some(types::SearchKind::Links) => !crate::link::find(&m.text).is_empty(),
+            None => true,
+        })
         .take(30)
         .map(|m| {
             let text = crate::backend::excerpt(&m.text.replace('\n', " "), &q);
@@ -822,8 +867,8 @@ fn demo_hits(threads: &[ThreadDto], items: &[MsgDto], query: &str, header: bool)
             }
         })
         .collect();
-    if header && !rows.is_empty() {
-        rows.insert(0, ResultDto::Header("메시지".into()));
+    if !rows.is_empty() {
+        rows.insert(0, ResultDto::Header(tr!("Messages · {}", rows.len()).into()));
     }
     // the "more" row's look, always: the demo has no further pages
     if !rows.is_empty() {

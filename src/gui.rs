@@ -49,6 +49,8 @@ pub(crate) struct Ui {
     /// the sidebar's search or contact list, while one is on
     results: Rc<VecModel<ResultItem>>,
     result_dtos: Vec<ResultDto>,
+    /// ↑/↓ in the search box opened another chat: the focus stays in the box, to go on
+    stepping: bool,
     /// unsent composer contents by thread key (`drafts.enc`)
     pub(crate) drafts: HashMap<String, drafts::Draft>,
     pub(crate) drafts_path: PathBuf,

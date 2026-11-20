@@ -610,8 +610,8 @@ msgstr "Verbindung fehlgeschlagen. Neuer Versuch in {} s"
 msgid "Contacts"
 msgstr "Kontakte"
 
-msgid "Messages"
-msgstr "Nachrichten"
+msgid "Messages · {}"
+msgstr "Nachrichten · {}"
 
 msgid "Show more"
 msgstr "Mehr anzeigen"
@@ -622,8 +622,30 @@ msgstr "Ältere Nachrichten werden für die Suche vorbereitet ({} %)"
 msgid "Search this chat"
 msgstr "In diesem Chat suchen"
 
-msgid "Searching in {}"
-msgstr "Suche in {}"
+msgid "Who sent it?"
+msgstr "Wer hat es gesendet?"
+
+msgid "Sender's name"
+msgstr "Name des Absenders"
+
+msgid "Sender"
+msgstr "Absender"
+
+msgid "Date"
+msgstr "Datum"
+
+msgid "Type"
+msgstr "Art"
+
+
+msgid "Until {}"
+msgstr "Bis {}"
+
+msgid "Photos and videos"
+msgstr "Fotos und Videos"
+
+msgid "Links"
+msgstr "Links"
 
 msgid "Couldn't add the sticker pack: {}"
 msgstr "Sticker-Set konnte nicht hinzugefügt werden: {}"
