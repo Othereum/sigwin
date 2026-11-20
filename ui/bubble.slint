@@ -853,6 +853,10 @@ export component Bubble inherits VerticalLayout {
                             font-size: 14px;
                         }
                         tl := VerticalLayout {
+                            // the emoji font's glyphs sit low in the line box: lift big ones to its middle
+                            // without changing the row's height
+                            padding-top: m.big-emoji ? -3px : 0px;
+                            padding-bottom: m.big-emoji ? 3px : 0px;
                             TextInput {
                                 text: m.text;
                                 read-only: true;
@@ -943,9 +947,10 @@ export component Bubble inherits VerticalLayout {
                             padding-left: 6px;
                             padding-right: r.count > 1 ? 7px : 6px;
                             spacing: 3px;
-                            // the emoji sits 1px lower than the count (centered in 2px of extra top padding)
+                            // the emoji font's glyphs sit low in the line box: the extra bottom padding
+                            // centers them in the chip
                             VerticalLayout {
-                                padding-top: 2px;
+                                padding-bottom: 2px;
                                 Text {
                                     text: r.emoji;
                                     font-size: 14px;
