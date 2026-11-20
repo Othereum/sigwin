@@ -197,6 +197,9 @@ msgstr "Info"
 msgid "Italic"
 msgstr "Kursiv"
 
+msgid "Keeps other apps and Windows Recall from capturing Sigwin's windows. They also show up blank in your own screenshots and screen sharing."
+msgstr "Verhindert, dass andere Apps und Windows Recall die Fenster von Sigwin aufnehmen. Auch in eigenen Screenshots und bei der Bildschirmfreigabe bleiben sie leer."
+
 msgid "License"
 msgstr "Lizenz"
 
@@ -317,6 +320,9 @@ msgstr "Fixierte Nachricht"
 msgid "Pinned message {}/{}"
 msgstr "Fixierte Nachricht {}/{}"
 
+msgid "Privacy"
+msgstr "Datenschutz"
+
 msgid "Reactions"
 msgstr "Reaktionen"
 
@@ -358,6 +364,9 @@ msgstr "Erneut versuchen"
 
 msgid "Save"
 msgstr "Speichern"
+
+msgid "Screen security"
+msgstr "Bildschirmschutz"
 
 msgid "Scroll to zoom"
 msgstr "Mit dem Mausrad zoomen"

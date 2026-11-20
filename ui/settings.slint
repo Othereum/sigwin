@@ -88,6 +88,7 @@ export global SettingsData {
     in-out property <int> zoom: 1;
     in-out property <bool> enter-sends: true;
     in-out property <bool> link-previews: true;
+    in-out property <bool> screen-security;
     in-out property <int> photo-quality: 0;
     in-out property <bool> autostart;
     in-out property <bool> start-hidden: true;
@@ -362,6 +363,17 @@ export component SettingsPage inherits Rectangle {
                             hint: @tr("Adds the title and image of a link to messages you send. Sigwin visits the site to get them, so the site sees your IP address.");
                             Toggle {
                                 checked <=> SettingsData.link-previews;
+                                toggled => { SettingsData.changed(); }
+                            }
+                        }
+                    }
+                    SettingSection {
+                        title: @tr("Privacy");
+                        SettingRow {
+                            label: @tr("Screen security");
+                            hint: @tr("Keeps other apps and Windows Recall from capturing Sigwin's windows. They also show up blank in your own screenshots and screen sharing.");
+                            Toggle {
+                                checked <=> SettingsData.screen-security;
                                 toggled => { SettingsData.changed(); }
                             }
                         }

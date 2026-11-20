@@ -73,7 +73,7 @@ Set notification content, sound and badge for each chat, and override the settin
 - **Notifications**: Windows notifications, unread badge
 - **Always on**: keeps running in the tray when the window is closed, opens at login, updates itself
 - **Getting started**: links to your phone as a **linked device** with a QR code, brings over your recent chat history from the phone
-- **Security**: local data is encrypted, with the key protected by Windows DPAPI
+- **Security**: local data is encrypted, with the key protected by Windows DPAPI; screen security keeps the window out of screenshots
 - **Languages**: English, Deutsch, 한국어
 
 ### Not supported

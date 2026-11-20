@@ -41,6 +41,8 @@ pub struct Settings {
     pub badge_muted: bool,
     /// a link in the composer gets a preview, fetched from its site
     pub link_previews: bool,
+    /// our windows are left out of screen captures (other apps, Recall, screen sharing)
+    pub screen_security: bool,
     /// photos are sent at: 0 = standard, 1 = high (see `sigwin_thumb::photo::Quality`)
     pub photo_quality: u8,
     /// the newest version whose "what's new" was seen or dismissed ("" = never recorded; not a
@@ -85,6 +87,7 @@ impl Default for Settings {
             muted_replies: true,
             badge_muted: true,
             link_previews: true,
+            screen_security: screen_security_default(),
             photo_quality: 0,
             last_seen_version: String::new(),
             viewer_click_closed: false,
@@ -92,6 +95,23 @@ impl Default for Settings {
             window: None,
         }
     }
+}
+
+/// On from Windows 11, as in Signal Desktop. Windows 10 2004+ supports it too, but Signal chose
+/// not to turn it on there by default, and we follow without knowing why.
+#[cfg(windows)]
+fn screen_security_default() -> bool {
+    use windows_sys::Win32::System::SystemInformation::{GetVersionExW, OSVERSIONINFOW};
+    let mut v: OSVERSIONINFOW = unsafe { std::mem::zeroed() };
+    v.dwOSVersionInfoSize = std::mem::size_of::<OSVERSIONINFOW>() as u32;
+    // SAFETY: `v` is a local with its size set. Real numbers: the manifest declares Windows 10.
+    let ok = unsafe { GetVersionExW(&mut v) } != 0;
+    ok && v.dwMajorVersion >= 10 && v.dwBuildNumber >= 22000
+}
+
+#[cfg(not(windows))]
+fn screen_security_default() -> bool {
+    false
 }
 
 pub const ZOOMS: [u32; 5] = [90, 100, 110, 125, 150];

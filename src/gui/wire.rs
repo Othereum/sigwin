@@ -958,6 +958,7 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             muted_replies: d.get_muted_replies(),
             badge_muted: d.get_badge_muted(),
             link_previews: d.get_link_previews(),
+            screen_security: d.get_screen_security(),
             photo_quality: d.get_photo_quality().clamp(0, 1) as u8,
             last_seen_version: UI.with_borrow(|ui| ui.settings.last_seen_version.clone()),
             viewer_click_closed: UI.with_borrow(|ui| ui.settings.viewer_click_closed),
@@ -990,6 +991,10 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
         if old.zoom != new.zoom {
             apply_zoom(&app);
+        }
+        if old.screen_security != new.screen_security {
+            window::protect(window::hwnd(&app), new.screen_security);
+            viewer::protect(new.screen_security);
         }
         new.save(&path);
     });

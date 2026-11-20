@@ -106,6 +106,7 @@ pub(crate) fn show_settings(app: &AppWindow, s: &settings::Settings) {
     d.set_zoom(settings::ZOOMS.iter().position(|&z| z == s.zoom).unwrap_or(1) as i32);
     d.set_enter_sends(s.enter_sends);
     d.set_link_previews(s.link_previews);
+    d.set_screen_security(s.screen_security);
     d.set_photo_quality(s.photo_quality as i32);
     d.set_autostart(s.autostart);
     d.set_start_hidden(s.start_hidden);
@@ -143,6 +144,25 @@ pub(crate) fn hwnd(app: &AppWindow) -> isize {
         _ => 0,
     }
 }
+
+/// Leaves a window out of screen captures, or lets it back in. Every window showing account data
+/// needs it: one left out is captured as usual. Toasts are drawn by Windows and can't have it.
+#[cfg(windows)]
+pub(crate) fn protect(hwnd: isize, on: bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE};
+    // no native window in headless runs
+    if hwnd == 0 {
+        return;
+    }
+    // SAFETY: our own window, on its UI thread
+    let ok = unsafe { SetWindowDisplayAffinity(hwnd as _, if on { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE }) } != 0;
+    if !ok {
+        tracing::warn!(on, err = std::io::Error::last_os_error().raw_os_error(), "screen security");
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn protect(_: isize, _: bool) {}
 
 /// What a message box asks: a yes/no question, or only something to read.
 pub(crate) enum Ask {
@@ -564,6 +584,7 @@ pub(crate) fn hook_window(app: &AppWindow) {
         this.stop();
         // the zoom setting on top of the monitor's scale; also tells the backend the scale
         apply_zoom(&app);
+        protect(h, UI.with_borrow(|ui| ui.settings.screen_security));
         let last = std::rc::Rc::new(std::cell::Cell::new(true));
         let l2 = last.clone();
         let w2 = app.as_weak();

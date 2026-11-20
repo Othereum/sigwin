@@ -401,6 +401,11 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
     Ok(())
 }
 
+/// The screen security setting changed: the open viewer follows.
+pub(crate) fn protect(on: bool) {
+    with_current(|v| window::protect(viewer_hwnd(&v.win), on));
+}
+
 fn with_current(f: impl FnOnce(&Viewer)) {
     VIEWER.with_borrow(|v| {
         if let Some(v) = v {
@@ -763,6 +768,7 @@ fn attach(win: &ImageViewer, owner: isize) {
     if hwnd == 0 || owner == 0 {
         return;
     }
+    window::protect(hwnd, UI.with_borrow(|ui| ui.settings.screen_security));
     // SAFETY: both are our own live windows, on their UI thread; the subclass goes with the window
     unsafe {
         SetWindowSubclass(hwnd as _, Some(filter_styles), 1, 0);
