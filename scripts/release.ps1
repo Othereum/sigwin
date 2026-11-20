@@ -81,7 +81,13 @@ Copy-Item target\release\sigwin.exe $exe -Force
 Remove-Item "$exe.minisig" -ErrorAction SilentlyContinue
 
 # the app accepts only this exact trusted comment for this version
-minisign -S -s $Key -m $exe -t "sigwin $v"; Run "minisign sign"
+# a mistyped password must not cost the whole build, so ask again here
+for ($try = 1; ; $try++) {
+    minisign -S -s $Key -m $exe -t "sigwin $v"
+    if ($LASTEXITCODE -eq 0) { break }
+    if ($try -ge 3) { Run "minisign sign" }
+    Write-Warning "minisign sign failed (exit $LASTEXITCODE): try again, or Ctrl+C to stop"
+}
 minisign -V -P $pub -m $exe; Run "minisign verify"
 
 Write-Host $notesText
