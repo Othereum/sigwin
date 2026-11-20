@@ -38,6 +38,23 @@ a higher version, never by re-tagging. A release the app rejects (signature mism
 `sigwin.exe` or `.minisig`) is skipped until a newer tag appears; it is remembered only until the
 app restarts, so each running app downloads a broken release at most once per launch.
 
+## After a release: updating dependencies
+Right after a release, run `scripts\update-deps.ps1` to move `Cargo.lock` to the newest compatible
+versions. Then a full development cycle runs on them before the next release, and the release
+just made is unaffected. Not before a release: that ships them untested.
+- It refuses a dirty tree, runs `cargo update`, and keeps every `[patch]` in use: a newer registry
+  release of a patched crate (e.g. `swash`) would otherwise replace the vendor copy and the build
+  would still succeed, without the fix. If it can't, the vendor copy needs rebasing.
+- Then it builds `--profile fast`, runs all tests and lists what changed, plus newer releases that
+  need a `Cargo.toml` change (bump those by hand, one at a time).
+- After it: run the real app (receiving, images, emoji), then commit `Cargo.lock` alone as
+  `Update dependencies`, so it can be reverted alone.
+- Git deps (presage, libsignal-service, rusqlite) stay on their pinned revs; Slint stays on its
+  exact version. Those are upgraded on their own.
+- Security fixes don't wait for this: Dependabot alerts (on in the GitHub repository) report
+  advisories against `Cargo.lock`; update just that crate with `cargo update -p`. Its automatic
+  PRs stay off: they don't check the patches.
+
 ## Release notes
 Written per release from `git log <last tag>..HEAD` and the actual changes, not kept in a file along
 the way: several commits often make one change for users, and a bug made and fixed between two

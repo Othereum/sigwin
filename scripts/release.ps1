@@ -112,3 +112,4 @@ Remove-Item $Notes
 # gh made the tag on GitHub; bring it here. The release is already out, so failing here isn't fatal
 git fetch origin --quiet
 if ($LASTEXITCODE -ne 0) { Write-Warning "git fetch failed: run it by hand to get $tag" }
+Write-Host "Next: scripts\update-deps.ps1 (dependencies are updated right after a release)"
