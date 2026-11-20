@@ -1,6 +1,6 @@
 //! The date picker (`ui/calendar.slint`): a month's days or a year's months, the ones holding
 //! no messages dimmed. Which do comes from the backend, one view at a time
-//! (`Command::CalendarMarks`); a pick goes through `show-day`, like the date pill did. It also
+//! (`Command::CalendarMarks`); a pick goes through `show-day`, like a click on the date pill. It also
 //! picks the search's "until" date, then with every day up to today open.
 
 use chrono::{Datelike, Local, NaiveDate};

@@ -1194,12 +1194,12 @@ export component AppWindow inherits Window {
                     opacity: root.date-show && root.top-day != 0 && !root.sep-near ? 1.0 : 0.0;
                     visible: self.opacity > 0;
                     animate opacity { duration: 150ms; }
-                    // a click opens the date picker on that day
+                    // a click goes to the first message of that day
                     date-ta := TouchArea {
                         mouse-cursor: pointer;
                         clicked => {
                             root.date-show = false;
-                            CalendarData.show(root.shown-day, parent.absolute-position.x + parent.width / 2, parent.absolute-position.y + parent.height + 4px);
+                            root.show-day(root.shown-day);
                         }
                     }
                     date-text := Text {
