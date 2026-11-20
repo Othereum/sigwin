@@ -462,6 +462,8 @@ struct App {
     last_outgoing: HashMap<String, (u64, bool)>,
     avatars_running: bool,
     avatar_queue: std::collections::VecDeque<crate::avatar::Want>,
+    /// photos shown from the store that the network may update; run when `avatar_queue` is empty
+    avatar_refresh: std::collections::VecDeque<crate::avatar::Want>,
     /// bumped per opened sticker pack: image work for an older grid stops
     grid_gen: Arc<std::sync::atomic::AtomicU64>,
     /// the toast slot (`notify.rs`)
@@ -631,6 +633,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         last_outgoing: HashMap::new(),
         avatars_running: false,
         avatar_queue: Default::default(),
+        avatar_refresh: Default::default(),
         grid_gen: Default::default(),
         notes: Default::default(),
         mute_due: None,
@@ -1079,6 +1082,7 @@ impl App {
             Internal::Avatars(done) => {
                 self.avatars_running = false;
                 self.persist.avatars.extend(done.state);
+                self.avatar_refresh.extend(done.stale);
                 self.persist_dirty = true;
                 if done.profiles_refreshed {
                     // refetched profiles may carry new names
@@ -1222,6 +1226,7 @@ impl App {
         self.avatars_done.clear();
         self.last_outgoing.clear();
         self.avatar_queue.clear();
+        self.avatar_refresh.clear();
         self.requests.clear();
         self.not_written.clear();
         self.persist = Persist::default();

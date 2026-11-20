@@ -192,6 +192,7 @@ impl App {
         let in_list = |k: &str| k.starts_with(crate::avatar::MSG_PREFIX) || k.starts_with(crate::avatar::READ_PREFIX);
         self.avatars_done.retain(|k| !in_list(k));
         self.avatar_queue.retain(|w| !in_list(&w.key));
+        self.avatar_refresh.retain(|w| !in_list(&w.key));
         // leaving a thread we were typing in
         if let Some(c) = self.composing.take() {
             self.send_typing(c.thread, false);

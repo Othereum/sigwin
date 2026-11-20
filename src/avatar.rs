@@ -55,6 +55,8 @@ pub struct Want {
 }
 /// Signal profiles (name, photo) are cached forever by presage: refetch them after this.
 const PROFILE_REFRESH: Duration = Duration::from_secs(3 * 24 * 3600);
+/// A refetch that failed (account gone, offline) is tried again after this, not on every start.
+const RETRY_FAILED: Duration = Duration::from_secs(24 * 3600);
 /// pause after a network fetch, so a first run over many threads doesn't hammer the server
 const FETCH_GAP: Duration = Duration::from_millis(300);
 
@@ -78,33 +80,48 @@ pub struct Job {
     pub state: HashMap<String, State>,
     /// our uuid and profile key: the store files ours under neither
     pub own: (Uuid, ProfileKey),
+    /// false: only what's stored, so a refresh due somewhere can't hold back the photos after it;
+    /// what the network has to add is listed in `Done::stale` for a later network job
+    pub network: bool,
 }
 
 /// Result of a job: updated states and whether any profile was refetched (names may have changed).
 pub struct Done {
     pub state: HashMap<String, State>,
     pub profiles_refreshed: bool,
+    pub stale: Vec<Want>,
 }
 
 impl Job {
-    /// Loads (fetching when needed) and emits the photos, one after another.
+    /// Loads and emits the photos, one after another.
     pub async fn run(mut self, todo: Vec<Want>) -> Done {
         let now = unix_now();
         let mut refreshed = false;
         let mut found = 0;
+        let mut stale = Vec::new();
         for Want { key, thread, size } in todo {
             // state and disk cache belong to the person / group, whatever size is asked for
             let skey = crate::types::thread_key(&thread);
             let mut st = self.state.get(&skey).cloned().unwrap_or_default();
-            let (bytes, fetched) = match &thread {
-                Thread::Contact(sid) => {
-                    let (b, f) = Box::pin(self.contact(sid.raw_uuid(), &mut st, now)).await;
-                    refreshed |= f;
-                    (b, f)
+            let (bytes, fetched) = if !self.network {
+                let (b, needs) = Box::pin(self.stored(&thread, &mut st, now)).await;
+                if needs {
+                    stale.push(Want { key: key.clone(), thread: thread.clone(), size });
                 }
-                Thread::Group(master) => Box::pin(self.group(*master, &mut st)).await,
+                (Some(b), false)
+            } else {
+                match &thread {
+                    Thread::Contact(sid) => {
+                        let (b, f, ok) = Box::pin(self.contact(sid.raw_uuid(), &mut st, now)).await;
+                        refreshed |= ok;
+                        (Some(b), f)
+                    }
+                    Thread::Group(master) => Box::pin(self.group(*master, &mut st)).await,
+                }
             };
             self.state.insert(skey.clone(), st);
+            // None: the fetch failed, keep showing what the stored pass showed
+            let Some(bytes) = bytes else { continue };
             found += bytes.is_some() as usize;
             let dir = self.dir.clone();
             let k = key.clone();
@@ -121,16 +138,57 @@ impl Job {
                 tokio::time::sleep(FETCH_GAP).await;
             }
         }
-        debug!(found, refreshed, "avatars loaded");
-        Done { state: self.state, profiles_refreshed: refreshed }
+        debug!(found, refreshed, network = self.network, stale = stale.len(), "avatars loaded");
+        Done { state: self.state, profiles_refreshed: refreshed, stale }
     }
 
-    /// (photo bytes, whether the network was used)
-    async fn contact(&mut self, uuid: Uuid, st: &mut State, now: u64) -> (Option<Vec<u8>>, bool) {
+    async fn profile_key(&self, uuid: Uuid) -> Option<ProfileKey> {
+        if uuid == self.own.0 {
+            return Some(self.own.1);
+        }
+        self.store.profile_key(&ServiceId::Aci(uuid.into())).await.ok().flatten()
+    }
+
+    /// the photo saved in the phone's contacts
+    async fn synced(&self, uuid: Uuid) -> Option<Vec<u8>> {
         let sid = ServiceId::Aci(uuid.into());
+        self.store.contact_by_id(&sid).await.ok().flatten().and_then(|c| c.avatar).map(|a| a.reader.to_vec())
+    }
+
+    /// The photo as stored, without the network, and whether the network has something to add (a
+    /// refresh due, a photo not downloaded yet, a group photo that changed).
+    async fn stored(&self, thread: &Thread, st: &mut State, now: u64) -> (Option<Vec<u8>>, bool) {
+        match thread {
+            Thread::Contact(sid) => {
+                let uuid = sid.raw_uuid();
+                let Some(key) = self.profile_key(uuid).await else { return (self.synced(uuid).await, false) };
+                let profile = self.store.profile(uuid, key).await.ok().flatten();
+                let due = profile.is_none() || now.saturating_sub(st.checked) > PROFILE_REFRESH.as_secs();
+                if let Some(b) = self.store.profile_avatar(uuid, key).await.ok().flatten() {
+                    return (Some(b), due);
+                }
+                let undownloaded = profile.is_some_and(|p| p.avatar.is_some());
+                (self.synced(uuid).await, due || undownloaded)
+            }
+            Thread::Group(master) => {
+                let Ok(Some(g)) = self.store.group(*master).await else { return (None, false) };
+                if g.avatar.is_empty() {
+                    st.group_path.clear();
+                    return (None, false);
+                }
+                // a changed photo shows the old one until the new one is in
+                let cached = self.store.group_avatar(*master).await.ok().flatten();
+                let needs = st.group_path != g.avatar || cached.is_none();
+                (cached, needs)
+            }
+        }
+    }
+
+    /// (photo bytes, whether the network was used, whether the profile was refetched)
+    async fn contact(&mut self, uuid: Uuid, st: &mut State, now: u64) -> (Option<Vec<u8>>, bool, bool) {
         let mut fetched = false;
-        let key = if uuid == self.own.0 { Some(self.own.1) } else { self.store.profile_key(&sid).await.ok().flatten() };
-        if let Some(key) = key {
+        let mut refreshed = false;
+        if let Some(key) = self.profile_key(uuid).await {
             let cached = self.store.profile(uuid, key).await.ok().flatten();
             if cached.is_none() || now.saturating_sub(st.checked) > PROFILE_REFRESH.as_secs() {
                 fetched = true;
@@ -139,6 +197,7 @@ impl Job {
                 match Box::pin(self.manager.retrieve_profile_by_uuid(uuid, key)).await {
                     Ok(p) => {
                         st.checked = now;
+                        refreshed = true;
                         // also covers a rotated profile key: the photo row is keyed by uuid only
                         if cached.as_ref().map(|c| &c.avatar) != Some(&p.avatar) {
                             let _ = self.index.forget_profile_avatar(uuid).await;
@@ -146,6 +205,7 @@ impl Job {
                     }
                     Err(e) => {
                         debug!("profile: {e}");
+                        st.checked = now.saturating_sub(PROFILE_REFRESH.saturating_sub(RETRY_FAILED).as_secs());
                         if let Some(old) = cached {
                             let _ = self.store.save_profile(uuid, key, old).await;
                         }
@@ -157,21 +217,20 @@ impl Job {
                 fetched = self.store.profile(uuid, key).await.ok().flatten().is_some_and(|p| p.avatar.is_some());
             }
             match Box::pin(self.manager.retrieve_profile_avatar_by_uuid(uuid, key)).await {
-                Ok(Some(b)) => return (Some(b), fetched),
+                Ok(Some(b)) => return (Some(b), fetched, refreshed),
                 Ok(None) => {}
                 Err(e) => debug!("profile avatar: {e}"),
             }
         }
-        // the photo saved in the phone's contacts
-        let synced = self.store.contact_by_id(&sid).await.ok().flatten().and_then(|c| c.avatar).map(|a| a.reader.to_vec());
-        (synced, fetched)
+        (self.synced(uuid).await, fetched, refreshed)
     }
 
-    async fn group(&mut self, master: [u8; 32], st: &mut State) -> (Option<Vec<u8>>, bool) {
-        let Ok(Some(g)) = self.store.group(master).await else { return (None, false) };
+    /// (photo bytes, None when the fetch failed; whether the network was used)
+    async fn group(&mut self, master: [u8; 32], st: &mut State) -> (Option<Option<Vec<u8>>>, bool) {
+        let Ok(Some(g)) = self.store.group(master).await else { return (Some(None), false) };
         if g.avatar.is_empty() {
             st.group_path.clear();
-            return (None, false);
+            return (Some(None), false);
         }
         let mut fetched = false;
         if st.group_path != g.avatar {
@@ -183,9 +242,9 @@ impl Job {
         match Box::pin(self.manager.retrieve_group_avatar(ctx)).await {
             Ok(Some(b)) => {
                 st.group_path = g.avatar;
-                (Some(b), fetched)
+                (Some(Some(b)), fetched)
             }
-            Ok(None) => (None, fetched),
+            Ok(None) => (Some(None), fetched),
             Err(e) => {
                 debug!("group avatar: {e}");
                 (None, fetched)

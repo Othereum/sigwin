@@ -290,6 +290,7 @@ impl App {
     pub(super) async fn rescale(&mut self) {
         self.avatars_done.clear();
         self.avatar_queue.clear();
+        self.avatar_refresh.clear();
         self.load_avatars();
         self.load_list_reader_avatars();
         if self.current.is_some() {
@@ -321,20 +322,27 @@ impl App {
         self.run_avatars();
     }
 
-    /// Loads queued photos in the background, a few at a time so new requests can cut in.
+    /// Loads queued photos in the background, a few at a time so new requests can cut in. Stored
+    /// photos all go first; network refreshes come after, one per job, as each can take a second.
     pub(super) fn run_avatars(&mut self) {
-        if self.avatars_running || self.avatar_queue.is_empty() {
+        if self.avatars_running || (self.avatar_queue.is_empty() && self.avatar_refresh.is_empty()) {
             return;
         }
         let Some(manager) = self.manager.clone() else { return };
-        let n = self.avatar_queue.len().min(8);
-        let todo: Vec<crate::avatar::Want> = self.avatar_queue.drain(..n).collect();
+        let network = self.avatar_queue.is_empty();
+        let todo: Vec<crate::avatar::Want> = if network {
+            self.avatar_refresh.pop_front().into_iter().collect()
+        } else {
+            let n = self.avatar_queue.len().min(8);
+            self.avatar_queue.drain(..n).collect()
+        };
         self.avatars_running = true;
         let job = crate::avatar::Job {
             store: self.store.clone(),
             index: self.index.clone(),
             own: (self.me, manager.registration_data().profile_key()),
             manager,
+            network,
             emit: self.emit.clone(),
             dir: self.paths.thumbs.clone(),
             state: todo
