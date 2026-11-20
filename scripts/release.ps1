@@ -25,6 +25,14 @@ if (-not (Test-Path $Notes)) { throw "release notes not found: $Notes" }
 $Notes = (Resolve-Path $Notes).Path
 $notesText = [IO.File]::ReadAllText($Notes, [Text.UTF8Encoding]::new($false))
 if (-not $notesText.Trim()) { throw "release notes are empty: $Notes" }
+# GitHub reads "@name" as a mention: it notifies that user and lists them as a contributor. A name
+# stops at the first character outside [A-Za-z0-9-], so "@erwähnen" mentions "erw". Code spans are
+# safe; Korean "@멘션" isn't a name at all
+$mentions = [regex]::Replace($notesText, '(?s)```.*?```|`[^`\n]*`', '') -split "`n" |
+    Where-Object { $_ -match '(?<![\w`])@[A-Za-z0-9]' }
+if ($mentions) {
+    throw "release notes mention GitHub users; drop the @ or wrap it in backticks:`n$($mentions -join "`n")"
+}
 
 # release only what is on origin/main
 if ((git branch --show-current) -ne "main") { throw "not on main" }

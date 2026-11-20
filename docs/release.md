@@ -56,6 +56,8 @@ file.
   content, with setting and screen names as its catalog spells them.
 - A MINOR release (no going back to older versions) says so first.
 - No account data, and nothing about a conversation it was found in.
+- No `@word` outside backticks: GitHub takes it for a user (`@erwähnen` mentions `erw`), notifies
+  them and lists them as a contributor. The script refuses such notes.
 - Notes of past releases stay as they are.
 
 ### In the app
