@@ -47,7 +47,14 @@ if (-not $pub) { throw "PUBLIC_KEY not found in src/update.rs" }
 $out = New-Item -ItemType Directory -Force target\release-dist
 
 $licenses = Join-Path $out "licenses.html"
-cargo about generate -c build-support/about.toml build-support/about.hbs -o $licenses; Run "cargo about"
+# build.rs watches this file: rewriting it unchanged would recompile the whole app crate
+$fresh = "$licenses.new"
+cargo about generate -c build-support/about.toml build-support/about.hbs -o $fresh; Run "cargo about"
+if ((Test-Path $licenses) -and (Get-FileHash $fresh).Hash -eq (Get-FileHash $licenses).Hash) {
+    Remove-Item $fresh
+} else {
+    Move-Item $fresh $licenses -Force
+}
 $env:SIGWIN_LICENSES = (Resolve-Path $licenses).Path
 # leaves out everything that marks dev builds (build.rs `sigwin_dev`)
 $env:SIGWIN_RELEASE = "1"

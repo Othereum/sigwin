@@ -107,6 +107,15 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
+# the crates every release rebuilds: one codegen unit runs their LLVM passes and ThinLTO on a
+# single core and took most of a release build. 4 got nearly all of what 8 or 16 save in time,
+# for less size. sigwin-thumb stays at 1: its pixel loops are the hot code.
+[profile.release.package.sigwin]
+codegen-units = 4
+
+[profile.release.package.sigwin-ui]
+codegen-units = 4
+
 [patch.crates-io]
 # glyph hinting and contrast in the software renderer: see vendor/i-slint-renderer-software, "sigwin patch"
 i-slint-renderer-software = { path = "vendor/i-slint-renderer-software" }
