@@ -461,7 +461,8 @@ export component AppWindow inherits Window {
                     }
                     search-edit := Field {
                         y: (parent.height - self.height) / 2;
-                        icon: Icons.search;
+                        // the chat's picture stands first in its place
+                        icon: scope-chip.visible ? "" : Icons.search;
                         placeholder: SearchData.picking ? @tr("Sender's name")
                             : SearchData.scope-key != "" ? @tr("Search in {}", SearchData.scope-name)
                             : !SearchData.contacts ? @tr("Search")
@@ -497,12 +498,12 @@ export component AppWindow inherits Window {
                             }
                             reject
                         }
-                        lead: scope-chip.visible ? scope-chip.width + 6px : 0px;
+                        lead: scope-chip.visible ? scope-chip.width + 4px : 0px;
                         // the chat searched in: where, not what, so in the box rather than
                         // among the filters below
                         scope-chip := ScopeToken {
                             visible: SearchData.scope-key != "" && !SearchData.picking;
-                            x: 32px;
+                            x: 8px;
                             y: (parent.height - self.height) / 2;
                             clear => {
                                 SearchData.leave-scope();
