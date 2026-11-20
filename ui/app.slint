@@ -632,8 +632,10 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
+                        // reads "@Me": what mentions us. Others' mentions are found by their
+                        // name, as the text shows them
                         FilterChip {
-                            text: @tr("Mentions");
+                            text: @tr("Me");
                             icon: Icons.at;
                             set: SearchData.mentions;
                             clicked => {

@@ -21,7 +21,7 @@ use crate::types::SearchKind;
 ///   again over moving columns;
 /// - `ls_deleted_mine` has no source to rebuild from (which deleted rows were ours): its data
 ///   must be carried over.
-const SCHEMA: i64 = 2;
+const SCHEMA: i64 = 1;
 
 async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query("CREATE TABLE IF NOT EXISTS ls_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID")
@@ -49,14 +49,9 @@ async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 /// One migration step up from `v`; returns the new version. Run in order, each exactly once.
-async fn step(pool: &SqlitePool, v: i64) -> anyhow::Result<i64> {
+async fn step(_pool: &SqlitePool, v: i64) -> anyhow::Result<i64> {
     match v {
-        // whether a text mentions us. Rows keep 0 until the text backfill runs again
-        // (`TEXT_FORMAT`): the texts stay searchable meanwhile
-        1 => {
-            sqlx::query("ALTER TABLE ls_text ADD COLUMN mention INTEGER NOT NULL DEFAULT 0").execute(pool).await?;
-            Ok(2)
-        }
+        // 1 => { DROP TABLE ls_pins; CREATE the new one; reset `Persist.pins_indexed`; Ok(2) }
         _ => anyhow::bail!("db: no migration from schema {v}"),
     }
 }
@@ -75,20 +70,24 @@ pub struct Searched<'a> {
     pub thread: Option<&'a Thread>,
     /// what a text must hold, then pass `keep`; None: any text, and attachments
     pub needle: Option<&'a str>,
-    pub keep: &'a dyn Fn(&str) -> bool,
+    /// given a text and whom it @mentions (ACIs)
+    pub keep: &'a dyn Fn(&str, &[uuid::Uuid]) -> bool,
     /// as stored: `ServiceId::service_id_string`
     pub sender: Option<&'a str>,
     /// sent before (ms)
     pub until: Option<u64>,
     pub kind: Option<SearchKind>,
-    /// only those that @mention us
-    pub mentions: bool,
+    /// only those that @mention them (ACI)
+    pub mentions: Option<uuid::Uuid>,
+    /// whose mention shows the needle (ACIs): a text holds a mention as a placeholder, not
+    /// the name, so what mentions them is looked through too
+    pub named: &'a [uuid::Uuid],
 }
 
 impl Searched<'_> {
     /// Asks for what only a text holds, so a message without text can't pass.
     fn in_text(&self) -> bool {
-        self.mentions || self.kind == Some(SearchKind::Links)
+        self.mentions.is_some() || self.kind == Some(SearchKind::Links)
     }
 }
 
@@ -207,18 +206,38 @@ async fn ensure_text(pool: &SqlitePool) -> anyhow::Result<()> {
     // a search by sender reads only theirs, newest first. On presage's table: here, on every
     // open, since a presage migration that rebuilds the table drops it
     sqlx::query("CREATE INDEX IF NOT EXISTS ls_by_sender ON thread_messages (sender_service_id, ts)").execute(&mut *tx).await?;
-    let trigger: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'thread_messages' AND name = 'ls_text_del'",
+    // who each indexed text @mentions (ACI, 16 bytes), read by person, newest first: a text
+    // holds a mention as a placeholder, so searching for a name can't find it there
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS ls_mentions (
+            aci BLOB NOT NULL,
+            ts INTEGER NOT NULL,
+            thread_id INTEGER NOT NULL,
+            PRIMARY KEY (aci, ts, thread_id)
+        ) WITHOUT ROWID",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS ls_mentions_msg ON ls_mentions (thread_id, ts)").execute(&mut *tx).await?;
+    let triggers: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'thread_messages'
+            AND name IN ('ls_text_del', 'ls_mentions_del')",
     )
     .fetch_one(&mut *tx)
     .await?;
-    if trigger == 1 {
+    if triggers == 2 {
         return Ok(tx.commit().await?);
     }
-    // first run, or a presage migration rebuilt the table and dropped the trigger
+    // first run, or a presage migration rebuilt the table and dropped the triggers
     sqlx::query(
         "DELETE FROM ls_text WHERE NOT EXISTS
             (SELECT 1 FROM thread_messages m WHERE m.thread_id = ls_text.thread_id AND m.ts = ls_text.ts)",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM ls_mentions WHERE NOT EXISTS
+            (SELECT 1 FROM thread_messages m WHERE m.thread_id = ls_mentions.thread_id AND m.ts = ls_mentions.ts)",
     )
     .execute(&mut *tx)
     .await?;
@@ -229,7 +248,34 @@ async fn ensure_text(pool: &SqlitePool) -> anyhow::Result<()> {
     )
     .execute(&mut *tx)
     .await?;
+    sqlx::query(
+        "CREATE TRIGGER IF NOT EXISTS ls_mentions_del AFTER DELETE ON thread_messages BEGIN
+            DELETE FROM ls_mentions WHERE thread_id = old.thread_id AND ts = old.ts;
+        END",
+    )
+    .execute(&mut *tx)
+    .await?;
     Ok(tx.commit().await?)
+}
+
+/// Message `thread_id`/`ts` @mentions `who`, instead of whoever it did.
+async fn put_mentions(tx: &mut sqlx::SqliteConnection, thread_id: i64, ts: i64, who: &[uuid::Uuid]) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM ls_mentions WHERE thread_id = ? AND ts = ?").bind(thread_id).bind(ts).execute(&mut *tx).await?;
+    for u in who {
+        sqlx::query("INSERT OR IGNORE INTO ls_mentions (aci, ts, thread_id) VALUES (?, ?, ?)")
+            .bind(u.as_bytes().as_slice())
+            .bind(ts)
+            .bind(thread_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Whom a search row's text @mentions: its `who` column, `group_concat(hex(aci))`.
+fn who(r: &sqlx::sqlite::SqliteRow) -> anyhow::Result<Vec<uuid::Uuid>> {
+    let who: Option<&str> = r.try_get("who")?;
+    Ok(who.map_or_else(Vec::new, |w| w.split(',').filter_map(|h| uuid::Uuid::parse_str(h).ok()).collect()))
 }
 
 fn unzip(thread: &Thread) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
@@ -471,21 +517,10 @@ impl Index {
         Ok(Self { pool })
     }
 
-    /// Message `ts` reads `text` (lowercase body, captions and file names), for the message
-    /// search; `mention`: it mentions us.
-    pub async fn record_text(&self, thread: &Thread, ts: u64, text: &str, mention: bool) -> anyhow::Result<()> {
-        let (gk, rid) = unzip(thread);
-        sqlx::query(
-            "INSERT OR REPLACE INTO ls_text (thread_id, ts, text, mention)
-             SELECT id, ?, ?, ? FROM threads WHERE group_master_key = ? OR recipient_id = ?",
-        )
-        .bind(ts as i64)
-        .bind(text)
-        .bind(mention)
-        .bind(gk)
-        .bind(rid)
-        .execute(&self.pool)
-        .await?;
+    /// Message `ts` reads `text` (lowercase body, captions and file names) and @mentions
+    /// `mentions` (ACIs), for the message search.
+    pub async fn record_text(&self, thread: &Thread, ts: u64, text: String, mentions: Vec<uuid::Uuid>) -> anyhow::Result<()> {
+        self.record_texts(thread, &[(ts, text, mentions)]).await?;
         Ok(())
     }
 
@@ -503,7 +538,7 @@ impl Index {
     }
 
     /// `record_text` for many messages of one thread, in one transaction; how many.
-    pub async fn record_texts(&self, thread: &Thread, texts: &[(u64, String, bool)]) -> anyhow::Result<usize> {
+    pub async fn record_texts(&self, thread: &Thread, texts: &[(u64, String, Vec<uuid::Uuid>)]) -> anyhow::Result<usize> {
         if texts.is_empty() {
             return Ok(0);
         }
@@ -517,14 +552,14 @@ impl Index {
         else {
             return Ok(0);
         };
-        for (ts, text, mention) in texts {
-            sqlx::query("INSERT OR REPLACE INTO ls_text (thread_id, ts, text, mention) VALUES (?, ?, ?, ?)")
+        for (ts, text, mentions) in texts {
+            sqlx::query("INSERT OR REPLACE INTO ls_text (thread_id, ts, text) VALUES (?, ?, ?)")
                 .bind(id)
                 .bind(*ts as i64)
                 .bind(text)
-                .bind(mention)
                 .execute(&mut *tx)
                 .await?;
+            put_mentions(&mut tx, id, *ts as i64, mentions).await?;
         }
         tx.commit().await?;
         Ok(texts.len())
@@ -532,38 +567,53 @@ impl Index {
 
     /// An edit by `sender` (`service_id_string`) gives message `ts` new text. Only that
     /// message's own author can, and only a message already indexed (not one that disappears).
-    pub async fn edit_text(&self, thread: &Thread, ts: u64, sender: &str, text: &str, mention: bool) -> anyhow::Result<()> {
-        let (gk, rid) = unzip(thread);
-        sqlx::query(
-            "UPDATE ls_text SET text = ?1, mention = ?6
-             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ?2 OR recipient_id = ?3) AND ts = ?4
+    pub async fn edit_text(&self, thread: &Thread, ts: u64, sender: &str, text: &str, mentions: &[uuid::Uuid]) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let Some(id) = self.thread_id_in(&mut tx, thread).await? else { return Ok(()) };
+        let edited = sqlx::query(
+            "UPDATE ls_text SET text = ?1
+             WHERE thread_id = ?2 AND ts = ?3
                AND EXISTS (SELECT 1 FROM thread_messages m
-                           WHERE m.thread_id = ls_text.thread_id AND m.ts = ls_text.ts AND m.sender_service_id = ?5)",
+                           WHERE m.thread_id = ls_text.thread_id AND m.ts = ls_text.ts AND m.sender_service_id = ?4)",
         )
         .bind(text)
-        .bind(gk)
-        .bind(rid)
+        .bind(id)
         .bind(ts as i64)
         .bind(sender)
-        .bind(mention)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        if edited.rows_affected() > 0 {
+            put_mentions(&mut tx, id, ts as i64, mentions).await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
     /// Message `ts` was deleted for everyone: presage replaces it in place, which the delete
     /// trigger doesn't see.
     pub async fn forget_text(&self, thread: &Thread, ts: u64) -> anyhow::Result<()> {
-        let (gk, rid) = unzip(thread);
-        sqlx::query(
-            "DELETE FROM ls_text WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?) AND ts = ?",
-        )
-        .bind(gk)
-        .bind(rid)
-        .bind(ts as i64)
-        .execute(&self.pool)
-        .await?;
+        let mut tx = self.pool.begin().await?;
+        let Some(id) = self.thread_id_in(&mut tx, thread).await? else { return Ok(()) };
+        sqlx::query("DELETE FROM ls_text WHERE thread_id = ? AND ts = ?").bind(id).bind(ts as i64).execute(&mut *tx).await?;
+        put_mentions(&mut tx, id, ts as i64, &[]).await?;
+        tx.commit().await?;
         Ok(())
+    }
+
+    /// Everyone some indexed text @mentions (ACIs).
+    pub async fn mentioned(&self) -> anyhow::Result<Vec<uuid::Uuid>> {
+        let rows: Vec<Vec<u8>> = sqlx::query_scalar("SELECT DISTINCT aci FROM ls_mentions").fetch_all(&self.pool).await?;
+        Ok(rows.iter().filter_map(|b| uuid::Uuid::from_slice(b).ok()).collect())
+    }
+
+    /// `thread_id`, inside a transaction.
+    async fn thread_id_in(&self, tx: &mut sqlx::SqliteConnection, thread: &Thread) -> anyhow::Result<Option<i64>> {
+        let (gk, rid) = unzip(thread);
+        Ok(sqlx::query_scalar("SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?")
+            .bind(gk)
+            .bind(rid)
+            .fetch_optional(&mut *tx)
+            .await?)
     }
 
     /// The DB id of `thread`, if it has one.
@@ -596,11 +646,14 @@ impl Index {
             Some(SearchKind::Files) => Some(MediaKind::Files),
             _ => None,
         };
-        if let Some(sender) = s.sender {
+        if let Some(who) = s.mentions {
+            // what mentions them is fewer still than what anyone sent
+            hits = self.search_mentioning(s, who, only, media, &threads, cap, cancelled).await?;
+        } else if let Some(sender) = s.sender {
             // theirs alone are fewer than the texts or attachments to go through
             hits = self.search_sender(s, sender, only, media, &threads, cap, cancelled).await?;
-        } else if s.needle.is_some() || media.is_none() || s.mentions {
-            // a needle, links, mentions or every text: the texts. Attachments alone have none, so without
+        } else if s.needle.is_some() || media.is_none() {
+            // a needle, links or every text: the texts. Attachments alone have none, so without
             // a needle they come from `ls_media`. What `with_media` drops is unknown here, so
             // it needs them all
             let enough = if media.is_some() { usize::MAX } else { cap };
@@ -612,6 +665,13 @@ impl Index {
         if s.sender.is_none() && s.needle.is_none() && !s.in_text() {
             let ids: HashMap<String, i64> = threads.iter().map(|(id, t)| (crate::types::thread_key(t), *id)).collect();
             hits.extend(self.search_media(s, media, &ids, cap, cancelled).await?);
+        }
+        // the scans above take the needle from the text; it may show in a mention instead.
+        // What mentions us was read whole already
+        if s.needle.is_some() && s.mentions.is_none() {
+            for &who in s.named {
+                hits.extend(self.search_mentioning(s, who, only, media, &threads, cap, cancelled).await?);
+            }
         }
         if cancelled() {
             return Ok(Vec::new());
@@ -635,7 +695,6 @@ impl Index {
         // tiny in tests, so that they cross spans
         const CHUNK: i64 = if cfg!(test) { 2 } else { 20_000 };
         let links = s.kind == Some(SearchKind::Links);
-        let mention = s.mentions;
         let mut hits = Vec::new();
         let mut before = s.until.map_or(i64::MAX, |t| t as i64);
         while hits.len() < enough {
@@ -649,23 +708,23 @@ impl Index {
                 .fetch_optional(&self.pool)
                 .await?;
             let rows = sqlx::query(
-                "SELECT thread_id, ts, text FROM ls_text
-                 WHERE ts < ?1 AND ts >= ?2 AND (?3 IS NULL OR thread_id = ?3)
-                    AND (?4 IS NULL OR instr(text, ?4) > 0)
-                    AND (?5 = 0 OR instr(text, 'http') > 0 OR instr(text, 'www.') > 0)
-                    AND (?6 = 0 OR mention)",
+                "SELECT t.thread_id, t.ts, t.text, CASE WHEN ?4 IS NOT NULL THEN (SELECT group_concat(hex(y.aci)) FROM ls_mentions y
+                    WHERE y.thread_id = t.thread_id AND y.ts = t.ts) END AS who
+                 FROM ls_text t
+                 WHERE t.ts < ?1 AND t.ts >= ?2 AND (?3 IS NULL OR t.thread_id = ?3)
+                    AND (?4 IS NULL OR instr(t.text, ?4) > 0)
+                    AND (?5 = 0 OR instr(t.text, 'http') > 0 OR instr(t.text, 'www.') > 0)",
             )
             .bind(before)
             .bind(from.unwrap_or(i64::MIN))
             .bind(only)
             .bind(s.needle)
             .bind(links)
-            .bind(mention)
             .fetch_all(&self.pool)
             .await?;
             for r in rows {
                 let text: &str = r.try_get("text")?;
-                if (s.keep)(text) && (!links || !crate::link::find(text).is_empty()) {
+                if (s.keep)(text, &who(&r)?) && (!links || !crate::link::find(text).is_empty()) {
                     hits.push((r.try_get("thread_id")?, r.try_get("ts")?));
                 }
             }
@@ -725,7 +784,6 @@ impl Index {
     ) -> anyhow::Result<Vec<(i64, i64)>> {
         const PAGE: i64 = 500;
         let links = s.kind == Some(SearchKind::Links);
-        let mention = s.mentions;
         // a kind asks for its attachment; with nothing asked, a message without text needs one
         let attached = if media.is_some() || (s.needle.is_none() && !s.in_text()) {
             Some(self.attached(s, media, threads).await?)
@@ -740,12 +798,13 @@ impl Index {
             }
             // the needle and links narrow in SQL, as in `search_texts`
             let rows = sqlx::query(
-                "SELECT m.thread_id, m.ts, t.text FROM thread_messages m
+                "SELECT m.thread_id, m.ts, t.text, CASE WHEN ?4 IS NOT NULL THEN (SELECT group_concat(hex(y.aci)) FROM ls_mentions y
+                    WHERE y.thread_id = m.thread_id AND y.ts = m.ts) END AS who
+                 FROM thread_messages m
                  LEFT JOIN ls_text t ON t.thread_id = m.thread_id AND t.ts = m.ts
                  WHERE m.sender_service_id = ?1 AND m.ts < ?2 AND (?3 IS NULL OR m.thread_id = ?3)
                     AND (?4 IS NULL OR instr(t.text, ?4) > 0)
                     AND (?5 = 0 OR instr(t.text, 'http') > 0 OR instr(t.text, 'www.') > 0)
-                    AND (?7 = 0 OR t.mention)
                  ORDER BY m.ts DESC LIMIT ?6",
             )
             .bind(sender)
@@ -754,7 +813,6 @@ impl Index {
             .bind(s.needle)
             .bind(links)
             .bind(PAGE)
-            .bind(mention)
             .fetch_all(&self.pool)
             .await?;
             let last = rows.len() < PAGE as usize;
@@ -765,13 +823,83 @@ impl Index {
                 if !threads.contains_key(&id) {
                     continue;
                 }
-                if text.is_some_and(|x| !(s.keep)(x)) || (links && !text.is_some_and(|x| !crate::link::find(x).is_empty())) {
+                let mentioned = who(r)?;
+                if text.is_some_and(|x| !(s.keep)(x, &mentioned)) || (links && !text.is_some_and(|x| !crate::link::find(x).is_empty())) {
                     continue;
                 }
                 if let Some(set) = &attached {
                     if (media.is_some() || text.is_none()) && !set.contains(&(id, ts)) {
                         continue;
                     }
+                }
+                hits.push((id, ts));
+                if hits.len() >= cap {
+                    break;
+                }
+            }
+            if last {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        Ok(hits)
+    }
+
+    /// The newest `cap` texts that @mention `whom` and pass the rest of `s`, read through
+    /// `ls_mentions`: they're few. The needle isn't asked of the text, since it may show in a
+    /// mention instead (`Searched::named`).
+    #[allow(clippy::too_many_arguments)]
+    async fn search_mentioning(
+        &self,
+        s: &Searched<'_>,
+        whom: uuid::Uuid,
+        only: Option<i64>,
+        media: Option<MediaKind>,
+        threads: &HashMap<i64, Thread>,
+        cap: usize,
+        cancelled: &dyn Fn() -> bool,
+    ) -> anyhow::Result<Vec<(i64, i64)>> {
+        const PAGE: i64 = 500;
+        let links = s.kind == Some(SearchKind::Links);
+        let mut hits = Vec::new();
+        let mut before = s.until.map_or(i64::MAX, |t| t as i64);
+        while hits.len() < cap {
+            if cancelled() {
+                return Ok(Vec::new());
+            }
+            let rows = sqlx::query(
+                "SELECT x.thread_id, x.ts, t.text, (SELECT group_concat(hex(y.aci)) FROM ls_mentions y
+                    WHERE y.thread_id = x.thread_id AND y.ts = x.ts) AS who
+                 FROM ls_mentions x
+                 JOIN ls_text t ON t.thread_id = x.thread_id AND t.ts = x.ts
+                 WHERE x.aci = ?1 AND x.ts < ?2 AND (?3 IS NULL OR x.thread_id = ?3)
+                    AND (?4 = 0 OR instr(t.text, 'http') > 0 OR instr(t.text, 'www.') > 0)
+                    AND (?5 IS NULL OR EXISTS (SELECT 1 FROM thread_messages m
+                        WHERE m.thread_id = x.thread_id AND m.ts = x.ts AND m.sender_service_id = ?5))
+                    AND (?6 IS NULL OR EXISTS (SELECT 1 FROM ls_mentions y
+                        WHERE y.aci = ?6 AND y.ts = x.ts AND y.thread_id = x.thread_id))
+                 ORDER BY x.ts DESC LIMIT ?7",
+            )
+            .bind(whom.as_bytes().as_slice())
+            .bind(before)
+            .bind(only)
+            .bind(links)
+            .bind(s.sender)
+            .bind(s.mentions.map(|u| u.as_bytes().to_vec()))
+            .bind(PAGE)
+            .fetch_all(&self.pool)
+            .await?;
+            let last = rows.len() < PAGE as usize;
+            for r in &rows {
+                let (id, ts): (i64, i64) = (r.try_get("thread_id")?, r.try_get("ts")?);
+                before = ts;
+                let text: &str = r.try_get("text")?;
+                let Some(t) = threads.get(&id) else { continue };
+                if !(s.keep)(text, &who(r)?) || links && crate::link::find(text).is_empty() {
+                    continue;
+                }
+                if media.is_some() && !self.has_media(t, ts, media).await? {
+                    continue;
                 }
                 hits.push((id, ts));
                 if hits.len() >= cap {
@@ -980,20 +1108,17 @@ impl Index {
         .bind(&tr)
         .execute(&self.pool)
         .await?;
-        // the moved copies are new rows of `to`: the text goes with them
-        sqlx::query(
+        // the moved copies are new rows of `to`: the text and its mentions go with them
+        for q in [
             "UPDATE OR IGNORE ls_text SET thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
              WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
                AND EXISTS (SELECT 1 FROM threads WHERE group_master_key = ? OR recipient_id = ?)",
-        )
-        .bind(&tg)
-        .bind(&tr)
-        .bind(fg)
-        .bind(fr)
-        .bind(&tg)
-        .bind(&tr)
-        .execute(&self.pool)
-        .await?;
+            "UPDATE OR IGNORE ls_mentions SET thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND EXISTS (SELECT 1 FROM threads WHERE group_master_key = ? OR recipient_id = ?)",
+        ] {
+            sqlx::query(q).bind(&tg).bind(&tr).bind(&fg).bind(&fr).bind(&tg).bind(&tr).execute(&self.pool).await?;
+        }
         Ok(())
     }
 

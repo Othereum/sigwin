@@ -124,8 +124,8 @@ impl Paths {
     }
 }
 
-/// 1: body and captions. 2: names of files too, and whether a text mentions us.
-const TEXT_FORMAT: u32 = 2;
+/// 1: body and captions. 3: names of files too, and whom a text @mentions (2 never shipped).
+const TEXT_FORMAT: u32 = 3;
 
 #[derive(Default, Serialize, Deserialize)]
 struct Persist {

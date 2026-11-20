@@ -645,8 +645,9 @@ msgstr "사진·동영상"
 msgid "Links"
 msgstr "링크"
 
-msgid "Mentions"
-msgstr "멘션"
+#. a search chip after an @ icon: what mentions me
+msgid "Me"
+msgstr "나"
 
 msgid "Couldn't add the sticker pack: {}"
 msgstr "스티커 팩 추가 실패: {}"

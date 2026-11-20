@@ -647,8 +647,9 @@ msgstr "Fotos und Videos"
 msgid "Links"
 msgstr "Links"
 
-msgid "Mentions"
-msgstr "Erwähnungen"
+#. a search chip after an @ icon: what mentions me
+msgid "Me"
+msgstr "Mich"
 
 msgid "Couldn't add the sticker pack: {}"
 msgstr "Sticker-Set konnte nicht hinzugefügt werden: {}"

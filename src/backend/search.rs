@@ -27,6 +27,8 @@ pub(super) struct Search {
     pub hits: Hits,
     /// how far the one-time text backfill is (%), while it runs
     pub indexing: Option<u8>,
+    /// those @mentioned somewhere, with their names (lowercase): a word a mention shows finds it
+    named: Vec<(Uuid, String)>,
 }
 
 impl Search {
@@ -47,6 +49,18 @@ pub(crate) struct Terms {
     words: Vec<String>,
     /// the last word may still be in composition (`hangul::find_typed`): not a closed quote
     typing: bool,
+    /// per word, those whose mention shows it (`with_people`)
+    people: Vec<Vec<Uuid>>,
+}
+
+/// Whether a mention of `name` shows `w`: it reads "@name", so "@철", "철수" and "수" all
+/// match "철수", initials too, but "@수" doesn't.
+fn shows(name: &str, w: &str) -> bool {
+    match w.strip_prefix('@') {
+        Some("") => true,
+        Some(rest) => crate::hangul::find(name, rest) == Some(0),
+        None => crate::hangul::find(name, w).is_some(),
+    }
 }
 
 impl Terms {
@@ -83,7 +97,14 @@ impl Terms {
                 words.push(word.to_string());
             }
         }
-        Self { words, typing }
+        Self { words, typing, people: Vec::new() }
+    }
+
+    /// A text's mentions read as "@name" on screen, so a word may be found there instead:
+    /// `named` are those mentioned anywhere, with their names (lowercase).
+    fn with_people(mut self, named: &[(Uuid, String)]) -> Self {
+        self.people = self.words.iter().map(|w| named.iter().filter(|(_, n)| shows(n, w)).map(|(u, _)| *u).collect()).collect();
+        self
     }
 
     fn typed(&self, i: usize) -> bool {
@@ -108,7 +129,15 @@ impl Terms {
 
     /// Whether `text` (lowercase) holds every word.
     pub(crate) fn keep(&self, text: &str) -> bool {
-        self.words.iter().enumerate().all(|(i, w)| if self.typed(i) { crate::hangul::find_typed(text, w).is_some() } else { text.contains(w.as_str()) })
+        self.keep_with(text, &[])
+    }
+
+    /// Whether a text (lowercase) that @mentions `who` shows every word.
+    fn keep_with(&self, text: &str, who: &[Uuid]) -> bool {
+        self.words.iter().enumerate().all(|(i, w)| {
+            let in_text = if self.typed(i) { crate::hangul::find_typed(text, w).is_some() } else { text.contains(w.as_str()) };
+            in_text || self.people.get(i).is_some_and(|p| who.iter().any(|u| p.contains(u)))
+        })
     }
 
     /// Where in `text` (lowercase) the first word found starts, in chars.
@@ -317,9 +346,34 @@ impl App {
         (s.query, s.contacts, s.find, s.scope, s.filter, s.pick_sender) = (query, contacts, find, scope, filter, pick_sender);
         // while picking, the query is a name: the messages found stay for when it's done
         if !pick_sender {
+            self.search.named = self.named().await;
             self.search_messages();
         }
         self.emit_results().await;
+    }
+
+    /// Those @mentioned somewhere, with their names (lowercase), while there are words to look
+    /// for. Unknown names don't show as theirs.
+    async fn named(&mut self) -> Vec<(Uuid, String)> {
+        let q = self.search.query.trim().to_lowercase();
+        if self.search.contacts || !looks(&q, &self.search.filter) || q.is_empty() {
+            return Vec::new();
+        }
+        let people = match self.index.mentioned().await {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("mentioned: {e:#}");
+                return Vec::new();
+            }
+        };
+        let mut named = Vec::new();
+        for u in people {
+            let name = self.name(u).await;
+            if name != unknown_name(u) {
+                named.push((u, name.to_lowercase()));
+            }
+        }
+        named
     }
 
     /// Starts looking for the messages the search names, if that changed, once typing pauses.
@@ -341,6 +395,8 @@ impl App {
         }
         let scope = s.scope.as_deref().and_then(parse_thread_key);
         let filter = s.filter.clone();
+        let named = s.named.clone();
+        let mentions = filter.mentions.then_some(self.me);
         let (index, tx, current) = (self.index.clone(), self.tx.clone(), s.hits.turn.clone());
         tokio::task::spawn_local(async move {
             tokio::time::sleep(TYPING_PAUSE).await;
@@ -348,9 +404,14 @@ impl App {
                 return;
             }
             let started = Instant::now();
-            let terms = Terms::new(&q);
+            let terms = Terms::new(&q).with_people(&named);
             let needle = terms.needle();
-            let keep = |text: &str| terms.keep(text);
+            // the needle may show in a mention instead of the text
+            let shown: Vec<Uuid> = match &needle {
+                Some(n) => named.iter().filter(|(_, name)| shows(name, n)).map(|(u, _)| *u).collect(),
+                None => Vec::new(),
+            };
+            let keep = |text: &str, who: &[Uuid]| terms.keep_with(text, who);
             let gone = || current.get() != turn;
             let sender = filter.sender.as_deref().and_then(parse_thread_key).and_then(|t| match t {
                 Thread::Contact(id @ ServiceId::Aci(_)) => Some(id.service_id_string()),
@@ -363,7 +424,8 @@ impl App {
                 sender: sender.as_deref(),
                 until: filter.until,
                 kind: filter.kind,
-                mentions: filter.mentions,
+                mentions,
+                named: &shown,
             };
             match index.search(&searched, MAX_HITS, &gone).await {
                 Ok(list) if !gone() => {
@@ -614,6 +676,8 @@ impl App {
             return;
         }
         self.search.hits.asked = None;
+        // whom texts mention was being indexed too
+        self.search.named = self.named().await;
         self.search_messages();
         if self.search.active() {
             self.emit_results().await;

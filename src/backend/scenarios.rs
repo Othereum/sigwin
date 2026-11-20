@@ -336,11 +336,12 @@ fn messages_are_found_as_they_now_read() {
         let searched = crate::db::Searched {
             thread: Some(&thread),
             needle: Some("글"),
-            keep: &|_| true,
+            keep: &|_, _| true,
             sender: None,
             until: None,
             kind: None,
-            mentions: false,
+            mentions: None,
+            named: &[],
         };
         let left = || h.app.index.search(&searched, 10, &|| false);
         assert_eq!(left().await.unwrap().len(), 1);
@@ -425,6 +426,20 @@ fn mentions_of_us_and_file_names_are_found() {
         assert!(found_by(&mut h, "", None, with_links).await.is_empty(), "with the other filters");
         let from_two = SearchFilter { sender: Some(thread_key(&two)), ..mentions.clone() };
         assert_eq!(found_by(&mut h, "", None, from_two).await.len(), 1);
+
+        // someone's name finds what mentions them, as it reads; with the filters too
+        h.app.names.insert(super::fixture::contact(1), "철수".into());
+        assert_eq!(found(&mut h, "철수", None).await, ["@철수 봐 줘"]);
+        assert_eq!(found(&mut h, "ㅊㅅ", None).await.len(), 1, "by initials, like the people");
+        assert!(found_by(&mut h, "철수", None, mentions.clone()).await.is_empty(), "it doesn't mention us");
+        // the mention reads "@철수": with the @, from the name's start
+        assert_eq!(found(&mut h, "@철수", None).await, ["@철수 봐 줘"]);
+        assert_eq!(found(&mut h, "@ㅊ", None).await.len(), 1);
+        assert!(found(&mut h, "@수", None).await.is_empty());
+        // each word in the text or a mention
+        assert_eq!(found(&mut h, "봐 철수", None).await, ["@철수 봐 줘"]);
+        assert_eq!(found(&mut h, "@철수 봐", None).await, ["@철수 봐 줘"]);
+        assert!(found(&mut h, "철수 메시지", None).await.is_empty());
 
         // a file's name, however it's cased
         assert_eq!(found(&mut h, "보고서.pdf", None).await, ["📄 분기보고서.PDF"]);
