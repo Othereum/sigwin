@@ -5,6 +5,7 @@ import { ThreadItem } from "types.slint";
 import { Theme } from "theme.slint";
 import { ThreadRow } from "thread_row.slint";
 import { Icon, Icons } from "icons.slint";
+import { Avatar } from "widgets.slint";
 
 export enum ResultKind { header, thread, contact, start, find, message, more, note }
 
@@ -31,6 +32,11 @@ export global SearchData {
     // "search in this chat": the thread whose messages alone are searched, and its name
     in-out property <string> scope-key;
     in-out property <string> scope-name;
+    // its photo (pre-cut for the token's size) or initial
+    in-out property <string> scope-initial;
+    in-out property <color> scope-tint;
+    in-out property <image> scope-photo;
+    in-out property <bool> scope-has-photo;
     // the found message last opened, marked in the list
     in-out property <string> picked;
     in property <[ResultItem]> results;
@@ -68,7 +74,7 @@ export global SearchData {
     // the next page of found messages
     callback more();
 
-    public function search-in(key: string, name: string) {
+    public function search-in(key: string, name: string, initial: string, tint: color, photo: image, has-photo: bool) {
         leave-contacts();
         if (picking) {
             picking = false;
@@ -76,6 +82,10 @@ export global SearchData {
         }
         scope-key = key;
         scope-name = name;
+        scope-initial = initial;
+        scope-tint = tint;
+        scope-photo = photo;
+        scope-has-photo = has-photo;
         query = "";
         changed();
     }
@@ -186,15 +196,52 @@ export global SearchData {
     }
 }
 
-// A filter of the search: grey with a chevron while it's off, its value on the selection color
-// with a clear button once set. A menu it opens goes inside it (`@children`).
+// The chat searched in, inside the search box: its photo and a clear button only, so the box
+// keeps its room for typing; the name is in the box's placeholder.
+export component ScopeToken inherits Rectangle {
+    callback clear();
+    height: 24px;
+    width: 48px;
+    border-radius: 12px;
+    background: Theme.chip-on;
+    Avatar {
+        x: 2px;
+        y: 2px;
+        size: 20px;
+        initial: SearchData.scope-initial;
+        tint: SearchData.scope-tint;
+        photo: SearchData.scope-photo;
+        has-photo: SearchData.scope-has-photo;
+    }
+    Rectangle {
+        x: parent.width - self.width - 2px;
+        y: 2px;
+        width: 20px;
+        height: 20px;
+        border-radius: 10px;
+        background: xta.has-hover ? Theme.notice-hover : transparent;
+        xta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.clear(); }
+        }
+        Icon {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            size: 12px;
+            icon: Icons.close;
+            tint: Theme.link;
+        }
+    }
+}
+
+// A filter of the search: grey while it's off, its value in the accent with a clear button once
+// set. No chevron for a menu: the chips must fit the sidebar's width side by side. A menu it
+// opens goes inside it (`@children`).
 export component FilterChip inherits Rectangle {
     in property <string> text;
     in property <bool> set;
     // false: only its clear button does anything (the chat searched in)
     in property <bool> clickable: true;
-    // false: an on/off chip, turned on by a click, with no menu to open
-    in property <bool> menu: true;
     // one of `Icons`, before the label
     in property <string> icon;
     callback clicked();
@@ -202,8 +249,8 @@ export component FilterChip inherits Rectangle {
     property <length> label-w: min(lbl.preferred-width, 150px);
     property <length> label-x: icon != "" ? 30px : 12px;
     height: 28px;
-    width: label-x + label-w + (set ? 28px : clickable && menu ? 26px : 12px);
-    border-radius: 14px;
+    width: label-x + label-w + (set ? 28px : 12px);
+    border-radius: self.height / 2;
     property <color> fg: set ? Theme.link : Theme.text;
     background: set ? Theme.chip-on : ta.has-hover ? Theme.field-off : Theme.field;
     ta := TouchArea {
@@ -226,13 +273,6 @@ export component FilterChip inherits Rectangle {
         font-size: 13px;
         overflow: elide;
         vertical-alignment: center;
-    }
-    if !root.set && root.clickable && root.menu: Icon {
-        x: parent.width - self.width - 10px;
-        y: (parent.height - self.height) / 2;
-        size: 14px;
-        icon: Icons.chevron-down;
-        tint: Theme.subtle;
     }
     if root.set: Rectangle {
         x: parent.width - self.width - 4px;

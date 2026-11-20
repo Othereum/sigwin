@@ -92,7 +92,7 @@ unsafe extern "system" fn subclass_proc(
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_DPICHANGED,
-        WM_POWERBROADCAST, WM_SETTINGCHANGE, WM_SHOWWINDOW, WM_SIZE,
+        WM_LBUTTONDOWN, WM_POWERBROADCAST, WM_SETTINGCHANGE, WM_SHOWWINDOW, WM_SIZE,
     };
     /// `PBT_POWERSETTINGCHANGE`
     const SETTING_CHANGE: usize = 0x8013;
@@ -170,6 +170,18 @@ unsafe extern "system" fn subclass_proc(
                 APP.with_borrow(|a| {
                     if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
                         crate::gui::system_theme_changed(&app);
+                    }
+                });
+            });
+        }
+        // a press anywhere, before the UI sees it: a list that scrolls takes presses on its
+        // empty space for itself, so the UI can't tell that one fell outside the search box
+        WM_LBUTTONDOWN => {
+            let x = (lparam & 0xffff) as i16 as f32;
+            let _ = slint::invoke_from_event_loop(move || {
+                APP.with_borrow(|a| {
+                    if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
+                        app.invoke_pressed_at(x / app.window().scale_factor());
                     }
                 });
             });

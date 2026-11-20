@@ -175,12 +175,25 @@ pub(crate) fn header_avatar(app: &AppWindow, ui: &Ui) {
         app.set_current_tint(tint(&ui.open_key));
         app.set_current_has_photo(false);
         app.set_current_photo(Image::default());
+        app.set_current_photo_small(Image::default());
         return;
     };
     app.set_current_initial(row.initial);
     app.set_current_tint(row.color);
     app.set_current_has_photo(row.has_photo);
+    app.set_current_photo_small(if row.has_photo { shrunk(&row.photo, SCOPE_PHOTO) } else { Image::default() });
     app.set_current_photo(row.photo);
+}
+
+/// The photo in the search box's "searching in" token (`ScopeToken`), logical px.
+const SCOPE_PHOTO: u32 = 20;
+
+/// `photo` resampled to `size`: drawn smaller as it is, it would be sampled nearest-neighbor.
+fn shrunk(photo: &Image, size: u32) -> Image {
+    let Some(buf) = photo.to_rgba8() else { return Image::default() };
+    let Some(img) = image::RgbaImage::from_raw(buf.width(), buf.height(), buf.as_bytes().to_vec()) else { return Image::default() };
+    let small = sigwin_thumb::fit(img, types::physical_px(size));
+    Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(small.as_raw(), small.width(), small.height()))
 }
 
 /// The open thread's unread count, on the jump button.

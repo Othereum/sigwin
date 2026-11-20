@@ -13,7 +13,7 @@ import { ThreadMenu, ThreadMenuData, ThreadPrefsDialog } from "thread_menu.slint
 import { LinkPage } from "link.slint";
 import { RepliesData, RepliesDialog } from "replies.slint";
 import { RequestCard, RequestData, SafetyTipsDialog } from "request.slint";
-import { ChipMenu, ChipMenuRow, FilterChip, FindKind, ResultRow, ResultKind, SearchData } from "search.slint";
+import { ChipMenu, ChipMenuRow, FilterChip, FindKind, ResultRow, ResultKind, ScopeToken, SearchData } from "search.slint";
 import { GalleryData, GalleryPage } from "gallery.slint";
 import { CalendarData, CalendarPopup } from "calendar.slint";
 
@@ -59,6 +59,8 @@ export component AppWindow inherits Window {
     in property <string> current-initial;
     in property <color> current-tint;
     in property <image> current-photo;
+    // the same, pre-cut for the search box's "searching in" token
+    in property <image> current-photo-small;
     in property <bool> current-has-photo;
     in property <string> current-sub;
     // the open thread is a message request: the request bar instead of the composer
@@ -280,11 +282,20 @@ export component AppWindow inherits Window {
     // the header's search button and Ctrl+F: the search box, over the open chat's messages
     function search-in-chat() {
         root.settings-open = false;
-        SearchData.search-in(root.current-key, root.current-name);
+        SearchData.search-in(root.current-key, root.current-name, root.current-initial, root.current-tint,
+            root.current-photo-small, root.current-has-photo);
         search-edit.focus();
     }
     public function focus-search() {
         search-edit.focus();
+    }
+    // a left press at `x` anywhere in the window (winhook): one past the sidebar leaves the search
+    // box, as a press on the list's empty space wouldn't by itself. Not while a filter's menu or
+    // date picker, which reach past the sidebar, is open
+    public function pressed-at(x: length) {
+        if (x >= sidebar.width && !kind-menu.is-open && !CalendarData.open) {
+            search-edit.blur();
+        }
     }
     public function blur-composer() {
         composer.clear-focus();
@@ -387,20 +398,27 @@ export component AppWindow inherits Window {
     main := HorizontalLayout {
         visible: page == "main";
         // sidebar
-        Rectangle {
+        sidebar := Rectangle {
+            // the box has the focus (a menu or the date picker of the filters takes it while
+            // open): the buttons beside the box give it their room until it's left
+            property <bool> typing: search-edit.focused || kind-menu.is-open || (CalendarData.open && CalendarData.until)
+                || SearchData.picking;
+            property <bool> searching: SearchData.active || self.typing;
             width: 300px;
             background: Theme.sidebar;
             VerticalLayout {
                 HorizontalLayout {
                     padding: 10px;
                     spacing: 6px;
+                    // as tall without the photo beside the box as with it
+                    min-height: 56px;
                     // the contact list: the way back to the threads
                     if SearchData.contacts: IconButton {
                         y: (parent.height - self.height) / 2;
                         icon: Icons.back;
                         clicked => { SearchData.step-back(); }
                     }
-                    if !SearchData.contacts: Rectangle {
+                    if !SearchData.contacts && !sidebar.typing: Rectangle {
                         width: 32px;
                         // as tall as the search box beside it
                         min-height: 36px;
@@ -445,7 +463,7 @@ export component AppWindow inherits Window {
                         y: (parent.height - self.height) / 2;
                         icon: Icons.search;
                         placeholder: SearchData.picking ? @tr("Sender's name")
-                            : SearchData.scope-key != "" ? @tr("Search this chat")
+                            : SearchData.scope-key != "" ? @tr("Search in {}", SearchData.scope-name)
                             : !SearchData.contacts ? @tr("Search")
                             : SearchData.find == FindKind.phone ? @tr("Enter a phone number")
                             : SearchData.find == FindKind.username ? @tr("Username (e.g. name.42)")
@@ -463,7 +481,13 @@ export component AppWindow inherits Window {
                         accepted => { SearchData.accept(); }
                         key-pressed(event) => {
                             if (event.text == Key.Escape) {
-                                SearchData.back();
+                                // nothing left to undo: out of the box, which gives the buttons
+                                // beside it back
+                                if (!SearchData.active) {
+                                    self.blur();
+                                } else {
+                                    SearchData.back();
+                                }
                                 return accept;
                             }
                             // through the found messages, one by one
@@ -473,9 +497,21 @@ export component AppWindow inherits Window {
                             }
                             reject
                         }
+                        lead: scope-chip.visible ? scope-chip.width + 6px : 0px;
+                        // the chat searched in: where, not what, so in the box rather than
+                        // among the filters below
+                        scope-chip := ScopeToken {
+                            visible: SearchData.scope-key != "" && !SearchData.picking;
+                            x: 32px;
+                            y: (parent.height - self.height) / 2;
+                            clear => {
+                                SearchData.leave-scope();
+                                search-edit.focus();
+                            }
+                        }
                     }
                     // start a conversation: the contact list
-                    if !SearchData.contacts: IconButton {
+                    if !SearchData.contacts && !sidebar.typing: IconButton {
                         y: (parent.height - self.height) / 2;
                         icon: Icons.compose;
                         clicked => {
@@ -521,106 +557,92 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                // the message search's filters, the chat searched in first. Shown while the box
-                // has the focus too, so that a search can start from a filter; a menu or the
-                // date picker takes the focus while open
+                // the message search's filters. Shown while the box has the focus too, so that a
+                // search can start from a filter; a menu or the date picker takes the focus while
+                // open. Set values run longer: the chips wrap rather than scroll out of sight
                 chips := Rectangle {
-                    property <bool> shown: !SearchData.contacts && !SearchData.picking
-                        && (SearchData.active || search-edit.focused || kind-menu.is-open || (CalendarData.open && CalendarData.until));
-                    height: self.shown ? 36px : 0px;
+                    property <bool> shown: !SearchData.contacts && !SearchData.picking && sidebar.searching;
+                    height: self.shown ? chip-flow.preferred-height + 8px : 0px;
                     visible: self.shown;
-                    HStrip {
+                    chip-flow := FlexboxLayout {
                         x: 8px;
-                        width: parent.width - 16px;
-                        height: 28px;
                         y: 2px;
-                        content-width: chip-row.preferred-width;
-                        chip-row := HorizontalLayout {
-                            spacing: 6px;
-                            if SearchData.scope-key != "": FilterChip {
-                                text: SearchData.scope-name;
-                                set: true;
-                                clickable: false;
-                                clear => {
-                                    SearchData.leave-scope();
-                                    search-edit.focus();
-                                }
+                        width: parent.width - 16px;
+                        height: self.preferred-height;
+                        spacing: 6px;
+                        FilterChip {
+                            text: SearchData.sender-key != "" ? SearchData.sender-name : @tr("Sender");
+                            set: SearchData.sender-key != "";
+                            clicked => {
+                                SearchData.pick-sender();
+                                search-edit.focus();
                             }
-                            FilterChip {
-                                text: SearchData.sender-key != "" ? SearchData.sender-name : @tr("Sender");
-                                set: SearchData.sender-key != "";
-                                clicked => {
-                                    SearchData.pick-sender();
-                                    search-edit.focus();
-                                }
-                                clear => {
-                                    SearchData.clear-sender();
-                                    search-edit.focus();
-                                }
+                            clear => {
+                                SearchData.clear-sender();
+                                search-edit.focus();
                             }
-                            date-chip := FilterChip {
-                                text: SearchData.until-day != 0 ? SearchData.until-label : @tr("Date");
-                                set: SearchData.until-day != 0;
-                                clicked => {
-                                    CalendarData.show-until(date-chip.absolute-position.x + 100px,
-                                        date-chip.absolute-position.y + date-chip.height + 4px);
-                                }
-                                clear => {
-                                    SearchData.clear-until();
-                                    search-edit.focus();
-                                }
+                        }
+                        date-chip := FilterChip {
+                            text: SearchData.until-day != 0 ? SearchData.until-label : @tr("Date");
+                            set: SearchData.until-day != 0;
+                            clicked => {
+                                CalendarData.show-until(date-chip.absolute-position.x + 100px,
+                                    date-chip.absolute-position.y + date-chip.height + 4px);
                             }
-                            kind-chip := FilterChip {
-                                text: SearchData.kind == 1 ? @tr("Photos and videos") : SearchData.kind == 2 ? @tr("Files")
-                                    : SearchData.kind == 3 ? @tr("Links") : @tr("Type");
-                                set: SearchData.kind != 0;
-                                clicked => { kind-menu.show(); }
-                                clear => {
-                                    SearchData.set-kind(0);
-                                    search-edit.focus();
-                                }
-                                kind-menu := ChipMenu {
-                                    x: 0px;
-                                    y: parent.height + 4px;
-                                    ChipMenuRow {
-                                        text: @tr("Photos and videos");
-                                        current: SearchData.kind == 1;
-                                        clicked => {
-                                            SearchData.set-kind(1);
-                                            kind-menu.close();
-                                        }
+                            clear => {
+                                SearchData.clear-until();
+                                search-edit.focus();
+                            }
+                        }
+                        kind-chip := FilterChip {
+                            text: SearchData.kind == 1 ? @tr("Photos and videos") : SearchData.kind == 2 ? @tr("Files")
+                                : SearchData.kind == 3 ? @tr("Links") : @tr("Type");
+                            set: SearchData.kind != 0;
+                            clicked => { kind-menu.show(); }
+                            clear => {
+                                SearchData.set-kind(0);
+                                search-edit.focus();
+                            }
+                            kind-menu := ChipMenu {
+                                x: 0px;
+                                y: parent.height + 4px;
+                                ChipMenuRow {
+                                    text: @tr("Photos and videos");
+                                    current: SearchData.kind == 1;
+                                    clicked => {
+                                        SearchData.set-kind(1);
+                                        kind-menu.close();
                                     }
-                                    ChipMenuRow {
-                                        text: @tr("Files");
-                                        current: SearchData.kind == 2;
-                                        clicked => {
-                                            SearchData.set-kind(2);
-                                            kind-menu.close();
-                                        }
+                                }
+                                ChipMenuRow {
+                                    text: @tr("Files");
+                                    current: SearchData.kind == 2;
+                                    clicked => {
+                                        SearchData.set-kind(2);
+                                        kind-menu.close();
                                     }
-                                    ChipMenuRow {
-                                        text: @tr("Links");
-                                        current: SearchData.kind == 3;
-                                        clicked => {
-                                            SearchData.set-kind(3);
-                                            kind-menu.close();
-                                        }
+                                }
+                                ChipMenuRow {
+                                    text: @tr("Links");
+                                    current: SearchData.kind == 3;
+                                    clicked => {
+                                        SearchData.set-kind(3);
+                                        kind-menu.close();
                                     }
                                 }
                             }
-                            FilterChip {
-                                text: @tr("Mentions me");
-                                icon: Icons.at;
-                                menu: false;
-                                set: SearchData.mentions;
-                                clicked => {
-                                    SearchData.set-mentions(!SearchData.mentions);
-                                    search-edit.focus();
-                                }
-                                clear => {
-                                    SearchData.set-mentions(false);
-                                    search-edit.focus();
-                                }
+                        }
+                        FilterChip {
+                            text: @tr("Mentions");
+                            icon: Icons.at;
+                            set: SearchData.mentions;
+                            clicked => {
+                                SearchData.set-mentions(!SearchData.mentions);
+                                search-edit.focus();
+                            }
+                            clear => {
+                                SearchData.set-mentions(false);
+                                search-edit.focus();
                             }
                         }
                     }
@@ -689,9 +711,11 @@ export component AppWindow inherits Window {
                                 } else if (r.kind == ResultKind.more) {
                                     SearchData.more();
                                 } else if (r.kind == ResultKind.message) {
-                                    // the results stay, to go through them one by one
+                                    // the results stay, to go through them one by one. Picked
+                                    // with the mouse: the box is done with (↑/↓ keep it)
                                     GalleryData.close();
                                     SearchData.show-found(r.thread.key, r.text);
+                                    search-edit.blur();
                                 } else if (r.kind != ResultKind.header) {
                                     root.settings-open = false;
                                     GalleryData.close();

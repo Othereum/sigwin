@@ -619,8 +619,8 @@ msgstr "Mehr anzeigen"
 msgid "Preparing older messages for search ({}%)"
 msgstr "Ältere Nachrichten werden für die Suche vorbereitet ({} %)"
 
-msgid "Search this chat"
-msgstr "In diesem Chat suchen"
+msgid "Search in {}"
+msgstr "In {} suchen"
 
 msgid "Who sent it?"
 msgstr "Wer hat es gesendet?"
@@ -647,8 +647,8 @@ msgstr "Fotos und Videos"
 msgid "Links"
 msgstr "Links"
 
-msgid "Mentions me"
-msgstr "Erwähnt mich"
+msgid "Mentions"
+msgstr "Erwähnungen"
 
 msgid "Couldn't add the sticker pack: {}"
 msgstr "Sticker-Set konnte nicht hinzugefügt werden: {}"

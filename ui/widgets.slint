@@ -203,6 +203,8 @@ export component Field inherits Rectangle {
     in property <string> placeholder;
     // before the text (one of `Icons`)
     in property <string> icon;
+    // room kept after the icon for what the caller puts there (its children, placed by it)
+    in property <length> lead;
     in-out property <string> text;
     // what the IME is composing, not in `text` yet
     out property <string> preedit: input.preedit-text;
@@ -212,6 +214,9 @@ export component Field inherits Rectangle {
     callback accepted();
     callback key-pressed(KeyEvent) -> EventResult;
     forward-focus: input;
+    public function blur() {
+        input.clear-focus();
+    }
     height: 34px;
     min-width: 80px;
     horizontal-stretch: 1;
@@ -228,7 +233,7 @@ export component Field inherits Rectangle {
         icon: root.icon;
     }
     input := TextBox {
-        x: root.icon != "" ? 34px : 12px;
+        x: (root.icon != "" ? 34px : 12px) + root.lead;
         width: parent.width - self.x - 10px;
         height: parent.height;
         single-line: true;
@@ -243,12 +248,15 @@ export component Field inherits Rectangle {
     }
     if root.text == "" && input.preedit-text == "": Text {
         x: input.x;
+        width: input.width;
         height: parent.height;
         text: root.placeholder;
         color: Theme.subtle;
         font-size: 13px;
+        overflow: elide;
         vertical-alignment: center;
     }
+    @children
 }
 
 export component MenuRow inherits Rectangle {

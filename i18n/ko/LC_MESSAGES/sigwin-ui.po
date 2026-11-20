@@ -617,8 +617,8 @@ msgstr "더 보기"
 msgid "Preparing older messages for search ({}%)"
 msgstr "이전 메시지 검색 준비 중 ({}%)"
 
-msgid "Search this chat"
-msgstr "이 대화에서 검색"
+msgid "Search in {}"
+msgstr "{}에서 검색"
 
 msgid "Who sent it?"
 msgstr "누가 보냈나요?"
@@ -645,8 +645,8 @@ msgstr "사진·동영상"
 msgid "Links"
 msgstr "링크"
 
-msgid "Mentions me"
-msgstr "나를 멘션"
+msgid "Mentions"
+msgstr "멘션"
 
 msgid "Couldn't add the sticker pack: {}"
 msgstr "스티커 팩 추가 실패: {}"
