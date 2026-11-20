@@ -45,8 +45,11 @@ just made is unaffected. Not before a release: that ships them untested.
 - It refuses a dirty tree, runs `cargo update`, and keeps every `[patch]` in use: a newer registry
   release of a patched crate (e.g. `swash`) would otherwise replace the vendor copy and the build
   would still succeed, without the fix. If it can't, the vendor copy needs rebasing.
-- Then it builds `--profile fast`, runs all tests and lists what changed, plus newer releases that
-  need a `Cargo.toml` change (bump those by hand, one at a time).
+- Then it builds `--profile fast`, runs all tests and lists what changed. Newer releases it can't
+  take need a `Cargo.toml` change and maybe code changes, so they are left alone unless a fix or
+  feature is needed (security ones come from the alerts below). It points out the one other case
+  worth a hand bump: only our crates hold an old version that the build also has in another
+  version, so moving to that one drops a copy.
 - After it: run the real app (receiving, images, emoji), then commit `Cargo.lock` alone as
   `Update dependencies`, so it can be reverted alone.
 - Git deps (presage, libsignal-service, rusqlite) stay on their pinned revs; Slint stays on its
