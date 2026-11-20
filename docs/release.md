@@ -47,6 +47,7 @@ file.
   internals.
 - English first, as `## New` and `## Fixes`, leaving out an empty one. Only what differs from the
   last release.
+- Several lines about one feature become one line naming it, with the changes indented under it.
 - Then every other UI language, each folded in `<details><summary>Language name</summary>` (a blank
   line after the summary, so the Markdown inside renders): Korean first, the maintainer's language
   and most users', then the rest in alphabetical order of language name.
