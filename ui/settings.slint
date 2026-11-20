@@ -172,13 +172,15 @@ export component SettingsPage inherits Rectangle {
                     HorizontalLayout {
                         padding: 16px;
                         spacing: 16px;
-                        Avatar {
-                            size: 56px;
-                            y: 0px;
-                            initial: SettingsData.account-initial;
-                            tint: SettingsData.account-tint;
-                            photo: SettingsData.account-photo;
-                            has-photo: SettingsData.account-has-photo;
+                        VerticalLayout {
+                            alignment: center;
+                            Avatar {
+                                size: 56px;
+                                initial: SettingsData.account-initial;
+                                tint: SettingsData.account-tint;
+                                photo: SettingsData.account-photo;
+                                has-photo: SettingsData.account-has-photo;
+                            }
                         }
                         VerticalLayout {
                             alignment: center;

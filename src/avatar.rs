@@ -45,7 +45,7 @@ pub const ME_SIDEBAR: &str = "me:sidebar";
 pub const ME_CARD: &str = "me:card";
 /// logical sizes of the two (ui/app.slint sidebar button, ui/settings.slint card)
 pub const ME_SIDEBAR_SIZE: u32 = 32;
-pub const ME_CARD_SIZE: u32 = 64;
+pub const ME_CARD_SIZE: u32 = 56;
 
 /// One photo to load: emitted key, whose photo, logical size.
 pub struct Want {
