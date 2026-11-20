@@ -204,7 +204,8 @@ export component FilterChip inherits Rectangle {
     height: 28px;
     width: label-x + label-w + (set ? 28px : clickable && menu ? 26px : 12px);
     border-radius: 14px;
-    background: set ? Theme.selected : ta.has-hover ? Theme.field-off : Theme.field;
+    property <color> fg: set ? Theme.link : Theme.text;
+    background: set ? Theme.chip-on : ta.has-hover ? Theme.field-off : Theme.field;
     ta := TouchArea {
         enabled: root.clickable;
         mouse-cursor: self.enabled ? pointer : default;
@@ -215,13 +216,13 @@ export component FilterChip inherits Rectangle {
         y: (parent.height - self.height) / 2;
         size: 16px;
         icon: root.icon;
-        tint: Theme.text;
+        tint: root.fg;
     }
     lbl := Text {
         x: root.label-x;
         width: root.label-w;
         text: root.text;
-        color: Theme.text;
+        color: root.fg;
         font-size: 13px;
         overflow: elide;
         vertical-alignment: center;
@@ -239,7 +240,7 @@ export component FilterChip inherits Rectangle {
         width: 22px;
         height: 22px;
         border-radius: 11px;
-        background: xta.has-hover ? Theme.hover : transparent;
+        background: xta.has-hover ? Theme.notice-hover : transparent;
         xta := TouchArea {
             mouse-cursor: pointer;
             clicked => { root.clear(); }
@@ -249,7 +250,7 @@ export component FilterChip inherits Rectangle {
             y: (parent.height - self.height) / 2;
             size: 12px;
             icon: Icons.close;
-            tint: Theme.text;
+            tint: root.fg;
         }
     }
     @children
