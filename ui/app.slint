@@ -416,7 +416,13 @@ export component AppWindow inherits Window {
                     if SearchData.contacts: IconButton {
                         y: (parent.height - self.height) / 2;
                         icon: Icons.back;
-                        clicked => { SearchData.step-back(); }
+                        clicked => {
+                            SearchData.step-back();
+                            // back to the thread list, not into a search
+                            if (!SearchData.contacts) {
+                                search-edit.blur();
+                            }
+                        }
                     }
                     if !SearchData.contacts && !sidebar.typing: Rectangle {
                         width: 32px;
@@ -487,7 +493,11 @@ export component AppWindow inherits Window {
                                 if (!SearchData.active) {
                                     self.blur();
                                 } else {
+                                    let leaving = SearchData.contacts;
                                     SearchData.back();
+                                    if (leaving && !SearchData.contacts) {
+                                        self.blur();
+                                    }
                                 }
                                 return accept;
                             }
