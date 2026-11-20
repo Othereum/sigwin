@@ -122,6 +122,11 @@ pub fn classify(c: &Content, me: Uuid) -> Kind<'_> {
     }
 }
 
+/// Whether the window's message `ts` is a sticker.
+pub fn sticker_at(window: &[(u64, Content)], ts: u64) -> bool {
+    window.iter().any(|(t, c)| *t == ts && data_message(c).is_some_and(|dm| dm.sticker.is_some()))
+}
+
 /// The data message carried by a stored content (plain, synced from another device, or an edit).
 pub fn data_message(c: &Content) -> Option<&DataMessage> {
     match &c.body {
@@ -161,6 +166,8 @@ pub struct Indexed {
     pub edits: Vec<(u64, Content)>,
     /// target ts -> how many messages quote it
     pub replies: HashMap<u64, u32>,
+    /// quoted messages that are stickers, in the window or not
+    pub sticker_quotes: std::collections::HashSet<u64>,
 }
 
 pub struct Built {
@@ -226,7 +233,7 @@ pub fn build(
     long: &LongTexts,
     name_of: &dyn Fn(&Uuid) -> String,
 ) -> Built {
-    let Indexed { status, my_deletes, reactions, edits: outside, replies } = indexed;
+    let Indexed { status, my_deletes, reactions, edits: outside, replies, sticker_quotes } = indexed;
     let mut edits: HashMap<u64, (u64, &DataMessage, Uuid)> = HashMap::new();
     let now = now_ms();
     let mut next_expiry: Option<u64> = None;
@@ -311,7 +318,8 @@ pub fn build(
                     m.sender_key = sender.to_string();
                 }
                 if let Some(q) = &dm.quote {
-                    set_quote(&mut m, q, *ts, me, name_of, &mut wanted_cells);
+                    let sticker = q.id.is_some_and(|id| sticker_quotes.contains(&id));
+                    set_quote(&mut m, q, sticker, *ts, me, name_of, &mut wanted_cells);
                 }
                 set_attachments(&mut m, dm, *ts, &mut wanted_cells);
                 m.view_once = media::view_once_state(dm, outgoing, *ts, now);
@@ -386,8 +394,16 @@ pub fn build(
 }
 
 /// The quote at the top of a reply: its text, author, target and picture.
-fn set_quote(m: &mut MsgDto, q: &Quote, ts: u64, me: Uuid, name_of: &dyn Fn(&Uuid) -> String, wanted_cells: &mut Vec<WantedCell>) {
-    m.quote = text::quote_text(q, name_of);
+fn set_quote(
+    m: &mut MsgDto,
+    q: &Quote,
+    sticker: bool,
+    ts: u64,
+    me: Uuid,
+    name_of: &dyn Fn(&Uuid) -> String,
+    wanted_cells: &mut Vec<WantedCell>,
+) {
+    m.quote = text::quote_text(q, sticker, name_of);
     m.quote_author = quote_author_name(q, me, name_of);
     m.quote_id = q.id.map(|i| i.to_string()).unwrap_or_default();
     // the quoted message's picture, as the sender's app cut it

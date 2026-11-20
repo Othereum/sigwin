@@ -93,10 +93,14 @@ pub fn quote_author(q: &Quote) -> Option<Uuid> {
 }
 
 /// What a quote says: its text, or for one without text what it quotes, as Signal Desktop labels
-/// it: the kind of a picture, video or sound, a file's name.
-pub fn quote_text(q: &Quote, name_of: &dyn Fn(&Uuid) -> String) -> String {
+/// it: the kind of a picture, video or sound, a file's name. `sticker`: the quoted message is one
+/// (see [`quotes_picture`]).
+pub fn quote_text(q: &Quote, sticker: bool, name_of: &dyn Fn(&Uuid) -> String) -> String {
     if let Some(t) = q.text.as_deref().filter(|t| !t.is_empty()) {
         return with_mentions(t, &q.body_ranges, name_of);
+    }
+    if sticker && quotes_picture(q) {
+        return tr!("Sticker").into();
     }
     let Some(a) = q.attachments.first() else { return tr!("(attachment)").into() };
     let ct = a.content_type.as_deref().unwrap_or("");
@@ -112,6 +116,16 @@ pub fn quote_text(q: &Quote, name_of: &dyn Fn(&Uuid) -> String) -> String {
     } else {
         a.file_name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| tr!("File").into())
     }
+}
+
+/// A quote that would say "Photo". Signal's apps quote a sticker as its picture, with nothing
+/// that marks it a sticker: only the quoted message, if we have it, tells them apart.
+pub fn quotes_picture(q: &Quote) -> bool {
+    q.text.as_deref().is_none_or(str::is_empty)
+        && q.attachments
+            .first()
+            .and_then(|a| a.content_type.as_deref())
+            .is_some_and(|ct| ct.starts_with("image/") && ct != "image/gif")
 }
 
 /// The name shown above a quote: "You" for our own messages.
@@ -439,17 +453,19 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(quote_text(&quote("image/jpeg", Some("a.jpg"), false), &name), tr!("Photo"));
-        assert_eq!(quote_text(&quote("image/gif", None, false), &name), "GIF");
-        assert_eq!(quote_text(&quote("video/mp4", None, false), &name), tr!("Video"));
-        assert_eq!(quote_text(&quote("audio/aac", None, true), &name), tr!("Voice message"));
-        assert_eq!(quote_text(&quote("audio/mpeg", Some("a.mp3"), false), &name), tr!("Audio"));
-        assert_eq!(quote_text(&quote("application/pdf", Some("보고서.pdf"), false), &name), "보고서.pdf");
-        assert_eq!(quote_text(&quote("application/octet-stream", None, false), &name), tr!("File"));
-        assert_eq!(quote_text(&Quote::default(), &name), tr!("(attachment)"));
+        assert_eq!(quote_text(&quote("image/jpeg", Some("a.jpg"), false), false, &name), tr!("Photo"));
+        assert_eq!(quote_text(&quote("image/gif", None, false), false, &name), "GIF");
+        assert_eq!(quote_text(&quote("video/mp4", None, false), false, &name), tr!("Video"));
+        assert_eq!(quote_text(&quote("audio/aac", None, true), false, &name), tr!("Voice message"));
+        assert_eq!(quote_text(&quote("audio/mpeg", Some("a.mp3"), false), false, &name), tr!("Audio"));
+        assert_eq!(quote_text(&quote("application/pdf", Some("보고서.pdf"), false), false, &name), "보고서.pdf");
+        assert_eq!(quote_text(&quote("application/octet-stream", None, false), false, &name), tr!("File"));
+        assert_eq!(quote_text(&Quote::default(), false, &name), tr!("(attachment)"));
+        // a sticker arrives as its picture; the quoted message says it is one
+        assert_eq!(quote_text(&quote("image/webp", None, false), true, &name), tr!("Sticker"));
         // text wins
         let q = Quote { text: Some("봐 줘".into()), ..quote("image/jpeg", None, false) };
-        assert_eq!(quote_text(&q, &name), "봐 줘");
+        assert_eq!(quote_text(&q, true, &name), "봐 줘");
     }
 
     #[test]

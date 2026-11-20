@@ -53,12 +53,13 @@ impl App {
                 ..Default::default()
             })
         });
+        let quoted_sticker = quote.as_ref().and_then(|q| q.id).is_some_and(|id| view::sticker_at(&open.window, id));
         let names = &self.names;
         let name_of = |u: &Uuid| names.get(u).cloned().unwrap_or_else(|| tr!("Unknown").into());
         // same labels as view::build gives the stored row
         let (quote_label, quote_author) = quote
             .as_ref()
-            .map(|q| (view::text::quote_text(q, &name_of), view::text::quote_author_name(q, self.me, &name_of)))
+            .map(|q| (view::text::quote_text(q, quoted_sticker, &name_of), view::text::quote_author_name(q, self.me, &name_of)))
             .unwrap_or_default();
         let (body, body_ranges) = crate::mention::encode(&text, &mentions);
         if body.len() > view::text::MAX_LONG_TEXT_BYTES {

@@ -528,7 +528,26 @@ impl App {
             }
             Err(e) => warn!("edits: {e:#}"),
         }
-        let indexed = view::Indexed { status: receipts, my_deletes, reactions, edits, replies };
+        // only picture quotes can be stickers; the quoted message is often outside the window
+        let mut sticker_quotes = std::collections::HashSet::new();
+        let picture_quotes: Vec<u64> = open
+            .window
+            .iter()
+            .filter_map(|(_, c)| view::data_message(c)?.quote.as_ref())
+            .filter(|q| view::text::quotes_picture(q))
+            .filter_map(|q| q.id)
+            .collect();
+        for id in picture_quotes {
+            let sticker = if open.window.iter().any(|(t, _)| *t == id) {
+                view::sticker_at(&open.window, id)
+            } else {
+                matches!(self.store.message(&open.thread, id).await, Ok(Some(c)) if view::data_message(&c).is_some_and(|dm| dm.sticker.is_some()))
+            };
+            if sticker {
+                sticker_quotes.insert(id);
+            }
+        }
+        let indexed = view::Indexed { status: receipts, my_deletes, reactions, edits, replies, sticker_quotes };
         // resolve names first (async), then build synchronously
         let mut senders: Vec<Uuid> = open.window.iter().map(|(_, c)| c.metadata.sender.raw_uuid()).collect();
         senders.extend(open.members.iter().copied());
