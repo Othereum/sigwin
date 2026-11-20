@@ -11,6 +11,7 @@ use presage::libsignal_service::content::{Content, ContentBody, DataMessage};
 use presage::libsignal_service::prelude::Uuid;
 use presage::proto::sync_message::{Content as SyncContent, Sent};
 use presage::proto::data_message::pin_message::PinDuration;
+use presage::proto::data_message::quote::QuotedAttachment;
 use presage::proto::data_message::Quote;
 use presage::proto::{receipt_message, AttachmentPointer, EditMessage, ReceiptMessage, SyncMessage};
 
@@ -406,8 +407,12 @@ fn set_quote(
     m.quote = text::quote_text(q, sticker, name_of);
     m.quote_author = quote_author_name(q, me, name_of);
     m.quote_id = q.id.map(|i| i.to_string()).unwrap_or_default();
-    // the quoted message's picture, as the sender's app cut it
-    if let Some(a) = q.attachments.iter().find_map(|a| a.thumbnail.as_ref()) {
+    // the quoted message's picture, as the sender's app cut it. Only a picture or video has one:
+    // our older builds put a file's or a voice note's own pointer there.
+    let visual = |a: &&QuotedAttachment| {
+        a.content_type.as_deref().is_some_and(|ct| ct.starts_with("image/") || ct.starts_with("video/"))
+    };
+    if let Some(a) = q.attachments.iter().filter(visual).find_map(|a| a.thumbnail.as_ref()) {
         let file_key = attachment_key(a, ts, QUOTE_IMAGE_INDEX);
         m.quote_image_key = format!("{file_key}@{}x{}", QUOTE_IMAGE.0, QUOTE_IMAGE.1);
         wanted_cells.push(WantedCell { key: m.quote_image_key.clone(), file_key, ptr: a.clone(), size: QUOTE_IMAGE });

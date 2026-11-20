@@ -45,7 +45,15 @@ impl App {
                             vec![presage::proto::data_message::quote::QuotedAttachment {
                                 content_type: a.content_type.clone(),
                                 file_name: a.file_name.clone(),
-                                thumbnail: Some(a.clone()),
+                                // only a picture or video has one, as Desktop sends; a voice
+                                // note's pointer stays so the flag still says "Voice message"
+                                thumbnail: a
+                                    .content_type
+                                    .as_deref()
+                                    .is_some_and(|ct| {
+                                        ct.starts_with("image/") || ct.starts_with("video/") || view::media::is_voice(a)
+                                    })
+                                    .then(|| a.clone()),
                             }]
                         })
                         .unwrap_or_default()
