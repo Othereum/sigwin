@@ -428,6 +428,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         let (mut start, mut end) = (total - 60, total);
         // like view::build: the first row of the window always starts a day
         let all = items.clone();
+        let all_days: Vec<i32> = items.iter().map(|m| m.day).collect();
         let rows = move |start: usize, end: usize| {
             let mut rows = all[start..end].to_vec();
             rows[0].day_sep = true;
@@ -477,6 +478,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                         }
                         emit(Event::JumpTo(id.clone()));
                     }
+                    Command::CalendarMarks(bounds) => demo_calendar(&emit, "c:demo-1", &all_days, bounds),
                     _ => {}
                 }
             }
@@ -504,8 +506,13 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         let (emit, items, all_pins) = (emit.clone(), items.clone(), pins.clone());
         let mut threads = threads;
         std::thread::spawn(move || {
+            let mut open_key = String::from("c:demo-1");
             while let Some(c) = cmd_rx.blocking_recv() {
                 demo_frames(&emit, &c);
+                if let Command::CalendarMarks(bounds) = &c {
+                    let days: Vec<i32> = items.iter().map(|m| m.day).collect();
+                    demo_calendar(&emit, &open_key, &days, bounds);
+                }
                 if let Command::Replies(id) = &c {
                     // the rows after it stand in for its replies (demo ids are row ids)
                     let at = id.parse::<usize>().unwrap_or(0);
@@ -543,6 +550,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
                     _ => None,
                 };
                 if let Some((key, msg)) = open {
+                    open_key = key.clone();
                     // threads differ in length, like real ones (scroll positions don't carry over)
                     let n: usize = key.trim_start_matches("c:demo-").parse().unwrap_or(1);
                     let items = if n == 1 { items.clone() } else { items[items.len() - (10 + n * 7).min(items.len())..].to_vec() };
@@ -1058,6 +1066,13 @@ fn demo_status(emit: backend::Emit) {
 
 /// `StickerFrames` / `PickerFrames`: `demo-st-1` and every 4th picker sticker are animated GIFs
 /// (a pulsing blob), decoded like real stickers.
+/// The date picker's answer from the demo rows' days.
+fn demo_calendar(emit: &backend::Emit, key: &str, days: &[i32], bounds: &[i32]) {
+    let marks = bounds.windows(2).map(|w| days.iter().any(|d| (w[0]..w[1]).contains(d))).collect();
+    let first = days.iter().copied().filter(|&d| d > 0).min();
+    emit(Event::CalendarMarks { key: key.into(), bounds: bounds.to_vec(), marks, first });
+}
+
 fn demo_frames(emit: &backend::Emit, c: &Command) {
     if let Command::LinkPreview(Some(url)) = c {
         return demo_link_fetch(emit, url);

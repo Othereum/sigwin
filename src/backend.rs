@@ -873,6 +873,11 @@ impl App {
                     warn!("jump to day: {e:#}");
                 }
             }
+            Command::CalendarMarks(bounds) => {
+                if let Err(e) = self.calendar_marks(bounds).await {
+                    warn!("calendar marks: {e:#}");
+                }
+            }
             Command::Composing(active) => self.composing(active),
             Command::SettingsOpened => {
                 self.emit_account().await;

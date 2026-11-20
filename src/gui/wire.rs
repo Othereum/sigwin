@@ -16,6 +16,7 @@ pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     anim::wire(app);
     whatsnew::wire(app);
     gallery::wire(app);
+    calendar::wire(app);
     app.on_day_label(|day| crate::view::time::scroll_day_label(day).into());
     if !headless::active() {
         // no native window in headless; started when the window is first shown

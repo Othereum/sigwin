@@ -720,6 +720,29 @@ fn jumping_to_a_day_lands_on_its_first_message() {
     });
 }
 
+#[test]
+fn the_date_picker_marks_days_with_messages() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        // all on the day two days ago (see above)
+        h.op("seed who=1 n=300").await;
+        h.open(1).await;
+        let day = view::time::day_num(&(chrono::Local::now() - chrono::Duration::days(2)));
+        h.take_events();
+        h.cmd(Command::CalendarMarks(vec![day - 2, day - 1, day, day + 1, day + 2])).await;
+        let ev = h.take_events();
+        let (marks, first) = ev
+            .iter()
+            .find_map(|e| match e {
+                Event::CalendarMarks { marks, first, .. } => Some((marks.clone(), *first)),
+                _ => None,
+            })
+            .expect("an answer");
+        assert_eq!(marks, [false, false, true, false]);
+        assert_eq!(first, Some(day));
+    });
+}
+
 /// A message `from` sent to `to` at `ts`, with `pni_verified` as given.
 fn dm_between(from: ServiceId, to: ServiceId, ts: u64, body: &str, pni_verified: Option<Uuid>) -> Content {
     let at = chrono::DateTime::from_timestamp_millis(ts as i64).unwrap();

@@ -386,6 +386,27 @@ impl App {
         Ok(())
     }
 
+    /// Which spans between local days `bounds` hold a row of the open thread, for the date
+    /// picker. Rows that don't show (reactions, edits) count too: a day holding only those
+    /// jumps on to the next message, like any `jump_to_day`.
+    pub(super) async fn calendar_marks(&mut self, bounds: Vec<i32>) -> anyhow::Result<()> {
+        let Some((thread, key)) = self.current.as_ref().map(|o| (o.thread.clone(), o.key.clone())) else { return Ok(()) };
+        let starts: Vec<u64> = bounds.iter().map(|&d| crate::view::time::day_start_ms(d)).collect::<Option<_>>().unwrap_or_default();
+        let mut marks = vec![false; starts.len().saturating_sub(1)];
+        // each lookup finds the next row and skips the empty spans before it: a sparse history
+        // takes a few, never more than one per span
+        let mut i = 0;
+        while i < marks.len() {
+            let Some(ts) = self.index.ts_from(&thread, starts[i]).await? else { break };
+            let Some(j) = (i..marks.len()).find(|&j| ts < starts[j + 1]) else { break };
+            marks[j] = true;
+            i = j + 1;
+        }
+        let first = self.index.ts_from(&thread, 0).await?.map(|ts| crate::view::time::day_num(&crate::view::time::local(ts)));
+        (self.emit)(Event::CalendarMarks { key, bounds, marks, first });
+        Ok(())
+    }
+
     /// `jump_to` for sent timestamp `target`; `top`: the row's day separator goes near the top
     /// of the view instead of the row to the middle.
     async fn jump_to_msg(&mut self, target: u64, top: bool) -> anyhow::Result<()> {

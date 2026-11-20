@@ -1,0 +1,187 @@
+// The date picker that moves the open chat to a day.
+
+import { Theme } from "theme.slint";
+import { IconButton } from "widgets.slint";
+import { Icon, Icons } from "icons.slint";
+
+// a day of the month view, or a month of the year view
+export struct CalendarCell {
+    label: string,
+    // the local day number (`view::time::day_num`), or the month (0 = January)
+    value: int,
+    // a place in the grid before the 1st or after the last day
+    blank: bool,
+    enabled: bool,
+    // known to hold no messages
+    dim: bool,
+    selected: bool,
+    today: bool,
+}
+
+// The picker's state; Rust fills it (`gui::calendar`).
+export global CalendarData {
+    in-out property <bool> open;
+    // the middle of its top edge, in window coordinates
+    in property <length> anchor-x;
+    in property <length> anchor-y;
+    in property <string> title;
+    // a year's months rather than a month's days
+    in property <bool> months;
+    // weekday names over the days' columns
+    in property <[string]> heads;
+    in property <[CalendarCell]> cells;
+    in property <bool> can-prev;
+    in property <bool> can-next;
+    // open on day `day` (0: the day at the top of the message list), hanging from (x, y)
+    callback show(int, length, length);
+    // the previous (-1) or next (1) month or year
+    callback step(int);
+    // from a month's days to its year's months
+    callback zoom-out();
+    callback pick(int);
+    callback close();
+}
+
+export component CalendarPopup inherits Rectangle {
+    // after it closed, by any way
+    callback closed();
+    property <length> cell-w: 36px;
+    property <length> cell-h: CalendarData.months ? 52px : 34px;
+    property <int> cols: CalendarData.months ? 3 : 7;
+    function dismiss() {
+        CalendarData.close();
+        root.closed();
+    }
+    TouchArea {
+        clicked => { root.dismiss(); }
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                root.dismiss();
+            }
+        }
+    }
+    keys := FocusScope {
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.dismiss();
+                return accept;
+            }
+            if (e.text == Key.PageUp && CalendarData.can-prev) {
+                CalendarData.step(-1);
+                return accept;
+            }
+            if (e.text == Key.PageDown && CalendarData.can-next) {
+                CalendarData.step(1);
+                return accept;
+            }
+            reject
+        }
+    }
+    Rectangle {
+        property <length> w: 7 * root.cell-w + 24px;
+        width: w;
+        height: cal-col.preferred-height;
+        x: max(8px, min(CalendarData.anchor-x - w / 2, root.width - w - 8px));
+        y: max(8px, min(CalendarData.anchor-y, root.height - self.height - 8px));
+        border-radius: 12px;
+        background: Theme.pane;
+        border-width: 1px;
+        border-color: Theme.border;
+        drop-shadow-blur: 12px;
+        drop-shadow-color: Theme.shadow;
+        TouchArea { }
+        cal-col := VerticalLayout {
+            padding: 12px;
+            spacing: 6px;
+            HorizontalLayout {
+                height: 32px;
+                spacing: 4px;
+                IconButton {
+                    width: 32px;
+                    height: 32px;
+                    icon: Icons.chevron-left;
+                    icon-size: 16px;
+                    enabled: CalendarData.can-prev;
+                    clicked => { CalendarData.step(-1); }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 8px;
+                    background: title-ta.has-hover && !CalendarData.months ? Theme.hover : transparent;
+                    title-ta := TouchArea {
+                        enabled: !CalendarData.months;
+                        mouse-cursor: self.enabled ? pointer : default;
+                        clicked => { CalendarData.zoom-out(); }
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        Text {
+                            text: CalendarData.title;
+                            color: Theme.text;
+                            font-size: 13px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        if !CalendarData.months: Icon {
+                            y: (parent.height - self.height) / 2;
+                            icon: Icons.chevron-down;
+                            size: 14px;
+                        }
+                    }
+                }
+                IconButton {
+                    width: 32px;
+                    height: 32px;
+                    icon: Icons.chevron-right;
+                    icon-size: 16px;
+                    enabled: CalendarData.can-next;
+                    clicked => { CalendarData.step(1); }
+                }
+            }
+            if !CalendarData.months: HorizontalLayout {
+                height: 22px;
+                for h in CalendarData.heads: Text {
+                    width: root.cell-w;
+                    text: h;
+                    color: Theme.subtle;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle {
+                height: Math.ceil(CalendarData.cells.length / root.cols) * root.cell-h;
+                for c[i] in CalendarData.cells: Rectangle {
+                    property <length> cw: parent.width / root.cols;
+                    x: Math.mod(i, root.cols) * self.cw;
+                    y: Math.floor(i / root.cols) * root.cell-h;
+                    width: self.cw;
+                    height: root.cell-h;
+                    if !c.blank: Rectangle {
+                        width: CalendarData.months ? parent.width - 8px : 32px;
+                        height: CalendarData.months ? 40px : 32px;
+                        border-radius: CalendarData.months ? 8px : 16px;
+                        background: c.selected ? Theme.accent : cell-ta.has-hover && c.enabled ? Theme.hover : transparent;
+                        border-width: c.today && !c.selected ? 1px : 0px;
+                        border-color: Theme.subtle;
+                        cell-ta := TouchArea {
+                            enabled: c.enabled;
+                            mouse-cursor: self.enabled ? pointer : default;
+                            clicked => { CalendarData.pick(c.value); }
+                        }
+                        Text {
+                            text: c.label;
+                            color: c.selected ? white : c.dim ? Theme.subtle.transparentize(50%) : Theme.text;
+                            font-size: 13px;
+                            font-weight: c.today ? 700 : 400;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

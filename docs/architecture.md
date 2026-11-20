@@ -42,6 +42,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/gui/linkcard.rs` | the link preview card in the composer |
 | `src/gui/viewer.rs` | image viewer window |
 | `src/gui/gallery.rs` | a chat's media page: rows by month, which items are on screen, their thumbnails |
+| `src/gui/calendar.rs` | the date picker: which days of a month (months of a year) have messages, picking one jumps there |
 | `src/gui/window.rs` | theme, zoom, native window handle, releasing memory while hidden |
 | `src/gui/whatsnew.rs` | the "what's new" offer after an update, which opens the GitHub releases page |
 | `src/away.rs` | whether the user is away (no input for a while, screen locked or off) and whether the window can be seen (not covered) |
@@ -116,6 +117,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `ui/reactions.slint` | reaction buttons and the emoji picker of the message menu |
 | `ui/viewer.slint` | image viewer window |
 | `ui/gallery.slint` | a chat's media page, and its `GalleryData` |
+| `ui/calendar.slint` | the date picker, and its `CalendarData` |
 | `ui/widgets.slint` | small shared widgets |
 | `ui/icons.slint` | the icon set: paths on a 24-unit grid and the `Icon` that draws them |
 | `ui/thread_row.slint`, `ui/stickers.slint`, `ui/link.slint` | thread list row, sticker panel, linking page |

@@ -611,6 +611,9 @@ pub enum Event {
     JumpTo(String),
     /// scroll the message list to row `id`, the first of its day: the day separator goes near the top
     JumpToDay(String),
+    /// answer to `Command::CalendarMarks` for thread `key`: per span, whether it holds a row,
+    /// and the local day of the thread's oldest row (None: it has none)
+    CalendarMarks { key: String, bounds: Vec<i32>, marks: Vec<bool>, first: Option<i32> },
     /// scroll the message list to the first unread row `id` (already in the last `Messages`),
     /// its line near the top of the view
     JumpToUnread(String),
@@ -792,6 +795,9 @@ pub enum Command {
     JumpTo(String),
     /// the first message of local day `day` (`view::time::day_num`) in the open thread
     JumpToDay(i32),
+    /// the date picker's view: which spans between these local days (ascending) hold messages
+    /// in the open thread; answered with `Event::CalendarMarks`
+    CalendarMarks(Vec<i32>),
     /// a toast was clicked: open chat `key` at message `msg` (sent timestamp)
     OpenFromToast { key: String, msg: Option<u64> },
     /// the composer was edited; false when it became empty

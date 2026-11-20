@@ -108,7 +108,11 @@ fn date(d: NaiveDate, year: bool, weekday: bool) -> String {
 
 /// The month of `ts` as a heading in a chat's media: "November 2026", "2026년 11월".
 pub fn month_label(ts: u64) -> String {
-    let d = local(ts).date_naive();
+    month_title(local(ts).date_naive())
+}
+
+/// The month of `d`: "November 2026", "2026년 11월".
+pub fn month_title(d: NaiveDate) -> String {
     match i18n::lang() {
         "de" => {
             const MON: [&str; 12] =
@@ -117,6 +121,33 @@ pub fn month_label(ts: u64) -> String {
         }
         "ko" => format!("{}년 {}월", d.year(), d.month()),
         _ => d.format("%B %Y").to_string(),
+    }
+}
+
+/// Month `month0` (0 = January) in a few letters: "Nov", "11월", "Nov.".
+pub fn month_short(month0: u32) -> String {
+    let Some(d) = NaiveDate::from_ymd_opt(2000, month0 + 1, 1) else { return String::new() };
+    match i18n::lang() {
+        "de" => {
+            const MON: [&str; 12] = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sept.", "Okt.", "Nov.", "Dez."];
+            MON[month0 as usize].to_string()
+        }
+        "ko" => format!("{}월", month0 + 1),
+        _ => d.format("%b").to_string(),
+    }
+}
+
+/// Whether a calendar's weeks start on Monday (as in Germany) rather than Sunday.
+pub fn week_starts_monday() -> bool {
+    i18n::lang() == "de"
+}
+
+/// The weekdays over a calendar's columns, from the first day of its week.
+pub fn weekday_heads() -> [&'static str; 7] {
+    match i18n::lang() {
+        "de" => ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
+        "ko" => ["일", "월", "화", "수", "목", "금", "토"],
+        _ => ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"],
     }
 }
 

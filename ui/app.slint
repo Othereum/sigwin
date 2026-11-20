@@ -15,6 +15,7 @@ import { RepliesData, RepliesDialog } from "replies.slint";
 import { RequestCard, RequestData, SafetyTipsDialog } from "request.slint";
 import { FindKind, ResultRow, ResultKind, SearchData } from "search.slint";
 import { GalleryData, GalleryPage } from "gallery.slint";
+import { CalendarData, CalendarPopup } from "calendar.slint";
 
 // Structs and globals the Rust side uses.
 export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, ReplyItem, MentionItem, PackItem, StickerItem, ViewOnce } from "types.slint";
@@ -26,6 +27,7 @@ export { FindKind, ResultItem, ResultKind, SearchData } from "search.slint";
 export { RepliesData } from "replies.slint";
 export { RequestData } from "request.slint";
 export { GalleryCell, GalleryData, GalleryRow } from "gallery.slint";
+export { CalendarCell, CalendarData } from "calendar.slint";
 
 export component AppWindow inherits Window {
     in property <int> total-unread;
@@ -821,6 +823,14 @@ export component AppWindow inherits Window {
                     }
                     IconButton {
                         y: (parent.height - self.height) / 2;
+                        icon: Icons.calendar;
+                        active: CalendarData.open;
+                        clicked => {
+                            CalendarData.show(0, self.absolute-position.x + self.width / 2, self.absolute-position.y + self.height + 4px);
+                        }
+                    }
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
                         icon: Icons.gallery;
                         active: GalleryData.open;
                         clicked => { GalleryData.show(); }
@@ -1025,12 +1035,12 @@ export component AppWindow inherits Window {
                     opacity: root.date-show && root.top-day != 0 && !root.sep-near ? 1.0 : 0.0;
                     visible: self.opacity > 0;
                     animate opacity { duration: 150ms; }
-                    // a click goes to the first message of that day
+                    // a click opens the date picker on that day
                     date-ta := TouchArea {
                         mouse-cursor: pointer;
                         clicked => {
                             root.date-show = false;
-                            root.show-day(root.shown-day);
+                            CalendarData.show(root.shown-day, parent.absolute-position.x + parent.width / 2, parent.absolute-position.y + parent.height + 4px);
                         }
                     }
                     date-text := Text {
@@ -2003,6 +2013,9 @@ export component AppWindow inherits Window {
         }
     }
 
+    if CalendarData.open: CalendarPopup {
+        closed => { root.focus-composer(); }
+    }
     if ThreadMenuData.key != "": ThreadMenu { }
     if ThreadMenuData.prefs-key != "": ThreadPrefsDialog { }
 

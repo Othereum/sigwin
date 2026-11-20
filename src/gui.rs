@@ -18,6 +18,7 @@ use sigwin_ui::{
 
 pub(crate) mod anim;
 pub(crate) mod attach;
+mod calendar;
 pub(crate) mod drafts;
 pub(crate) mod gallery;
 pub(crate) mod linkcard;
@@ -326,6 +327,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         }
         Event::JumpTo(id) => jump_to_row(app, id),
         Event::JumpToDay(id) => jump_to_day(app, id),
+        Event::CalendarMarks { key, bounds, marks, first } => calendar::marks_arrived(app, key, bounds, marks, first),
         Event::JumpToUnread(id) => jump_to_unread(app, id),
         Event::Avatar(t) => media::avatar_arrived(app, t),
         Event::StickerThumbs(list) => stickers::thumbs_arrived(app, list),
@@ -423,6 +425,7 @@ fn messages_arrived(app: &AppWindow, key: String, items: Vec<MsgDto>, paging: Pa
         app.set_mention_items(ModelRc::default());
         stickers::close(app);
         gallery::close(app);
+        calendar::close(app);
         UI.with_borrow(|ui| header_avatar(app, ui));
     }
     app.set_current_key(key.into());

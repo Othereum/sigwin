@@ -1293,6 +1293,23 @@ impl Index {
         .await?)
     }
 
+    /// Sent timestamp of the thread's first stored row sent at `ts` or later.
+    pub async fn ts_from(&self, thread: &Thread, ts: u64) -> anyhow::Result<Option<u64>> {
+        let (gk, rid) = unzip(thread);
+        let found: Option<i64> = sqlx::query_scalar(
+            "SELECT ts FROM ls_order
+             WHERE thread_id = (SELECT id FROM threads WHERE group_master_key = ? OR recipient_id = ?)
+               AND ts >= ?
+             ORDER BY ts ASC LIMIT 1",
+        )
+        .bind(gk)
+        .bind(rid)
+        .bind(ts.min(i64::MAX as u64) as i64)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(found.map(|t| t as u64))
+    }
+
     /// Display position of a stored message.
     pub async fn seq_of(&self, thread: &Thread, ts: u64) -> anyhow::Result<Option<i64>> {
         let (gk, rid) = unzip(thread);
