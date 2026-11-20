@@ -49,10 +49,11 @@ fn exec(app: &AppWindow, line: &str) -> anyhow::Result<()> {
             away::force(Some(on_off("away")?));
             window::refresh_active(app);
         }
-        // the window can be seen (not covered), whatever the headless one is
-        "shown" => {
-            away::force_on_screen(Some(on_off("shown")?));
-            window::refresh_active(app);
+        // the mouse moves over the window (`touch off`: it leaves)
+        "touch" => {
+            if window::touched(on_off("touch")?) {
+                window::refresh_active(app);
+            }
         }
         "expect" => expect(app, rest)?,
         // who @mentions can name, as a group's members arrive: `members 이서연|이민준`

@@ -365,7 +365,7 @@ impl App {
                     *n += 1;
                     self.persist_dirty = true;
                 }
-                // watched: it is on screen already
+                // watched: the user is at it, the list shows it
                 if !(is_open && self.watching && !self.focused) {
                     self.notify_message(&thread, &key, &c).await;
                 }

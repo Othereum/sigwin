@@ -45,7 +45,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/gui/calendar.rs` | the date picker: which days of a month (months of a year) have messages, picking one jumps there |
 | `src/gui/window.rs` | theme, zoom, native window handle, releasing memory while hidden |
 | `src/gui/whatsnew.rs` | the "what's new" offer after an update, which opens the GitHub releases page |
-| `src/away.rs` | whether the user is away (no input for a while, screen locked or off) and whether the window can be seen (not covered) |
+| `src/away.rs` | whether the user is away (no input for a while, screen locked or off) |
 | `src/winhook.rs` | window-proc subclass: repaint on restore, focus events, close to tray |
 | `src/format.rs` | composing text styles with markers |
 | `src/mention.rs` | composing @mentions: finding the query, filtering members, Signal's wire form |

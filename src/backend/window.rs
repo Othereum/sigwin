@@ -36,8 +36,8 @@ impl App {
         self.at_bottom && self.current.as_ref().is_some_and(|o| o.end_seq.is_none())
     }
 
-    /// What the user sees counts as read: they work in the window, or watch it (the UI then
-    /// reports a row only after it stayed on screen for a while).
+    /// What the user sees counts as read: they work in the window, or handle it with the mouse
+    /// without the focus (`Command::WindowWatching`).
     pub(super) fn reads(&self) -> bool {
         self.focused || self.watching
     }

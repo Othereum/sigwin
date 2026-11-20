@@ -183,7 +183,7 @@ fn news_while_watching_stays_at_the_bottom_and_is_read_by_the_ui() {
         let (items, scroll) = last_list(&ev).expect("a list");
         assert_ne!(scroll, Scroll::News, "the list stays at the bottom");
         assert!(divider(items).is_none(), "no line: the user is looking");
-        assert_eq!(h.query("unread", 1), "2", "read once the UI says the rows stayed on screen");
+        assert_eq!(h.query("unread", 1), "2", "read once the UI reports the rows");
         assert_eq!(h.query("toasts", 1), "", "the open thread doesn't toast");
         // the last row stayed on screen: read, with receipts
         h.cmd(Command::ReadUpTo(h.row(21))).await;
@@ -193,7 +193,7 @@ fn news_while_watching_stays_at_the_bottom_and_is_read_by_the_ui() {
 }
 
 #[test]
-fn watching_stops_when_the_window_is_covered() {
+fn watching_stops_when_the_mouse_leaves() {
     scenario(|| async {
         let mut h = Harness::new().await;
         h.op("seed who=1 n=20").await;
@@ -207,7 +207,7 @@ fn watching_stops_when_the_window_is_covered() {
         let (_, scroll) = last_list(&ev).expect("a list");
         assert_eq!(scroll, Scroll::News);
         h.cmd(Command::ReadUpTo(h.row(21))).await;
-        assert_eq!(h.query("unread", 1), "2", "nothing is read from a covered window");
+        assert_eq!(h.query("unread", 1), "2", "nothing is read once the mouse has left");
     });
 }
 

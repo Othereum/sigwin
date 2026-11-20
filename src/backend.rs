@@ -429,7 +429,7 @@ struct App {
     pin_expiry: Option<u64>,
     sweeping: bool,
     focused: bool,
-    /// the window shows without the focus (`Command::WindowWatching`)
+    /// the mouse is at the window without the focus (`Command::WindowWatching`)
     watching: bool,
     /// the window lost rows since the last `emit_messages`
     moved: bool,

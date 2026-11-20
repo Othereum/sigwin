@@ -73,8 +73,6 @@ pub(crate) struct Ui {
     /// the window is not the one the user is working in (no focus, or away): rows coming in
     /// don't scroll the list
     inactive: bool,
-    /// rows seen in a window that is only watched, with when: they count as read after a while
-    dwell: Vec<(String, std::time::Instant)>,
     files: Vec<PathBuf>,
     /// the server's attachment size limit; None: the default (`attach::admit`)
     send_limit: Option<u64>,
@@ -424,7 +422,6 @@ fn messages_arrived(app: &AppWindow, key: String, items: Vec<MsgDto>, paging: Pa
             restored = Some(drafts::switch(app, ui, &key));
             ui.open_key = key.clone();
             ui.read_sent = None;
-            ui.dwell.clear();
             show_open_unread(app, ui);
             ui.mention_rows.clear();
             ui.typing.clear();

@@ -7,6 +7,8 @@
 //! - Activation changes: tell the backend whether the window is in the foreground
 //!   (replaces polling).
 //! - The monitor turned off or on: the user is away (`away`).
+//! - The mouse moves or the wheel turns over the window without the focus: it reads as if
+//!   focused for a moment (`gui::touched`). Slint doesn't say whether the window has the focus.
 //! - DPI change: winit resets the scale factor to the monitor's; re-apply the zoom setting.
 
 use std::cell::{Cell, RefCell};
@@ -19,6 +21,22 @@ thread_local! {
     static APP: RefCell<Option<slint::Weak<AppWindow>>> = const { RefCell::new(None) };
     static MINIMIZED: Cell<bool> = const { Cell::new(false) };
     static ON_FOCUS: RefCell<Option<Box<dyn Fn(bool)>>> = RefCell::new(None);
+    /// where the last `WM_MOUSEMOVE` was (its `lparam`)
+    static MOUSE_AT: Cell<isize> = const { Cell::new(-1) };
+}
+
+/// The mouse touched the window (`gui::touched`); refreshes the presence when that changed it.
+#[cfg(windows)]
+fn touched(on: bool) {
+    if crate::gui::touched(on) {
+        let _ = slint::invoke_from_event_loop(|| {
+            APP.with_borrow(|a| {
+                if let Some(app) = a.as_ref().and_then(|w| w.upgrade()) {
+                    crate::gui::refresh_active(&app);
+                }
+            });
+        });
+    }
 }
 
 /// Flip the window background between two identical-looking colors: repaints everything.
@@ -92,8 +110,10 @@ unsafe extern "system" fn subclass_proc(
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SIZE_MAXIMIZED, SIZE_MINIMIZED, SIZE_RESTORED, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_DPICHANGED,
-        WM_LBUTTONDOWN, WM_POWERBROADCAST, WM_SETTINGCHANGE, WM_SHOWWINDOW, WM_SIZE,
+        WM_LBUTTONDOWN, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_POWERBROADCAST, WM_SETTINGCHANGE,
+        WM_SHOWWINDOW, WM_SIZE,
     };
+    use windows_sys::Win32::UI::Controls::WM_MOUSELEAVE;
     /// `PBT_POWERSETTINGCHANGE`
     const SETTING_CHANGE: usize = 0x8013;
     match msg {
@@ -185,6 +205,19 @@ unsafe extern "system" fn subclass_proc(
                     }
                 });
             });
+        }
+        // Windows also sends a move when a window above ours appears or goes while the cursor
+        // rests: only a new position is the user's doing
+        WM_MOUSEMOVE => {
+            if MOUSE_AT.replace(lparam) != lparam {
+                touched(true);
+            }
+        }
+        WM_MOUSEWHEEL | WM_MOUSEHWHEEL => touched(true),
+        // winit asks for it (TrackMouseEvent) to report the cursor leaving
+        WM_MOUSELEAVE => {
+            MOUSE_AT.set(-1);
+            touched(false);
         }
         m if m == taskbar_created() => crate::badge::refresh(),
         _ => {}

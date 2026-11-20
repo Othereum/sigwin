@@ -474,12 +474,33 @@ thread_local! {
     /// what the list and the backend were last told
     static ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     static WATCHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// runs while rows wait out `WATCH_DWELL`
-    static DWELL: slint::Timer = slint::Timer::default();
+    /// the last mouse move or wheel over the window
+    static TOUCHED: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+    /// ends `WATCHING` once `TOUCH_HOLD` has passed without a touch
+    static TOUCH_END: slint::Timer = slint::Timer::default();
 }
 
-/// A row shown in a window that is only watched counts as seen after this long on screen.
-const WATCH_DWELL: std::time::Duration = std::time::Duration::from_secs(5);
+/// How long a mouse move or wheel over a window without the focus keeps it read. Short on
+/// purpose: a cursor left on the window while the user works elsewhere must not read what comes
+/// in later. Only something the user did to this window reads it, so they can tell when a read
+/// receipt goes out.
+const TOUCH_HOLD: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The mouse moved or the wheel turned over the window (`false`: the mouse left it). Called from
+/// the window procedure for every such message, so it only keeps the time; true when that starts
+/// or ends reading without the focus, and `refresh_active` is due.
+pub(crate) fn touched(on: bool) -> bool {
+    if FOCUSED.get() {
+        return false;
+    }
+    let was = touching();
+    TOUCHED.set(on.then(std::time::Instant::now));
+    was != on
+}
+
+fn touching() -> bool {
+    TOUCHED.get().is_some_and(|t| t.elapsed() < TOUCH_HOLD)
+}
 
 /// The window gained or lost the focus.
 pub(crate) fn focus_changed(app: &AppWindow, focused: bool) {
@@ -488,14 +509,28 @@ pub(crate) fn focus_changed(app: &AppWindow, focused: bool) {
 }
 
 /// How the user stands to the window, told to the list and the backend (notifications, read
-/// receipts). Active: they work in it (focused, not away). Watching: it shows but isn't the one
-/// they work in (a second monitor next to a game), so what comes in is read after a while.
+/// receipts). Active: they work in it (focused, not away). Watching: no focus, but the mouse
+/// moves or the wheel turns over it (a second monitor), so it reads as if active, for
+/// `TOUCH_HOLD` after the last touch. A window that merely shows reads nothing: whether anyone
+/// looks at it can't be told, and a wrong read receipt tells the sender they were ignored.
 /// Otherwise nothing is read and the list keeps its place. Called when the focus changes, the
-/// monitor turns off or on, and every few seconds for the input, lock and cover checks.
+/// mouse comes or goes, the monitor turns off or on, and every few seconds for the input and
+/// lock checks.
 pub(crate) fn refresh_active(app: &AppWindow) {
     let away = crate::away::is_away();
     let active = FOCUSED.get() && !away;
-    let watching = !active && !away && crate::away::on_screen(hwnd(app));
+    let watching = !active && touching();
+    if watching {
+        let left = TOUCHED.get().map_or(TOUCH_HOLD, |t| TOUCH_HOLD.saturating_sub(t.elapsed()));
+        let weak = app.as_weak();
+        TOUCH_END.with(|t| {
+            t.start(slint::TimerMode::SingleShot, left + std::time::Duration::from_millis(50), move || {
+                if let Some(app) = weak.upgrade() {
+                    refresh_active(&app);
+                }
+            })
+        });
+    }
     let was_active = ACTIVE.replace(active);
     let was_watching = WATCHING.replace(watching);
     if was_active == active && was_watching == watching {
@@ -509,49 +544,20 @@ pub(crate) fn refresh_active(app: &AppWindow) {
             ui.read_sent = None;
         }
     });
-    tracing::info!(active, watching, "user presence");
-    app.set_inactive(!reading);
-    if active {
-        // the user is here now: what waited for its time was in front of them
-        flush_dwell(true);
-    } else if !watching {
-        UI.with_borrow_mut(|ui| ui.dwell.clear());
+    // watching comes and goes with the mouse: kept out of users' log files
+    if was_active != active {
+        tracing::info!(active, watching, "user presence");
+    } else {
+        tracing::debug!(active, watching, "user presence");
     }
+    app.set_inactive(!reading);
     send_cmd(Command::WindowWatching(watching));
     send_cmd(Command::WindowFocus(active));
 }
 
-/// The user saw row `id` fully on screen: read now when they work in the window, after
-/// `WATCH_DWELL` when it is only watched.
+/// The user saw row `id` fully on screen (the list reports rows only while it is read):
+/// `ReadUpTo` for it, each row only once, and nothing for rows above one already sent.
 pub(crate) fn row_seen(id: &str) {
-    if ACTIVE.get() {
-        send_read(id);
-        return;
-    }
-    UI.with_borrow_mut(|ui| ui.dwell.push((id.to_string(), std::time::Instant::now())));
-    DWELL.with(|t| {
-        if !t.running() {
-            t.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), || flush_dwell(false));
-        }
-    });
-}
-
-/// Reports the rows that stayed long enough (all of them with `all`).
-fn flush_dwell(all: bool) {
-    let due: Vec<String> = UI.with_borrow_mut(|ui| {
-        let n = ui.dwell.iter().rposition(|(_, at)| all || at.elapsed() >= WATCH_DWELL).map_or(0, |i| i + 1);
-        ui.dwell.drain(..n).map(|(id, _)| id).collect()
-    });
-    for id in due {
-        send_read(&id);
-    }
-    if UI.with_borrow(|ui| ui.dwell.is_empty()) {
-        DWELL.with(|t| t.stop());
-    }
-}
-
-/// `ReadUpTo` for a row: each row only once, and nothing for rows above one already sent.
-fn send_read(id: &str) {
     let go = UI.with_borrow_mut(|ui| {
         let pos = |ui: &Ui, id: &str| ui.last.iter().position(|m| m.id == id);
         let Some(at) = pos(ui, id) else { return false };
