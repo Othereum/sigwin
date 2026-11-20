@@ -2,6 +2,7 @@
 //! main crate at opt-level 0 (slint's generated code), and generic/inlined pixel code is compiled
 //! in the crate that calls it: unoptimized, a 260px Lanczos resample took ~37ms instead of ~1ms.
 
+mod avif;
 pub mod photo;
 
 pub use image::{DynamicImage, ImageResult, RgbaImage};
@@ -36,15 +37,34 @@ pub fn progress_ring(size: u32, width: f32, percent: u8) -> Pixels {
     out
 }
 
+/// A decoder for what `bytes` hold, sniffing the format (file names and content types may lie).
+fn decoder(bytes: &[u8]) -> ImageResult<Box<dyn image::ImageDecoder + '_>> {
+    if avif::is_avif(bytes) {
+        return Ok(Box::new(avif::AvifDecoder::new(bytes)?));
+    }
+    Ok(Box::new(image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.into_decoder()?))
+}
+
+/// `decoder` for a file, reading only what the format needs.
+fn file_decoder(path: &std::path::Path) -> ImageResult<Box<dyn image::ImageDecoder>> {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(256);
+    std::fs::File::open(path)?.take(256).read_to_end(&mut head)?;
+    if avif::is_avif(&head) {
+        return Ok(Box::new(avif::AvifDecoder::new(&std::fs::read(path)?)?));
+    }
+    Ok(Box::new(image::ImageReader::open(path)?.with_guessed_format()?.into_decoder()?))
+}
+
 /// Decodes, sniffing the format (file names and content types may lie).
 pub fn decode(bytes: &[u8]) -> ImageResult<DynamicImage> {
-    image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.decode()
+    DynamicImage::from_decoder(decoder(bytes)?)
 }
 
 /// Decodes, turned the way its EXIF says.
 fn decode_upright(bytes: &[u8]) -> ImageResult<DynamicImage> {
-    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.into_decoder()?;
-    let orientation = image::ImageDecoder::orientation(&mut decoder)?;
+    let mut decoder = decoder(bytes)?;
+    let orientation = decoder.orientation()?;
     let mut img = DynamicImage::from_decoder(decoder)?;
     img.apply_orientation(orientation);
     Ok(img)
@@ -57,9 +77,8 @@ pub fn decode_thumb(bytes: &[u8], max: u32) -> ImageResult<DynamicImage> {
 
 /// A photo file's size as shown (EXIF applied), from its header alone.
 pub fn photo_size(path: &std::path::Path) -> ImageResult<(u32, u32)> {
-    use image::ImageDecoder;
     use image::metadata::Orientation::{Rotate90, Rotate90FlipH, Rotate270, Rotate270FlipH};
-    let mut decoder = image::ImageReader::open(path)?.with_guessed_format()?.into_decoder()?;
+    let mut decoder = file_decoder(path)?;
     let (w, h) = decoder.dimensions();
     Ok(match decoder.orientation()? {
         Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH => (h, w),
@@ -70,9 +89,8 @@ pub fn photo_size(path: &std::path::Path) -> ImageResult<(u32, u32)> {
 /// A photo file's size as shown (EXIF applied) and its blurhash. Past `max_pixels` it isn't
 /// decoded and has no blurhash, nor does one that turns out broken after its header.
 pub fn photo_facts(path: &std::path::Path, max_pixels: u64) -> ImageResult<((u32, u32), Option<String>)> {
-    use image::ImageDecoder;
     use image::metadata::Orientation::{Rotate90, Rotate90FlipH, Rotate270, Rotate270FlipH};
-    let mut decoder = image::ImageReader::open(path)?.with_guessed_format()?.into_decoder()?;
+    let mut decoder = file_decoder(path)?;
     let (w, h) = decoder.dimensions();
     let orientation = decoder.orientation()?;
     let size = if matches!(orientation, Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH) { (h, w) } else { (w, h) };
@@ -310,13 +328,11 @@ pub struct ViewImage {
 /// Decodes a still image for the viewer. `None` when it is animated or has more than
 /// `max_pixels`: those go to an outside app.
 pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> ImageResult<Option<ViewImage>> {
-    use image::ImageDecoder;
-    let reader = || image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format();
-    let (w, h) = reader()?.into_dimensions()?;
+    let mut decoder = decoder(bytes)?;
+    let (w, h) = decoder.dimensions();
     if w as u64 * h as u64 > max_pixels || is_animated(bytes) {
         return Ok(None);
     }
-    let mut decoder = reader()?.into_decoder()?;
     let orientation = decoder.orientation()?;
     let mut img = DynamicImage::from_decoder(decoder)?;
     img.apply_orientation(orientation);

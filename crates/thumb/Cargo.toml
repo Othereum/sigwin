@@ -11,3 +11,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 slint = { version = "1.19.0", default-features = false, features = ["std", "compat-1-2"] }
 # APNG encoder for animated stickers (same version the image crate uses)
 png = "0.18.1"
+# AVIF: `image` decodes it only through the dav1d C library (see src/avif.rs)
+rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16", "asm"] }
+mp4parse = "0.17.0"
+# rav1d reports EAGAIN with the platform's value
+libc = "0.2.191"

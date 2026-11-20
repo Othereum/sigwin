@@ -52,7 +52,7 @@ pub struct Prepared {
 /// can't decode. What stays in its format (an animation, an image with transparent parts: a JPEG
 /// would lose that) still loses its metadata.
 pub fn prepare(bytes: &[u8], quality: Quality) -> ImageResult<Option<Prepared>> {
-    let format = image::guess_format(bytes)?;
+    let format = if super::avif::is_avif(bytes) { ImageFormat::Avif } else { image::guess_format(bytes)? };
     if let Some(p) = shrink(bytes, format, quality)? {
         return Ok(Some(p));
     }
@@ -67,25 +67,33 @@ pub fn prepare(bytes: &[u8], quality: Quality) -> ImageResult<Option<Prepared>> 
 /// A photo scaled and re-encoded as a JPEG, or just freed of metadata when it is small enough.
 /// `None` when it should stay in its format.
 fn shrink(bytes: &[u8], format: ImageFormat, quality: Quality) -> ImageResult<Option<Prepared>> {
-    if super::is_animated(bytes) || !matches!(format, ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::WebP) {
+    if super::is_animated(bytes) || !matches!(format, ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::WebP | ImageFormat::Avif) {
         return Ok(None);
     }
-    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.into_decoder()?;
+    let mut decoder = super::decoder(bytes)?;
     let orientation = decoder.orientation()?;
     let upright = orientation == image::metadata::Orientation::NoTransforms;
     let jpeg = format == ImageFormat::Jpeg;
+    // Signal's apps never send AVIF (Desktop transcodes it), so a phone may not show one: it
+    // always goes as a JPEG, or as a PNG when it has transparent parts
+    let avif = format == ImageFormat::Avif;
     // a small JPEG that needs no turning only loses its metadata, untouched otherwise
     let (side, jpeg_quality, target, keep_size) = level(quality);
     if jpeg && upright && bytes.len() <= keep_size {
         return Ok(Some(Prepared { bytes: strip_jpeg_metadata(bytes), content_type: "image/jpeg", size: None, blurhash: None }));
     }
-    if !jpeg && bytes.len() <= keep_size {
+    if !jpeg && !avif && bytes.len() <= keep_size {
         return Ok(None);
     }
     let mut img = DynamicImage::from_decoder(decoder)?;
     img.apply_orientation(orientation);
     let rgba = img.to_rgba8();
     if img.color().has_alpha() && rgba.pixels().any(|p| p.0[3] < 255) {
+        if avif {
+            let size = Some(rgba.dimensions());
+            let blurhash = super::encode_blurhash(&img.thumbnail(64, 64).to_rgba8());
+            return Ok(Some(Prepared { bytes: super::png_rgba(&rgba)?, content_type: "image/png", size, blurhash }));
+        }
         return Ok(None);
     }
     let blurhash = super::encode_blurhash(&img.thumbnail(64, 64).to_rgba8());

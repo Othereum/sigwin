@@ -121,7 +121,7 @@ pub fn is_voice(ptr: &AttachmentPointer) -> bool {
 pub fn is_image(ptr: &AttachmentPointer) -> bool {
     matches!(
         ptr.content_type.as_deref(),
-        Some("image/jpeg" | "image/png" | "image/apng" | "image/gif" | "image/webp")
+        Some("image/jpeg" | "image/png" | "image/apng" | "image/gif" | "image/webp" | "image/avif")
     )
 }
 
