@@ -69,11 +69,98 @@ pub fn private_bytes() -> usize {
     0
 }
 
+/// What holds Rust heap for a while, counted where it is kept, so the report says what the heap
+/// is made of. What isn't counted shows as the rest.
+#[derive(Clone, Copy)]
+pub enum Gauge {
+    /// pictures of the open chat's rows (UI)
+    Thumbs,
+    /// round photos of the thread list, for the session
+    Avatars,
+    /// photos next to group messages and of readers, open chat only
+    SenderAvatars,
+    /// animated stickers playing in the open chat
+    Anims,
+    /// the composer's attachment tiles
+    Composer,
+    /// the sticker panel's pack covers
+    StickerCovers,
+    /// the media page's cells
+    Gallery,
+    /// the picture open in the image viewer
+    Viewer,
+}
+
+impl Gauge {
+    /// By number, for a const generic (`gui::held::ImageMap`).
+    pub const ALL: [Gauge; 8] = [
+        Gauge::Thumbs,
+        Gauge::Avatars,
+        Gauge::SenderAvatars,
+        Gauge::Anims,
+        Gauge::Composer,
+        Gauge::StickerCovers,
+        Gauge::Gallery,
+        Gauge::Viewer,
+    ];
+}
+
+const GAUGES: [&str; 8] = ["thumbs", "avatars", "sender avatars", "anims", "composer", "sticker covers", "gallery", "viewer"];
+
+/// Bytes and items of each gauge.
+static HELD: [(AtomicUsize, AtomicUsize); GAUGES.len()] = [const { (AtomicUsize::new(0), AtomicUsize::new(0)) }; GAUGES.len()];
+
+/// `items` more of `bytes` held under `g`.
+pub fn add(g: Gauge, bytes: usize, items: usize) {
+    HELD[g as usize].0.fetch_add(bytes, Relaxed);
+    HELD[g as usize].1.fetch_add(items, Relaxed);
+}
+
+/// `items` of `bytes` no longer held under `g`.
+pub fn sub(g: Gauge, bytes: usize, items: usize) {
+    HELD[g as usize].0.fetch_sub(bytes, Relaxed);
+    HELD[g as usize].1.fetch_sub(items, Relaxed);
+}
+
+/// Bytes and items held under `g` now.
+#[cfg(test)]
+pub fn held(g: Gauge) -> (usize, usize) {
+    (HELD[g as usize].0.load(Relaxed), HELD[g as usize].1.load(Relaxed))
+}
+
+/// One item counted under its gauge for as long as this lives: a field of what holds the memory.
+pub struct Held {
+    gauge: Gauge,
+    bytes: usize,
+}
+
+impl Held {
+    pub fn new(gauge: Gauge, bytes: usize) -> Self {
+        add(gauge, bytes, 1);
+        Self { gauge, bytes }
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        sub(self.gauge, self.bytes, 1);
+    }
+}
+
+fn mb(b: usize) -> f64 {
+    b as f64 / 1048576.0
+}
+
 pub fn report() -> String {
-    format!(
-        "rust heap {:.1}MB (peak {:.1}MB), private {:.1}MB",
-        live() as f64 / 1048576.0,
-        peak() as f64 / 1048576.0,
-        private_bytes() as f64 / 1048576.0
-    )
+    let live = live();
+    let mut s = format!("rust heap {:.1}MB (peak {:.1}MB), private {:.1}MB", mb(live), mb(peak()), mb(private_bytes()));
+    let mut counted = 0;
+    for (name, (bytes, items)) in GAUGES.iter().zip(&HELD) {
+        let (bytes, items) = (bytes.load(Relaxed), items.load(Relaxed));
+        counted += bytes;
+        if items > 0 {
+            s += &format!(" | {name} {:.1}MB/{items}", mb(bytes));
+        }
+    }
+    s + &format!(" | rest {:.1}MB", mb(live.saturating_sub(counted)))
 }

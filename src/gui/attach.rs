@@ -156,10 +156,13 @@ fn cut(path: &Path, px: u32) -> Option<(Vec<u8>, u32)> {
 fn arrived(app: &AppWindow, path: PathBuf, pixels: Option<(Vec<u8>, u32)>) {
     let at = UI.with_borrow_mut(|ui| {
         // removed while it was being cut
-        let slot = ui.pending_thumbs.get_mut(&path)?;
+        if !ui.pending_thumbs.contains_key(&path) {
+            return None;
+        }
         let (raw, px) = pixels?;
-        *slot = Some(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&raw, px, px)));
-        ui.files.iter().position(|p| *p == path).map(|i| (i, slot.clone()))
+        let img = Some(Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&raw, px, px)));
+        ui.pending_thumbs.insert(path.clone(), img.clone());
+        ui.files.iter().position(|p| *p == path).map(|i| (i, img))
     });
     let Some((i, Some(img))) = at else { return };
     let model = app.get_pending_files();

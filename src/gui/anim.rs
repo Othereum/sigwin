@@ -27,13 +27,15 @@ struct Sticker {
     bytes: usize,
     /// `Anims.clock` when last shown
     used: u64,
+    _held: crate::alloc::Held,
 }
 
 impl Sticker {
     fn new(f: &Frames, used: u64) -> Option<Self> {
         let image = Image::load_from_data(&f.png, Some("png")).ok()?;
         let size = image.size();
-        Some(Sticker { image, bytes: f.png.len() + 2 * 4 * (size.width * size.height) as usize, used })
+        let bytes = f.png.len() + 2 * 4 * (size.width * size.height) as usize;
+        Some(Sticker { image, bytes, used, _held: crate::alloc::Held::new(crate::alloc::Gauge::Anims, bytes) })
     }
 }
 

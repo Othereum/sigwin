@@ -20,7 +20,7 @@ struct Page {
     rows: Rc<VecModel<GalleryRow>>,
     /// per row: its top and bottom (px from the list's top) and the items it shows
     spans: Vec<(f32, f32, Range<usize>)>,
-    thumbs: HashMap<String, Image>,
+    thumbs: held::Pictures<{ held::GALLERY }>,
     labels: rows::MediaStates,
     /// items whose thumbnails are wanted
     shown: Range<usize>,
@@ -116,7 +116,7 @@ fn open(app: &AppWindow, files: bool) {
             cols,
             rows: rows.clone(),
             spans: Vec::new(),
-            thumbs: HashMap::new(),
+            thumbs: Default::default(),
             labels: Default::default(),
             shown: 0..0,
             view,

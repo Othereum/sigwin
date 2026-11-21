@@ -21,6 +21,7 @@ pub(crate) mod attach;
 mod calendar;
 pub(crate) mod drafts;
 pub(crate) mod gallery;
+mod held;
 pub(crate) mod linkcard;
 mod media;
 pub(crate) mod notice;
@@ -56,15 +57,15 @@ pub(crate) struct Ui {
     pub(crate) drafts_path: PathBuf,
     pub(crate) messages: Rc<VecModel<MsgItem>>,
     /// thumbnails for the open thread only; cleared on thread switch to bound memory
-    thumbs: HashMap<String, Image>,
+    thumbs: held::Pictures<{ held::THUMBS }>,
     /// text over pictures, by the same keys
     media_labels: rows::MediaStates,
     /// animated stickers' frames (message list, open thread; the hovered picker sticker)
     anims: anim::Anims,
     /// round photos by thread key, for the whole session (~6KB each at 40px)
-    avatars: HashMap<String, Image>,
+    avatars: held::Pictures<{ held::AVATARS }>,
     /// photos next to group messages by sender uuid, open thread only
-    sender_avatars: HashMap<String, Image>,
+    sender_avatars: held::Pictures<{ held::SENDER_AVATARS }>,
     last: Vec<MsgDto>,
     /// the theme the rows were last drawn for: what arrives late draws its row the same way
     dark: bool,
@@ -77,7 +78,7 @@ pub(crate) struct Ui {
     /// the server's attachment size limit; None: the default (`attach::admit`)
     send_limit: Option<u64>,
     /// pictures of `files` for the composer: None while being cut (or when there is none)
-    pending_thumbs: HashMap<PathBuf, Option<Image>>,
+    pending_thumbs: held::ImageMap<PathBuf, Option<Image>, { held::COMPOSER }>,
     /// the GIF playing in a composer tile: (playback number, file), and the last number used
     pending_gif: Option<(u64, PathBuf)>,
     pending_gif_seq: u64,

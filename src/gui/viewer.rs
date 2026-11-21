@@ -62,6 +62,11 @@ const SMOOTH_BELOW: f64 = 3.0;
 /// Window position and size, physical px.
 type Placement = (i32, i32, u32, u32);
 
+fn held(p: &ViewerPixels) -> crate::alloc::Held {
+    let px = |b: &slint::SharedPixelBuffer<slint::Rgba8Pixel>| b.width() as usize * b.height() as usize * 4;
+    crate::alloc::Held::new(crate::alloc::Gauge::Viewer, px(&p.original) + p.fitted.as_ref().map_or(0, px))
+}
+
 struct Viewer {
     win: ImageViewer,
     id: String,
@@ -80,6 +85,8 @@ struct Viewer {
     /// Pans and zooms only resample the visible part of `pixels.original`. Kept until the image or
     /// the window goes, and shared with `source` once that shows it, not a copy.
     pixels: ViewerPixels,
+    /// `pixels` in the memory report
+    held: crate::alloc::Held,
     /// a GIF: its frames arrive one by one (`gif_frame`), and zooming is off
     animated: Cell<bool>,
     /// the picture on screen is on its way, and this is its `MediaLabel` key; empty: it is here
@@ -190,6 +197,7 @@ pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
             // its blurhash in the strip becomes the picture
             send_cmd(Command::ViewerThumbs { id: v.id.clone(), px: strip_px(&v.win) });
         }
+        v.held = held(&img.pixels);
         v.pixels = img.pixels;
         clear_patch(v);
         let first = v.pixels.take_first();
@@ -414,6 +422,7 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
             hide_strip: slint::Timer::default(),
             _hide_intro: [hide_top, hide_hint],
             refit: slint::Timer::default(),
+            held: held(&img.pixels),
             pixels: img.pixels,
             animated: Cell::new(img.animated),
             pending: RefCell::new(String::new()),

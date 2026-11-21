@@ -10,7 +10,7 @@ pub(crate) struct Panel {
     pub(crate) stickers: Rc<VecModel<StickerItem>>,
     pub(crate) grid: Vec<types::StickerDto>,
     /// pack cover images (grid images live only in `stickers` rows)
-    covers: HashMap<String, Image>,
+    covers: held::Pictures<{ held::STICKER_COVERS }>,
 }
 
 pub(crate) fn close(app: &AppWindow) {
