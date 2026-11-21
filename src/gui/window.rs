@@ -424,12 +424,28 @@ fn ctrl_letter(logical: &Key, physical: PhysicalKey, mods: ModifiersState) -> Op
     }
 }
 
-/// Keep Ctrl shortcuts working in every text field regardless of Caps Lock and the IME.
-fn fix_ctrl_shortcuts(app: &AppWindow) {
+/// The main window's winit events that Slint doesn't handle as we need: Ctrl shortcuts in every
+/// text field regardless of Caps Lock and the IME, files dropped from Explorer, the rect to
+/// remember, and scale changes.
+fn winit_events(app: &AppWindow) {
     let mods = std::cell::Cell::new(ModifiersState::empty());
     let weak = app.as_weak();
     app.window().on_winit_window_event(move |window, event| {
         match event {
+            // Instead of Slint's handling, which has two faults. It takes the new scale but keeps
+            // the window item's logical size until winit reports a resize, and none comes when the
+            // window keeps its size (maximized): the next paint overruns the buffer and the software
+            // renderer asserts. And it asks winit to keep a size set before the window existed
+            // (`restore_geometry`) when the window got exactly that size, so the window kept its
+            // pixels instead of its logical size. Here winit's own new size stands, and the item
+            // fits the current pixels until it arrives.
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                let sf = *scale_factor as f32;
+                let size = window.size();
+                window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: sf });
+                window.dispatch_event(slint::platform::WindowEvent::Resized { size: size.to_logical(sf) });
+                return EventResult::PreventDefault;
+            }
             WindowEvent::ModifiersChanged(m) => mods.set(m.state()),
             // files dragged in from Explorer: there is one event per file
             WindowEvent::HoveredFile(_) => {
@@ -575,7 +591,7 @@ pub(crate) fn row_seen(id: &str) {
 /// Slint exposes neither focus nor minimize/restore: hook the window procedure once the
 /// native window exists (it is created when the event loop starts).
 pub(crate) fn hook_window(app: &AppWindow) {
-    fix_ctrl_shortcuts(app);
+    winit_events(app);
     let weak = app.as_weak();
     let tries = std::cell::Cell::new(0u32);
     let timer = Rc::new(slint::Timer::default());
