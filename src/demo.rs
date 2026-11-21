@@ -392,6 +392,19 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     if std::env::var_os("SIGWIN_DEMO_VIDEO").is_some() {
         demo_video_rows(&mut items);
     }
+    if std::env::var_os("SIGWIN_DEMO_PHOTOS").is_some() {
+        let last = items.len() - DEMO_PHOTOS.len();
+        for (n, (&(w, h), m)) in DEMO_PHOTOS.iter().zip(&mut items[last..]).enumerate() {
+            m.big_emoji = false;
+            m.sticker = false;
+            m.quote.clear();
+            m.quote_author.clear();
+            m.attachment.clear();
+            m.outgoing = n % 3 == 2;
+            m.text = if demo_captioned(n) { "사진 설명".into() } else { String::new() };
+            view::media::set_single_photo(m, format!("demo-size-{n}"), view::media::fit(Some(w), Some(h), view::media::captioned(m)));
+        }
+    }
     if std::env::var_os("SIGWIN_DEMO_GRID").is_some() {
         // the newest rows, bare, with a caption and with a file
         let last = items.len() - DEMO_GRIDS.len();
@@ -620,6 +633,10 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
     if std::env::var_os("SIGWIN_DEMO_VIDEO").is_some() {
         let emit = emit.clone();
         std::thread::spawn(move || demo_videos(&emit));
+    }
+    if std::env::var_os("SIGWIN_DEMO_PHOTOS").is_some() {
+        let emit = emit.clone();
+        std::thread::spawn(move || demo_photos(&emit));
     }
     if std::env::var_os("SIGWIN_DEMO_GRID").is_some() {
         // after the rows, as downloads do
@@ -1269,6 +1286,30 @@ fn demo_video_hash(path: &std::path::Path) -> Option<String> {
     let v = crate::videoframe::first_frame_plain(path).ok().flatten()?;
     tracing::info!("demo video to send: size {:?}", v.size);
     v.blurhash()
+}
+
+/// SIGWIN_DEMO_PHOTOS: sizes of the newest rows' photos, the awkward ones.
+const DEMO_PHOTOS: [(u32, u32); 8] = [(1, 1), (16, 16), (60, 40), (40, 60), (1000, 10), (10, 1000), (200, 150), (4000, 3000)];
+
+fn demo_captioned(n: usize) -> bool {
+    n % 4 == 1
+}
+
+/// Their pictures, made from a checkerboard of that size the way a received photo's are.
+fn demo_photos(emit: &backend::Emit) {
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    for (n, &(w, h)) in DEMO_PHOTOS.iter().enumerate() {
+        let src = image::RgbaImage::from_fn(w, h, |x, y| {
+            let on = (x * 8 / w.max(1) + y * 8 / h.max(1)) % 2 == 0;
+            image::Rgba(if on { [230, 120, 40, 255] } else { [40, 90, 200, 255] })
+        });
+        let Ok(png) = sigwin_thumb::png_rgba(&src) else { continue };
+        let (cw, ch) = view::media::fit(Some(w), Some(h), demo_captioned(n));
+        let cell = (types::physical_px(cw), types::physical_px(ch));
+        let Ok(img) = sigwin_thumb::decode_thumb_for(&png, view::media::PHOTO_THUMB_MAX, |d| sigwin_thumb::cover_side(d, cell)) else { continue };
+        let img = sigwin_thumb::cover(&sigwin_thumb::to_rgba(&img), cell.0, cell.1);
+        emit(Event::Thumb(Arc::new(types::Thumb { key: format!("demo-size-{n}"), width: img.width(), height: img.height(), rgba: img.into_raw() })));
+    }
 }
 
 /// SIGWIN_DEMO_GRID: images of the newest rows.

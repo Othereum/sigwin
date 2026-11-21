@@ -112,7 +112,7 @@ impl App {
         if view_once {
             photos.clear();
         } else {
-            self.spawn_pending_thumbs(ts, photo_paths, &photos);
+            self.spawn_pending_thumbs(ts, photo_paths, &photos, !text.is_empty() && quote.is_none());
         }
         let attachment = if view_once { String::new() } else { attachment };
         self.queue_send(Pending {
@@ -135,8 +135,9 @@ impl App {
     }
 
     /// Pictures for the pending row's photos, straight from the files being sent (no cache).
-    /// One photo is fitted to its size, several fill the cells of a grid.
-    fn spawn_pending_thumbs(&self, ts: u64, paths: Vec<PathBuf>, sizes: &[(u32, u32)]) {
+    /// One photo is fitted to its size, several fill the cells of a grid. `captioned`: as
+    /// `view::media::captioned` says of the row.
+    fn spawn_pending_thumbs(&self, ts: u64, paths: Vec<PathBuf>, sizes: &[(u32, u32)], captioned: bool) {
         if paths.is_empty() {
             return;
         }
@@ -149,7 +150,11 @@ impl App {
                 let Ok(bytes) = std::fs::read(path) else { continue };
                 let key = pending_photo_key(ts, n, single);
                 // the cell it fills: one photo's own box, or its place in the grid
-                let (w, h) = if single { view::media::fit(Some(sizes[0].0), Some(sizes[0].1)) } else { view::media::grid_cell_size(paths.len(), n) };
+                let (w, h) = if single {
+                    view::media::fit(Some(sizes[0].0), Some(sizes[0].1), captioned)
+                } else {
+                    view::media::grid_cell_size(paths.len(), n)
+                };
                 let (w, h) = (crate::types::physical_px(w), crate::types::physical_px(h));
                 let Ok(img) = sigwin_thumb::decode_thumb_for(&bytes, 0, |d| sigwin_thumb::cover_side(d, (w, h))) else { continue };
                 let rgba = sigwin_thumb::cover(&sigwin_thumb::to_rgba(&img), w, h);
@@ -774,7 +779,10 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     }
     match p.photos[..] {
         [] => {}
-        [(w, h)] => view::media::set_single_photo(&mut m, pending_photo_key(p.ts, 0, true), view::media::fit(Some(w), Some(h))),
+        [(w, h)] => {
+            let size = view::media::fit(Some(w), Some(h), view::media::captioned(&m));
+            view::media::set_single_photo(&mut m, pending_photo_key(p.ts, 0, true), size);
+        }
         _ => view::media::set_photo_grid(&mut m, p.photos.len(), |n, _, _| pending_photo_key(p.ts, n, false)),
     }
     if !p.image_key.is_empty() {

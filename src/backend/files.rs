@@ -1012,8 +1012,14 @@ fn placeholder(ptr: &AttachmentPointer, fit: (u32, u32)) -> crate::types::Viewer
 fn blur_for(key: &str, hash: &str, ptr: &AttachmentPointer, shape: &ThumbShape) -> Option<Thumb> {
     let (w, h) = match *shape {
         ThumbShape::Cover(w, h) => (w, h),
-        // a single photo: the box its size gives (`set_attachments`)
-        ThumbShape::Fit(_) => view::media::fit(ptr.width, ptr.height),
+        // the longer side px long, as the sticker will be
+        ThumbShape::Fit(px) => match (ptr.width, ptr.height) {
+            (Some(w), Some(h)) if w > 0 && h > 0 => {
+                let s = f64::from(px) / f64::from(w.max(h));
+                (((f64::from(w) * s).round() as u32).max(1), ((f64::from(h) * s).round() as u32).max(1))
+            }
+            _ => (px, px),
+        },
     };
     blur_thumb(key, hash, crate::types::physical_px(w), crate::types::physical_px(h))
 }

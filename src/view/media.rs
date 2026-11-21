@@ -327,17 +327,35 @@ fn may_animate(ptr: &AttachmentPointer) -> bool {
     matches!(ptr.content_type.as_deref(), Some("image/gif" | "image/apng" | "image/webp"))
 }
 
-/// Size a single photo of `w` x `h` is shown at (logical px).
-pub fn fit(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
-    match (w, h) {
-        (Some(w), Some(h)) if w > 0 && h > 0 => {
-            // scale into the box for its orientation, never up
-            let (bw, bh) = if h > w { PHOTO_BOX_TALL } else { PHOTO_BOX_WIDE };
-            let s = (bw as f32 / w as f32).min(bh as f32 / h as f32).min(1.0);
-            (((w as f32 * s) as u32).max(40), ((h as f32 * s) as u32).max(40))
-        }
-        _ => PHOTO_BOX_WIDE,
+/// The shorter side of a lone photo, at the least: a smaller one is easy to miss, and its marks
+/// (download, size) need the room. As small as a grid's smallest cell.
+const PHOTO_MIN: u32 = 100;
+/// The narrowest bubble a photo with a caption gets (`flush` in `ui/bubble.slint`).
+const CAPTIONED_MIN_WIDTH: u32 = 200;
+
+/// Whether the picture of `m` shares its bubble with a caption: the bubble is then at least
+/// `CAPTIONED_MIN_WIDTH` wide and the picture as wide as the bubble (`flush` in the UI).
+pub fn captioned(m: &MsgDto) -> bool {
+    !m.text.is_empty() && m.quote.is_empty()
+}
+
+/// Size a lone photo of `w` x `h` is shown at (logical px): scaled into the box for its
+/// orientation, never up, unless it is smaller than the least it is shown at. An extreme shape
+/// is cut to the box.
+pub fn fit(w: Option<u32>, h: Option<u32>, captioned: bool) -> (u32, u32) {
+    let (Some(w), Some(h)) = (w, h) else { return PHOTO_BOX_WIDE };
+    if w == 0 || h == 0 {
+        return PHOTO_BOX_WIDE;
     }
+    let (bw, bh) = if h > w { PHOTO_BOX_TALL } else { PHOTO_BOX_WIDE };
+    let (w, h) = (w as f64, h as f64);
+    let into_box = (bw as f64 / w).min(bh as f64 / h).min(1.0);
+    let min_w = if captioned { CAPTIONED_MIN_WIDTH } else { 0 };
+    let least = (PHOTO_MIN as f64 / w.min(h)).max(min_w as f64 / w);
+    let s = into_box.max(least);
+    let side = |v: f64, most: u32| ((v * s).round() as u32).clamp(1, most);
+    let (w, h) = (side(w, bw), side(h, bh));
+    (w.max(min_w), h)
 }
 
 /// Attachments: one photo or video alone, several in a grid, the rest as a file line.
@@ -361,7 +379,7 @@ pub(super) fn set_attachments(
     if let [(i, a)] = photos[..] {
         let file_key = attachment_key(a, ts, i);
         // the sender's size may be missing or wrong: the picture is cut to fill the box
-        let size = fit(a.width, a.height);
+        let size = fit(a.width, a.height, captioned(m));
         // the same image may also be shown in a cell of another size
         let key = format!("{file_key}@{}x{}", size.0, size.1);
         set_single_photo(m, key.clone(), size);
@@ -408,15 +426,31 @@ mod tests {
 
     #[test]
     fn photo_size_caps() {
-        let f = |w, h| fit(Some(w), Some(h));
+        let f = |w, h| fit(Some(w), Some(h), false);
         assert_eq!(f(3000, 3000), (300, 300)); // square
         assert_eq!(f(4000, 3000), (400, 300)); // 4:3 unchanged
         assert_eq!(f(3000, 4000), (300, 400)); // 3:4 is width-limited
         assert_eq!(f(2000, 3000), (300, 450)); // 2:3
         assert_eq!(f(900, 1600), (253, 450)); // 9:16
         assert_eq!(f(1600, 900), (400, 225)); // 16:9 unchanged
-        assert_eq!(f(100, 100), (100, 100)); // never upscaled
-        assert_eq!(fit(None, None), (400, 300));
+        assert_eq!(f(150, 120), (150, 120)); // never upscaled
+        assert_eq!(fit(None, None, false), (400, 300));
+    }
+
+    #[test]
+    fn small_photos_have_a_least_size() {
+        let f = |w, h, c| fit(Some(w), Some(h), c);
+        assert_eq!(f(1, 1, false), (100, 100));
+        assert_eq!(f(60, 40, false), (150, 100)); // its shape kept
+        // extreme shapes are cut to the box
+        assert_eq!(f(1000, 10, false), (400, 100));
+        assert_eq!(f(10, 1000, false), (100, 450));
+        // a caption's bubble is wider: the picture fills it rather than being stretched to it
+        assert_eq!(f(16, 16, true), (200, 200));
+        assert_eq!(f(300, 100, true), (300, 100));
+        assert_eq!(f(150, 120, true), (200, 160));
+        assert_eq!(f(10, 1000, true), (200, 450));
+        assert_eq!(fit(None, None, true), (400, 300));
     }
 
     #[test]
