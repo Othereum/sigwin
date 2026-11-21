@@ -21,6 +21,7 @@
 **Target: idle private memory under 30MB**, measured with a real account after sync, one thread open, nothing else going on. The rest of the budget depends on who started the work (reasons in `docs/decisions.md`):
 - Something the user opened (image viewer, sticker panel) may use what it needs, with a safety limit against abnormal input, and must return to idle levels when closed. Inside it, responsiveness comes first: don't drop and reload what the user will likely need next just to lower memory while it's open.
 - Automatic work (receiving, thumbnails, sync) has to stay small: no outside app would have done it instead, so all of it is added cost. Hold only what's on screen, at the size it's shown; anything worth keeping goes to disk.
+- The aim is cutting waste, not squeezing limits. Once what's held is bounded and needed (a small margin that keeps scrolling back smooth counts), don't trade feel for a few more MB.
 
 Every change must respect this:
 - No GPU renderer, WebView, JVM, or extra runtimes. Slint uses `renderer-software` only (GPU renderers cost 200MB+; numbers in `docs/decisions.md`). Never enable the `renderer-femtovg` / `renderer-skia` features by default.
