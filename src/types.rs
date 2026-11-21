@@ -278,6 +278,12 @@ pub struct MsgDto {
     pub image_key: String,
     pub img_w: u32,
     pub img_h: u32,
+    /// How the pictures follow the chat's width until their row is built for it (`Bubble.k`):
+    /// their width with no room limit, the width of the box they're fitted to then, and the room
+    /// they were sized for (0: none, they don't grow). Logical px.
+    pub img_full_w: u32,
+    pub img_box_w: u32,
+    pub img_room: u32,
     /// the preview of a link in the text, as the sender's app made it
     pub link: Option<LinkCard>,
     /// the message's pictures and videos: a grid, or one cell for a single one. `image_key` is

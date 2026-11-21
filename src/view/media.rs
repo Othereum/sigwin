@@ -428,6 +428,27 @@ pub fn set_photo_grid(m: &mut MsgDto, count: usize, mut key: impl FnMut(usize, u
         .collect();
     m.img_w = cells.iter().map(|c| c.0 + c.2).max().unwrap_or(0);
     m.img_h = cells.iter().map(|c| c.1 + c.3).max().unwrap_or(0);
+    // a grid is its box
+    let full = grid_cells_at(count, photo_choice(), u32::MAX).iter().map(|c| c.0 + c.2).max().unwrap_or(0);
+    (m.img_full_w, m.img_box_w, m.img_room) = (full, full, ROOM.load(Ordering::Relaxed));
+}
+
+/// Marks the lone photo of `m`, `w` x `h` as the sender said and fitted by `fit`, for following
+/// the chat's width (`MsgDto::img_full_w`).
+pub fn follow_room(m: &mut MsgDto, w: Option<u32>, h: Option<u32>) {
+    let choice = photo_choice();
+    m.img_full_w = fit_at(w, h, captioned(m), choice, u32::MAX).0;
+    m.img_box_w = photo_px(photo_box(w, h).0, choice);
+    m.img_room = ROOM.load(Ordering::Relaxed);
+}
+
+/// The box at the medium size a photo of `w` x `h` is fitted into: by its orientation, landscape
+/// when that isn't known.
+fn photo_box(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
+    match (w, h) {
+        (Some(w), Some(h)) if w > 0 && h > w => PHOTO_BOX_TALL,
+        _ => PHOTO_BOX_WIDE,
+    }
 }
 
 /// Makes `m` show one picture as a grid of one cell, `size` big (logical px). Everything a
@@ -472,7 +493,7 @@ fn fit_at(w: Option<u32>, h: Option<u32>, captioned: bool, choice: u8, room: u32
     if w == 0 || h == 0 {
         return sized(PHOTO_BOX_WIDE);
     }
-    let (bw, bh) = sized(if h > w { PHOTO_BOX_TALL } else { PHOTO_BOX_WIDE });
+    let (bw, bh) = sized(photo_box(Some(w), Some(h)));
     let (w, h) = (w as f64, h as f64);
     let into_box = (bw as f64 / w).min(bh as f64 / h).min(1.0);
     // the bubble's width is the UI's, at any size
@@ -509,6 +530,7 @@ pub(super) fn set_attachments(
         // the same image may also be shown in a cell of another size
         let key = format!("{file_key}@{}x{}", size.0, size.1);
         set_single_photo(m, key.clone(), size);
+        follow_room(m, a.width, a.height);
         wanted_cells.push(WantedCell { key, file_key, ptr: a.clone(), size });
     } else {
         set_photo_grid(m, photos.len(), |n, w, h| {

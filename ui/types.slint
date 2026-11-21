@@ -126,6 +126,10 @@ export struct MsgItem {
     anim: image,
     img-w: length,
     img-h: length,
+    // how the pictures follow the chat's width until the row is built for it (`MsgDto::img_full_w`)
+    img-full-w: length,
+    img-box-w: length,
+    img-room: length,
     // the preview of a link in the text (link-url empty: none); link-img-w 0: no image
     link-url: string,
     link-title: string,

@@ -395,8 +395,9 @@ export component AppWindow inherits Window {
     callback gif-scrolled();
     // the width a picture may take in the message list: the row's padding (16px a side in
     // `Bubble`) and a group's avatar column (28px and 8px of spacing) left out. The backend sizes
-    // pictures to it, so a narrow chat shrinks them instead of cutting them.
-    out property <length> photo-room: msg-list.visible-width - 2 * 16px - 36px;
+    // pictures to it, so a narrow chat shrinks them instead of cutting them. Whole px: the rows
+    // compare it with the room they were sized for (`Bubble.k`).
+    out property <length> photo-room: floor((msg-list.visible-width - 2 * 16px - 36px) / 1px) * 1px;
     changed photo-room => { root.photo-room-changed(); }
     callback photo-room-changed();
     // the date shown at the top while scrolling: "Today", "Yesterday", "Sat, Nov 7" for a day number

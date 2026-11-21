@@ -132,12 +132,15 @@ export component MsgImage inherits Rectangle {
     in property <length> r-tr: 18px;
     in property <length> r-bl: 18px;
     in property <length> r-br: 18px;
+    // drawn at this share of its size: the chat got narrower than the picture and its rows aren't
+    // built again yet (`Bubble.k`)
+    in property <float> k: 1;
     callback attachment-clicked(string, int);
     callback menu(string, length, length);
-    min-width: flush ? m.img-w : 0px;
-    preferred-width: m.img-w;
-    max-width: flush ? 100000px : m.img-w;
-    height: m.img-h;
+    min-width: flush ? m.img-w * k : 0px;
+    preferred-width: m.img-w * k;
+    max-width: flush ? 100000px : m.img-w * k;
+    height: m.img-h * k;
     // flush: only the top corners follow the bubble (the bubble itself must not clip: reader photos hang over its edge)
     border-top-left-radius: flush || whole ? r-tl : 8px;
     border-top-right-radius: flush || whole ? r-tr : 8px;
@@ -181,11 +184,11 @@ export component MsgImage inherits Rectangle {
         }
     }
     for cell[i] in m.cells: Rectangle {
-        x: cell.x;
-        y: cell.y;
+        x: cell.x * root.k;
+        y: cell.y * root.k;
         // a lone picture fills the bubble's width when that is wider (flush)
-        width: m.cells.length == 1 ? parent.width : cell.w;
-        height: cell.h;
+        width: m.cells.length == 1 ? parent.width : cell.w * root.k;
+        height: cell.h * root.k;
         // until the image arrives
         background: Theme.loading;
         Image {
@@ -519,7 +522,18 @@ export component Bubble inherits VerticalLayout {
     // a received bare photo: its time sits beside it, so the chips straddle the picture's bottom edge like a bubble's.
     // Not when the photo takes the row's width (a narrow chat): the time goes under it. 72px: the
     // spacing, a pin and the time. The avatar column is already out of the room.
-    property <bool> side-time: photo-only && !m.outgoing && !m.hide-time && m.img-w + 72px <= root.room + (m.avatar-col ? 0px : 36px);
+    property <bool> side-time: photo-only && !m.outgoing && !m.hide-time && root.img-w + 72px <= root.room + (m.avatar-col ? 0px : 36px);
+    // While a resize goes on, the pictures are drawn at the size the room will give them (cut
+    // rather than wider than the room), until the backend sizes them for it
+    // (`gui::window::wire_photo_room`). Their thumbnails are sampled nearest-neighbor meanwhile.
+    // A picture inside a bubble's padding (a reply, a file line with it) is held to the bubble's
+    // width, which the backend doesn't size for: it stays drawn smaller.
+    property <length> avail: root.flush || root.bare ? root.room : min(root.room, root.max-w - 24px);
+    // growing: its box widens with the room up to the box's own width, and the picture with it,
+    // up to the size it has with no limit. Back at the room it was sized for, exactly 1.
+    property <float> grow: m.img-room <= 0px || m.img-box-w <= 0px ? 1 : min(min(m.img-box-w, root.avail) / min(m.img-box-w, m.img-room), m.img-full-w / m.img-w);
+    property <float> k: m.sticker || m.img-w <= 0px ? 1 : root.avail < m.img-w ? root.avail / m.img-w : max(1, min(root.grow, root.avail / m.img-w));
+    property <length> img-w: m.img-w * k;
     // a bare photo with its time row under the picture (sent, or received in a narrow chat): the chips straddle its edge, above that row
     property <bool> under-time: photo-only && !m.hide-time && !side-time;
     // height of the day separator above the message itself (centering a jump on the bubble)
@@ -626,7 +640,7 @@ export component Bubble inherits VerticalLayout {
             }
         }
         Rectangle {
-            max-width: root.flush ? max(m.img-w, 200px) : root.max-w;
+            max-width: root.flush ? max(root.img-w, 200px) : root.max-w;
             // a short bubble is at least as wide as its chips
             min-width: has-chips ? chips.width + 16px : 0px;
             border-top-left-radius: root.r-tl;
@@ -666,6 +680,7 @@ export component Bubble inherits VerticalLayout {
                 spacing: 0px;
                 if root.flush: MsgImage {
                     m: m;
+                    k: root.k;
                     flush: true;
                     r-tl: root.r-tl;
                     r-tr: root.r-tr;
@@ -702,6 +717,7 @@ export component Bubble inherits VerticalLayout {
                 }
                 if m.has-image && !root.flush: MsgImage {
                     m: m;
+                    k: root.k;
                     // a photo alone is the message: it takes the bubble's corners (stickers stay as they are)
                     whole: root.bare && !m.sticker;
                     r-tl: root.r-tl;
@@ -840,7 +856,7 @@ export component Bubble inherits VerticalLayout {
                         property <string> pad: !with-time ? "" : mm.preferred-width <= 52px ? "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" : mm.preferred-width <= 82px ? "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" : mm.preferred-width <= 112px ? "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" : "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}";
                         // fixed (the widest the text can get), so measuring doesn't loop with the layout;
                         // a wide link preview holds the bubble to its own width
-                        property <length> probe-w: min((root.flush ? max(m.img-w, 200px) : root.max-w) - 24px, m.link-url != "" && m.link-img-w > 100px ? m.link-img-w : 100000px);
+                        property <length> probe-w: min((root.flush ? max(root.img-w, 200px) : root.max-w) - 24px, m.link-url != "" && m.link-img-w > 100px ? m.link-img-w : 100000px);
                         property <bool> wraps: with-time && probe-pad.preferred-height > probe.preferred-height;
                         preferred-width: with-time ? probe.preferred-width + mm.preferred-width + 6px : probe.preferred-width;
                         mm := MsgMeta { visible: false; m: m; }

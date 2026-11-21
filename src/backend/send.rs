@@ -782,6 +782,7 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
         [(w, h)] => {
             let size = view::media::fit(Some(w), Some(h), view::media::captioned(&m));
             view::media::set_single_photo(&mut m, pending_photo_key(p.ts, 0, true), size);
+            view::media::follow_room(&mut m, Some(w), Some(h));
         }
         _ => view::media::set_photo_grid(&mut m, p.photos.len(), |n, _, _| pending_photo_key(p.ts, n, false)),
     }
