@@ -9,10 +9,11 @@
 - **MAJOR** stays 0 until the core features feel complete.
 
 ## Publishing
-1. Write the release notes to `target\release-notes.md` (see below) and have the user check them
+1. Run `/security-review` on the changes since the last release tag.
+2. Write the release notes to `target\release-notes.md` (see below) and have the user check them
    along with the version. This comes before the push: writing them can turn up a missed fix.
-2. Bump `version` in `Cargo.toml` (and `Cargo.lock` via `cargo build`), commit as `Release <version>`, push `main`.
-3. The user runs `scripts\release.ps1` (in a terminal: it asks for the key password and the publish
+3. Bump `version` in `Cargo.toml` (and `Cargo.lock` via `cargo build`), commit as `Release <version>`, push `main`.
+4. The user runs `scripts\release.ps1` (in a terminal: it asks for the key password and the publish
    confirmation). An agent only opens it in a new window for the user
    (`Start-Process pwsh -WorkingDirectory <repo> -ArgumentList '-NoExit','-File','scripts\release.ps1'`);
    the password and the confirmation stay with the user. It refuses missing or
@@ -22,7 +23,7 @@
    `PUBLIC_KEY`, shows the notes, asks for confirmation and creates tag `v<version>` plus the GitHub release with
    `sigwin.exe`, `sigwin.exe.minisig` and `licenses.html`, removes the notes file, then fetches the new tag. Needs `cargo-about`, `minisign` and
    `gh` (logged in) in `PATH`; the key defaults to `~\.minisign\sigwin.key` (`-Key` to change).
-4. Installed apps check `releases/latest` after the first sync (at once on the login screen), then hourly (and when the window
+5. Installed apps check `releases/latest` after the first sync (at once on the login screen), then hourly (and when the window
    gains focus after an hour without a check), download and verify the exe, swap it in, and
    show "새 버전 … 준비됨 · 다시 시작" in the sidebar. Network failures retry after 5 min,
    backing off to an hour.
