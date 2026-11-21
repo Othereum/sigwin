@@ -3,8 +3,9 @@
 //! Stickers: a row reports itself on screen (`Anim.shown`), then the backend is asked once for
 //! the sticker as an APNG at the size shown (stills answer with none). Slint's `Image` plays it,
 //! decoding a frame when it draws one, so nothing ticks here and nothing decodes while it isn't
-//! drawn. The least recently shown sticker goes back to its still when the list's stickers
-//! would exceed `ANIM_BUDGET`. Picker: only the hovered sticker plays.
+//! drawn. Those off screen keep `OFF_SCREEN` together, the longest off screen going back to its
+//! still first (asked for again when its row comes back), and all of them keep `ANIM_BUDGET`.
+//! Picker: only the hovered sticker plays.
 //!
 //! GIFs play from frames the backend streams (`backend::gif`): one at a time, decoded off the UI
 //! thread, which Slint's player can't do for big ones.
@@ -25,17 +26,19 @@ struct Sticker {
     image: Image,
     /// what it holds while playing: its bytes and the two frames `Image` keeps decoded
     bytes: usize,
-    /// `Anims.clock` when last shown
-    used: u64,
     _held: crate::alloc::Held,
 }
 
+/// What the open chat's playing stickers off screen may hold together. Coming back on screen,
+/// one let go of is decoded again from its attachment.
+const OFF_SCREEN: usize = 4 << 20;
+
 impl Sticker {
-    fn new(f: &Frames, used: u64) -> Option<Self> {
+    fn new(f: &Frames) -> Option<Self> {
         let image = Image::load_from_data(&f.png, Some("png")).ok()?;
         let size = image.size();
         let bytes = f.png.len() + 2 * 4 * (size.width * size.height) as usize;
-        Some(Sticker { image, bytes, used, _held: crate::alloc::Held::new(crate::alloc::Gauge::Anims, bytes) })
+        Some(Sticker { image, bytes, _held: crate::alloc::Held::new(crate::alloc::Gauge::Anims, bytes) })
     }
 }
 
@@ -58,7 +61,6 @@ pub(crate) struct Anims {
     list: HashMap<String, Sticker>,
     /// keys asked from the backend, answered or not (an evicted key leaves, so it can come back)
     asked: HashSet<String>,
-    clock: u64,
     /// the hovered picker sticker's key, and whether it plays (its APNG arrived)
     hovered: Option<String>,
     picker: bool,
@@ -86,6 +88,41 @@ impl Anims {
 
     fn bytes(&self) -> usize {
         self.list.values().map(|s| s.bytes).sum()
+    }
+}
+
+/// Puts the stickers back to their stills past `OFF_SCREEN` off screen (the longest off screen
+/// first) and past `ANIM_BUDGET` in all (the longest since on screen first).
+pub(super) fn trim_list(ui: &mut Ui) {
+    let on_screen = ui.shown.on_screen_keys(&ui.last);
+    let mut by_age: Vec<(u64, &String, usize, bool)> = ui
+        .anims
+        .list
+        .iter()
+        .map(|(k, s)| (ui.shown.last_seen(k), k, s.bytes, on_screen.contains(k.as_str())))
+        .collect();
+    by_age.sort_by_key(|o| o.0);
+    let mut off = by_age.iter().filter(|o| !o.3).map(|o| o.2).sum::<usize>();
+    let mut all = ui.anims.bytes();
+    let mut gone = Vec::new();
+    for (_, k, bytes, shown) in by_age {
+        if off <= OFF_SCREEN && all <= ANIM_BUDGET {
+            break;
+        }
+        if shown && all <= ANIM_BUDGET {
+            continue;
+        }
+        if !shown {
+            off -= bytes;
+        }
+        all -= bytes;
+        gone.push(k.clone());
+    }
+    for k in gone {
+        tracing::debug!("anim budget: {k} back to its still");
+        ui.anims.list.remove(&k);
+        ui.anims.asked.remove(&k);
+        set_rows(ui, &k);
     }
 }
 
@@ -247,14 +284,8 @@ fn shown(id: &str) {
             return;
         }
         let key = m.image_key.clone();
-        ui.anims.clock += 1;
-        let clock = ui.anims.clock;
-        if let Some(p) = ui.anims.list.get_mut(&key) {
-            p.used = clock;
-            return;
-        }
         // not downloaded yet: the still's arrival reports the row again
-        if !ui.thumbs.contains_key(&key) || !ui.anims.asked.insert(key.clone()) {
+        if ui.anims.list.contains_key(&key) || !ui.thumbs.contains_key(&key) || !ui.anims.asked.insert(key.clone()) {
             return;
         }
         if let Some(tx) = &ui.tx {
@@ -296,7 +327,7 @@ pub(crate) fn frames_arrived(f: Frames) {
             if ui.anims.hovered.as_deref() != Some(f.key.as_str()) {
                 return;
             }
-            let Some(s) = Sticker::new(&f, 0) else { return };
+            let Some(s) = Sticker::new(&f) else { return };
             set_picker_row(ui, &f.key, s.image);
             ui.anims.picker = true;
         } else {
@@ -304,16 +335,10 @@ pub(crate) fn frames_arrived(f: Frames) {
             if !ui.anims.asked.contains(&f.key) || ui.anims.list.contains_key(&f.key) {
                 return;
             }
-            let Some(s) = Sticker::new(&f, ui.anims.clock) else { return };
-            while !ui.anims.list.is_empty() && ui.anims.bytes() + s.bytes > ANIM_BUDGET {
-                let Some(old) = ui.anims.list.iter().min_by_key(|(_, s)| s.used).map(|(k, _)| k.clone()) else { break };
-                tracing::debug!("anim budget: {old} back to its still");
-                ui.anims.list.remove(&old);
-                ui.anims.asked.remove(&old);
-                set_rows(ui, &old);
-            }
+            let Some(s) = Sticker::new(&f) else { return };
             ui.anims.list.insert(f.key.clone(), s);
             set_rows(ui, &f.key);
+            trim_list(ui);
             tracing::debug!(playing = ui.anims.list.len(), kb = ui.anims.bytes() / 1024, "anim frames");
         }
     });

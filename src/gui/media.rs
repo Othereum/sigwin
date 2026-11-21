@@ -128,6 +128,16 @@ impl Shown {
         self.dropped.retain(|k| keys.contains(k.as_str()));
     }
 
+    /// When the picture under `key` was last on screen (or arrived): 0 for never.
+    pub(super) fn last_seen(&self, key: &str) -> u64 {
+        self.left.get(key).copied().unwrap_or(0)
+    }
+
+    /// The pictures of the rows on screen, of `items`.
+    pub(super) fn on_screen_keys<'a>(&self, items: &'a [MsgDto]) -> HashSet<&'a str> {
+        self.on_screen(items).iter().flat_map(rows::picture_keys).collect()
+    }
+
     /// The rows on screen, of `items`.
     fn on_screen<'a>(&self, items: &'a [MsgDto]) -> &'a [MsgDto] {
         let at = |id: &str| items.iter().position(|m| m.id == id);
@@ -161,16 +171,22 @@ pub(super) fn view_moved(top: &str, bottom: &str) {
     }
 }
 
-/// Lets go of the pictures longest off screen past `OFF_SCREEN`, taking them out of their rows.
+/// Lets go of what pictures off screen hold past their budgets: thumbnails, then animations.
 fn trim_pictures(ui: &mut Ui) {
-    let on_screen: HashSet<&str> = ui.shown.on_screen(&ui.last).iter().flat_map(rows::picture_keys).collect();
+    trim_thumbs(ui);
+    super::anim::trim_list(ui);
+}
+
+/// Lets go of the pictures longest off screen past `OFF_SCREEN`, taking them out of their rows.
+fn trim_thumbs(ui: &mut Ui) {
+    let on_screen = ui.shown.on_screen_keys(&ui.last);
     // the rows' only: the composer's and the link card's stay
     let rows: HashSet<&str> = ui.last.iter().flat_map(rows::picture_keys).collect();
     let mut off: Vec<(u64, &String, usize)> = ui
         .thumbs
         .iter()
         .filter(|(k, _)| rows.contains(k.as_str()) && !on_screen.contains(k.as_str()))
-        .map(|(k, img)| (ui.shown.left.get(k).copied().unwrap_or(0), k, held::Measured::bytes(img)))
+        .map(|(k, img)| (ui.shown.last_seen(k), k, held::Measured::bytes(img)))
         .collect();
     let mut over = off.iter().map(|o| o.2).sum::<usize>().saturating_sub(OFF_SCREEN);
     if over == 0 {
