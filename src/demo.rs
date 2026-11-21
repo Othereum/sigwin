@@ -388,7 +388,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             m.attachment.clear();
             m.outgoing = n % 3 == 2;
             m.text = if demo_captioned(n) { "사진 설명".into() } else { String::new() };
-            view::media::set_single_photo(m, format!("demo-size-{n}"), view::media::fit(Some(w), Some(h), view::media::captioned(m)));
+            view::media::set_single_photo(m, format!("demo-size-{n}"), view::media::fit(Some(w), Some(h), view::media::place(m)));
         }
     }
     if std::env::var_os("SIGWIN_DEMO_GRID").is_some() {
@@ -1286,6 +1286,10 @@ fn demo_captioned(n: usize) -> bool {
     n % 4 == 1
 }
 
+fn demo_place(n: usize) -> view::media::Place {
+    if demo_captioned(n) { view::media::Place::Captioned } else { view::media::Place::Bare }
+}
+
 /// Their pictures, made from a checkerboard of that size the way a received photo's are.
 fn demo_photos(emit: &backend::Emit) {
     std::thread::sleep(std::time::Duration::from_millis(300));
@@ -1295,7 +1299,7 @@ fn demo_photos(emit: &backend::Emit) {
             image::Rgba(if on { [230, 120, 40, 255] } else { [40, 90, 200, 255] })
         });
         let Ok(png) = sigwin_thumb::png_rgba(&src) else { continue };
-        let (cw, ch) = view::media::fit(Some(w), Some(h), demo_captioned(n));
+        let (cw, ch) = view::media::fit(Some(w), Some(h), demo_place(n));
         let cell = (types::physical_px(cw), types::physical_px(ch));
         let Ok(img) = sigwin_thumb::decode_thumb_for(&png, view::media::PHOTO_THUMB_MAX, |d| sigwin_thumb::cover_side(d, cell)) else { continue };
         let img = sigwin_thumb::cover(&sigwin_thumb::to_rgba(&img), cell.0, cell.1);

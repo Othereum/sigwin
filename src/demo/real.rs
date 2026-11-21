@@ -350,7 +350,7 @@ fn send_thumbs(emit: &backend::Emit) {
     send(CHAT_PHOTO.0, (400, 300), CHAT_PHOTO.1);
     send(&format!("{}-q", CHAT_PHOTO.0), crate::view::QUOTE_IMAGE, CHAT_PHOTO.1);
     for (n, &v) in GROUP_PHOTOS.iter().enumerate() {
-        send(&format!("real-grid-{n}"), view::media::grid_cell_size(GROUP_PHOTOS.len(), n), v);
+        send(&format!("real-grid-{n}"), view::media::grid_cell_size(GROUP_PHOTOS.len(), n, view::media::Place::Captioned), v);
     }
 }
 

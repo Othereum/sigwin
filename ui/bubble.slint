@@ -242,18 +242,20 @@ export component MsgImage inherits Rectangle {
 // a link's preview: a wide image on top, a small one beside the text; clicking opens the link
 component LinkPreview inherits Rectangle {
     in property <MsgItem> m;
+    // the wide image drawn at this share of its size while a resize goes on (`Bubble.link-k`)
+    in property <float> k: 1;
     callback menu(string, length, length);
     property <bool> wide: m.link-img-w > 100px;
     property <bool> small: m.link-img-w > 0px && !wide;
     preferred-width: 300px;
     // a wide image is pre-resampled to exactly this width; stretching it would be nearest-neighbor
-    max-width: wide ? m.link-img-w : 100000px;
+    max-width: wide ? m.link-img-w * k : 100000px;
     border-radius: 8px;
     clip: true;
     background: m.outgoing ? (ta.has-hover ? Theme.inset-out-hover : Theme.inset-out) : (ta.has-hover ? Theme.inset-hover : Theme.inset);
     VerticalLayout {
         if wide: Rectangle {
-            height: m.link-img-h;
+            height: m.link-img-h * root.k;
             background: Theme.loading;
             Image {
                 width: 100%;
@@ -462,8 +464,9 @@ export component QuoteBox inherits Rectangle {
 export component Bubble inherits VerticalLayout {
     in property <MsgItem> m;
     in property <length> max-w;
-    // the width a picture may take (`photo-room` in app.slint)
+    // the width a picture may take (`photo-room` in app.slint), and inside a bubble's padding
     in property <length> room: 100000px;
+    in property <length> room-boxed: 100000px;
     // briefly outlined after jumping to it (pinned message bar)
     in property <bool> flash;
     callback attachment-clicked(string, int);
@@ -526,14 +529,15 @@ export component Bubble inherits VerticalLayout {
     // While a resize goes on, the pictures are drawn at the size the room will give them (cut
     // rather than wider than the room), until the backend sizes them for it
     // (`gui::window::wire_photo_room`). Their thumbnails are sampled nearest-neighbor meanwhile.
-    // A picture inside a bubble's padding (a reply, a file line with it) is held to the bubble's
-    // width, which the backend doesn't size for: it stays drawn smaller.
-    property <length> avail: root.flush || root.bare ? root.room : min(root.room, root.max-w - 24px);
+    // a picture inside a bubble's padding (a reply, a file line with it) is held to the bubble's width
+    property <length> avail: root.flush || root.bare ? root.room : root.room-boxed;
     // growing: its box widens with the room up to the box's own width, and the picture with it,
     // up to the size it has with no limit. Back at the room it was sized for, exactly 1.
     property <float> grow: m.img-room <= 0px || m.img-box-w <= 0px ? 1 : min(min(m.img-box-w, root.avail) / min(m.img-box-w, m.img-room), m.img-full-w / m.img-w);
     property <float> k: m.sticker || m.img-w <= 0px ? 1 : root.avail < m.img-w ? root.avail / m.img-w : max(1, min(root.grow, root.avail / m.img-w));
     property <length> img-w: m.img-w * k;
+    // a link preview's wide image the same way: its box is the image
+    property <float> link-k: m.link-img-w <= 100px || m.link-full-w <= 0px ? 1 : min(m.link-full-w, root.room-boxed) / m.link-img-w;
     // a bare photo with its time row under the picture (sent, or received in a narrow chat): the chips straddle its edge, above that row
     property <bool> under-time: photo-only && !m.hide-time && !side-time;
     // height of the day separator above the message itself (centering a jump on the bubble)
@@ -640,7 +644,9 @@ export component Bubble inherits VerticalLayout {
             }
         }
         Rectangle {
-            max-width: root.flush ? max(root.img-w, 200px) : root.max-w;
+            // a picture's bubble is as wide as the picture, which the backend sizes to the room:
+            // held to `max-w`, a bare one was squeezed and cut at its sides
+            max-width: root.flush || root.bare ? max(root.img-w, 200px) : root.max-w;
             // a short bubble is at least as wide as its chips
             min-width: has-chips ? chips.width + 16px : 0px;
             border-top-left-radius: root.r-tl;
@@ -835,6 +841,7 @@ export component Bubble inherits VerticalLayout {
                 }
                 if m.link-url != "": LinkPreview {
                     m: m;
+                    k: root.link-k;
                     menu(id, x, y) => { root.menu(id, x, y); }
                 }
                 // With @mentions or links the visible glyphs come from a StyledText on top (same font
@@ -856,7 +863,7 @@ export component Bubble inherits VerticalLayout {
                         property <string> pad: !with-time ? "" : mm.preferred-width <= 52px ? "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" : mm.preferred-width <= 82px ? "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" : mm.preferred-width <= 112px ? "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}" : "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}";
                         // fixed (the widest the text can get), so measuring doesn't loop with the layout;
                         // a wide link preview holds the bubble to its own width
-                        property <length> probe-w: min((root.flush ? max(root.img-w, 200px) : root.max-w) - 24px, m.link-url != "" && m.link-img-w > 100px ? m.link-img-w : 100000px);
+                        property <length> probe-w: min((root.flush ? max(root.img-w, 200px) : root.max-w) - 24px, m.link-url != "" && m.link-img-w > 100px ? m.link-img-w * root.link-k : 100000px);
                         property <bool> wraps: with-time && probe-pad.preferred-height > probe.preferred-height;
                         preferred-width: with-time ? probe.preferred-width + mm.preferred-width + 6px : probe.preferred-width;
                         mm := MsgMeta { visible: false; m: m; }

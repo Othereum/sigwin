@@ -112,7 +112,9 @@ impl App {
         if view_once {
             photos.clear();
         } else {
-            self.spawn_pending_thumbs(ts, photo_paths, &photos, !text.is_empty() && quote.is_none());
+            // as the pending row will say (`pending_row`)
+            let place = view::media::Place::of(&text, &quote_label, &attachment);
+            self.spawn_pending_thumbs(ts, photo_paths, &photos, place);
         }
         let attachment = if view_once { String::new() } else { attachment };
         self.queue_send(Pending {
@@ -135,9 +137,9 @@ impl App {
     }
 
     /// Pictures for the pending row's photos, straight from the files being sent (no cache).
-    /// One photo is fitted to its size, several fill the cells of a grid. `captioned`: as
-    /// `view::media::captioned` says of the row.
-    fn spawn_pending_thumbs(&self, ts: u64, paths: Vec<PathBuf>, sizes: &[(u32, u32)], captioned: bool) {
+    /// One photo is fitted to its size, several fill the cells of a grid. `place`: as
+    /// `view::media::place` says of the row.
+    fn spawn_pending_thumbs(&self, ts: u64, paths: Vec<PathBuf>, sizes: &[(u32, u32)], place: view::media::Place) {
         if paths.is_empty() {
             return;
         }
@@ -151,9 +153,9 @@ impl App {
                 let key = pending_photo_key(ts, n, single);
                 // the cell it fills: one photo's own box, or its place in the grid
                 let (w, h) = if single {
-                    view::media::fit(Some(sizes[0].0), Some(sizes[0].1), captioned)
+                    view::media::fit(Some(sizes[0].0), Some(sizes[0].1), place)
                 } else {
-                    view::media::grid_cell_size(paths.len(), n)
+                    view::media::grid_cell_size(paths.len(), n, place)
                 };
                 let (w, h) = (crate::types::physical_px(w), crate::types::physical_px(h));
                 let Ok(img) = sigwin_thumb::decode_thumb_for(&bytes, 0, |d| sigwin_thumb::cover_side(d, (w, h))) else { continue };
@@ -780,7 +782,7 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     match p.photos[..] {
         [] => {}
         [(w, h)] => {
-            let size = view::media::fit(Some(w), Some(h), view::media::captioned(&m));
+            let size = view::media::fit(Some(w), Some(h), view::media::place(&m));
             view::media::set_single_photo(&mut m, pending_photo_key(p.ts, 0, true), size);
             view::media::follow_room(&mut m, Some(w), Some(h));
         }

@@ -409,6 +409,7 @@ pub(crate) fn to_item(
         link_image: card.and_then(|c| thumbs.get(&c.image_key)).cloned().unwrap_or_default(),
         link_img_w: card.map_or(0.0, |c| c.img_w as f32),
         link_img_h: card.map_or(0.0, |c| c.img_h as f32),
+        link_full_w: card.map_or(0.0, |c| crate::view::media::link_image_full_width(c.img_w) as f32),
         reactions: ModelRc::new(VecModel::from(reactions)),
         replies: m.replies as i32,
         big_emoji: m.big_emoji,

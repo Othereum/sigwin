@@ -33,19 +33,55 @@ fn photo_choice() -> u8 {
     PHOTO_SIZE.load(Ordering::Relaxed)
 }
 
-/// The width a picture may take in the chat, logical px (`set_room`): a narrow chat shrinks its
-/// pictures rather than cutting them. 0 until the UI says, no limit.
-static ROOM: AtomicU32 = AtomicU32::new(0);
+/// Where a message's pictures sit, which decides how wide they may be: alone (`bare` in
+/// `ui/bubble.slint`), on top of a caption's bubble (`flush`), or inside a bubble's padding (a
+/// reply, a file line, a link preview's image), held to that bubble's width.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Place {
+    Bare,
+    Captioned,
+    Boxed,
+}
 
-/// Sets the width pictures may take in the chat. Whether any picture's size changes: past the
+impl Place {
+    /// As the UI tells them apart.
+    pub fn of(text: &str, quote: &str, attachment: &str) -> Place {
+        if !quote.is_empty() {
+            Place::Boxed
+        } else if !text.is_empty() {
+            Place::Captioned
+        } else if !attachment.is_empty() {
+            Place::Boxed
+        } else {
+            Place::Bare
+        }
+    }
+}
+
+/// Where the pictures of `m` sit.
+pub fn place(m: &MsgDto) -> Place {
+    Place::of(&m.text, &m.quote, &m.attachment)
+}
+
+/// The width a picture may take in the chat, logical px (`set_room`): a narrow chat shrinks its
+/// pictures rather than cutting them. Alone or captioned, and inside a bubble. 0 until the UI
+/// says, no limit.
+static ROOM: AtomicU32 = AtomicU32::new(0);
+static ROOM_BOXED: AtomicU32 = AtomicU32::new(0);
+
+/// Sets the widths pictures may take in the chat. Whether any picture's size changes: past the
 /// widest box at the chosen size, the room makes no difference.
-pub fn set_room(px: u32) -> bool {
-    // the UI's least pane leaves more; a caption's bubble is never narrower anyway
-    let px = px.max(CAPTIONED_MIN_WIDTH);
-    let old = ROOM.swap(px, Ordering::Relaxed);
-    let widest = photo_px(PHOTO_BOX_WIDE.0, photo_choice());
+pub fn set_room(px: u32, boxed: u32) -> bool {
+    let widest = photo_px(PHOTO_BOX_WIDE.0, photo_choice()).max(LINK_IMAGE_WIDE.0);
     let bound = |r: u32| if r == 0 { widest } else { r.min(widest) };
-    bound(old) != bound(px)
+    // the UI's least pane leaves more; a caption's bubble is never narrower anyway
+    let set = |room: &AtomicU32, px: u32| {
+        let px = px.max(CAPTIONED_MIN_WIDTH);
+        bound(room.swap(px, Ordering::Relaxed)) != bound(px)
+    };
+    // both, not the first to differ only
+    let changed = set(&ROOM, px);
+    set(&ROOM_BOXED, boxed) || changed
 }
 
 /// Whether the UI has said how wide the chat is.
@@ -53,9 +89,17 @@ pub fn has_room() -> bool {
     ROOM.load(Ordering::Relaxed) != 0
 }
 
-/// The room set, or no limit.
-fn room() -> u32 {
-    match ROOM.load(Ordering::Relaxed) {
+/// The room set for pictures in `place`, as set: 0 for none.
+fn room_set(place: Place) -> u32 {
+    match place {
+        Place::Boxed => ROOM_BOXED.load(Ordering::Relaxed),
+        _ => ROOM.load(Ordering::Relaxed),
+    }
+}
+
+/// The room for pictures in `place`, or no limit.
+fn room(place: Place) -> u32 {
+    match room_set(place) {
         0 => u32::MAX,
         r => r,
     }
@@ -95,12 +139,28 @@ const LINK_IMAGE_SMALL: (u32, u32) = (64, 64);
 pub const LINK_TITLE_MAX: usize = 200;
 pub const LINK_DESC_MAX: usize = 300;
 
-/// An image too small or of unknown size stays small (site logos).
+/// An image too small or of unknown size stays small (site logos). A wide one is no wider than
+/// its bubble's room, keeping its shape.
 pub fn link_image_size(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
+    link_image_size_in(w, h, room(Place::Boxed))
+}
+
+fn link_image_size_in(w: Option<u32>, h: Option<u32>, room: u32) -> (u32, u32) {
     match (w, h) {
-        (Some(w), Some(h)) if w >= 200 && h >= 100 && w >= h => LINK_IMAGE_WIDE,
+        (Some(w), Some(h)) if w >= 200 && h >= 100 && w >= h => narrowed(LINK_IMAGE_WIDE, room),
         _ => LINK_IMAGE_SMALL,
     }
+}
+
+/// The width a link preview's image of `w` x `h` (logical px, on the card) has with no room
+/// limit: the UI follows a resize to it (`Bubble.link-k`).
+pub fn link_image_full_width(w: u32) -> u32 {
+    if w > LINK_IMAGE_SMALL.0 { LINK_IMAGE_WIDE.0 } else { w }
+}
+
+/// A box `w` x `h` no wider than `room`, keeping its shape.
+fn narrowed((w, h): (u32, u32), room: u32) -> (u32, u32) {
+    if w <= room { (w, h) } else { (room, ((u64::from(h) * u64::from(room) * 2 + u64::from(w)) / (2 * u64::from(w))) as u32) }
 }
 
 /// The preview to show on a message, and its image to fetch. Like Signal's clients, it counts
@@ -349,8 +409,8 @@ pub const GRID_SHOWN: usize = 5;
 
 /// Where a grid of `count` images (2 or more) puts them: x, y, width and height in logical px,
 /// with a 1px gap. As in Signal's apps, the first ones are the largest.
-fn grid_cells(count: usize) -> Vec<(u32, u32, u32, u32)> {
-    grid_cells_at(count, photo_choice(), room())
+fn grid_cells(count: usize, place: Place) -> Vec<(u32, u32, u32, u32)> {
+    grid_cells_at(count, photo_choice(), room(place))
 }
 
 fn grid_cells_at(count: usize, choice: u8, room: u32) -> Vec<(u32, u32, u32, u32)> {
@@ -398,9 +458,9 @@ fn split(total: u32, weights: &[u32]) -> Vec<(u32, u32)> {
         .collect()
 }
 
-/// Width and height of cell `n` in a grid of `count` images (logical px).
-pub fn grid_cell_size(count: usize, n: usize) -> (u32, u32) {
-    grid_cells(count).get(n).map_or((0, 0), |c| (c.2, c.3))
+/// Width and height of cell `n` in a grid of `count` images in `place` (logical px).
+pub fn grid_cell_size(count: usize, n: usize, place: Place) -> (u32, u32) {
+    grid_cells(count, place).get(n).map_or((0, 0), |c| (c.2, c.3))
 }
 
 /// Makes `m` show `count` images as a grid, if that is 2 or more. `key` gets the index of each
@@ -410,7 +470,8 @@ pub fn set_photo_grid(m: &mut MsgDto, count: usize, mut key: impl FnMut(usize, u
     if count == 0 {
         return;
     }
-    let cells = grid_cells(count);
+    let place = place(m);
+    let cells = grid_cells(count, place);
     let more = count.saturating_sub(GRID_SHOWN) as u32;
     m.cells = cells
         .iter()
@@ -430,16 +491,16 @@ pub fn set_photo_grid(m: &mut MsgDto, count: usize, mut key: impl FnMut(usize, u
     m.img_h = cells.iter().map(|c| c.1 + c.3).max().unwrap_or(0);
     // a grid is its box
     let full = grid_cells_at(count, photo_choice(), u32::MAX).iter().map(|c| c.0 + c.2).max().unwrap_or(0);
-    (m.img_full_w, m.img_box_w, m.img_room) = (full, full, ROOM.load(Ordering::Relaxed));
+    (m.img_full_w, m.img_box_w, m.img_room) = (full, full, room_set(place));
 }
 
 /// Marks the lone photo of `m`, `w` x `h` as the sender said and fitted by `fit`, for following
 /// the chat's width (`MsgDto::img_full_w`).
 pub fn follow_room(m: &mut MsgDto, w: Option<u32>, h: Option<u32>) {
-    let choice = photo_choice();
-    m.img_full_w = fit_at(w, h, captioned(m), choice, u32::MAX).0;
+    let (choice, place) = (photo_choice(), place(m));
+    m.img_full_w = fit_at(w, h, place, choice, u32::MAX).0;
     m.img_box_w = photo_px(photo_box(w, h).0, choice);
-    m.img_room = ROOM.load(Ordering::Relaxed);
+    m.img_room = room_set(place);
 }
 
 /// The box at the medium size a photo of `w` x `h` is fitted into: by its orientation, landscape
@@ -470,25 +531,17 @@ const PHOTO_MIN: u32 = 100;
 /// The narrowest bubble a photo with a caption gets (`flush` in `ui/bubble.slint`).
 const CAPTIONED_MIN_WIDTH: u32 = 200;
 
-/// Whether the picture of `m` shares its bubble with a caption: the bubble is then at least
-/// `CAPTIONED_MIN_WIDTH` wide and the picture as wide as the bubble (`flush` in the UI).
-pub fn captioned(m: &MsgDto) -> bool {
-    !m.text.is_empty() && m.quote.is_empty()
+/// Size a lone photo of `w` x `h` in `place` is shown at (logical px): scaled into the box for
+/// its orientation at the chosen size and no wider than the room, never up, unless it is smaller
+/// than the least it is shown at. An extreme shape is cut to the box. With a caption, the bubble
+/// is at least `CAPTIONED_MIN_WIDTH` wide and the picture as wide as the bubble.
+pub fn fit(w: Option<u32>, h: Option<u32>, place: Place) -> (u32, u32) {
+    fit_at(w, h, place, photo_choice(), room(place))
 }
 
-/// Size a lone photo of `w` x `h` is shown at (logical px): scaled into the box for its
-/// orientation at the chosen size and no wider than the room, never up, unless it is smaller
-/// than the least it is shown at. An extreme shape is cut to the box.
-pub fn fit(w: Option<u32>, h: Option<u32>, captioned: bool) -> (u32, u32) {
-    fit_at(w, h, captioned, photo_choice(), room())
-}
-
-fn fit_at(w: Option<u32>, h: Option<u32>, captioned: bool, choice: u8, room: u32) -> (u32, u32) {
-    // a box narrowed by the room keeps its shape
-    let sized = |(w, h): (u32, u32)| {
-        let (w, h) = (photo_px(w, choice), photo_px(h, choice));
-        if w <= room { (w, h) } else { (room, ((u64::from(h) * u64::from(room) * 2 + u64::from(w)) / (2 * u64::from(w))) as u32) }
-    };
+fn fit_at(w: Option<u32>, h: Option<u32>, place: Place, choice: u8, room: u32) -> (u32, u32) {
+    let captioned = place == Place::Captioned;
+    let sized = |(w, h): (u32, u32)| narrowed((photo_px(w, choice), photo_px(h, choice)), room);
     let (Some(w), Some(h)) = (w, h) else { return sized(PHOTO_BOX_WIDE) };
     if w == 0 || h == 0 {
         return sized(PHOTO_BOX_WIDE);
@@ -526,7 +579,7 @@ pub(super) fn set_attachments(
     if let [(i, a)] = photos[..] {
         let file_key = attachment_key(a, ts, i);
         // the sender's size may be missing or wrong: the picture is cut to fill the box
-        let size = fit(a.width, a.height, captioned(m));
+        let size = fit(a.width, a.height, place(m));
         // the same image may also be shown in a cell of another size
         let key = format!("{file_key}@{}x{}", size.0, size.1);
         set_single_photo(m, key.clone(), size);
@@ -575,9 +628,14 @@ mod tests {
     /// A chat wide enough for every box.
     const WIDE: u32 = u32::MAX;
 
+    /// With a caption or alone.
+    fn at(captioned: bool) -> Place {
+        if captioned { Place::Captioned } else { Place::Bare }
+    }
+
     #[test]
     fn photo_size_caps() {
-        let f = |w, h| fit_at(Some(w), Some(h), false, 1, WIDE);
+        let f = |w, h| fit_at(Some(w), Some(h), Place::Bare, 1, WIDE);
         assert_eq!(f(3000, 3000), (300, 300)); // square
         assert_eq!(f(4000, 3000), (400, 300)); // 4:3 unchanged
         assert_eq!(f(3000, 4000), (300, 400)); // 3:4 is width-limited
@@ -585,26 +643,38 @@ mod tests {
         assert_eq!(f(900, 1600), (253, 450)); // 9:16
         assert_eq!(f(1600, 900), (400, 225)); // 16:9 unchanged
         assert_eq!(f(150, 120), (150, 120)); // never upscaled
-        assert_eq!(fit_at(None, None, false, 1, WIDE), (400, 300));
+        assert_eq!(fit_at(None, None, Place::Bare, 1, WIDE), (400, 300));
     }
 
     #[test]
     fn a_narrow_chat_shrinks_photos() {
-        let f = |w, h, c| fit_at(Some(w), Some(h), c, 2, 280);
+        let f = |w, h, c| fit_at(Some(w), Some(h), at(c), 2, 280);
         // the box narrows and keeps its shape: nothing is cut that a wide chat shows
         assert_eq!(f(4000, 3000, false), (280, 210));
         assert_eq!(f(2000, 3000, false), (280, 420));
-        assert_eq!(fit_at(None, None, false, 2, 280), (280, 210));
+        assert_eq!(fit_at(None, None, Place::Bare, 2, 280), (280, 210));
         // a photo that fits is left alone
         assert_eq!(f(200, 150, false), (200, 150));
         assert_eq!(f(16, 16, true), (200, 200));
         let cells = grid_cells_at(5, 2, 280);
         assert_eq!(cells.iter().map(|c| c.0 + c.2).max(), Some(280));
+        // a link preview's wide image too; a small one stays as it is
+        assert_eq!(link_image_size_in(Some(1200), Some(630), 240), (240, 126));
+        assert_eq!(link_image_size_in(Some(1200), Some(630), WIDE), LINK_IMAGE_WIDE);
+        assert_eq!(link_image_size_in(Some(64), Some(64), 240), LINK_IMAGE_SMALL);
+    }
+
+    #[test]
+    fn pictures_sit_where_the_bubble_puts_them() {
+        assert_eq!(Place::of("", "", ""), Place::Bare);
+        assert_eq!(Place::of("caption", "", "a.zip"), Place::Captioned);
+        assert_eq!(Place::of("caption", "quoted", ""), Place::Boxed);
+        assert_eq!(Place::of("", "", "a.zip"), Place::Boxed);
     }
 
     #[test]
     fn small_photos_have_a_least_size() {
-        let f = |w, h, c| fit_at(Some(w), Some(h), c, 1, WIDE);
+        let f = |w, h, c| fit_at(Some(w), Some(h), at(c), 1, WIDE);
         assert_eq!(f(1, 1, false), (100, 100));
         assert_eq!(f(60, 40, false), (150, 100)); // its shape kept
         // extreme shapes are cut to the box
@@ -615,16 +685,16 @@ mod tests {
         assert_eq!(f(300, 100, true), (300, 100));
         assert_eq!(f(150, 120, true), (200, 160));
         assert_eq!(f(10, 1000, true), (200, 450));
-        assert_eq!(fit_at(None, None, true, 1, WIDE), (400, 300));
+        assert_eq!(fit_at(None, None, Place::Captioned, 1, WIDE), (400, 300));
     }
 
     #[test]
     fn photos_follow_the_chosen_size() {
-        let f = |w, h, c, choice| fit_at(Some(w), Some(h), c, choice, WIDE);
+        let f = |w, h, c, choice| fit_at(Some(w), Some(h), at(c), choice, WIDE);
         assert_eq!(f(4000, 3000, false, 0), (300, 225));
         assert_eq!(f(4000, 3000, false, 2), (533, 400));
         assert_eq!(f(3000, 4000, false, 2), (400, 533));
-        assert_eq!(fit_at(None, None, false, 0, WIDE), (300, 225));
+        assert_eq!(fit_at(None, None, Place::Bare, 0, WIDE), (300, 225));
         // the least size follows; the caption's bubble doesn't
         assert_eq!(f(1, 1, false, 0), (75, 75));
         assert_eq!(f(1, 1, false, 2), (134, 134));

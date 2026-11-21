@@ -138,6 +138,8 @@ export struct MsgItem {
     link-image: image,
     link-img-w: length,
     link-img-h: length,
+    // its image's width with no room limit, which a resize follows to (`Bubble.link-k`)
+    link-full-w: length,
     // several images: the grid drawn instead of `image`
     cells: [ImageCell],
     deleted: bool,

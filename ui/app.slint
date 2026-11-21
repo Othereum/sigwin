@@ -399,6 +399,12 @@ export component AppWindow inherits Window {
     // compare it with the room they were sized for (`Bubble.k`).
     out property <length> photo-room: floor((msg-list.visible-width - 2 * 16px - 36px) / 1px) * 1px;
     changed photo-room => { root.photo-room-changed(); }
+    // the widest a message's bubble gets
+    property <length> bubble-max-w: min(560px, msg-list.visible-width * 0.75);
+    // the same inside a bubble's padding (12px a side in `Bubble`): a reply's picture, one with a
+    // file line, a link preview's image
+    out property <length> photo-room-boxed: floor((root.bubble-max-w - 2 * 12px) / 1px) * 1px;
+    changed photo-room-boxed => { root.photo-room-changed(); }
     callback photo-room-changed();
     // the date shown at the top while scrolling: "Today", "Yesterday", "Sat, Nov 7" for a day number
     pure callback day-label(int) -> string;
@@ -878,8 +884,9 @@ export component AppWindow inherits Window {
                         m: m;
                         last: idx == root.messages.length - 1;
                         tail: root.under-h;
-                        max-w: min(560px, msg-list.visible-width * 0.75);
+                        max-w: root.bubble-max-w;
                         room: root.photo-room;
+                        room-boxed: root.photo-room-boxed;
                         flash: m.id == root.flash-id;
                         property <int> probe: root.jump-probe;
                         changed probe => {

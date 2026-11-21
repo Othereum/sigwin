@@ -141,8 +141,8 @@ pub(crate) fn wire_photo_room(app: &AppWindow) {
     let apply = move || {
         let Some(app) = weak.upgrade() else { return };
         // not laid out yet
-        let room = app.get_photo_room();
-        if room > 0.0 && crate::view::media::set_room(room as u32) {
+        let (room, boxed) = (app.get_photo_room(), app.get_photo_room_boxed());
+        if room > 0.0 && boxed > 0.0 && crate::view::media::set_room(room as u32, boxed as u32) {
             media_resized();
         }
     };
