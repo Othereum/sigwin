@@ -127,6 +127,9 @@ impl Paths {
 /// 1: body and captions. 3: names of files too, and whom a text @mentions (2 never shipped).
 const TEXT_FORMAT: u32 = 3;
 
+/// 1: pictures and videos named by their kind, not their file name.
+const SNIPPET_FORMAT: u32 = 1;
+
 #[derive(Default, Serialize, Deserialize)]
 struct Persist {
     unread: HashMap<String, u32>,
@@ -176,15 +179,9 @@ struct Persist {
     /// layout of the attachment and thumbnail caches on disk (`CACHE_FORMAT` once converted)
     #[serde(default)]
     cache_format: u32,
-    /// `snippets` holds nothing from when only the newest rows were searched and edits were ignored
+    /// how `snippets` were made (`SNIPPET_FORMAT` once those made otherwise were cleared)
     #[serde(default)]
-    snippets_namedle: bool,
-    /// `snippets` of groups lead with the sender's name (cleared once when that began)
-    #[serde(default)]
-    snippets_named: bool,
-    /// `snippets` of a video show its own mark (cleared once when that began)
-    #[serde(default)]
-    snippets_video: bool,
+    snippet_format: u32,
     /// thread key -> notifications off until (ms; 0 = on, `MUTE_ALWAYS`), picked in Sigwin
     #[serde(default)]
     mute_override: HashMap<String, u64>,

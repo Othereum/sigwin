@@ -8,7 +8,7 @@ use presage::proto::body_range::AssociatedValue;
 use presage::proto::data_message::Quote;
 use presage::proto::{AttachmentPointer, BodyRange};
 
-use super::media::{attachment_key, attachment_label, is_image, shown_attachments};
+use super::media::{attachment_key, is_image, kind_label, shown_attachments};
 use super::time::now_ms;
 use super::{classify, expires_at, Kind};
 use crate::types::MsgDto;
@@ -333,7 +333,7 @@ pub fn one_line(dm: &DataMessage, name_of: &dyn Fn(&Uuid) -> String) -> String {
         t = shown_attachments(dm)
             .next()
             .map(|(_, a)| {
-                let l = attachment_label(a);
+                let l = kind_label(a);
                 let icon = if is_image(a) {
                     "📷"
                 } else if crate::view::media::is_video(a) {
@@ -439,6 +439,18 @@ mod tests {
         let t = body_text_spans(&dm, &name, &mut spans, &mut Vec::new());
         let got: Vec<&str> = spans.iter().map(|&(s, e, _)| &t[s..e]).collect();
         assert_eq!(got, ["@철수", "@영희"]);
+    }
+
+    #[test]
+    fn previews_name_media_by_kind_and_files_by_name() {
+        let name = |_: &Uuid| String::new();
+        let one = |ct: &str, file: &str| {
+            let a = AttachmentPointer { content_type: Some(ct.into()), file_name: Some(file.into()), ..Default::default() };
+            one_line(&DataMessage { attachments: vec![a], ..Default::default() }, &name)
+        };
+        assert_eq!(one("image/jpeg", "IMG_0001.jpg"), format!("📷 {}", tr!("Photo")));
+        assert_eq!(one("video/mp4", "VID_0001.mp4"), format!("🎥 {}", tr!("Video")));
+        assert_eq!(one("application/pdf", "보고서.pdf"), "📄 보고서.pdf");
     }
 
     #[test]

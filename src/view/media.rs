@@ -287,6 +287,24 @@ pub fn attachment_label(ptr: &AttachmentPointer) -> String {
     }
 }
 
+/// What an attachment is, for one-line previews (thread list, notifications, pins, replies).
+/// Pictures and videos go by their kind: their names are mostly camera numbers. Files keep
+/// their name, which says what they are.
+pub fn kind_label(ptr: &AttachmentPointer) -> String {
+    let ct = ptr.content_type.as_deref().unwrap_or("");
+    if ct == "image/gif" {
+        "GIF".into()
+    } else if ct.starts_with("image/") {
+        tr!("Photo").into()
+    } else if ct.starts_with("video/") {
+        tr!("Video").into()
+    } else if ct.starts_with("audio/") {
+        if is_voice(ptr) { tr!("Voice message").into() } else { tr!("Audio").into() }
+    } else {
+        attachment_label(ptr)
+    }
+}
+
 /// An image wanted for a cell of a message's grid.
 pub struct WantedCell {
     /// what the UI knows it by
