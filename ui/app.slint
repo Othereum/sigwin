@@ -783,6 +783,11 @@ export component AppWindow inherits Window {
                     y: 0px;
                     width: parent.width;
                     height: parent.height + root.under-h;
+                    // No scrollbar: its height is an estimate from the rows on screen and its
+                    // range only the loaded window, so a thumb jitters and can't say where in
+                    // the thread the view is. The date pill, the jump button and jumping to a
+                    // date do its jobs.
+                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                     // what floats over the bottom growing (a reply card, a second line, the
                     // sticker panel): if the list was at the bottom, keep the last message above it.
                     // The rows lay out only when drawing, so the content height is still the old
@@ -1007,7 +1012,6 @@ export component AppWindow inherits Window {
                 max-height: self.visible ? 400px : 0px;
                 // a pill holding the buttons and the text
                 HorizontalLayout {
-                    // clear of the message list's scrollbar strip (14px) on the right
                     padding-left: 16px;
                     padding-right: 16px;
                     padding-top: 8px;
@@ -1350,58 +1354,66 @@ export component AppWindow inherits Window {
                                     }
                                     return reject;
                                 }
-                                // past the cap the text scrolls, with the message list's scrollbar
-                                composer-flick := ScrollView {
+                                // past the cap the text scrolls
+                                ThinScroll {
                                     min-height: 0px;
-                                    content-height: composer.height;
-                                    composer := TextBox {
-                                        x: 0px;
-                                        y: 0px;
-                                        // keep the text clear of the scrollbar's thumb. Always, not
-                                        // only while it shows: the width sets the wrapped height,
-                                        // which decides whether it shows
-                                        width: composer-flick.visible-width - 10px;
-                                        height: root.view-once-on ? 20px : self.preferred-height;
-                                        text <=> root.draft;
-                                        // kept, not sent, while a view-once photo is to go
-                                        read-only: root.view-once-on;
-                                        edited => {
-                                            // over the 64KB a message can carry: the new part is cut to fit
-                                            let cut = root.clamp-draft(self.text);
-                                            if cut >= 0 {
-                                                self.set-selection-offsets(cut, cut);
+                                    content-y <=> composer-flick.content-y;
+                                    content-height: composer-flick.content-height;
+                                    visible-height: composer-flick.visible-height;
+                                    composer-flick := ScrollView {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                                        content-height: composer.height;
+                                        composer := TextBox {
+                                            x: 0px;
+                                            y: 0px;
+                                            // keep the text clear of the scrollbar's thumb. Always, not
+                                            // only while it shows: the width sets the wrapped height,
+                                            // which decides whether it shows
+                                            width: composer-flick.visible-width - 10px;
+                                            height: root.view-once-on ? 20px : self.preferred-height;
+                                            text <=> root.draft;
+                                            // kept, not sent, while a view-once photo is to go
+                                            read-only: root.view-once-on;
+                                            edited => {
+                                                // over the 64KB a message can carry: the new part is cut to fit
+                                                let cut = root.clamp-draft(self.text);
+                                                if cut >= 0 {
+                                                    self.set-selection-offsets(cut, cut);
+                                                }
+                                                root.composing(self.text != "");
+                                                root.link-check();
+                                                root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
                                             }
-                                            root.composing(self.text != "");
-                                            root.link-check();
-                                            root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
-                                        }
-                                        cursor-position-changed(pos) => {
-                                            // keep the cursor line in view (`pos` is its top)
-                                            let line = 20px;
-                                            let view = composer-flick.visible-height;
-                                            if (pos.y + composer-flick.content-y < 0px) {
-                                                composer-flick.content-y = -pos.y;
-                                            } else if (pos.y + line + composer-flick.content-y > view) {
-                                                composer-flick.content-y = max(view - self.height, view - pos.y - line);
+                                            cursor-position-changed(pos) => {
+                                                // keep the cursor line in view (`pos` is its top)
+                                                let line = 20px;
+                                                let view = composer-flick.visible-height;
+                                                if (pos.y + composer-flick.content-y < 0px) {
+                                                    composer-flick.content-y = -pos.y;
+                                                } else if (pos.y + line + composer-flick.content-y > view) {
+                                                    composer-flick.content-y = max(view - self.height, view - pos.y - line);
+                                                }
+                                                root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
                                             }
-                                            root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
+                                            // IME composition (Hangul) changes neither text nor cursor: follow it too
+                                            preedit-changed => {
+                                                root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
+                                            }
+                                            single-line: false;
+                                            wrap: word-wrap;
+                                            color: root.view-once-on ? transparent : Theme.text;
+                                            font-size: 14px;
                                         }
-                                        // IME composition (Hangul) changes neither text nor cursor: follow it too
-                                        preedit-changed => {
-                                            root.mention-check(self.text, self.cursor-position-byte-offset, self.preedit-text);
+                                        // hide as soon as IME composition starts (preedit isn't in text yet)
+                                        if (root.draft == "" && composer.preedit-text == "") || root.view-once-on: Text {
+                                            x: 0;
+                                            y: 0;
+                                            text: root.view-once-on ? @tr("View-once photo") : root.edit-preview != "" ? @tr("Edit message (Esc to cancel)") : @tr("Message");
+                                            color: Theme.subtle;
+                                            font-size: 14px;
                                         }
-                                        single-line: false;
-                                        wrap: word-wrap;
-                                        color: root.view-once-on ? transparent : Theme.text;
-                                        font-size: 14px;
-                                    }
-                                    // hide as soon as IME composition starts (preedit isn't in text yet)
-                                    if (root.draft == "" && composer.preedit-text == "") || root.view-once-on: Text {
-                                        x: 0;
-                                        y: 0;
-                                        text: root.view-once-on ? @tr("View-once photo") : root.edit-preview != "" ? @tr("Edit message (Esc to cancel)") : @tr("Message");
-                                        color: Theme.subtle;
-                                        font-size: 14px;
                                     }
                                 }
                             }
@@ -1899,6 +1911,8 @@ export component AppWindow inherits Window {
                 // folded, a search left with results keeps them for when the box opens again
                 ThinScroll {
                     visible: !SearchData.active || !root.side-wide;
+                    // a thumb always up would crowd the folded rail
+                    hover-only: true;
                     // folded, the peeked card has the pointer: the thumb shows beside it
                     keep: root.peek-on;
                     content-y <=> thread-list.content-y;
@@ -1930,6 +1944,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 if SearchData.active && root.side-wide: ThinScroll {
+                    hover-only: true;
                     content-y <=> search-list.content-y;
                     content-height: search-list.content-height;
                     visible-height: search-list.visible-height;
@@ -2224,36 +2239,44 @@ export component AppWindow inherits Window {
         border-color: Theme.border;
         drop-shadow-blur: 12px;
         drop-shadow-color: Theme.shadow;
-        mention-list := ListView {
+        ThinScroll {
             x: 4px;
             y: 4px;
             width: parent.width - 8px;
             height: list-h;
-            for item[i] in root.mention-items: Rectangle {
-                height: row-h;
-                border-radius: 6px;
-                background: i == root.mention-sel ? Theme.selected : mta.has-hover ? Theme.hover : transparent;
-                mta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.mention-pick(i, composer.text, composer.cursor-position-byte-offset); }
-                }
-                HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
-                    spacing: 8px;
-                    alignment: start;
-                    Avatar {
-                        size: 24px;
-                        y: 6px;
-                        initial: item.initial;
-                        tint: item.tint;
+            content-y <=> mention-list.content-y;
+            content-height: mention-list.content-height;
+            visible-height: mention-list.visible-height;
+            mention-list := ListView {
+                width: parent.width;
+                height: parent.height;
+                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                for item[i] in root.mention-items: Rectangle {
+                    height: row-h;
+                    border-radius: 6px;
+                    background: i == root.mention-sel ? Theme.selected : mta.has-hover ? Theme.hover : transparent;
+                    mta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.mention-pick(i, composer.text, composer.cursor-position-byte-offset); }
                     }
-                    Text {
-                        text: item.name;
-                        color: Theme.text;
-                        font-size: 14px;
-                        vertical-alignment: center;
-                        overflow: elide;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 8px;
+                        alignment: start;
+                        Avatar {
+                            size: 24px;
+                            y: 6px;
+                            initial: item.initial;
+                            tint: item.tint;
+                        }
+                        Text {
+                            text: item.name;
+                            color: Theme.text;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
                     }
                 }
             }

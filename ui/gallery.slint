@@ -3,7 +3,7 @@
 import { ScrollView } from "std-widgets.slint";
 import { MediaState } from "types.slint";
 import { Theme } from "theme.slint";
-import { BusySpinner, IconButton, Segmented } from "widgets.slint";
+import { BusySpinner, IconButton, Segmented, ThinScroll } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
 import { MediaLabel, VideoMark } from "bubble.slint";
 
@@ -200,40 +200,50 @@ export component GalleryPage inherits Rectangle {
         }
         Rectangle {
             vertical-stretch: 1;
-            sv := ScrollView {
-                // the scrollbar overlaps the right edge: `pad` keeps the cells clear of it
-                property <int> cols: max(1, floor((self.visible-width - 2 * GalleryData.pad + GalleryData.gap) / (GalleryData.cell + GalleryData.gap)));
-                // the grid sits in the middle; files take the width
-                property <length> side: GalleryData.tab == 1 ? GalleryData.pad
-                    : max(GalleryData.pad, (self.visible-width - self.cols * GalleryData.cell - (self.cols - 1) * GalleryData.gap) / 2);
-                init => {
-                    GalleryData.layout(self.cols);
-                    GalleryData.scrolled(-self.content-y, self.visible-height);
-                }
-                changed cols => { GalleryData.layout(self.cols); }
-                changed content-y => { GalleryData.scrolled(-self.content-y, self.visible-height); }
-                changed visible-height => { GalleryData.scrolled(-self.content-y, self.visible-height); }
-                VerticalLayout {
-                    padding-left: sv.side;
-                    padding-right: sv.side;
-                    padding-bottom: GalleryData.pad;
-                    for r in GalleryData.rows: Rectangle {
-                        height: r.month != "" ? GalleryData.head-h : r.name != "" ? GalleryData.file-h : GalleryData.cell + GalleryData.gap;
-                        if r.month != "": Text {
-                            x: 4px;
-                            y: parent.height - self.height - 8px;
-                            text: r.month;
-                            color: Theme.text;
-                            font-size: 13px;
-                            font-weight: 700;
+            ThinScroll {
+                rest: 4px;
+                wide: 8px;
+                content-y <=> sv.content-y;
+                content-height: sv.content-height;
+                visible-height: sv.visible-height;
+                sv := ScrollView {
+                    width: parent.width;
+                    height: parent.height;
+                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                    // the scrollbar overlaps the right edge: `pad` keeps the cells clear of it
+                    property <int> cols: max(1, floor((self.visible-width - 2 * GalleryData.pad + GalleryData.gap) / (GalleryData.cell + GalleryData.gap)));
+                    // the grid sits in the middle; files take the width
+                    property <length> side: GalleryData.tab == 1 ? GalleryData.pad
+                        : max(GalleryData.pad, (self.visible-width - self.cols * GalleryData.cell - (self.cols - 1) * GalleryData.gap) / 2);
+                    init => {
+                        GalleryData.layout(self.cols);
+                        GalleryData.scrolled(-self.content-y, self.visible-height);
+                    }
+                    changed cols => { GalleryData.layout(self.cols); }
+                    changed content-y => { GalleryData.scrolled(-self.content-y, self.visible-height); }
+                    changed visible-height => { GalleryData.scrolled(-self.content-y, self.visible-height); }
+                    VerticalLayout {
+                        padding-left: sv.side;
+                        padding-right: sv.side;
+                        padding-bottom: GalleryData.pad;
+                        for r in GalleryData.rows: Rectangle {
+                            height: r.month != "" ? GalleryData.head-h : r.name != "" ? GalleryData.file-h : GalleryData.cell + GalleryData.gap;
+                            if r.month != "": Text {
+                                x: 4px;
+                                y: parent.height - self.height - 8px;
+                                text: r.month;
+                                color: Theme.text;
+                                font-size: 13px;
+                                font-weight: 700;
+                            }
+                            if r.cells.length > 0: HorizontalLayout {
+                                alignment: start;
+                                spacing: GalleryData.gap;
+                                padding-bottom: GalleryData.gap;
+                                for c in r.cells: Cell { c: c; }
+                            }
+                            if r.name != "": FileRow { r: r; }
                         }
-                        if r.cells.length > 0: HorizontalLayout {
-                            alignment: start;
-                            spacing: GalleryData.gap;
-                            padding-bottom: GalleryData.gap;
-                            for c in r.cells: Cell { c: c; }
-                        }
-                        if r.name != "": FileRow { r: r; }
                     }
                 }
             }

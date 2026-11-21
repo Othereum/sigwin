@@ -181,7 +181,7 @@ export component TextBox inherits TextInput {
 // A row that scrolls sideways, with no scrollbar: a tile cut off at the edge shows there's more,
 // and a bar would cover a strip this low. A Flickable that overflows only sideways rejects the
 // wheel, so the event bubbles up to this TouchArea, which moves the row. Vertical overflow wants
-// a scrollbar: use a ScrollView or ListView there, not a bare Flickable.
+// a scrollbar: use a ScrollView or ListView in a ThinScroll there, not a bare Flickable.
 export component HStrip inherits TouchArea {
     in-out property <length> content-x <=> flick.content-x;
     in-out property <length> content-width <=> flick.content-width;
@@ -199,24 +199,31 @@ export component HStrip inherits TouchArea {
 
 // The app's scrollbar: a thin thumb over the right edge of a list whose own bar is off
 // (`vertical-scrollbar-policy: always-off`), shown only while `active`. The stock bar is a 14px
-// strip that fattens and gets a ground and arrows on hover, covering the rows it sits on. Size it
-// as a 12px-wide strip along the list's right edge; it covers only the thumb's own height.
+// strip that fattens and gets a ground and arrows on hover, covering the rows it sits on, and
+// can't be restyled. Size it as a 12px-wide strip along the list's right edge (its height is the
+// track); it covers only the thumb's own height.
 export component ThinThumb inherits Rectangle {
     in-out property <length> content-y;
     in property <length> content-height;
     in property <length> visible-height;
     in property <bool> active;
+    // thumb width at rest and under the pointer
+    in property <length> rest: 3px;
+    in property <length> wide: 6px;
     property <length> max-y: max(0px, root.content-height - root.visible-height);
+    // where the view is: 0 at the top, 1 at the bottom
+    property <float> place: root.max-y <= 0px ? 0 : clamp(-root.content-y / root.max-y, 0, 1);
     property <length> thumb-h: root.content-height <= 0px ? 0px
-        : min(root.visible-height, max(24px, root.visible-height * root.visible-height / root.content-height));
-    property <length> saved-y;
+        : min(root.height, max(24px, root.height * root.visible-height / root.content-height));
+    property <float> saved-place;
     property <length> saved-pos;
+    property <length> saved-max;
 
     thumb := Rectangle {
-        width: grab.has-hover || grab.pressed ? 6px : 3px;
+        width: grab.has-hover || grab.pressed ? root.wide : root.rest;
         height: root.thumb-h;
         x: parent.width - self.width - 2px;
-        y: root.max-y <= 0px ? 0px : (root.visible-height - self.height) * (-root.content-y / root.max-y);
+        y: (root.height - self.height) * root.place;
         border-radius: self.width / 2;
         background: Theme.subtle;
         visible: root.max-y > 0px;
@@ -231,40 +238,61 @@ export component ThinThumb inherits Rectangle {
         y: thumb.y;
         width: parent.width;
         height: thumb.height;
+        function save() {
+            root.saved-place = root.place;
+            root.saved-pos = self.absolute-position.y + self.mouse-y;
+            root.saved-max = root.max-y;
+        }
         pointer-event(e) => {
             if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
-                root.saved-y = -root.content-y;
-                root.saved-pos = self.absolute-position.y + self.mouse-y;
+                self.save();
             }
         }
         moved => {
-            if (self.pressed && root.visible-height > root.thumb-h) {
-                root.content-y = -clamp(root.saved-y + (self.absolute-position.y + self.mouse-y - root.saved-pos)
-                    * root.max-y / (root.visible-height - root.thumb-h), 0px, root.max-y);
+            // A ListView's content height is an estimate that changes as rows of other heights
+            // come on screen: measuring the drag from the press would then throw the view
+            // around. Start again from where it is.
+            if (self.pressed && root.max-y != root.saved-max) {
+                self.save();
+            }
+            if (self.pressed && root.height > root.thumb-h) {
+                let to = clamp(root.saved-place + (self.absolute-position.y + self.mouse-y - root.saved-pos)
+                    / (root.height - root.thumb-h), 0, 1);
+                root.content-y = -to * root.max-y;
             }
         }
     }
 }
 
-// Wraps a ListView with the thumb above: it shows while the pointer is over the list.
+// Wraps a ListView or ScrollView (filling it, its own bar off) with the app's thumb above. Every
+// scrolling area but the message list uses it, so they share one look; each picks when the thumb
+// shows and how thick:
+// long lists that fill a page take `rest: 4px; wide: 8px`, narrow ones and popups the default.
+// The wrapper takes the list's place in the layout (stretch, sizes, x/y).
 export component ThinScroll inherits TouchArea {
     in-out property <length> content-y;
     in property <length> content-height;
     in property <length> visible-height;
-
-    @children
-
+    in property <length> rest: 3px;
+    in property <length> wide: 6px;
+    // only while the pointer is over the list; otherwise whenever there is more to scroll
+    in property <bool> hover-only;
     // keeps the thumb up while something drawn over the list has the pointer instead
     in property <bool> keep;
 
+    @children
+
     ThinThumb {
         x: parent.width - 12px;
+        y: 0px;
         width: 12px;
         height: parent.height;
         content-y <=> root.content-y;
         content-height: root.content-height;
         visible-height: root.visible-height;
-        active: root.has-hover || root.keep;
+        rest: root.rest;
+        wide: root.wide;
+        active: !root.hover-only || root.has-hover || root.keep;
     }
 }
 

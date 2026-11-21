@@ -3,7 +3,7 @@
 import { PackItem, StickerItem } from "types.slint";
 import { Anim, Theme } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
-import { Field, HStrip, PlainButton, TextButton } from "widgets.slint";
+import { Field, HStrip, PlainButton, TextButton, ThinScroll } from "widgets.slint";
 import { Icons } from "icons.slint";
 
 export component StickerPanel inherits Rectangle {
@@ -69,79 +69,95 @@ export component StickerPanel inherits Rectangle {
             }
         }
         // sticker grid
-        if !root.suggest: ScrollView {
+        if !root.suggest: ThinScroll {
             vertical-stretch: 1;
             max-width: 100000px;
-            content-height: ceil(root.stickers.length / root.cols) * root.cell;
-            for s[i] in root.stickers: Rectangle {
-                x: mod(i, root.cols) * root.cell;
-                y: floor(i / root.cols) * root.cell;
-                width: root.cell;
-                height: root.cell;
-                border-radius: 12px;
-                background: sta.has-hover ? Theme.hover : transparent;
-                Image {
-                    width: root.cell - 12px;
-                    height: root.cell - 12px;
-                    source: s.anim.width > 0 ? s.anim : s.img;
-                    image-fit: contain;
-                }
-                sta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.send-sticker(root.current-pack, s.id); }
-                    changed has-hover => {
-                        if s.animated { Anim.hover(root.current-pack, s.id, self.has-hover); }
+            content-y <=> grid-view.content-y;
+            content-height: grid-view.content-height;
+            visible-height: grid-view.visible-height;
+            grid-view := ScrollView {
+                width: parent.width;
+                height: parent.height;
+                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                content-height: ceil(root.stickers.length / root.cols) * root.cell;
+                for s[i] in root.stickers: Rectangle {
+                    x: mod(i, root.cols) * root.cell;
+                    y: floor(i / root.cols) * root.cell;
+                    width: root.cell;
+                    height: root.cell;
+                    border-radius: 12px;
+                    background: sta.has-hover ? Theme.hover : transparent;
+                    Image {
+                        width: root.cell - 12px;
+                        height: root.cell - 12px;
+                        source: s.anim.width > 0 ? s.anim : s.img;
+                        image-fit: contain;
+                    }
+                    sta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.send-sticker(root.current-pack, s.id); }
+                        changed has-hover => {
+                            if s.animated { Anim.hover(root.current-pack, s.id, self.has-hover); }
+                        }
                     }
                 }
             }
         }
         // add packs: Signal's built-in packs + signal.art link
-        if root.suggest: sug-view := ScrollView {
+        if root.suggest: ThinScroll {
             vertical-stretch: 1;
             max-width: 100000px;
-            content-height: sug.preferred-height;
-            sug := VerticalLayout {
-                // the Add buttons clear of the scrollbar's thumb
-                width: sug-view.visible-width - 12px;
-                spacing: 4px;
-                Text { text: @tr("Featured sticker packs"); color: Theme.subtle; font-size: 12px; }
-                for p in root.packs: HorizontalLayout {
-                    visible: !p.installed;
-                    height: p.installed ? 0px : 34px;
-                    spacing: 8px;
-                    Text {
-                        text: p.title;
-                        color: Theme.text;
-                        font-size: 13px;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                    }
-                    PlainButton {
-                        text: @tr("Add");
-                        clicked => { root.install-pack(p.id); }
-                    }
-                }
-                Rectangle { height: 8px; }
-                Text { text: @tr("Add from a signal.art sticker link"); color: Theme.subtle; font-size: 12px; }
-                HorizontalLayout {
-                    spacing: 6px;
-                    Field {
-                        height: 32px;
-                        placeholder: "https://signal.art/addstickers/#pack_id=…&pack_key=…";
-                        text <=> root.url-text;
-                        accepted => { root.add-pack-url(root.url-text); }
-                        key-pressed(event) => {
-                            if (event.text != Key.Escape) {
-                                return reject;
-                            }
-                            root.close();
-                            accept
+            content-y <=> sug-view.content-y;
+            content-height: sug-view.content-height;
+            visible-height: sug-view.visible-height;
+            sug-view := ScrollView {
+                width: parent.width;
+                height: parent.height;
+                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                content-height: sug.preferred-height;
+                sug := VerticalLayout {
+                    // the Add buttons clear of the scrollbar's thumb
+                    width: sug-view.visible-width - 12px;
+                    spacing: 4px;
+                    Text { text: @tr("Featured sticker packs"); color: Theme.subtle; font-size: 12px; }
+                    for p in root.packs: HorizontalLayout {
+                        visible: !p.installed;
+                        height: p.installed ? 0px : 34px;
+                        spacing: 8px;
+                        Text {
+                            text: p.title;
+                            color: Theme.text;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        PlainButton {
+                            text: @tr("Add");
+                            clicked => { root.install-pack(p.id); }
                         }
                     }
-                    PlainButton {
-                        text: @tr("Add");
-                        clicked => { root.add-pack-url(root.url-text); }
+                    Rectangle { height: 8px; }
+                    Text { text: @tr("Add from a signal.art sticker link"); color: Theme.subtle; font-size: 12px; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Field {
+                            height: 32px;
+                            placeholder: "https://signal.art/addstickers/#pack_id=…&pack_key=…";
+                            text <=> root.url-text;
+                            accepted => { root.add-pack-url(root.url-text); }
+                            key-pressed(event) => {
+                                if (event.text != Key.Escape) {
+                                    return reject;
+                                }
+                                root.close();
+                                accept
+                            }
+                        }
+                        PlainButton {
+                            text: @tr("Add");
+                            clicked => { root.add-pack-url(root.url-text); }
+                        }
                     }
                 }
             }

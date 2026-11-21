@@ -2,7 +2,7 @@
 
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { PlainButton } from "widgets.slint";
+import { PlainButton, ThinScroll } from "widgets.slint";
 import { ReplyItem } from "types.slint";
 
 // The list's state; Rust fills it (`gui::wire`, `Event::Replies`).
@@ -44,38 +44,46 @@ export component RepliesDialog inherits Rectangle {
                 color: Theme.subtle;
                 font-size: 13px;
             }
-            if RepliesData.items.length > 0: ListView {
+            if RepliesData.items.length > 0: ThinScroll {
                 height: min(RepliesData.items.length * 56px, 336px);
-                for r in RepliesData.items: Rectangle {
-                    height: 56px;
-                    border-radius: 8px;
-                    background: ta.has-hover ? Theme.hover : transparent;
-                    ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            RepliesData.pick(r.id);
-                            RepliesData.open = false;
-                        }
-                    }
-                    VerticalLayout {
-                        padding-left: 10px;
-                        padding-right: 10px;
-                        padding-top: 6px;
-                        padding-bottom: 6px;
-                        spacing: 2px;
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Text {
-                                text: r.sender;
-                                font-size: 13px;
-                                font-weight: 700;
-                                color: Theme.text;
-                                overflow: elide;
-                                horizontal-stretch: 1;
+                content-y <=> reply-list.content-y;
+                content-height: reply-list.content-height;
+                visible-height: reply-list.visible-height;
+                reply-list := ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                    for r in RepliesData.items: Rectangle {
+                        height: 56px;
+                        border-radius: 8px;
+                        background: ta.has-hover ? Theme.hover : transparent;
+                        ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                RepliesData.pick(r.id);
+                                RepliesData.open = false;
                             }
-                            Text { text: r.time; font-size: 12px; color: Theme.subtle; horizontal-stretch: 0; }
                         }
-                        Text { text: r.text; font-size: 13px; color: Theme.subtle; overflow: elide; }
+                        VerticalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            padding-top: 6px;
+                            padding-bottom: 6px;
+                            spacing: 2px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: r.sender;
+                                    font-size: 13px;
+                                    font-weight: 700;
+                                    color: Theme.text;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                                Text { text: r.time; font-size: 12px; color: Theme.subtle; horizontal-stretch: 0; }
+                            }
+                            Text { text: r.text; font-size: 13px; color: Theme.subtle; overflow: elide; }
+                        }
                     }
                 }
             }

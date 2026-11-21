@@ -2,7 +2,7 @@
 
 import { ListView } from "std-widgets.slint";
 import { Links, Theme } from "theme.slint";
-import { Avatar, DangerButton, Dropdown, IconButton, PlainButton, Segmented, Toggle } from "widgets.slint";
+import { Avatar, DangerButton, Dropdown, IconButton, PlainButton, Segmented, ThinScroll, Toggle } from "widgets.slint";
 import { Icons } from "icons.slint";
 
 // a heading over its rows, which sit together on one rounded card
@@ -159,351 +159,361 @@ export component SettingsPage inherits Rectangle {
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
         }
         // a ListView for its scrollbar (it takes a single `for`: one row holding everything)
-        ListView {
+        ThinScroll {
             vertical-stretch: 1;
-            for _ in [0]: Rectangle {
-            height: body.preferred-height;
-            HorizontalLayout {
+            rest: 4px;
+            wide: 8px;
+            content-y <=> page-list.content-y;
+            content-height: page-list.content-height;
+            visible-height: page-list.visible-height;
+            page-list := ListView {
                 width: parent.width;
-                alignment: center;
-                body := VerticalLayout {
-                    width: min(560px, root.width - 48px);
-                    padding-top: 20px;
-                    padding-bottom: 24px;
-                    Rectangle {
-                    border-radius: 12px;
-                    background: Theme.group;
-                    HorizontalLayout {
-                        padding: 16px;
-                        spacing: 16px;
-                        VerticalLayout {
-                            alignment: center;
-                            Avatar {
-                                size: 56px;
-                                initial: SettingsData.account-initial;
-                                tint: SettingsData.account-tint;
-                                photo: SettingsData.account-photo;
-                                has-photo: SettingsData.account-has-photo;
+                height: parent.height;
+                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                for _ in [0]: Rectangle {
+                height: body.preferred-height;
+                HorizontalLayout {
+                    width: parent.width;
+                    alignment: center;
+                    body := VerticalLayout {
+                        width: min(560px, root.width - 48px);
+                        padding-top: 20px;
+                        padding-bottom: 24px;
+                        Rectangle {
+                        border-radius: 12px;
+                        background: Theme.group;
+                        HorizontalLayout {
+                            padding: 16px;
+                            spacing: 16px;
+                            VerticalLayout {
+                                alignment: center;
+                                Avatar {
+                                    size: 56px;
+                                    initial: SettingsData.account-initial;
+                                    tint: SettingsData.account-tint;
+                                    photo: SettingsData.account-photo;
+                                    has-photo: SettingsData.account-has-photo;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                Text {
+                                    text: SettingsData.account-name != "" ? SettingsData.account-name : @tr("My account");
+                                    color: Theme.text;
+                                    font-size: 17px;
+                                    font-weight: 700;
+                                    overflow: elide;
+                                }
+                                Text { text: SettingsData.account-number; color: Theme.subtle; font-size: 13px; overflow: elide; }
+                                if SettingsData.account-device != "": Text {
+                                    text: @tr("This device: {}", SettingsData.account-device);
+                                    color: Theme.subtle;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                }
                             }
                         }
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 2px;
-                            Text {
-                                text: SettingsData.account-name != "" ? SettingsData.account-name : @tr("My account");
-                                color: Theme.text;
-                                font-size: 17px;
-                                font-weight: 700;
-                                overflow: elide;
-                            }
-                            Text { text: SettingsData.account-number; color: Theme.subtle; font-size: 13px; overflow: elide; }
-                            if SettingsData.account-device != "": Text {
-                                text: @tr("This device: {}", SettingsData.account-device);
-                                color: Theme.subtle;
-                                font-size: 13px;
-                                overflow: elide;
-                            }
                         }
-                    }
-                    }
-                    SettingSection {
-                        title: @tr("Notifications");
-                        SettingRow {
-                            label: @tr("New message notifications");
-                            hint: @tr("Not shown while you're looking at the Sigwin window");
-                            Toggle {
-                                checked <=> SettingsData.notify;
-                                toggled => { SettingsData.changed(); }
-                            }
-                        }
-                        SettingRow {
-                            label: @tr("Show in notifications");
-                            Segmented {
-                                enabled: SettingsData.notify;
-                                options: [@tr("Name and message"), @tr("Name only"), @tr("Hidden")];
-                                current <=> SettingsData.preview;
-                                changed => { SettingsData.changed(); }
-                            }
-                        }
-                        SettingRow {
-                            label: @tr("Notification sound");
-                            Toggle {
-                                enabled: SettingsData.notify;
-                                checked <=> SettingsData.sound;
-                                toggled => { SettingsData.changed(); }
-                            }
-                        }
-                        SettingRow {
-                            label: @tr("Badge count");
-                            hint: @tr("Shows on the taskbar and notification area icons");
-                            Segmented {
-                                options: [@tr("Unread messages"), @tr("Unread chats")];
-                                current <=> SettingsData.badge-count;
-                                changed => { SettingsData.changed(); }
-                            }
-                        }
-                        SettingGroup {
-                            title: @tr("Muted chats");
-                            hint: @tr("You can mute a chat by right-clicking it, and set each chat under \"Notification settings…\"");
+                        SettingSection {
+                            title: @tr("Notifications");
                             SettingRow {
-                                label: @tr("Notify when I'm mentioned");
+                                label: @tr("New message notifications");
+                                hint: @tr("Not shown while you're looking at the Sigwin window");
+                                Toggle {
+                                    checked <=> SettingsData.notify;
+                                    toggled => { SettingsData.changed(); }
+                                }
+                            }
+                            SettingRow {
+                                label: @tr("Show in notifications");
+                                Segmented {
+                                    enabled: SettingsData.notify;
+                                    options: [@tr("Name and message"), @tr("Name only"), @tr("Hidden")];
+                                    current <=> SettingsData.preview;
+                                    changed => { SettingsData.changed(); }
+                                }
+                            }
+                            SettingRow {
+                                label: @tr("Notification sound");
                                 Toggle {
                                     enabled: SettingsData.notify;
-                                    checked <=> SettingsData.muted-mentions;
+                                    checked <=> SettingsData.sound;
                                     toggled => { SettingsData.changed(); }
                                 }
                             }
                             SettingRow {
-                                label: @tr("Notify on replies to my messages");
+                                label: @tr("Badge count");
+                                hint: @tr("Shows on the taskbar and notification area icons");
+                                Segmented {
+                                    options: [@tr("Unread messages"), @tr("Unread chats")];
+                                    current <=> SettingsData.badge-count;
+                                    changed => { SettingsData.changed(); }
+                                }
+                            }
+                            SettingGroup {
+                                title: @tr("Muted chats");
+                                hint: @tr("You can mute a chat by right-clicking it, and set each chat under \"Notification settings…\"");
+                                SettingRow {
+                                    label: @tr("Notify when I'm mentioned");
+                                    Toggle {
+                                        enabled: SettingsData.notify;
+                                        checked <=> SettingsData.muted-mentions;
+                                        toggled => { SettingsData.changed(); }
+                                    }
+                                }
+                                SettingRow {
+                                    label: @tr("Notify on replies to my messages");
+                                    Toggle {
+                                        enabled: SettingsData.notify;
+                                        checked <=> SettingsData.muted-replies;
+                                        toggled => { SettingsData.changed(); }
+                                    }
+                                }
+                                SettingRow {
+                                    label: @tr("Include in badge count");
+                                    Toggle {
+                                        checked <=> SettingsData.badge-muted;
+                                        toggled => { SettingsData.changed(); }
+                                    }
+                                }
+                            }
+                        }
+                        SettingSection {
+                            title: @tr("Startup");
+                            SettingRow {
+                                label: @tr("Open at computer login");
+                                hint: @tr("Starts Sigwin when you sign in to Windows");
                                 Toggle {
-                                    enabled: SettingsData.notify;
-                                    checked <=> SettingsData.muted-replies;
+                                    checked <=> SettingsData.autostart;
                                     toggled => { SettingsData.changed(); }
                                 }
                             }
                             SettingRow {
-                                label: @tr("Include in badge count");
+                                label: @tr("Start minimized to tray");
+                                hint: @tr("When started at login, stays in the tray without a window");
                                 Toggle {
-                                    checked <=> SettingsData.badge-muted;
+                                    enabled: SettingsData.autostart;
+                                    checked <=> SettingsData.start-hidden;
                                     toggled => { SettingsData.changed(); }
                                 }
                             }
                         }
-                    }
-                    SettingSection {
-                        title: @tr("Startup");
-                        SettingRow {
-                            label: @tr("Open at computer login");
-                            hint: @tr("Starts Sigwin when you sign in to Windows");
-                            Toggle {
-                                checked <=> SettingsData.autostart;
-                                toggled => { SettingsData.changed(); }
-                            }
-                        }
-                        SettingRow {
-                            label: @tr("Start minimized to tray");
-                            hint: @tr("When started at login, stays in the tray without a window");
-                            Toggle {
-                                enabled: SettingsData.autostart;
-                                checked <=> SettingsData.start-hidden;
-                                toggled => { SettingsData.changed(); }
-                            }
-                        }
-                    }
-                    SettingSection {
-                        title: @tr("Appearance");
-                        SettingRow {
-                            label: @tr("Theme");
-                            Segmented {
-                                options: [@tr("System"), @tr("Light"), @tr("Dark")];
-                                current <=> SettingsData.theme;
-                                changed => { SettingsData.changed(); }
-                            }
-                        }
-                        SettingRow {
-                            label: @tr("Language");
-                            hint: SettingsData.language != SettingsData.language-at-start ? @tr("Applies after Sigwin restarts") : "";
-                            HorizontalLayout {
-                                spacing: 8px;
-                                if SettingsData.language != SettingsData.language-at-start: PlainButton {
-                                    text: @tr("Restart");
-                                    clicked => { SettingsData.restart-app(); }
+                        SettingSection {
+                            title: @tr("Appearance");
+                            SettingRow {
+                                label: @tr("Theme");
+                                Segmented {
+                                    options: [@tr("System"), @tr("Light"), @tr("Dark")];
+                                    current <=> SettingsData.theme;
+                                    changed => { SettingsData.changed(); }
                                 }
-                                Dropdown {
-                                    // names in their own language, so anyone finds theirs
-                                    options: [@tr("System"), "English", "Deutsch", "한국어"];
-                                    current <=> SettingsData.language;
+                            }
+                            SettingRow {
+                                label: @tr("Language");
+                                hint: SettingsData.language != SettingsData.language-at-start ? @tr("Applies after Sigwin restarts") : "";
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    if SettingsData.language != SettingsData.language-at-start: PlainButton {
+                                        text: @tr("Restart");
+                                        clicked => { SettingsData.restart-app(); }
+                                    }
+                                    Dropdown {
+                                        // names in their own language, so anyone finds theirs
+                                        options: [@tr("System"), "English", "Deutsch", "한국어"];
+                                        current <=> SettingsData.language;
+                                        changed => { SettingsData.changed(); }
+                                    }
+                                }
+                            }
+                            SettingRow {
+                                label: @tr("Time format");
+                                Segmented {
+                                    options: [@tr("System"), @tr("12-hour"), @tr("24-hour")];
+                                    current <=> SettingsData.clock;
+                                    changed => { SettingsData.changed(); }
+                                }
+                            }
+                            SettingRow {
+                                label: @tr("Zoom");
+                                hint: @tr("Applied on top of the Windows scale");
+                                Segmented {
+                                    options: ["90%", "100%", "110%", "125%", "150%"];
+                                    current <=> SettingsData.zoom;
+                                    changed => { SettingsData.changed(); }
+                                }
+                            }
+                            SettingRow {
+                                label: @tr("Photo size in chats");
+                                hint: @tr("You can also change it by right-clicking a photo in a chat");
+                                Segmented {
+                                    options: [@tr("Small"), @tr("Medium"), @tr("Large")];
+                                    current <=> SettingsData.photo-size;
+                                    changed => { SettingsData.changed(); }
+                                }
+                            }
+                            SettingRow {
+                                label: @tr("Sticker size in chats");
+                                hint: @tr("You can also change it by right-clicking a sticker in a chat");
+                                Segmented {
+                                    options: [@tr("Small"), @tr("Medium"), @tr("Large")];
+                                    current <=> SettingsData.sticker-size;
                                     changed => { SettingsData.changed(); }
                                 }
                             }
                         }
-                        SettingRow {
-                            label: @tr("Time format");
-                            Segmented {
-                                options: [@tr("System"), @tr("12-hour"), @tr("24-hour")];
-                                current <=> SettingsData.clock;
-                                changed => { SettingsData.changed(); }
+                        SettingSection {
+                            title: @tr("Typing");
+                            SettingRow {
+                                label: @tr("Send message");
+                                hint: SettingsData.enter-sends ? @tr("Shift+Enter starts a new line") : @tr("Enter starts a new line");
+                                Segmented {
+                                    options: ["Enter", "Ctrl+Enter"];
+                                    current: SettingsData.enter-sends ? 0 : 1;
+                                    changed(i) => {
+                                        SettingsData.enter-sends = i == 0;
+                                        SettingsData.changed();
+                                    }
+                                }
                             }
-                        }
-                        SettingRow {
-                            label: @tr("Zoom");
-                            hint: @tr("Applied on top of the Windows scale");
-                            Segmented {
-                                options: ["90%", "100%", "110%", "125%", "150%"];
-                                current <=> SettingsData.zoom;
-                                changed => { SettingsData.changed(); }
+                            SettingRow {
+                                label: @tr("Sent photo quality");
+                                hint: [@tr("Sends photos downsized. Details like location are removed."), @tr("Sends photos at a higher resolution. Details like location are removed.")][SettingsData.photo-quality];
+                                Segmented {
+                                    options: [@tr("Standard"), @tr("High")];
+                                    current: SettingsData.photo-quality;
+                                    changed(i) => {
+                                        SettingsData.photo-quality = i;
+                                        SettingsData.changed();
+                                    }
+                                }
                             }
-                        }
-                        SettingRow {
-                            label: @tr("Photo size in chats");
-                            hint: @tr("You can also change it by right-clicking a photo in a chat");
-                            Segmented {
-                                options: [@tr("Small"), @tr("Medium"), @tr("Large")];
-                                current <=> SettingsData.photo-size;
-                                changed => { SettingsData.changed(); }
-                            }
-                        }
-                        SettingRow {
-                            label: @tr("Sticker size in chats");
-                            hint: @tr("You can also change it by right-clicking a sticker in a chat");
-                            Segmented {
-                                options: [@tr("Small"), @tr("Medium"), @tr("Large")];
-                                current <=> SettingsData.sticker-size;
-                                changed => { SettingsData.changed(); }
-                            }
-                        }
-                    }
-                    SettingSection {
-                        title: @tr("Typing");
-                        SettingRow {
-                            label: @tr("Send message");
-                            hint: SettingsData.enter-sends ? @tr("Shift+Enter starts a new line") : @tr("Enter starts a new line");
-                            Segmented {
-                                options: ["Enter", "Ctrl+Enter"];
-                                current: SettingsData.enter-sends ? 0 : 1;
-                                changed(i) => {
-                                    SettingsData.enter-sends = i == 0;
-                                    SettingsData.changed();
+                            SettingRow {
+                                label: @tr("Generate link previews");
+                                hint: @tr("Adds the title and image of a link to messages you send. Sigwin visits the site to get them, so the site sees your IP address.");
+                                Toggle {
+                                    checked <=> SettingsData.link-previews;
+                                    toggled => { SettingsData.changed(); }
                                 }
                             }
                         }
-                        SettingRow {
-                            label: @tr("Sent photo quality");
-                            hint: [@tr("Sends photos downsized. Details like location are removed."), @tr("Sends photos at a higher resolution. Details like location are removed.")][SettingsData.photo-quality];
-                            Segmented {
-                                options: [@tr("Standard"), @tr("High")];
-                                current: SettingsData.photo-quality;
-                                changed(i) => {
-                                    SettingsData.photo-quality = i;
-                                    SettingsData.changed();
+                        SettingSection {
+                            title: @tr("Privacy");
+                            SettingRow {
+                                label: @tr("Screen security");
+                                hint: @tr("Keeps other apps and Windows Recall from capturing Sigwin's windows. They also show up blank in your own screenshots and screen sharing.");
+                                Toggle {
+                                    checked <=> SettingsData.screen-security;
+                                    toggled => { SettingsData.changed(); }
                                 }
                             }
                         }
-                        SettingRow {
-                            label: @tr("Generate link previews");
-                            hint: @tr("Adds the title and image of a link to messages you send. Sigwin visits the site to get them, so the site sees your IP address.");
-                            Toggle {
-                                checked <=> SettingsData.link-previews;
-                                toggled => { SettingsData.changed(); }
+                        SettingSection {
+                            title: @tr("Account");
+                            SettingRow {
+                                label: @tr("Read receipts · Typing indicators");
+                                hint: SettingsData.account-phone;
+                            }
+                            SettingRow {
+                                label: @tr("Delete data");
+                                hint: @tr("Unlinks this PC and deletes all messages and files");
+                                DangerButton {
+                                    text: @tr("Delete data");
+                                    clicked => { root.unlink(); }
+                                }
                             }
                         }
-                    }
-                    SettingSection {
-                        title: @tr("Privacy");
-                        SettingRow {
-                            label: @tr("Screen security");
-                            hint: @tr("Keeps other apps and Windows Recall from capturing Sigwin's windows. They also show up blank in your own screenshots and screen sharing.");
-                            Toggle {
-                                checked <=> SettingsData.screen-security;
-                                toggled => { SettingsData.changed(); }
+                        SettingSection {
+                            title: @tr("Storage");
+                            SettingRow {
+                                label: @tr("In use");
+                                hint: SettingsData.storage;
                             }
-                        }
-                    }
-                    SettingSection {
-                        title: @tr("Account");
-                        SettingRow {
-                            label: @tr("Read receipts · Typing indicators");
-                            hint: SettingsData.account-phone;
-                        }
-                        SettingRow {
-                            label: @tr("Delete data");
-                            hint: @tr("Unlinks this PC and deletes all messages and files");
-                            DangerButton {
-                                text: @tr("Delete data");
-                                clicked => { root.unlink(); }
-                            }
-                        }
-                    }
-                    SettingSection {
-                        title: @tr("Storage");
-                        SettingRow {
-                            label: @tr("In use");
-                            hint: SettingsData.storage;
-                        }
-                        SettingRow {
-                            label: @tr("Clear thumbnail cache");
-                            hint: @tr("Deletes cached image previews and profile photos. They are made again when needed.");
-                            PlainButton {
-                                text: @tr("Clear");
-                                clicked => { SettingsData.clear-thumbs(); }
-                            }
-                        }
-                    }
-                    SettingSection {
-                        title: @tr("Troubleshooting");
-                        SettingRow {
-                            label: @tr("Log folder");
-                            hint: @tr("When reporting a problem, please include the files in this folder. Message contents are never logged.");
-                            PlainButton {
-                                text: @tr("Open");
-                                clicked => { SettingsData.open-logs(); }
-                            }
-                        }
-                    }
-                    SettingSection {
-                        title: @tr("Updates");
-                        SettingRow {
-                            label: @tr("Download updates automatically");
-                            hint: @tr("Downloads and installs new versions in the background. They apply the next time Sigwin starts.");
-                            Toggle {
-                                checked <=> SettingsData.auto-update;
-                                toggled => { SettingsData.changed(); }
-                            }
-                        }
-                        SettingRow {
-                            label: @tr("Check for updates");
-                            hint: SettingsData.update-version != "" ? @tr("A new version is ready. Restart from the bottom left.")
-                                : SettingsData.update-available != "" ? @tr("Version {} is available. Update from the bottom left.", SettingsData.update-available)
-                                : SettingsData.update-status != "" ? SettingsData.update-status
-                                : @tr("Checks GitHub for a new version.");
-                            PlainButton {
-                                text: SettingsData.update-checking ? @tr("Checking…") : @tr("Check now");
-                                enabled: !SettingsData.update-checking && SettingsData.update-version == "" && SettingsData.update-available == "";
-                                clicked => { SettingsData.check-update(); }
-                            }
-                        }
-                    }
-                    SettingSection {
-                        title: @tr("About");
-                        SettingRow {
-                            label: SettingsData.version;
-                            hint: @tr("An unofficial client, not affiliated with Signal. \"Signal\" is a trademark of the Signal Technology Foundation.");
-                        }
-                        SettingRow {
-                            label: @tr("What's new");
-                            hint: @tr("You can see what changed in each version on GitHub.");
-                            PlainButton {
-                                text: @tr("View");
-                                clicked => { root.open-whatsnew(); }
-                            }
-                        }
-                        SettingRow {
-                            label: @tr("Source code");
-                            hint: @tr("© 2026 Othereum. Free software under the AGPL-3.0 license, with no warranty.");
-                            HorizontalLayout {
-                                spacing: 6px;
+                            SettingRow {
+                                label: @tr("Clear thumbnail cache");
+                                hint: @tr("Deletes cached image previews and profile photos. They are made again when needed.");
                                 PlainButton {
-                                    text: "GitHub";
-                                    clicked => { Links.open("https://github.com/Othereum/sigwin"); }
+                                    text: @tr("Clear");
+                                    clicked => { SettingsData.clear-thumbs(); }
                                 }
+                            }
+                        }
+                        SettingSection {
+                            title: @tr("Troubleshooting");
+                            SettingRow {
+                                label: @tr("Log folder");
+                                hint: @tr("When reporting a problem, please include the files in this folder. Message contents are never logged.");
                                 PlainButton {
-                                    text: @tr("License");
-                                    clicked => { Links.open("https://www.gnu.org/licenses/agpl-3.0.html"); }
+                                    text: @tr("Open");
+                                    clicked => { SettingsData.open-logs(); }
                                 }
                             }
                         }
-                        SettingRow {
-                            label: @tr("Open source licenses");
-                            hint: @tr("Copyright and license notices of the libraries in Sigwin");
-                            PlainButton {
-                                text: @tr("View");
-                                clicked => { Links.open("sigwin-licenses:"); }
+                        SettingSection {
+                            title: @tr("Updates");
+                            SettingRow {
+                                label: @tr("Download updates automatically");
+                                hint: @tr("Downloads and installs new versions in the background. They apply the next time Sigwin starts.");
+                                Toggle {
+                                    checked <=> SettingsData.auto-update;
+                                    toggled => { SettingsData.changed(); }
+                                }
+                            }
+                            SettingRow {
+                                label: @tr("Check for updates");
+                                hint: SettingsData.update-version != "" ? @tr("A new version is ready. Restart from the bottom left.")
+                                    : SettingsData.update-available != "" ? @tr("Version {} is available. Update from the bottom left.", SettingsData.update-available)
+                                    : SettingsData.update-status != "" ? SettingsData.update-status
+                                    : @tr("Checks GitHub for a new version.");
+                                PlainButton {
+                                    text: SettingsData.update-checking ? @tr("Checking…") : @tr("Check now");
+                                    enabled: !SettingsData.update-checking && SettingsData.update-version == "" && SettingsData.update-available == "";
+                                    clicked => { SettingsData.check-update(); }
+                                }
                             }
                         }
+                        SettingSection {
+                            title: @tr("About");
+                            SettingRow {
+                                label: SettingsData.version;
+                                hint: @tr("An unofficial client, not affiliated with Signal. \"Signal\" is a trademark of the Signal Technology Foundation.");
+                            }
+                            SettingRow {
+                                label: @tr("What's new");
+                                hint: @tr("You can see what changed in each version on GitHub.");
+                                PlainButton {
+                                    text: @tr("View");
+                                    clicked => { root.open-whatsnew(); }
+                                }
+                            }
+                            SettingRow {
+                                label: @tr("Source code");
+                                hint: @tr("© 2026 Othereum. Free software under the AGPL-3.0 license, with no warranty.");
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    PlainButton {
+                                        text: "GitHub";
+                                        clicked => { Links.open("https://github.com/Othereum/sigwin"); }
+                                    }
+                                    PlainButton {
+                                        text: @tr("License");
+                                        clicked => { Links.open("https://www.gnu.org/licenses/agpl-3.0.html"); }
+                                    }
+                                }
+                            }
+                            SettingRow {
+                                label: @tr("Open source licenses");
+                                hint: @tr("Copyright and license notices of the libraries in Sigwin");
+                                PlainButton {
+                                    text: @tr("View");
+                                    clicked => { Links.open("sigwin-licenses:"); }
+                                }
+                            }
+                        }
+                        Rectangle { height: 16px; }
                     }
-                    Rectangle { height: 16px; }
                 }
-            }
+                }
             }
         }
     }

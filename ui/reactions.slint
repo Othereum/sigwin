@@ -2,6 +2,7 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
+import { ThinScroll } from "widgets.slint";
 
 export global PickerLayout {
     out property <length> cell: 36px;
@@ -92,14 +93,22 @@ export component EmojiPicker inherits VerticalLayout {
         }
         Rectangle { height: 1px; background: Theme.border; }
     }
-    ListView {
+    ThinScroll {
         height: PickerLayout.visible-rows * PickerLayout.cell;
-        for row in root.rows: HorizontalLayout {
-            alignment: start;
-            for e in row: ReactionCell {
-                emoji: e;
-                mine: e == root.mine;
-                picked => { root.picked(e); }
+        content-y <=> grid.content-y;
+        content-height: grid.content-height;
+        visible-height: grid.visible-height;
+        grid := ListView {
+            width: parent.width;
+            height: parent.height;
+            vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+            for row in root.rows: HorizontalLayout {
+                alignment: start;
+                for e in row: ReactionCell {
+                    emoji: e;
+                    mine: e == root.mine;
+                    picked => { root.picked(e); }
+                }
             }
         }
     }
