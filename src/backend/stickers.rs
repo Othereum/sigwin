@@ -217,7 +217,18 @@ impl App {
         let Some(thread_key) = self.current.as_ref().map(|o| o.key.clone()) else { return };
         // preview straight from the sticker bytes, no disk cache
         let bytes = s.bytes.clone();
-        self.pending.push(Pending {
+        let emit = self.emit.clone();
+        let key = image_key.clone();
+        tokio::task::spawn_blocking(move || {
+            let img = sigwin_thumb::decode(&bytes).map(|i| {
+                sigwin_thumb::fit(sigwin_thumb::to_rgba(&i), crate::types::physical_px(view::media::STICKER_SIZE))
+            });
+            if let Ok(rgba) = img {
+                let t = Thumb { key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() };
+                emit(Event::Thumb(Arc::new(t)));
+            }
+        });
+        self.queue_send(Pending {
             ts,
             thread_key,
             text: String::new(),
@@ -225,26 +236,15 @@ impl App {
             quote_author: String::new(),
             quote_id: String::new(),
             attachment: String::new(),
-            image_key: image_key.clone(),
+            image_key,
             photos: Vec::new(),
             link: None,
             error: None,
             canceled: false,
             after_seq: None,
             job: SendJob::Sticker(s),
-        });
-        let emit = self.emit.clone();
-        tokio::task::spawn_blocking(move || {
-            let img = sigwin_thumb::decode(&bytes).map(|i| {
-                sigwin_thumb::fit(sigwin_thumb::to_rgba(&i), crate::types::physical_px(view::media::STICKER_SIZE))
-            });
-            if let Ok(rgba) = img {
-                let t = Thumb { key: image_key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() };
-                emit(Event::Thumb(Arc::new(t)));
-            }
-        });
-        self.emit_messages(Scroll::Bottom).await;
-        self.start_send(ts).await;
+        })
+        .await;
     }
 
     pub(super) fn install_pack(&self, id: Vec<u8>, key: Vec<u8>) {

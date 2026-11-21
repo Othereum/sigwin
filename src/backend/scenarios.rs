@@ -193,6 +193,54 @@ fn news_while_watching_stays_at_the_bottom_and_is_read_by_the_ui() {
 }
 
 #[test]
+fn sending_drops_the_unread_line() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=20 unread=2").await;
+        h.open(1).await;
+        h.cmd(Command::ReadUpTo(h.row(19))).await;
+        assert_eq!(h.query("unread", 1), "0");
+        let ev = h.take_events();
+        assert!(last_list(&ev).map_or(true, |(items, _)| divider(items).is_some()), "read through: the line stays");
+        let ts = h.app.next_send_ts();
+        let thread_key = h.app.current.as_ref().unwrap().key.clone();
+        let job = SendJob::Text {
+            body: "hi".into(),
+            body_ranges: Vec::new(),
+            files: Vec::new(),
+            shown: Vec::new(),
+            quote: None,
+            link: LinkSend::None,
+            quality: sigwin_thumb::photo::Quality::from_index(0),
+            view_once: false,
+        };
+        h.app
+            .queue_send(Pending {
+                ts,
+                thread_key,
+                text: "hi".into(),
+                quote: String::new(),
+                quote_author: String::new(),
+                quote_id: String::new(),
+                attachment: String::new(),
+                image_key: String::new(),
+                photos: Vec::new(),
+                link: None,
+                error: None,
+                canceled: false,
+                after_seq: None,
+                job,
+            })
+            .await;
+        let ev = h.take_events();
+        let (items, scroll) = last_list(&ev).expect("a list");
+        assert_eq!(scroll, Scroll::Bottom);
+        assert!(divider(items).is_none());
+        assert!(h.query("window", 1).contains("divider=none"));
+    });
+}
+
+#[test]
 fn watching_stops_when_the_mouse_leaves() {
     scenario(|| async {
         let mut h = Harness::new().await;

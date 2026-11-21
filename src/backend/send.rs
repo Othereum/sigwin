@@ -115,7 +115,7 @@ impl App {
             self.spawn_pending_thumbs(ts, photo_paths, &photos);
         }
         let attachment = if view_once { String::new() } else { attachment };
-        self.pending.push(Pending {
+        self.queue_send(Pending {
             photos,
             ts,
             thread_key: key,
@@ -130,9 +130,8 @@ impl App {
             canceled: false,
             after_seq: None,
             job: SendJob::Text { body, body_ranges, files, shown, quote, link, quality, view_once },
-        });
-        self.emit_messages(Scroll::Bottom).await;
-        self.start_send(ts).await;
+        })
+        .await;
     }
 
     /// Pictures for the pending row's photos, straight from the files being sent (no cache).
@@ -285,6 +284,18 @@ impl App {
         p.error = None;
         p.canceled = false;
         p.after_seq = None;
+        self.queue_send(p).await;
+    }
+
+    /// Shows `p` at the bottom and sends it. Writing means the user caught up with the thread,
+    /// so the unread line goes (as in Signal Desktop).
+    pub(super) async fn queue_send(&mut self, p: Pending) {
+        let ts = p.ts;
+        if let Some(open) = self.current.as_mut().filter(|o| o.key == p.thread_key) {
+            open.divider = None;
+            open.divider_reached = false;
+            open.divider_due = false;
+        }
         self.pending.push(p);
         self.emit_messages(Scroll::Bottom).await;
         self.start_send(ts).await;
