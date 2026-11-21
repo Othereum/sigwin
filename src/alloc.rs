@@ -1,17 +1,34 @@
 //! Global allocator wrapper that counts live Rust heap bytes, so memory reports can tell
 //! Rust allocations apart from native ones (sqlite, Windows DLLs).
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::{GlobalAlloc, Layout};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 pub struct Counting;
+
+/// What allocates under the count: DHAT's recorder in a heap profiling build (`dhat-heap`),
+/// which passes through to the system allocator while no profile runs (`profile`).
+#[cfg(feature = "dhat-heap")]
+static INNER: dhat::Alloc = dhat::Alloc;
+#[cfg(not(feature = "dhat-heap"))]
+static INNER: std::alloc::System = std::alloc::System;
+
+/// Heap profiling build: records allocations from now until the guard drops (the end of
+/// `main`), then writes where the heap's peak was allocated to `dhat-heap.json` in `dir`.
+/// Backtraces and sizes only, no contents.
+#[cfg(feature = "dhat-heap")]
+pub fn profile(dir: &std::path::Path) -> dhat::Profiler {
+    let file = dir.join("dhat-heap.json");
+    tracing::info!("heap profile: written on exit");
+    dhat::Profiler::builder().file_name(file).build()
+}
 
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-        let p = unsafe { System.alloc(l) };
+        let p = unsafe { INNER.alloc(l) };
         if !p.is_null() {
             let now = LIVE.fetch_add(l.size(), Relaxed) + l.size();
             PEAK.fetch_max(now, Relaxed);
@@ -19,11 +36,11 @@ unsafe impl GlobalAlloc for Counting {
         p
     }
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
-        unsafe { System.dealloc(p, l) };
+        unsafe { INNER.dealloc(p, l) };
         LIVE.fetch_sub(l.size(), Relaxed);
     }
     unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
-        let p = unsafe { System.alloc_zeroed(l) };
+        let p = unsafe { INNER.alloc_zeroed(l) };
         if !p.is_null() {
             let now = LIVE.fetch_add(l.size(), Relaxed) + l.size();
             PEAK.fetch_max(now, Relaxed);
@@ -31,7 +48,7 @@ unsafe impl GlobalAlloc for Counting {
         p
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
-        let q = unsafe { System.realloc(p, l, new) };
+        let q = unsafe { INNER.realloc(p, l, new) };
         if !q.is_null() {
             if new >= l.size() {
                 let now = LIVE.fetch_add(new - l.size(), Relaxed) + new - l.size();

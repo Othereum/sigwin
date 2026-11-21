@@ -27,7 +27,7 @@ Every change must respect this:
 - No GPU renderer, WebView, JVM, or extra runtimes. Slint uses `renderer-software` only (GPU renderers cost 200MB+; numbers in `docs/decisions.md`). Never enable the `renderer-femtovg` / `renderer-skia` features by default.
 - Never load whole threads: always bound what you read from the store.
 - Anything that loads heavy system DLLs runs in a child process.
-- Measure, don't guess: the log prints `mem: rust heap …, private …` every 10s at debug level (`sigwin=debug`; info only every 10 min, for users' log files) (`alloc.rs` counts Rust heap; the rest is native), followed by what each counted cache holds and the uncounted rest. Anything that holds memory for a while gets an `alloc::Gauge` (`alloc::Held`, `gui::held::ImageMap`), or it hides in the rest. `SIGWIN_DEMO=1 SIGWIN_SELFTEST=1` measures the dialog and notification cost.
+- Measure, don't guess: the log prints `mem: rust heap …, private …` every 10s at debug level (`sigwin=debug`; info only every 10 min, for users' log files) (`alloc.rs` counts Rust heap; the rest is native), followed by what each counted cache holds and the uncounted rest. Anything that holds memory for a while gets an `alloc::Gauge` (`alloc::Held`, `gui::held::ImageMap`), or it hides in the rest. `SIGWIN_DEMO=1 SIGWIN_SELFTEST=1` measures the dialog and notification cost. Where a heap peak was allocated: `cargo build --profile prof --features dhat-heap` (it records only the run's single highest moment, so do just the thing being measured).
 
 ## Hard constraint: privacy and security
 This client holds private conversations; treat a leak as worse than a crash. Every change must respect this:

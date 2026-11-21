@@ -43,6 +43,7 @@ sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runti
 tokio = { version = "1.48", features = ["rt", "time", "sync", "macros", "net"] }
 getrandom = "0.3"
 tracing = "0.1"
+dhat = { version = "0.3.3", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = "1"
 url = "2"
@@ -76,6 +77,9 @@ members = ["crates/thumb", "crates/vault", "crates/ui"]
 # optional GPU renderers for comparison; pick at runtime with SLINT_BACKEND=winit-femtovg|winit-skia|winit-software
 renderer-femtovg = ["slint/renderer-femtovg"]
 renderer-skia = ["slint/renderer-skia"]
+# heap profiling: where the Rust heap's peak was allocated, written to dhat-heap.json in the
+# logs folder on exit (open it in DHAT's viewer). Build with `--profile prof` for the backtraces.
+dhat-heap = ["dep:dhat"]
 
 [build-dependencies]
 rspolib = "0.1.2" # the .po parser slint-build uses for the same catalogs (`src/i18n.rs`)
@@ -157,5 +161,11 @@ incremental = true
 # memory/perf numbers.
 [profile.fast.package.sigwin]
 opt-level = 0
+
+# heap profiling (`--features dhat-heap`): fast, keeping the symbols its backtraces need
+[profile.prof]
+inherits = "fast"
+strip = false
+debug = "line-tables-only"
 [profile.fast.package.sigwin-ui]
 opt-level = 0
