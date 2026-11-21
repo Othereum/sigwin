@@ -276,6 +276,7 @@ pub(crate) fn ensure_shown(app: &AppWindow) -> bool {
         return false;
     }
     restore_geometry(app);
+    restore_sidebar(app);
     if let Err(e) = app.show() {
         tracing::warn!("show window: {e}");
     }
@@ -367,6 +368,29 @@ fn on_screen(g: &settings::WindowGeom) -> bool {
 #[cfg(not(windows))]
 fn on_screen(_: &settings::WindowGeom) -> bool {
     true
+}
+
+/// The sidebar's width and fold as last left, and saving them as the user changes them (its
+/// edge, on release). Headless runs keep the defaults, as for the window's rect.
+fn restore_sidebar(app: &AppWindow) {
+    if headless::active() {
+        return;
+    }
+    let (w, folded) = UI.with_borrow(|ui| (ui.settings.sidebar_width, ui.settings.sidebar_folded));
+    app.set_side_width(w as f32);
+    app.set_side_folded(folded);
+    let weak = app.as_weak();
+    app.on_side_changed(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let (w, folded) = (app.get_side_width().round() as u32, app.get_side_folded());
+        UI.with_borrow_mut(|ui| {
+            if (ui.settings.sidebar_width, ui.settings.sidebar_folded) != (w, folded) {
+                ui.settings.sidebar_width = w;
+                ui.settings.sidebar_folded = folded;
+                ui.settings.save(&ui.settings_path);
+            }
+        });
+    });
 }
 
 /// On exit: writes the window's rect into the settings file.

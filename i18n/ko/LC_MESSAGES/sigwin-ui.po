@@ -1092,6 +1092,15 @@ msgstr "한 번만 볼 수 있는 사진"
 msgid "Click to view"
 msgstr "클릭하여 보기"
 
+msgid "Click to update"
+msgstr "클릭하여 업데이트"
+
+msgid "Click to restart"
+msgstr "클릭하여 다시 시작"
+
+msgid "Click to see what's new"
+msgstr "클릭하여 새로운 점 보기"
+
 msgid "Open it on your phone"
 msgstr "휴대폰에서 볼 수 있습니다"
 

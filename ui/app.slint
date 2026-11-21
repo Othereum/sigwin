@@ -29,6 +29,159 @@ export { RequestData } from "request.slint";
 export { GalleryCell, GalleryData, GalleryRow } from "gallery.slint";
 export { CalendarCell, CalendarData } from "calendar.slint";
 
+// Our photo at the sidebar's top, the way into the settings: a gear over it on hover, a ring while open.
+component MeButton inherits Rectangle {
+    in property <image> photo;
+    in property <bool> has-photo;
+    in property <bool> open;
+    callback clicked;
+    width: 32px;
+    Avatar {
+        y: (parent.height - self.height) / 2;
+        size: 32px;
+        initial: SettingsData.account-initial;
+        tint: SettingsData.account-tint;
+        photo: root.photo;
+        has-photo: root.has-photo;
+    }
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 32px;
+        height: 32px;
+        border-radius: 16px;
+        background: ta.has-hover ? #000000a0 : transparent;
+        border-width: 2px;
+        border-color: root.open && !ta.has-hover ? Theme.subtle : transparent;
+        Icon {
+            visible: ta.has-hover;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            icon: Icons.settings;
+            tint: white;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// The time a bar has left before it goes by itself, as a ring draining clockwise from the top
+// around a 36px button (short of 360°: a full turn would end where it starts and draw nothing).
+component DrainRing inherits Path {
+    // the part left, 0 to 1
+    in property <float> left;
+    property <angle> arc: min(359.9deg, 360deg * root.left);
+    width: 36px;
+    height: 36px;
+    viewbox-width: 36;
+    viewbox-height: 36;
+    stroke: Theme.subtle;
+    stroke-width: 1.5px;
+    MoveTo { x: 18; y: 6; }
+    ArcTo {
+        x: 18 + 12 * Math.sin(root.arc);
+        y: 18 - 12 * Math.cos(root.arc);
+        radius-x: 12;
+        radius-y: 12;
+        large-arc: root.arc > 180deg;
+        sweep: true;
+    }
+}
+
+// A bar docked at the sidebar's foot: flat on it, a rule above, its icon and then the children.
+// Folded, the icon alone, and what the bar says in a tip beside it while the pointer is on it.
+component FootBar inherits Rectangle {
+    in property <bool> folded;
+    in property <string> icon;
+    in property <string> tip;
+    in property <bool> enabled: true;
+    in property <length> pad-right: 18px;
+    // folded, a bar that goes by itself: the time it has left around its icon (1: nothing shown),
+    // and a close button beside it while the pointer is on the bar
+    in property <float> drain: 1;
+    in property <bool> closable;
+    callback close;
+    // the TouchArea holds the rest, so this stays on over the buttons in it
+    out property <bool> hovered: ta.has-hover;
+    callback clicked;
+    // the tip waits as briefly as the rail's row preview: only for a pointer passing by
+    property <bool> tip-ready;
+    Timer {
+        running: root.folded && ta.has-hover && !root.tip-ready;
+        interval: 100ms;
+        triggered => { root.tip-ready = true; }
+    }
+    changed hovered => { root.tip-ready = false; }
+    ta := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
+            }
+        }
+        Rectangle { background: ta.has-hover && root.enabled ? Theme.notice-hover : Theme.notice; }
+        Rectangle { y: 0px; height: 1px; background: Theme.border; }
+        if root.folded: Rectangle {
+            property <bool> beside: root.closable && ta.has-hover;
+            // the close button's room: the icon steps aside for it
+            x: self.beside ? 4px : (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 36px;
+            height: 36px;
+            Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                size: 20px;
+                icon: root.icon;
+                tint: Theme.accent;
+            }
+            if root.drain < 1: DrainRing { left: root.drain; }
+        }
+        if root.folded && root.closable && ta.has-hover: IconButton {
+            x: parent.width - self.width - 8px;
+            y: (parent.height - self.height) / 2;
+            width: 26px;
+            height: 26px;
+            icon: Icons.close;
+            icon-size: 14px;
+            clicked => { root.close(); }
+        }
+        HorizontalLayout {
+            visible: !root.folded;
+            padding-left: 18px;
+            padding-right: root.pad-right;
+            spacing: 10px;
+            Icon {
+                y: (parent.height - self.height) / 2;
+                size: 18px;
+                icon: root.icon;
+                tint: Theme.accent;
+            }
+            @children
+        }
+    }
+    // beside the rail, over the pane
+    if root.folded && root.tip-ready && ta.has-hover: Rectangle {
+        x: root.width + 6px;
+        y: (root.height - self.height) / 2;
+        width: tip-text.preferred-width + 20px;
+        height: tip-text.preferred-height + 14px;
+        border-radius: 6px;
+        background: Theme.sidebar;
+        border-width: 1px;
+        border-color: Theme.border;
+        tip-text := Text {
+            x: 10px;
+            y: 7px;
+            text: root.tip;
+            color: Theme.text;
+            font-size: 12px;
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     in property <int> total-unread;
     // dev builds (no SIGWIN_RELEASE): commit hash, else "dev"; empty for releases
@@ -36,8 +189,66 @@ export component AppWindow inherits Window {
     title: (dev-tag != "" ? "Sigwin [" + dev-tag + "]" : "Sigwin") + (total-unread > 0 ? " (" + total-unread + ")" : "");
     preferred-width: 1000px;
     preferred-height: 680px;
-    min-width: 640px;
+    // an open sidebar keeps its narrowest width: unfolding it in a narrow window widens the window
+    min-width: (root.side-folded ? root.rail-w : root.side-min) + root.pane-min;
     min-height: 420px;
+
+    // the sidebar: its open width (dragged on its edge) and whether it's folded to the rail of
+    // photos; `side-changed` saves both (gui::window)
+    in-out property <length> side-width: 300px;
+    in-out property <bool> side-folded;
+    callback side-changed();
+    property <length> rail-w: 76px;
+    property <length> side-min: 280px;
+    property <length> side-max: 480px;
+    property <length> pane-min: 340px;
+    // the open width the window leaves room for: it gives way before the pane does
+    property <length> side-open-w: max(root.side-min, min(root.side-width, root.side-max, root.width - root.pane-min));
+    // the search box needs the open width: a folded sidebar opens over the pane while it has the
+    // focus (`side-hold` until it gets it), and goes back once it's left
+    property <bool> side-hold;
+    property <bool> side-wide: !root.side-folded || root.side-hold || sidebar.typing;
+    // where the pane starts: a folded sidebar opened for the search lies over it
+    property <length> pane-x: root.side-folded ? root.rail-w : root.side-open-w;
+    // dragging the edge to `x`: short of halfway to the narrowest open width it folds, keeping the
+    // width the drag started from (passing by on the way doesn't set it) for unfolding
+    property <length> drag-from;
+    function drag-edge(x: length) {
+        if (x < (root.rail-w + root.side-min) / 2) {
+            root.side-folded = true;
+            root.side-width = root.drag-from;
+        } else {
+            root.side-folded = false;
+            root.side-width = max(root.side-min, min(root.side-max, x));
+        }
+    }
+    // folded: the row under the pointer shows whole over the pane, after a moment the first time
+    // and at once while the pointer goes along the rail; the pointer on it keeps it
+    property <string> hover-key;
+    property <ThreadItem> hover-item;
+    property <length> hover-y;
+    property <bool> peek-on;
+    property <ThreadItem> peek-item;
+    property <length> peek-y;
+    function rail-hover(t: ThreadItem, y: length) {
+        // a row the list's edge hides more than half of is passed over: its preview would stand
+        // mostly where the row isn't
+        let top = thread-list.absolute-position.y;
+        let shown = min(y + 64px, top + thread-list.height) - max(y, top);
+        if (shown < 32px) {
+            root.hover-key = "";
+            root.peek-on = false;
+            return;
+        }
+        root.hover-key = t.key;
+        root.hover-item = t;
+        root.hover-y = y;
+        if (root.peek-on) {
+            root.peek-item = t;
+            root.peek-y = y;
+        }
+    }
+    changed side-wide => { root.peek-on = false; root.hover-key = ""; }
     // Flipping this repaints the whole window: the software renderer only redraws damaged
     // regions and loses track of them when the window was updated while minimized.
     in property <bool> repaint-flip;
@@ -296,10 +507,30 @@ export component AppWindow inherits Window {
         root.settings-open = false;
         SearchData.search-in(root.current-key, root.current-name, root.current-initial, root.current-tint,
             root.current-photo-small, root.current-has-photo);
-        search-edit.focus();
+        root.focus-search();
     }
     public function focus-search() {
+        root.side-hold = true;
         search-edit.focus();
+    }
+    function pick-thread(key: string) {
+        root.settings-open = false;
+        GalleryData.close();
+        root.open-thread(key);
+    }
+    function toggle-settings() {
+        if (root.settings-open) {
+            root.settings-open = false;
+        } else {
+            root.open-settings();
+        }
+    }
+    // the ✎ button: the contact list, in the search box
+    function open-contacts() {
+        SearchData.contacts = true;
+        SearchData.query = "";
+        SearchData.changed();
+        root.focus-search();
     }
     // a left press at `x` anywhere in the window (winhook): one past the sidebar leaves the search
     // box, as a press on the list's empty space wouldn't by itself. Not while a filter's menu or
@@ -307,6 +538,7 @@ export component AppWindow inherits Window {
     public function pressed-at(x: length) {
         if (x >= sidebar.width && !kind-menu.is-open && !CalendarData.open) {
             search-edit.blur();
+            root.side-hold = false;
         }
     }
     public function blur-composer() {
@@ -407,547 +639,12 @@ export component AppWindow inherits Window {
         start-link(name) => { root.start-link(name); }
     }
 
-    main := HorizontalLayout {
+    // conversation pane, right of the sidebar's place: the sidebar lies over the window outside
+    // any layout, so that it can open over the pane
+    main := Rectangle {
         visible: page == "main";
-        // sidebar
-        sidebar := Rectangle {
-            // the box has the focus (a menu or the date picker of the filters takes it while
-            // open): the buttons beside the box give it their room until it's left
-            property <bool> typing: search-edit.focused || kind-menu.is-open || (CalendarData.open && CalendarData.until)
-                || SearchData.picking;
-            property <bool> searching: SearchData.active || self.typing;
-            width: 300px;
-            background: Theme.sidebar;
-            VerticalLayout {
-                HorizontalLayout {
-                    padding: 10px;
-                    spacing: 6px;
-                    // as tall without the photo beside the box as with it
-                    min-height: 56px;
-                    // the contact list: the way back to the threads
-                    if SearchData.contacts: IconButton {
-                        y: (parent.height - self.height) / 2;
-                        icon: Icons.back;
-                        clicked => {
-                            SearchData.step-back();
-                            // back to the thread list, not into a search
-                            if (!SearchData.contacts) {
-                                search-edit.blur();
-                            }
-                        }
-                    }
-                    if !SearchData.contacts && !sidebar.typing: Rectangle {
-                        width: 32px;
-                        // as tall as the search box beside it
-                        min-height: 36px;
-                        Avatar {
-                            y: (parent.height - self.height) / 2;
-                            size: 32px;
-                            initial: SettingsData.account-initial;
-                            tint: SettingsData.account-tint;
-                            photo: root.me-photo;
-                            has-photo: root.me-has-photo;
-                        }
-                        // the photo is the way into the settings: a gear over it on hover, a ring while open
-                        Rectangle {
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            width: 32px;
-                            height: 32px;
-                            border-radius: 16px;
-                            background: me-ta.has-hover ? #000000a0 : transparent;
-                            border-width: 2px;
-                            border-color: root.settings-open && !me-ta.has-hover ? Theme.subtle : transparent;
-                            Icon {
-                                visible: me-ta.has-hover;
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                icon: Icons.settings;
-                                tint: white;
-                            }
-                        }
-                        me-ta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => {
-                                if (root.settings-open) {
-                                    root.settings-open = false;
-                                } else {
-                                    root.open-settings();
-                                }
-                            }
-                        }
-                    }
-                    search-edit := Field {
-                        y: (parent.height - self.height) / 2;
-                        // the chat's picture stands first in its place
-                        icon: scope-chip.visible ? "" : Icons.search;
-                        placeholder: SearchData.picking ? @tr("Sender's name")
-                            : SearchData.scope-key != "" ? @tr("Search in {}", SearchData.scope-name)
-                            : !SearchData.contacts ? @tr("Search")
-                            : SearchData.find == FindKind.phone ? @tr("Enter a phone number")
-                            : SearchData.find == FindKind.username ? @tr("Username (e.g. name.42)")
-                            : @tr("Name, phone number, username");
-                        text <=> SearchData.query;
-                        edited => {
-                            SearchData.preedit = self.preedit;
-                            SearchData.changed();
-                        }
-                        // search as Hangul is composed, before it's committed to the text
-                        preedit-changed => {
-                            SearchData.preedit = self.preedit;
-                            SearchData.changed();
-                        }
-                        accepted => { SearchData.accept(); }
-                        key-pressed(event) => {
-                            if (event.text == Key.Escape) {
-                                // nothing left to undo: out of the box, which gives the buttons
-                                // beside it back
-                                if (!SearchData.active) {
-                                    self.blur();
-                                } else {
-                                    let leaving = SearchData.contacts;
-                                    SearchData.back();
-                                    if (leaving && !SearchData.contacts) {
-                                        self.blur();
-                                    }
-                                }
-                                return accept;
-                            }
-                            // through the found messages, one by one
-                            if (!SearchData.contacts && !SearchData.picking && (event.text == Key.UpArrow || event.text == Key.DownArrow)) {
-                                SearchData.step(event.text == Key.UpArrow ? -1 : 1);
-                                return accept;
-                            }
-                            reject
-                        }
-                        lead: scope-chip.visible ? scope-chip.width + 4px : 0px;
-                        // the chat searched in: where, not what, so in the box rather than
-                        // among the filters below
-                        scope-chip := ScopeToken {
-                            visible: SearchData.scope-key != "" && !SearchData.picking;
-                            x: 8px;
-                            y: (parent.height - self.height) / 2;
-                            clear => {
-                                SearchData.leave-scope();
-                                search-edit.focus();
-                            }
-                        }
-                    }
-                    // start a conversation: the contact list
-                    if !SearchData.contacts && !sidebar.typing: IconButton {
-                        y: (parent.height - self.height) / 2;
-                        icon: Icons.compose;
-                        clicked => {
-                            SearchData.contacts = true;
-                            SearchData.query = "";
-                            SearchData.changed();
-                            search-edit.focus();
-                        }
-                    }
-                }
-                // picking the sender filter: what the list is, and the way back
-                if SearchData.picking: Rectangle {
-                    height: 34px;
-                    Rectangle {
-                        x: 8px;
-                        width: parent.width - 16px;
-                        height: 30px;
-                        border-radius: 8px;
-                        background: Theme.selected;
-                    }
-                    HorizontalLayout {
-                        padding-left: 20px;
-                        padding-right: 12px;
-                        spacing: 4px;
-                        Text {
-                            text: @tr("Who sent it?");
-                            color: Theme.text;
-                            font-size: 13px;
-                            overflow: elide;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        IconButton {
-                            y: (parent.height - self.height) / 2;
-                            icon: Icons.close;
-                            icon-size: 14px;
-                            width: 24px;
-                            height: 24px;
-                            clicked => {
-                                SearchData.end-picking("", "");
-                                search-edit.focus();
-                            }
-                        }
-                    }
-                }
-                // the message search's filters. Shown while the box has the focus too, so that a
-                // search can start from a filter; a menu or the date picker takes the focus while
-                // open. Set values run longer: the chips wrap rather than scroll out of sight
-                chips := Rectangle {
-                    property <bool> shown: !SearchData.contacts && !SearchData.picking && sidebar.searching;
-                    height: self.shown ? chip-flow.preferred-height + 8px : 0px;
-                    visible: self.shown;
-                    chip-flow := FlexboxLayout {
-                        x: 8px;
-                        y: 2px;
-                        width: parent.width - 16px;
-                        height: self.preferred-height;
-                        spacing: 6px;
-                        FilterChip {
-                            text: SearchData.sender-key != "" ? SearchData.sender-name : @tr("Sender");
-                            set: SearchData.sender-key != "";
-                            clicked => {
-                                SearchData.pick-sender();
-                                search-edit.focus();
-                            }
-                            clear => {
-                                SearchData.clear-sender();
-                                search-edit.focus();
-                            }
-                        }
-                        date-chip := FilterChip {
-                            text: SearchData.until-day != 0 ? SearchData.until-label : @tr("Date");
-                            set: SearchData.until-day != 0;
-                            clicked => {
-                                CalendarData.show-until(date-chip.absolute-position.x + 100px,
-                                    date-chip.absolute-position.y + date-chip.height + 4px);
-                            }
-                            clear => {
-                                SearchData.clear-until();
-                                search-edit.focus();
-                            }
-                        }
-                        kind-chip := FilterChip {
-                            text: SearchData.kind == 1 ? @tr("Photos and videos") : SearchData.kind == 2 ? @tr("Files")
-                                : SearchData.kind == 3 ? @tr("Links") : @tr("Type");
-                            set: SearchData.kind != 0;
-                            clicked => { kind-menu.show(); }
-                            clear => {
-                                SearchData.set-kind(0);
-                                search-edit.focus();
-                            }
-                            kind-menu := ChipMenu {
-                                x: 0px;
-                                y: parent.height + 4px;
-                                ChipMenuRow {
-                                    text: @tr("Photos and videos");
-                                    current: SearchData.kind == 1;
-                                    clicked => {
-                                        SearchData.set-kind(1);
-                                        kind-menu.close();
-                                    }
-                                }
-                                ChipMenuRow {
-                                    text: @tr("Files");
-                                    current: SearchData.kind == 2;
-                                    clicked => {
-                                        SearchData.set-kind(2);
-                                        kind-menu.close();
-                                    }
-                                }
-                                ChipMenuRow {
-                                    text: @tr("Links");
-                                    current: SearchData.kind == 3;
-                                    clicked => {
-                                        SearchData.set-kind(3);
-                                        kind-menu.close();
-                                    }
-                                }
-                            }
-                        }
-                        // reads "@Me": what mentions us. Others' mentions are found by their
-                        // name, as the text shows them
-                        FilterChip {
-                            text: @tr("Me");
-                            icon: Icons.at;
-                            set: SearchData.mentions;
-                            clicked => {
-                                SearchData.set-mentions(!SearchData.mentions);
-                                search-edit.focus();
-                            }
-                            clear => {
-                                SearchData.set-mentions(false);
-                                search-edit.focus();
-                            }
-                        }
-                    }
-                }
-                if root.connection-text != "": Rectangle {
-                    height: 34px;
-                    Rectangle {
-                        x: 8px;
-                        width: parent.width - 16px;
-                        height: 30px;
-                        border-radius: 8px;
-                        background: Theme.selected;
-                    }
-                    Text {
-                        x: 20px;
-                        width: parent.width - 40px;
-                        text: root.connection-text;
-                        color: Theme.text;
-                        font-size: 13px;
-                        overflow: elide;
-                        vertical-alignment: center;
-                    }
-                }
-                // the threads, or the search's results over them (the threads keep their place)
-                Rectangle {
-                    vertical-stretch: 1;
-                    ListView {
-                        visible: !SearchData.active;
-                        for t in root.threads: ThreadRow {
-                            item: t;
-                            selected: t.key == root.current-key;
-                            clicked => {
-                                root.settings-open = false;
-                                GalleryData.close();
-                                root.open-thread(t.key);
-                            }
-                            menu(x, y) => { ThreadMenuData.open(t.key, x, y); }
-                        }
-                    }
-                    if SearchData.active: ListView {
-                        // a new search starts at the top (rows are updated in place, so the
-                        // list keeps its place for the next page of the same one)
-                        property <string> asked: SearchData.query + SearchData.preedit + SearchData.scope-key
-                            + SearchData.sender-key + SearchData.until-day + SearchData.kind + (SearchData.mentions ? "m" : "") + (SearchData.picking ? "p" : "");
-                        changed asked => { self.content-y = 0; }
-                        // ↑/↓ moved to a found message: it shows
-                        changed reveal-n => { self.ensure-row-visible(SearchData.reveal-row, ScrollBehavior.instant); }
-                        property <int> reveal-n: SearchData.reveal-n;
-                        for r in SearchData.results: ResultRow {
-                            item: r;
-                            selected: (!SearchData.picking && (r.kind == ResultKind.thread || r.kind == ResultKind.contact) && r.thread.key == root.current-key)
-                                || (r.kind == ResultKind.message && r.text == SearchData.picked && r.thread.key == root.current-key);
-                            clicked => {
-                                if (SearchData.picking) {
-                                    if (r.kind == ResultKind.contact) {
-                                        SearchData.end-picking(r.thread.key, r.thread.name);
-                                        search-edit.focus();
-                                    }
-                                } else if (r.kind == ResultKind.find) {
-                                    SearchData.pick-find(r.text);
-                                    search-edit.focus();
-                                } else if (r.kind == ResultKind.start) {
-                                    if (r.ready) {
-                                        SearchData.start(r.text);
-                                    }
-                                } else if (r.kind == ResultKind.more) {
-                                    SearchData.more();
-                                } else if (r.kind == ResultKind.message) {
-                                    // the results stay, to go through them one by one. Picked
-                                    // with the mouse: the box is done with (↑/↓ keep it)
-                                    GalleryData.close();
-                                    SearchData.show-found(r.thread.key, r.text);
-                                    search-edit.blur();
-                                } else if (r.kind != ResultKind.header) {
-                                    root.settings-open = false;
-                                    GalleryData.close();
-                                    root.open-thread(r.thread.key);
-                                    SearchData.leave-contacts();
-                                }
-                            }
-                            menu(x, y) => {
-                                if (r.kind == ResultKind.thread) {
-                                    ThreadMenuData.open(r.thread.key, x, y);
-                                }
-                            }
-                        }
-                    }
-                    if SearchData.active && SearchData.results.length == 0: Text {
-                        y: 24px;
-                        width: parent.width;
-                        horizontal-alignment: center;
-                        text: SearchData.contacts && SearchData.query == "" ? @tr("No contacts")
-                            : SearchData.scope-key != "" && SearchData.query == "" && SearchData.preedit == "" && !SearchData.filtered ? ""
-                            : @tr("No results");
-                        color: Theme.subtle;
-                        font-size: 13px;
-                    }
-                }
-                // bars docked at the sidebar's foot: flat on the sidebar, a rule above each
-                if root.whatsnew-version != "": wn-bar := Rectangle {
-                    // it goes away by itself, so nobody has to close it. The time runs only while
-                    // the user can see it (the window in front) and starts over while the cursor
-                    // is on it; only its last stretch shows, as a ring that drains around the close
-                    // button, so the bar sits still until it is about to leave.
-                    property <duration> wn-total: 12s;
-                    property <duration> wn-warn: 10s;
-                    property <duration> wn-step: 50ms;
-                    property <duration> wn-elapsed: 0ms;
-                    property <duration> wn-left: wn-total - wn-elapsed;
-                    height: 44px;
-                    background: wn-ta.has-hover ? Theme.notice-hover : Theme.notice;
-                    Rectangle { y: 0px; height: 1px; background: Theme.border; }
-                    Timer {
-                        interval: parent.wn-step;
-                        running: !root.inactive;
-                        triggered => {
-                            if (wn-ta.has-hover || wn-close.hovered) {
-                                parent.wn-elapsed = 0ms;
-                            } else {
-                                parent.wn-elapsed += parent.wn-step;
-                                if (parent.wn-elapsed >= parent.wn-total) { root.dismiss-whatsnew(); }
-                            }
-                        }
-                    }
-                    wn-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.open-whatsnew(); }
-                    }
-                    HorizontalLayout {
-                        padding-left: 18px;
-                        padding-right: 8px;
-                        spacing: 10px;
-                        Icon {
-                            y: (parent.height - self.height) / 2;
-                            size: 18px;
-                            icon: Icons.info;
-                            tint: Theme.accent;
-                        }
-                        Text {
-                            text: @tr("Updated to {}", root.whatsnew-version);
-                            color: Theme.text;
-                            font-size: 13px;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                            overflow: elide;
-                        }
-                        Text {
-                            text: @tr("What's new");
-                            color: Theme.accent;
-                            font-size: 13px;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-                        Rectangle {
-                            y: (parent.height - self.height) / 2;
-                            width: 36px;
-                            height: 36px;
-                            wn-close := IconButton {
-                                icon: Icons.close;
-                                icon-size: 16px;
-                                clicked => { root.dismiss-whatsnew(); }
-                            }
-                            // drains clockwise from the top (short of 360°: a full turn would end
-                            // where it starts and draw nothing)
-                            if wn-bar.wn-left <= wn-bar.wn-warn: Path {
-                                property <angle> left: min(359.9deg, 360deg * wn-bar.wn-left / wn-bar.wn-warn);
-                                width: 36px;
-                                height: 36px;
-                                viewbox-width: 36;
-                                viewbox-height: 36;
-                                stroke: Theme.subtle;
-                                stroke-width: 1.5px;
-                                MoveTo { x: 18; y: 6; }
-                                ArcTo {
-                                    x: 18 + 12 * Math.sin(parent.left);
-                                    y: 18 - 12 * Math.cos(parent.left);
-                                    radius-x: 12;
-                                    radius-y: 12;
-                                    large-arc: parent.left > 180deg;
-                                    sweep: true;
-                                }
-                            }
-                        }
-                    }
-                }
-                if SettingsData.update-version == "" && SettingsData.update-available != "": Rectangle {
-                    height: 52px;
-                    background: avail-ta.has-hover && !SettingsData.update-installing ? Theme.notice-hover : Theme.notice;
-                    Rectangle { y: 0px; height: 1px; background: Theme.border; }
-                    avail-ta := TouchArea {
-                        mouse-cursor: SettingsData.update-installing ? default : pointer;
-                        clicked => {
-                            if !SettingsData.update-installing {
-                                SettingsData.update-installing = true;
-                                SettingsData.install-update();
-                            }
-                        }
-                    }
-                    HorizontalLayout {
-                        padding-left: 18px;
-                        padding-right: 18px;
-                        spacing: 10px;
-                        Icon {
-                            y: (parent.height - self.height) / 2;
-                            size: 18px;
-                            icon: Icons.download;
-                            tint: Theme.accent;
-                        }
-                        VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: center;
-                            Text {
-                                text: @tr("New version available");
-                                color: Theme.text;
-                                font-size: 13px;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: SettingsData.current-version + " → " + SettingsData.update-available;
-                                color: Theme.subtle;
-                                font-size: 12px;
-                                overflow: elide;
-                            }
-                        }
-                        Text {
-                            text: SettingsData.update-installing ? @tr("Downloading…") : @tr("Update");
-                            color: SettingsData.update-installing ? Theme.subtle : Theme.accent;
-                            font-size: 13px;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-                if SettingsData.update-version != "": Rectangle {
-                    height: 52px;
-                    background: upd-ta.has-hover ? Theme.notice-hover : Theme.notice;
-                    Rectangle { y: 0px; height: 1px; background: Theme.border; }
-                    upd-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { SettingsData.restart-for-update(); }
-                    }
-                    HorizontalLayout {
-                        padding-left: 18px;
-                        padding-right: 18px;
-                        spacing: 10px;
-                        Icon {
-                            y: (parent.height - self.height) / 2;
-                            size: 18px;
-                            icon: Icons.download;
-                            tint: Theme.accent;
-                        }
-                        VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: center;
-                            Text {
-                                text: @tr("New version ready");
-                                color: Theme.text;
-                                font-size: 13px;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: SettingsData.current-version + " → " + SettingsData.update-version;
-                                color: Theme.subtle;
-                                font-size: 12px;
-                                overflow: elide;
-                            }
-                        }
-                        Text {
-                            text: @tr("Restart");
-                            color: Theme.accent;
-                            font-size: 13px;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-            }
-            Rectangle { x: parent.width - 1px; width: 1px; background: Theme.border; }
-        }
-        // conversation pane
+        x: root.pane-x;
+        width: root.width - root.pane-x;
         pane-col := VerticalLayout {
             if root.current-key == "": Rectangle {
                 vertical-stretch: 1;
@@ -1880,18 +1577,611 @@ export component AppWindow inherits Window {
     }
 
     if page == "main" && GalleryData.open && root.current-key != "": GalleryPage {
-        x: 300px;
-        width: root.width - 300px;
+        x: root.pane-x;
+        width: root.width - root.pane-x;
         height: root.height;
     }
 
     if page == "main" && root.settings-open: SettingsPage {
-        x: 300px;
-        width: root.width - 300px;
+        x: root.pane-x;
+        width: root.width - root.pane-x;
         height: root.height;
         open-whatsnew => { root.open-whatsnew(); }
         close => { root.settings-open = false; }
         unlink => { root.unlink(); }
+    }
+
+    // sidebar
+    sidebar := Rectangle {
+        // the box has the focus (a menu or the date picker of the filters takes it while
+        // open): the buttons beside the box give it their room until it's left
+        property <bool> typing: search-edit.focused || kind-menu.is-open || (CalendarData.open && CalendarData.until)
+            || SearchData.picking;
+        property <bool> searching: SearchData.active || self.typing;
+        changed typing => {
+            if (!self.typing) {
+                root.side-hold = false;
+                // folded, a contact list left has nowhere to wait: it was only for starting a chat
+                if (root.side-folded) {
+                    SearchData.leave-contacts();
+                }
+            }
+        }
+        visible: page == "main";
+        width: root.side-wide ? root.side-open-w : root.rail-w;
+        height: root.height;
+        x: 0px;
+        y: 0px;
+        background: Theme.sidebar;
+        // opened over the pane: lifted off it
+        drop-shadow-blur: root.side-folded && root.side-wide ? 16px : 0px;
+        drop-shadow-color: #00000040;
+        VerticalLayout {
+            // the box stays here while folded, for its focus to open the sidebar
+            HorizontalLayout {
+                visible: root.side-wide;
+                padding: root.side-wide ? 10px : 0px;
+                spacing: 6px;
+                // as tall without the photo beside the box as with it
+                min-height: root.side-wide ? 56px : 0px;
+                max-height: root.side-wide ? 56px : 0px;
+                // the contact list: the way back to the threads
+                if SearchData.contacts: IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Icons.back;
+                    clicked => {
+                        SearchData.step-back();
+                        // back to the thread list, not into a search
+                        if (!SearchData.contacts) {
+                            search-edit.blur();
+                        }
+                    }
+                }
+                if !SearchData.contacts && !sidebar.typing: MeButton {
+                    // as tall as the search box beside it
+                    min-height: 36px;
+                    photo: root.me-photo;
+                    has-photo: root.me-has-photo;
+                    open: root.settings-open;
+                    clicked => { root.toggle-settings(); }
+                }
+                search-edit := Field {
+                    y: (parent.height - self.height) / 2;
+                    // the chat's picture stands first in its place
+                    icon: scope-chip.visible ? "" : Icons.search;
+                    placeholder: SearchData.picking ? @tr("Sender's name")
+                        : SearchData.scope-key != "" ? @tr("Search in {}", SearchData.scope-name)
+                        : !SearchData.contacts ? @tr("Search")
+                        : SearchData.find == FindKind.phone ? @tr("Enter a phone number")
+                        : SearchData.find == FindKind.username ? @tr("Username (e.g. name.42)")
+                        : @tr("Name, phone number, username");
+                    text <=> SearchData.query;
+                    edited => {
+                        SearchData.preedit = self.preedit;
+                        SearchData.changed();
+                    }
+                    // search as Hangul is composed, before it's committed to the text
+                    preedit-changed => {
+                        SearchData.preedit = self.preedit;
+                        SearchData.changed();
+                    }
+                    accepted => { SearchData.accept(); }
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape) {
+                            // nothing left to undo: out of the box, which gives the buttons
+                            // beside it back
+                            if (!SearchData.active) {
+                                self.blur();
+                            } else {
+                                let leaving = SearchData.contacts;
+                                SearchData.back();
+                                if (leaving && !SearchData.contacts) {
+                                    self.blur();
+                                }
+                            }
+                            return accept;
+                        }
+                        // through the found messages, one by one
+                        if (!SearchData.contacts && !SearchData.picking && (event.text == Key.UpArrow || event.text == Key.DownArrow)) {
+                            SearchData.step(event.text == Key.UpArrow ? -1 : 1);
+                            return accept;
+                        }
+                        reject
+                    }
+                    lead: scope-chip.visible ? scope-chip.width + 4px : 0px;
+                    // the chat searched in: where, not what, so in the box rather than
+                    // among the filters below
+                    scope-chip := ScopeToken {
+                        visible: SearchData.scope-key != "" && !SearchData.picking;
+                        x: 8px;
+                        y: (parent.height - self.height) / 2;
+                        clear => {
+                            SearchData.leave-scope();
+                            search-edit.focus();
+                        }
+                    }
+                }
+                // start a conversation: the contact list
+                if !SearchData.contacts && !sidebar.typing: IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Icons.compose;
+                    clicked => { root.open-contacts(); }
+                }
+            }
+            // folded: the same buttons in a column, the search box's in its place
+            if !root.side-wide: VerticalLayout {
+                padding-top: 10px;
+                padding-bottom: 6px;
+                spacing: 4px;
+                HorizontalLayout {
+                    alignment: center;
+                    MeButton {
+                        height: 36px;
+                        photo: root.me-photo;
+                        has-photo: root.me-has-photo;
+                        open: root.settings-open;
+                        clicked => { root.toggle-settings(); }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    // a search left with results: they're still there
+                    IconButton {
+                        icon: Icons.search;
+                        active: SearchData.active;
+                        clicked => { root.focus-search(); }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: Icons.compose;
+                        clicked => { root.open-contacts(); }
+                    }
+                }
+            }
+            // picking the sender filter: what the list is, and the way back
+            if SearchData.picking: Rectangle {
+                height: 34px;
+                Rectangle {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    height: 30px;
+                    border-radius: 8px;
+                    background: Theme.selected;
+                }
+                HorizontalLayout {
+                    padding-left: 20px;
+                    padding-right: 12px;
+                    spacing: 4px;
+                    Text {
+                        text: @tr("Who sent it?");
+                        color: Theme.text;
+                        font-size: 13px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
+                        icon: Icons.close;
+                        icon-size: 14px;
+                        width: 24px;
+                        height: 24px;
+                        clicked => {
+                            SearchData.end-picking("", "");
+                            search-edit.focus();
+                        }
+                    }
+                }
+            }
+            // the message search's filters. Shown while the box has the focus too, so that a
+            // search can start from a filter; a menu or the date picker takes the focus while
+            // open. Set values run longer: the chips wrap rather than scroll out of sight
+            chips := Rectangle {
+                property <bool> shown: !SearchData.contacts && !SearchData.picking && sidebar.searching && root.side-wide;
+                height: self.shown ? chip-flow.preferred-height + 8px : 0px;
+                visible: self.shown;
+                chip-flow := FlexboxLayout {
+                    x: 8px;
+                    y: 2px;
+                    width: parent.width - 16px;
+                    height: self.preferred-height;
+                    spacing: 6px;
+                    FilterChip {
+                        text: SearchData.sender-key != "" ? SearchData.sender-name : @tr("Sender");
+                        set: SearchData.sender-key != "";
+                        clicked => {
+                            SearchData.pick-sender();
+                            search-edit.focus();
+                        }
+                        clear => {
+                            SearchData.clear-sender();
+                            search-edit.focus();
+                        }
+                    }
+                    date-chip := FilterChip {
+                        text: SearchData.until-day != 0 ? SearchData.until-label : @tr("Date");
+                        set: SearchData.until-day != 0;
+                        clicked => {
+                            CalendarData.show-until(date-chip.absolute-position.x + 100px,
+                                date-chip.absolute-position.y + date-chip.height + 4px);
+                        }
+                        clear => {
+                            SearchData.clear-until();
+                            search-edit.focus();
+                        }
+                    }
+                    kind-chip := FilterChip {
+                        text: SearchData.kind == 1 ? @tr("Photos and videos") : SearchData.kind == 2 ? @tr("Files")
+                            : SearchData.kind == 3 ? @tr("Links") : @tr("Type");
+                        set: SearchData.kind != 0;
+                        clicked => { kind-menu.show(); }
+                        clear => {
+                            SearchData.set-kind(0);
+                            search-edit.focus();
+                        }
+                        kind-menu := ChipMenu {
+                            x: 0px;
+                            y: parent.height + 4px;
+                            ChipMenuRow {
+                                text: @tr("Photos and videos");
+                                current: SearchData.kind == 1;
+                                clicked => {
+                                    SearchData.set-kind(1);
+                                    kind-menu.close();
+                                }
+                            }
+                            ChipMenuRow {
+                                text: @tr("Files");
+                                current: SearchData.kind == 2;
+                                clicked => {
+                                    SearchData.set-kind(2);
+                                    kind-menu.close();
+                                }
+                            }
+                            ChipMenuRow {
+                                text: @tr("Links");
+                                current: SearchData.kind == 3;
+                                clicked => {
+                                    SearchData.set-kind(3);
+                                    kind-menu.close();
+                                }
+                            }
+                        }
+                    }
+                    // reads "@Me": what mentions us. Others' mentions are found by their
+                    // name, as the text shows them
+                    FilterChip {
+                        text: @tr("Me");
+                        icon: Icons.at;
+                        set: SearchData.mentions;
+                        clicked => {
+                            SearchData.set-mentions(!SearchData.mentions);
+                            search-edit.focus();
+                        }
+                        clear => {
+                            SearchData.set-mentions(false);
+                            search-edit.focus();
+                        }
+                    }
+                }
+            }
+            if root.connection-text != "": Rectangle {
+                height: 34px;
+                Rectangle {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    height: 30px;
+                    border-radius: 8px;
+                    background: Theme.selected;
+                }
+                // folded: only that something is wrong
+                if !root.side-wide: Icon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    size: 18px;
+                    icon: Icons.warning;
+                }
+                if root.side-wide: Text {
+                    x: 20px;
+                    width: parent.width - 40px;
+                    text: root.connection-text;
+                    color: Theme.text;
+                    font-size: 13px;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+            }
+            // the threads, or the search's results over them (the threads keep their place)
+            Rectangle {
+                vertical-stretch: 1;
+                // folded, a search left with results keeps them for when the box opens again
+                thread-list := ListView {
+                    visible: !SearchData.active || !root.side-wide;
+                    // where the hovered row was is stale: the next row the pointer meets shows
+                    changed content-y => {
+                        root.peek-on = false;
+                        root.hover-key = "";
+                    }
+                    for t in root.threads: ThreadRow {
+                        item: t;
+                        folded: !root.side-wide;
+                        selected: t.key == root.current-key;
+                        clicked => { root.pick-thread(t.key); }
+                        menu(x, y) => { ThreadMenuData.open(t.key, x, y); }
+                        hover(on) => {
+                            if (on && self.folded) {
+                                root.rail-hover(t, self.absolute-position.y);
+                            } else if (!on && root.hover-key == t.key) {
+                                root.hover-key = "";
+                            }
+                        }
+                    }
+                }
+                if SearchData.active && root.side-wide: ListView {
+                    // a new search starts at the top (rows are updated in place, so the
+                    // list keeps its place for the next page of the same one)
+                    property <string> asked: SearchData.query + SearchData.preedit + SearchData.scope-key
+                        + SearchData.sender-key + SearchData.until-day + SearchData.kind + (SearchData.mentions ? "m" : "") + (SearchData.picking ? "p" : "");
+                    changed asked => { self.content-y = 0; }
+                    // ↑/↓ moved to a found message: it shows
+                    changed reveal-n => { self.ensure-row-visible(SearchData.reveal-row, ScrollBehavior.instant); }
+                    property <int> reveal-n: SearchData.reveal-n;
+                    for r in SearchData.results: ResultRow {
+                        item: r;
+                        selected: (!SearchData.picking && (r.kind == ResultKind.thread || r.kind == ResultKind.contact) && r.thread.key == root.current-key)
+                            || (r.kind == ResultKind.message && r.text == SearchData.picked && r.thread.key == root.current-key);
+                        clicked => {
+                            if (SearchData.picking) {
+                                if (r.kind == ResultKind.contact) {
+                                    SearchData.end-picking(r.thread.key, r.thread.name);
+                                    search-edit.focus();
+                                }
+                            } else if (r.kind == ResultKind.find) {
+                                SearchData.pick-find(r.text);
+                                search-edit.focus();
+                            } else if (r.kind == ResultKind.start) {
+                                if (r.ready) {
+                                    SearchData.start(r.text);
+                                }
+                            } else if (r.kind == ResultKind.more) {
+                                SearchData.more();
+                            } else if (r.kind == ResultKind.message) {
+                                // the results stay, to go through them one by one. Picked
+                                // with the mouse: the box is done with (↑/↓ keep it)
+                                GalleryData.close();
+                                SearchData.show-found(r.thread.key, r.text);
+                                search-edit.blur();
+                            } else if (r.kind != ResultKind.header) {
+                                root.settings-open = false;
+                                GalleryData.close();
+                                root.open-thread(r.thread.key);
+                                SearchData.leave-contacts();
+                            }
+                        }
+                        menu(x, y) => {
+                            if (r.kind == ResultKind.thread) {
+                                ThreadMenuData.open(r.thread.key, x, y);
+                            }
+                        }
+                    }
+                }
+                if SearchData.active && root.side-wide && SearchData.results.length == 0: Text {
+                    y: 24px;
+                    width: parent.width;
+                    horizontal-alignment: center;
+                    text: SearchData.contacts && SearchData.query == "" ? @tr("No contacts")
+                        : SearchData.scope-key != "" && SearchData.query == "" && SearchData.preedit == "" && !SearchData.filtered ? ""
+                        : @tr("No results");
+                    color: Theme.subtle;
+                    font-size: 13px;
+                }
+            }
+            // bars docked at the sidebar's foot: flat on the sidebar, a rule above each
+            if root.whatsnew-version != "": wn-bar := Rectangle {
+                // it goes away by itself, so nobody has to close it. The time runs only while
+                // the user can see it (the window in front) and starts over while the cursor
+                // is on it; only its last stretch shows, as a ring that drains around the close
+                // button, so the bar sits still until it is about to leave.
+                property <duration> wn-total: 12s;
+                property <duration> wn-warn: 10s;
+                property <duration> wn-step: 50ms;
+                property <duration> wn-elapsed: 0ms;
+                property <duration> wn-left: wn-total - wn-elapsed;
+                height: 44px;
+                Timer {
+                    interval: parent.wn-step;
+                    running: !root.inactive;
+                    triggered => {
+                        if (wn-foot.hovered) {
+                            parent.wn-elapsed = 0ms;
+                        } else {
+                            parent.wn-elapsed += parent.wn-step;
+                            if (parent.wn-elapsed >= parent.wn-total) { root.dismiss-whatsnew(); }
+                        }
+                    }
+                }
+                wn-foot := FootBar {
+                    folded: !root.side-wide;
+                    icon: Icons.info;
+                    tip: @tr("Updated to {}", root.whatsnew-version) + "\n" + @tr("Click to see what's new");
+                    pad-right: 8px;
+                    drain: wn-bar.wn-left <= wn-bar.wn-warn ? wn-bar.wn-left / wn-bar.wn-warn : 1;
+                    closable: true;
+                    close => { root.dismiss-whatsnew(); }
+                    clicked => { root.open-whatsnew(); }
+                    Text {
+                        text: @tr("Updated to {}", root.whatsnew-version);
+                        color: Theme.text;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: @tr("What's new");
+                        color: Theme.accent;
+                        font-size: 13px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        width: 36px;
+                        height: 36px;
+                        IconButton {
+                            icon: Icons.close;
+                            icon-size: 16px;
+                            clicked => { root.dismiss-whatsnew(); }
+                        }
+                        if wn-bar.wn-left <= wn-bar.wn-warn: DrainRing { left: wn-bar.wn-left / wn-bar.wn-warn; }
+                    }
+                }
+            }
+            if SettingsData.update-version == "" && SettingsData.update-available != "": FootBar {
+                height: 52px;
+                folded: !root.side-wide;
+                icon: Icons.download;
+                tip: SettingsData.update-installing ? @tr("Downloading…")
+                    : @tr("New version available") + ": " + SettingsData.current-version + " → " + SettingsData.update-available
+                        + "\n" + @tr("Click to update");
+                enabled: !SettingsData.update-installing;
+                clicked => {
+                    SettingsData.update-installing = true;
+                    SettingsData.install-update();
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text {
+                        text: @tr("New version available");
+                        color: Theme.text;
+                        font-size: 13px;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: SettingsData.current-version + " → " + SettingsData.update-available;
+                        color: Theme.subtle;
+                        font-size: 12px;
+                        overflow: elide;
+                    }
+                }
+                Text {
+                    text: SettingsData.update-installing ? @tr("Downloading…") : @tr("Update");
+                    color: SettingsData.update-installing ? Theme.subtle : Theme.accent;
+                    font-size: 13px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+            if SettingsData.update-version != "": FootBar {
+                height: 52px;
+                folded: !root.side-wide;
+                icon: Icons.download;
+                tip: @tr("New version ready") + ": " + SettingsData.current-version + " → " + SettingsData.update-version
+                    + "\n" + @tr("Click to restart");
+                clicked => { SettingsData.restart-for-update(); }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text {
+                        text: @tr("New version ready");
+                        color: Theme.text;
+                        font-size: 13px;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: SettingsData.current-version + " → " + SettingsData.update-version;
+                        color: Theme.subtle;
+                        font-size: 12px;
+                        overflow: elide;
+                    }
+                }
+                Text {
+                    text: @tr("Restart");
+                    color: Theme.accent;
+                    font-size: 13px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        Rectangle { x: parent.width - 1px; width: 1px; background: Theme.border; }
+        // drag to resize or fold, double click to fold or unfold; not while opened over the pane
+        edge := TouchArea {
+            enabled: !root.side-folded || !root.side-wide;
+            x: parent.width - 3px;
+            width: 7px;
+            mouse-cursor: ew-resize;
+            moved => {
+                if (self.pressed) {
+                    root.drag-edge(self.absolute-position.x + self.mouse-x);
+                }
+            }
+            pointer-event(e) => {
+                if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                    root.drag-from = root.side-width;
+                }
+                if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up) {
+                    root.side-changed();
+                }
+            }
+            double-clicked => {
+                root.side-folded = !root.side-folded;
+                root.side-changed();
+            }
+        }
+    }
+
+    // folded: the hovered row, whole, from the rail over the pane
+    Timer {
+        // only to let a pointer crossing the rail pass without a flash
+        interval: 100ms;
+        running: root.hover-key != "" && !root.peek-on && !root.side-wide;
+        triggered => {
+            root.peek-item = root.hover-item;
+            root.peek-y = root.hover-y;
+            root.peek-on = true;
+        }
+    }
+    Timer {
+        interval: 100ms;
+        running: root.peek-on && root.hover-key == "" && !peek-row.hovered;
+        triggered => { root.peek-on = false; }
+    }
+    Rectangle {
+        visible: root.peek-on && !root.side-wide && page == "main";
+        // a row cut off by the list's edge shows inside the list, not over what's beyond it (the
+        // bars at the foot, the buttons above); the pointer on its visible part stays on this
+        property <length> list-top: thread-list.absolute-position.y;
+        // the row's own card, inset as in the list: nothing of this shows around it. Pushed in,
+        // the card itself meets the edge
+        x: 8px;
+        y: max(self.list-top, min(root.peek-y + 1px, self.list-top + thread-list.height - self.height));
+        width: root.side-open-w - 16px;
+        height: peek-row.height - 2px;
+        border-radius: 10px;
+        background: Theme.sidebar;
+        drop-shadow-blur: 12px;
+        drop-shadow-color: #00000040;
+        // the wheel, which the row lets through, still moves the rail under it
+        TouchArea {
+            scroll-event(e) => {
+                root.peek-on = false;
+                thread-list.content-y = max(thread-list.visible-height - thread-list.content-height, min(0px, thread-list.content-y + e.delta-y));
+                accept
+            }
+        }
+        peek-row := ThreadRow {
+            x: -8px;
+            y: -1px;
+            width: root.side-open-w;
+            item: root.peek-item;
+            selected: root.peek-item.key == root.current-key;
+            clicked => { root.pick-thread(root.peek-item.key); }
+            menu(x, y) => { ThreadMenuData.open(root.peek-item.key, x, y); }
+        }
     }
 
     // @mention popup, just above the composer
@@ -2263,9 +2553,9 @@ export component AppWindow inherits Window {
 
     // files being dragged over the conversation: where they would go
     if page == "main" && root.current-key != "" && root.drop-hover: Rectangle {
-        x: 300px;
+        x: root.pane-x;
         y: 0px;
-        width: root.width - 300px;
+        width: root.width - root.pane-x;
         height: root.height;
         background: Theme.accent.with-alpha(0.14);
         border-width: 3px;
@@ -2285,8 +2575,8 @@ export component AppWindow inherits Window {
         text: root.notice-text;
         action: root.notice-action;
         action-clicked => { root.notice-action-clicked(); }
-        max-text-width: root.width - 300px - 76px;
-        x: 300px + (root.width - 300px - self.width) / 2;
+        max-text-width: root.width - root.pane-x - 76px;
+        x: root.pane-x + (root.width - root.pane-x - self.width) / 2;
         // above everything that sits over the input (attachment, reply, link preview), not just the
         // input row: the list ends where those begin
         y: msg-list.absolute-position.y + msg-list.height - self.height - 10px;

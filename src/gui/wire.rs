@@ -989,6 +989,8 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             viewer_click_closed: UI.with_borrow(|ui| ui.settings.viewer_click_closed),
             viewer_wheel_zoomed: UI.with_borrow(|ui| ui.settings.viewer_wheel_zoomed),
             window: UI.with_borrow(|ui| ui.settings.window),
+            sidebar_width: UI.with_borrow(|ui| ui.settings.sidebar_width),
+            sidebar_folded: UI.with_borrow(|ui| ui.settings.sidebar_folded),
         };
         let (old, path) = UI.with_borrow_mut(|ui| (std::mem::replace(&mut ui.settings, new.clone()), ui.settings_path.clone()));
         if old == new {

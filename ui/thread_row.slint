@@ -5,12 +5,41 @@ import { Theme } from "theme.slint";
 import { Avatar } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
 
+// the unread count; grey while the thread is muted, unless something got through
+component Unread inherits Rectangle {
+    in property <ThreadItem> item;
+    width: max(20px, count.preferred-width + 12px);
+    height: 18px;
+    border-radius: 9px;
+    background: item.muted && !item.loud ? Theme.subtle : Theme.accent;
+    count := Text {
+        text: item.unread > 99 ? "99+" : item.unread;
+        color: white;
+        font-size: 11px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
 export component ThreadRow inherits Rectangle {
     in property <ThreadItem> item;
     in property <bool> selected;
+    // in the folded sidebar: the photo alone, with the unread count on it
+    in property <bool> folded;
+    out property <bool> hovered: ta.has-hover;
     callback clicked;
     // right click, at window coordinates
     callback menu(length, length);
+    // the pointer came onto the row or left it; again when a row under it is reused for another
+    // thread, as the list scrolls
+    callback hover(bool);
+    changed hovered => { root.hover(self.hovered); }
+    changed item => {
+        if (self.hovered) {
+            root.hover(true);
+        }
+    }
     height: 64px;
     // the reader photos' outline: the row's own color
     property <color> ring: selected ? Theme.selected : (ta.has-hover ? Theme.hover : Theme.sidebar);
@@ -44,7 +73,7 @@ export component ThreadRow inherits Rectangle {
             photo: item.photo;
             has-photo: item.has-photo;
         }
-        VerticalLayout {
+        if !root.folded: VerticalLayout {
             alignment: center;
             spacing: 2px;
             HorizontalLayout {
@@ -133,26 +162,25 @@ export component ThreadRow inherits Rectangle {
                         }
                     }
                 }
-                if item.unread > 0: Rectangle {
+                if item.unread > 0: Unread {
                     horizontal-stretch: 0;
-                    min-width: 20px;
-                    height: 18px;
-                    border-radius: 9px;
-                    background: item.muted && !item.loud ? Theme.subtle : Theme.accent;
-                    HorizontalLayout {
-                        padding-left: 6px;
-                        padding-right: 6px;
-                        Text {
-                            text: item.unread > 99 ? "99+" : item.unread;
-                            color: white;
-                            font-size: 11px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
+                    item: root.item;
                 }
             }
+        }
+    }
+    // over the photo's top right corner, ringed in the row's color to stand off it
+    if root.folded && item.unread > 0: Rectangle {
+        x: 18px + 40px + 6px - self.width;
+        y: (parent.height - 40px) / 2 - 4px;
+        width: badge.width + 4px;
+        height: badge.height + 4px;
+        border-radius: self.height / 2;
+        background: root.ring;
+        badge := Unread {
+            x: 2px;
+            y: 2px;
+            item: root.item;
         }
     }
 }

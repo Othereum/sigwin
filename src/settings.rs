@@ -60,6 +60,10 @@ pub struct Settings {
     pub viewer_wheel_zoomed: bool,
     /// where the window was last (not a preference; restored at start)
     pub window: Option<WindowGeom>,
+    /// the open sidebar's width (logical px; the UI keeps it in its bounds) and whether it is
+    /// folded to the rail of photos, as last left
+    pub sidebar_width: u32,
+    pub sidebar_folded: bool,
 }
 
 /// Normal (not maximized) window rect in physical pixels, and whether it was maximized.
@@ -99,6 +103,8 @@ impl Default for Settings {
             viewer_click_closed: false,
             viewer_wheel_zoomed: false,
             window: None,
+            sidebar_width: 300,
+            sidebar_folded: false,
         }
     }
 }

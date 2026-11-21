@@ -1096,6 +1096,15 @@ msgstr "Foto zur Einmalansicht"
 msgid "Click to view"
 msgstr "Zum Ansehen klicken"
 
+msgid "Click to update"
+msgstr "Zum Aktualisieren klicken"
+
+msgid "Click to restart"
+msgstr "Zum Neustarten klicken"
+
+msgid "Click to see what's new"
+msgstr "Klicken, um die Neuerungen zu sehen"
+
 msgid "Open it on your phone"
 msgstr "Öffne es auf deinem Telefon"
 
