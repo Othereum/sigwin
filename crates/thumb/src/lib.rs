@@ -37,16 +37,43 @@ pub fn progress_ring(size: u32, width: f32, percent: u8) -> Pixels {
     out
 }
 
+/// The most pixels anything here decodes. A header can claim any size in a few bytes, and the
+/// buffer for it is allocated before any pixel is read: one that can't be allocated aborts the
+/// app. As large as the viewer and sending take.
+pub const MAX_PIXELS: u64 = 100_000_000;
+
+/// What an animation decoder may allocate at once: a canvas, the one kept for disposal, a frame
+/// and the composite, each up to `MAX_PIXELS` in RGBA. GIF frames may be larger than the screen.
+const ANIMATION_MAX_ALLOC: u64 = 4 * 4 * MAX_PIXELS;
+
+fn too_big() -> image::ImageError {
+    image::ImageError::Limits(image::error::LimitError::from_kind(image::error::LimitErrorKind::DimensionError))
+}
+
+/// Refuses a decoder whose image has more than `max_pixels` (never more than `MAX_PIXELS`).
+fn within<D: image::ImageDecoder + ?Sized>(decoder: &D, max_pixels: u64) -> ImageResult<()> {
+    let (w, h) = decoder.dimensions();
+    if w as u64 * h as u64 > max_pixels.min(MAX_PIXELS) { Err(too_big()) } else { Ok(()) }
+}
+
 /// A decoder for what `bytes` hold, sniffing the format (file names and content types may lie).
-fn decoder(bytes: &[u8]) -> ImageResult<Box<dyn image::ImageDecoder + '_>> {
+/// Header only: check its size before decoding, or use `decoder`.
+fn open(bytes: &[u8]) -> ImageResult<Box<dyn image::ImageDecoder + '_>> {
     if avif::is_avif(bytes) {
         return Ok(Box::new(avif::AvifDecoder::new(bytes)?));
     }
     Ok(Box::new(image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.into_decoder()?))
 }
 
-/// `decoder` for a file, reading only what the format needs.
-fn file_decoder(path: &std::path::Path) -> ImageResult<Box<dyn image::ImageDecoder>> {
+/// `open`, refusing more than `max_pixels`.
+fn decoder(bytes: &[u8], max_pixels: u64) -> ImageResult<Box<dyn image::ImageDecoder + '_>> {
+    let d = open(bytes)?;
+    within(&*d, max_pixels)?;
+    Ok(d)
+}
+
+/// `open` for a file, reading only what the format needs.
+fn open_file(path: &std::path::Path) -> ImageResult<Box<dyn image::ImageDecoder>> {
     use std::io::Read;
     let mut head = Vec::with_capacity(256);
     std::fs::File::open(path)?.take(256).read_to_end(&mut head)?;
@@ -58,7 +85,12 @@ fn file_decoder(path: &std::path::Path) -> ImageResult<Box<dyn image::ImageDecod
 
 /// Decodes, sniffing the format (file names and content types may lie).
 pub fn decode(bytes: &[u8]) -> ImageResult<DynamicImage> {
-    DynamicImage::from_decoder(decoder(bytes)?)
+    decode_within(bytes, MAX_PIXELS)
+}
+
+/// `decode`, refusing more than `max_pixels`.
+pub fn decode_within(bytes: &[u8], max_pixels: u64) -> ImageResult<DynamicImage> {
+    DynamicImage::from_decoder(decoder(bytes, max_pixels)?)
 }
 
 /// Decodes upright and resizes to fit in `max` x `max`, enlarging a smaller image too.
@@ -69,7 +101,7 @@ pub fn decode_thumb(bytes: &[u8], max: u32) -> ImageResult<DynamicImage> {
 /// Decodes upright and resizes so its longer side is what `side` asks for its size, as far as
 /// the image has it, and at least `floor` (enlarging a smaller image to that, like `decode_thumb`).
 pub fn decode_thumb_for(bytes: &[u8], floor: u32, side: impl FnOnce((u32, u32)) -> u32) -> ImageResult<DynamicImage> {
-    let mut decoder = decoder(bytes)?;
+    let mut decoder = decoder(bytes, MAX_PIXELS)?;
     let (w, h) = decoder.dimensions();
     let orientation = decoder.orientation()?;
     let own = w.max(h);
@@ -144,29 +176,30 @@ pub enum Photo<'a> {
 }
 
 impl Photo<'_> {
-    fn decoder(&self) -> ImageResult<Box<dyn image::ImageDecoder + '_>> {
+    /// Header only, like `open`.
+    fn open(&self) -> ImageResult<Box<dyn image::ImageDecoder + '_>> {
         match self {
-            Photo::File(path) => file_decoder(path),
-            Photo::Bytes(bytes) => decoder(bytes),
+            Photo::File(path) => open_file(path),
+            Photo::Bytes(bytes) => open(bytes),
         }
     }
 }
 
 /// A photo's size as shown (EXIF applied), from its header alone.
 pub fn photo_size(photo: Photo) -> ImageResult<(u32, u32)> {
-    let mut decoder = photo.decoder()?;
+    let mut decoder = photo.open()?;
     let (w, h) = decoder.dimensions();
     Ok(if turns(decoder.orientation()?) { (h, w) } else { (w, h) })
 }
 
-/// A photo's size as shown (EXIF applied) and its blurhash. Past `max_pixels` it isn't
-/// decoded and has no blurhash, nor does one that turns out broken after its header.
+/// A photo's size as shown (EXIF applied) and its blurhash. Past `max_pixels` (or `MAX_PIXELS`)
+/// it isn't decoded and has no blurhash, nor does one that turns out broken after its header.
 pub fn photo_facts(photo: Photo, max_pixels: u64) -> ImageResult<((u32, u32), Option<String>)> {
-    let mut decoder = photo.decoder()?;
+    let mut decoder = photo.open()?;
     let (w, h) = decoder.dimensions();
     let orientation = decoder.orientation()?;
     let size = if turns(orientation) { (h, w) } else { (w, h) };
-    if w as u64 * h as u64 > max_pixels {
+    if within(&*decoder, max_pixels).is_err() {
         return Ok((size, None));
     }
     let Ok(mut img) = DynamicImage::from_decoder(decoder) else { return Ok((size, None)) };
@@ -398,11 +431,10 @@ pub struct ViewImage {
 }
 
 /// Decodes a still image for the viewer. `None` when it is animated or has more than
-/// `max_pixels`: those go to an outside app.
+/// `max_pixels` (or `MAX_PIXELS`): those go to an outside app.
 pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> ImageResult<Option<ViewImage>> {
-    let mut decoder = decoder(bytes)?;
-    let (w, h) = decoder.dimensions();
-    if w as u64 * h as u64 > max_pixels || is_animated(bytes) {
+    let mut decoder = open(bytes)?;
+    if within(&*decoder, max_pixels).is_err() || is_animated(bytes) {
         return Ok(None);
     }
     let orientation = decoder.orientation()?;
@@ -565,21 +597,49 @@ pub fn square(img: &DynamicImage, px: u32) -> RgbaImage {
 /// Decoding stops here: long animations would take seconds to resample.
 const MAX_FRAMES: usize = 500;
 
+type Cursor<'a> = std::io::Cursor<&'a [u8]>;
+
+/// For the animation decoders below, which refuse a canvas past `MAX_PIXELS`: their own
+/// constructors set no limits, and their frame iterators allocate a canvas per frame.
+fn animation_limits() -> image::Limits {
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(ANIMATION_MAX_ALLOC);
+    limits
+}
+
+fn gif_decoder(bytes: &[u8]) -> ImageResult<image::codecs::gif::GifDecoder<Cursor<'_>>> {
+    use image::ImageDecoder;
+    let mut d = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes))?;
+    within(&d, MAX_PIXELS)?;
+    d.set_limits(animation_limits())?;
+    Ok(d)
+}
+
+fn png_decoder(bytes: &[u8]) -> ImageResult<image::codecs::png::PngDecoder<Cursor<'_>>> {
+    let d = image::codecs::png::PngDecoder::with_limits(std::io::Cursor::new(bytes), animation_limits())?;
+    within(&d, MAX_PIXELS)?;
+    Ok(d)
+}
+
+fn webp_decoder(bytes: &[u8]) -> ImageResult<image::codecs::webp::WebPDecoder<Cursor<'_>>> {
+    let d = image::codecs::webp::WebPDecoder::new(std::io::Cursor::new(bytes))?;
+    within(&d, MAX_PIXELS)?;
+    Ok(d)
+}
+
 /// The frames of an animated WebP / APNG / GIF; `None` for a still or another format.
 fn frames(bytes: &[u8]) -> ImageResult<Option<image::Frames<'_>>> {
     use image::AnimationDecoder;
-    use image::codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder};
-    let cur = || std::io::Cursor::new(bytes);
-    Ok(match image::ImageReader::new(cur()).with_guessed_format()?.format() {
+    Ok(match image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?.format() {
         Some(image::ImageFormat::WebP) => {
-            let d = WebPDecoder::new(cur())?;
+            let d = webp_decoder(bytes)?;
             d.has_animation().then(|| d.into_frames())
         }
         Some(image::ImageFormat::Png) => {
-            let d = PngDecoder::new(cur())?;
+            let d = png_decoder(bytes)?;
             if d.is_apng()? { Some(d.apng()?.into_frames()) } else { None }
         }
-        Some(image::ImageFormat::Gif) => Some(GifDecoder::new(cur())?.into_frames()),
+        Some(image::ImageFormat::Gif) => Some(gif_decoder(bytes)?.into_frames()),
         _ => None,
     })
 }
@@ -645,16 +705,14 @@ pub fn gif_size(bytes: &[u8]) -> Option<(u32, u32)> {
 /// Returns the frames of the first loop (a still, or a broken file, has fewer than 2 and stops).
 pub fn stream_gif(bytes: &[u8], px: u32, mut on_frame: impl FnMut(RgbaImage, u32) -> bool) -> ImageResult<usize> {
     use image::AnimationDecoder;
-    use image::codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder};
-    let cur = || std::io::Cursor::new(bytes);
     let format = image::guess_format(bytes)?;
     let mut first_loop = 0;
     loop {
         let mut n = 0;
         let frames = match format {
-            image::ImageFormat::WebP => WebPDecoder::new(cur())?.into_frames(),
-            image::ImageFormat::Png => PngDecoder::new(cur())?.apng()?.into_frames(),
-            _ => GifDecoder::new(cur())?.into_frames(),
+            image::ImageFormat::WebP => webp_decoder(bytes)?.into_frames(),
+            image::ImageFormat::Png => png_decoder(bytes)?.apng()?.into_frames(),
+            _ => gif_decoder(bytes)?.into_frames(),
         };
         for f in frames {
             let f = f?;
@@ -694,12 +752,11 @@ pub fn gif(frames: Vec<RgbaImage>, delay_ms: u32) -> ImageResult<Vec<u8>> {
 
 /// Whether `bytes` hold an animation, from the headers (GIFs: whether a second frame follows).
 pub fn is_animated(bytes: &[u8]) -> bool {
-    use image::codecs::{png::PngDecoder, webp::WebPDecoder};
-    let cur = || std::io::Cursor::new(bytes);
-    let Ok(reader) = image::ImageReader::new(cur()).with_guessed_format() else { return false };
+    let Ok(reader) = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format() else { return false };
     match reader.format() {
-        Some(image::ImageFormat::WebP) => WebPDecoder::new(cur()).is_ok_and(|d| d.has_animation()),
-        Some(image::ImageFormat::Png) => PngDecoder::new(cur()).is_ok_and(|d| d.is_apng().unwrap_or(false)),
+        Some(image::ImageFormat::WebP) => webp_decoder(bytes).is_ok_and(|d| d.has_animation()),
+        Some(image::ImageFormat::Png) => png_decoder(bytes).is_ok_and(|d| d.is_apng().unwrap_or(false)),
+        // counted without decoding them
         Some(image::ImageFormat::Gif) => gif_frames_at_least(bytes, 2),
         _ => false,
     }
@@ -993,6 +1050,80 @@ mod tests {
         assert_eq!(to_pixels(DynamicImage::ImageLuma8(gray)).as_bytes(), [7, 7, 7, 255].repeat(4).as_slice());
         let clear = RgbaImage::from_pixel(1, 1, image::Rgba([1, 2, 3, 4]));
         assert_eq!(to_pixels(DynamicImage::ImageRgba8(clear)).as_bytes(), [1, 2, 3, 4]);
+    }
+
+    fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let crc = [kind.as_slice(), data].concat().iter().fold(!0u32, |mut c, b| {
+            c ^= *b as u32;
+            for _ in 0..8 {
+                c = if c & 1 == 1 { (c >> 1) ^ 0xEDB8_8320 } else { c >> 1 };
+            }
+            c
+        });
+        [&(data.len() as u32).to_be_bytes(), kind.as_slice(), data, &(!crc).to_be_bytes()].concat()
+    }
+
+    /// A PNG of a few bytes whose header claims `side` x `side` RGBA, with `extra` chunks before
+    /// its (empty) image data.
+    fn claimed_png(side: u32, extra: &[Vec<u8>]) -> Vec<u8> {
+        let ihdr = [&side.to_be_bytes()[..], &side.to_be_bytes(), &[8, 6, 0, 0, 0]].concat();
+        let mut out = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        out.extend(png_chunk(b"IHDR", &ihdr));
+        extra.iter().for_each(|c| out.extend_from_slice(c));
+        out.extend(png_chunk(b"IDAT", &[0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]));
+        out.extend(png_chunk(b"IEND", &[]));
+        out
+    }
+
+    /// A GIF of a few bytes: a `screen` logical screen with one `frame`-sized image.
+    fn claimed_gif(screen: u16, frame: u16) -> Vec<u8> {
+        let mut out = b"GIF89a".to_vec();
+        out.extend_from_slice(&[&screen.to_le_bytes()[..], &screen.to_le_bytes(), &[0, 0, 0]].concat());
+        out.push(b',');
+        out.extend_from_slice(&[&[0, 0, 0, 0][..], &frame.to_le_bytes(), &frame.to_le_bytes(), &[0]].concat());
+        out.extend_from_slice(&[2, 2, 0x4C, 0x01, 0, b';']);
+        out
+    }
+
+    // each of these would allocate gigabytes or terabytes, and abort, if decoded
+    #[test]
+    fn refuses_a_huge_png_header() {
+        let png = claimed_png(1 << 20, &[]);
+        assert_eq!(png.len(), 65);
+        assert!(matches!(decode(&png), Err(image::ImageError::Limits(_))));
+        assert!(decode_thumb(&png, 100).is_err() && decode_rgba(&png).is_err());
+        assert!(decode_within(&claimed_png(2049, &[]), 2048 * 2048).is_err());
+        assert!(decode_view(&png, 100, 100, u64::MAX).unwrap().is_none());
+        assert!(photo::prepare(&png, photo::Quality::Standard).is_err());
+        assert!(animation_png(&png, 32).is_err());
+    }
+
+    #[test]
+    fn refuses_a_huge_gif_screen_or_frame() {
+        let gif = claimed_gif(u16::MAX, 1);
+        assert_eq!(gif.len(), 29);
+        assert!(decode(&gif).is_err());
+        assert!(decode_view(&gif, 100, 100, u64::MAX).unwrap().is_none());
+        assert!(!is_animated(&gif));
+        assert!(stream_gif(&gif, 32, |_, _| true).is_err());
+        assert!(animation_png(&gif, 32).is_err());
+        // a tiny screen doesn't make a huge frame safe
+        let gif = claimed_gif(1, u16::MAX);
+        assert!(decode(&gif).is_err());
+        assert!(!is_animated(&gif));
+        assert!(stream_gif(&gif, 32, |_, _| true).is_err());
+    }
+
+    #[test]
+    fn refuses_a_huge_apng() {
+        let actl = png_chunk(b"acTL", &[0, 0, 0, 2, 0, 0, 0, 0]);
+        let apng = claimed_png(1 << 20, &[actl.clone()]);
+        assert!(!is_animated(&apng));
+        assert!(animation_png(&apng, 32).is_err());
+        assert!(stream_gif(&apng, 32, |_, _| true).is_err());
+        assert!(decode(&apng).is_err());
+        // the same file at a sane size gets past the size check
+        assert!(png_decoder(&claimed_png(16, &[actl])).is_ok());
     }
 
     #[test]

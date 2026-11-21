@@ -44,11 +44,17 @@ impl AvifDecoder {
         let alpha = ctx.alpha_item_coded_data().filter(|d| !d.is_empty()).map(<[u8]>::to_vec);
         let header = sequence_header(&color)?;
         let size = (header.max_width as u32, header.max_height as u32);
+        if size.0 as u64 * size.1 as u64 > FRAME_SIZE_LIMIT as u64 {
+            return Err(ImageError::Limits(LimitError::from_kind(LimitErrorKind::DimensionError)));
+        }
         let mirror = ctx.image_mirror_ptr().ok().filter(|p| !p.is_null()).map(|p| unsafe { std::ptr::read(p) });
         let orientation = orientation(ctx.image_rotation().unwrap_or(mp4parse::ImageRotation::D0), mirror);
         Ok(Self { color, alpha, premultiplied: ctx.premultiplied_alpha, size, orientation })
     }
 }
+
+/// A safety limit against hostile headers; callers check the pixel count they accept.
+const FRAME_SIZE_LIMIT: u32 = 16384 * 16384;
 
 fn sequence_header(obus: &[u8]) -> ImageResult<Dav1dSequenceHeader> {
     let mut out = MaybeUninit::<Dav1dSequenceHeader>::uninit();
@@ -122,8 +128,7 @@ fn decode_av1(obus: &[u8]) -> ImageResult<Picture> {
     let mut settings = unsafe { settings.assume_init() };
     settings.n_threads = 1;
     settings.max_frame_delay = 1;
-    // a safety limit against hostile headers; callers check the pixel count they accept
-    settings.frame_size_limit = 16384 * 16384;
+    settings.frame_size_limit = FRAME_SIZE_LIMIT;
     let mut ctx: Option<Dav1dContext> = None;
     // SAFETY: both pointers are valid
     if unsafe { dav1d_open(NonNull::new(&mut ctx), NonNull::new(&mut settings)) }.0 != 0 {

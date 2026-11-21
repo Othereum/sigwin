@@ -70,7 +70,7 @@ fn shrink(bytes: &[u8], format: ImageFormat, quality: Quality) -> ImageResult<Op
     if super::is_animated(bytes) || !matches!(format, ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::WebP | ImageFormat::Avif) {
         return Ok(None);
     }
-    let mut decoder = super::decoder(bytes)?;
+    let mut decoder = super::decoder(bytes, super::MAX_PIXELS)?;
     let orientation = decoder.orientation()?;
     let upright = orientation == image::metadata::Orientation::NoTransforms;
     let jpeg = format == ImageFormat::Jpeg;

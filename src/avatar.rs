@@ -293,9 +293,13 @@ fn cached(dir: &Path, owner: &str, key: &str, bytes: &[u8], px: u32) -> Option<T
     Some(Thumb { key: key.into(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
 }
 
+/// Profile and group photos come from anyone and are decoded for every listed thread at start;
+/// Signal's apps upload them far smaller than this.
+const MAX_PIXELS: u64 = 2048 * 2048;
+
 /// Center-crops to a square, resamples to `px` and cuts an antialiased circle.
 pub fn round(bytes: &[u8], px: u32) -> anyhow::Result<image::RgbaImage> {
-    let img = sigwin_thumb::decode(bytes)?;
+    let img = sigwin_thumb::decode_within(bytes, MAX_PIXELS)?;
     anyhow::ensure!(img.width() > 0 && img.height() > 0, "empty image");
     let mut out = sigwin_thumb::square(&img, px);
     mask_circle(&mut out);
