@@ -985,7 +985,6 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             photo_quality: d.get_photo_quality().clamp(0, 1) as u8,
             photo_size: d.get_photo_size().clamp(0, 2) as u8,
             sticker_size: d.get_sticker_size().clamp(0, 2) as u8,
-            last_seen_version: UI.with_borrow(|ui| ui.settings.last_seen_version.clone()),
             viewer_click_closed: UI.with_borrow(|ui| ui.settings.viewer_click_closed),
             viewer_wheel_zoomed: UI.with_borrow(|ui| ui.settings.viewer_wheel_zoomed),
             window: UI.with_borrow(|ui| ui.settings.window),

@@ -377,8 +377,8 @@ msgstr "Mit dem Mausrad zoomen · Zum Schließen auf das Bild klicken oder Esc d
 msgid "Search"
 msgstr "Suchen"
 
-msgid "Select a chat"
-msgstr "Wähle einen Chat aus"
+msgid "Choose a chat on the left, or start a new one."
+msgstr "Wähle links einen Chat aus oder beginne einen neuen."
 
 msgid "Send failed"
 msgstr "Senden gescheitert"
@@ -475,9 +475,6 @@ msgstr "Für immer"
 
 msgid "Update"
 msgstr "Aktualisieren"
-msgid "Updated to {}"
-msgstr "Auf {} aktualisiert"
-
 msgid "Updates"
 msgstr "Aktualisierungen"
 
@@ -1101,9 +1098,6 @@ msgstr "Zum Aktualisieren klicken"
 
 msgid "Click to restart"
 msgstr "Zum Neustarten klicken"
-
-msgid "Click to see what's new"
-msgstr "Klicken, um die Neuerungen zu sehen"
 
 msgid "Open it on your phone"
 msgstr "Öffne es auf deinem Telefon"

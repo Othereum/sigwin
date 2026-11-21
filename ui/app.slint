@@ -67,27 +67,37 @@ component MeButton inherits Rectangle {
     }
 }
 
-// The time a bar has left before it goes by itself, as a ring draining clockwise from the top
-// around a 36px button (short of 360°: a full turn would end where it starts and draw nothing).
-component DrainRing inherits Path {
-    // the part left, 0 to 1
-    in property <float> left;
-    property <angle> arc: min(359.9deg, 360deg * root.left);
-    width: 36px;
-    height: 36px;
-    viewbox-width: 36;
-    viewbox-height: 36;
-    stroke: Theme.subtle;
-    stroke-width: 1.5px;
-    MoveTo { x: 18; y: 6; }
-    ArcTo {
-        x: 18 + 12 * Math.sin(root.arc);
-        y: 18 - 12 * Math.cos(root.arc);
-        radius-x: 12;
-        radius-y: 12;
-        large-arc: root.arc > 180deg;
-        sweep: true;
-    }
+// One shape of `AppMark`, in the icon's 256-unit box. A shape per Path: subpaths of one Path
+// that overlap in opposite directions cancel out under the nonzero rule and leave a hole.
+component MarkShape inherits Path {
+    in property <color> color;
+    // in icon units: a Path's stroke width doesn't scale with its viewbox
+    in property <float> line;
+    in property <length> unit;
+    width: 100%;
+    height: 100%;
+    viewbox-width: 256;
+    viewbox-height: 256;
+    fill: root.color;
+    stroke: root.line > 0 ? root.color : transparent;
+    stroke-width: root.line * root.unit;
+    stroke-line-join: round;
+}
+
+// The app's icon drawn as paths, after assets/icon.svg (change both together): an image would
+// be sampled nearest-neighbor, and the renderer has no SVG. The SVG's mask, the gap around the
+// front bubble, is painted in the pane's color, so this belongs on the plain pane.
+component AppMark inherits Rectangle {
+    in property <length> size: 72px;
+    property <length> u: root.size / 256;
+    width: root.size;
+    height: root.size;
+    MarkShape { commands: "M 76 100 A 80 80 0 1 1 236 100 A 80 80 0 1 1 76 100 Z"; color: #a9c3f8; unit: root.u; }
+    MarkShape { commands: "M 220 134 L 244 184 L 186 168 Z"; color: #a9c3f8; line: 10; unit: root.u; }
+    MarkShape { commands: "M 10 152 A 94 94 0 1 1 198 152 A 94 94 0 1 1 10 152 Z"; color: Theme.pane; unit: root.u; }
+    MarkShape { commands: "M 40 196 L 22 244 L 96 222 Z"; color: Theme.pane; line: 28; unit: root.u; }
+    MarkShape { commands: "M 24 152 A 80 80 0 1 1 184 152 A 80 80 0 1 1 24 152 Z"; color: #2c6bed; unit: root.u; }
+    MarkShape { commands: "M 52 200 L 30 240 L 92 222 Z"; color: #2c6bed; line: 10; unit: root.u; }
 }
 
 // A bar docked at the sidebar's foot: flat on it, a rule above, its icon and then the children.
@@ -97,12 +107,6 @@ component FootBar inherits Rectangle {
     in property <string> icon;
     in property <string> tip;
     in property <bool> enabled: true;
-    in property <length> pad-right: 18px;
-    // folded, a bar that goes by itself: the time it has left around its icon (1: nothing shown),
-    // and a close button beside it while the pointer is on the bar
-    in property <float> drain: 1;
-    in property <bool> closable;
-    callback close;
     // the TouchArea holds the rest, so this stays on over the buttons in it
     out property <bool> hovered: ta.has-hover;
     callback clicked;
@@ -123,35 +127,17 @@ component FootBar inherits Rectangle {
         }
         Rectangle { background: ta.has-hover && root.enabled ? Theme.notice-hover : Theme.notice; }
         Rectangle { y: 0px; height: 1px; background: Theme.border; }
-        if root.folded: Rectangle {
-            property <bool> beside: root.closable && ta.has-hover;
-            // the close button's room: the icon steps aside for it
-            x: self.beside ? 4px : (parent.width - self.width) / 2;
+        if root.folded: Icon {
+            x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: 36px;
-            height: 36px;
-            Icon {
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                size: 20px;
-                icon: root.icon;
-                tint: Theme.accent;
-            }
-            if root.drain < 1: DrainRing { left: root.drain; }
-        }
-        if root.folded && root.closable && ta.has-hover: IconButton {
-            x: parent.width - self.width - 8px;
-            y: (parent.height - self.height) / 2;
-            width: 26px;
-            height: 26px;
-            icon: Icons.close;
-            icon-size: 14px;
-            clicked => { root.close(); }
+            size: 20px;
+            icon: root.icon;
+            tint: Theme.accent;
         }
         HorizontalLayout {
             visible: !root.folded;
             padding-left: 18px;
-            padding-right: root.pad-right;
+            padding-right: 18px;
             spacing: 10px;
             Icon {
                 y: (parent.height - self.height) / 2;
@@ -355,12 +341,8 @@ export component AppWindow inherits Window {
     // our own photo in the sidebar header (the card on the settings page has its own)
     in property <image> me-photo;
     in property <bool> me-has-photo;
-    // "what's new" after an update: the sidebar offers the release notes until opened or dismissed.
-    // The running version ("" = no offer): the releases page lists newer ones not installed yet.
-    in-out property <string> whatsnew-version;
     // opens the release notes on GitHub
     callback open-whatsnew();
-    callback dismiss-whatsnew();
     callback open-settings();
 
     // the message being edited (banner above the composer)
@@ -648,17 +630,70 @@ export component AppWindow inherits Window {
         pane-col := VerticalLayout {
             if root.current-key == "": Rectangle {
                 vertical-stretch: 1;
+                // seen at every start: who this is, its version and what changed in it
                 VerticalLayout {
                     alignment: center;
-                    spacing: 12px;
+                    padding: 24px;
                     HorizontalLayout {
                         alignment: center;
-                        Icon { icon: Icons.chat; size: 48px; }
+                        AppMark { size: 72px; }
                     }
+                    Rectangle { height: 14px; }
                     Text {
-                        text: @tr("Select a chat");
+                        text: "Sigwin";
+                        color: Theme.text;
+                        font-size: 22px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                    }
+                    Rectangle { height: 4px; }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        Text {
+                            text: "v" + SettingsData.current-version;
+                            color: Theme.subtle;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: "·";
+                            color: Theme.subtle;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                        wn-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.open-whatsnew(); }
+                            min-width: wn-row.min-width;
+                            preferred-width: wn-row.preferred-width;
+                            min-height: wn-row.min-height;
+                            preferred-height: wn-row.preferred-height;
+                            wn-row := HorizontalLayout {
+                                spacing: 3px;
+                                Text {
+                                    text: @tr("What's new");
+                                    color: Theme.link;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                    opacity: wn-ta.has-hover ? 0.75 : 1;
+                                }
+                                Icon {
+                                    y: (parent.height - self.height) / 2;
+                                    icon: Icons.open-outside;
+                                    size: 14px;
+                                    tint: Theme.link;
+                                    opacity: wn-ta.has-hover ? 0.75 : 1;
+                                }
+                            }
+                        }
+                    }
+                    Rectangle { height: 22px; }
+                    Text {
+                        text: @tr("Choose a chat on the left, or start a new one.");
                         color: Theme.subtle;
-                        font-size: 15px;
+                        font-size: 13px;
+                        wrap: word-wrap;
                         horizontal-alignment: center;
                     }
                 }
@@ -2012,66 +2047,6 @@ export component AppWindow inherits Window {
                 }
             }
             // bars docked at the sidebar's foot: flat on the sidebar, a rule above each
-            if root.whatsnew-version != "": wn-bar := Rectangle {
-                // it goes away by itself, so nobody has to close it. The time runs only while
-                // the user can see it (the window in front) and starts over while the cursor
-                // is on it; only its last stretch shows, as a ring that drains around the close
-                // button, so the bar sits still until it is about to leave.
-                property <duration> wn-total: 12s;
-                property <duration> wn-warn: 10s;
-                property <duration> wn-step: 50ms;
-                property <duration> wn-elapsed: 0ms;
-                property <duration> wn-left: wn-total - wn-elapsed;
-                height: 44px;
-                Timer {
-                    interval: parent.wn-step;
-                    running: !root.inactive;
-                    triggered => {
-                        if (wn-foot.hovered) {
-                            parent.wn-elapsed = 0ms;
-                        } else {
-                            parent.wn-elapsed += parent.wn-step;
-                            if (parent.wn-elapsed >= parent.wn-total) { root.dismiss-whatsnew(); }
-                        }
-                    }
-                }
-                wn-foot := FootBar {
-                    folded: !root.side-wide;
-                    icon: Icons.info;
-                    tip: @tr("Updated to {}", root.whatsnew-version) + "\n" + @tr("Click to see what's new");
-                    pad-right: 8px;
-                    drain: wn-bar.wn-left <= wn-bar.wn-warn ? wn-bar.wn-left / wn-bar.wn-warn : 1;
-                    closable: true;
-                    close => { root.dismiss-whatsnew(); }
-                    clicked => { root.open-whatsnew(); }
-                    Text {
-                        text: @tr("Updated to {}", root.whatsnew-version);
-                        color: Theme.text;
-                        font-size: 13px;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                    }
-                    Text {
-                        text: @tr("What's new");
-                        color: Theme.accent;
-                        font-size: 13px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                    Rectangle {
-                        y: (parent.height - self.height) / 2;
-                        width: 36px;
-                        height: 36px;
-                        IconButton {
-                            icon: Icons.close;
-                            icon-size: 16px;
-                            clicked => { root.dismiss-whatsnew(); }
-                        }
-                        if wn-bar.wn-left <= wn-bar.wn-warn: DrainRing { left: wn-bar.wn-left / wn-bar.wn-warn; }
-                    }
-                }
-            }
             if SettingsData.update-version == "" && SettingsData.update-available != "": FootBar {
                 height: 52px;
                 folded: !root.side-wide;

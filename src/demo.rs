@@ -87,20 +87,6 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         // the "new version available" bar (automatic download off)
         app.global::<SettingsData>().set_update_available(v.into());
     }
-    if std::env::var_os("SIGWIN_DEMO_WHATSNEW").is_some() {
-        // the "updated, what's new" offer bar; it comes back a second after it leaves, to watch
-        // it run out again
-        app.set_whatsnew_version(env!("CARGO_PKG_VERSION").into());
-        let weak = app.as_weak();
-        let timer = Box::leak(Box::new(slint::Timer::default()));
-        timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), move || {
-            if let Some(app) = weak.upgrade()
-                && app.get_whatsnew_version().is_empty()
-            {
-                app.set_whatsnew_version(env!("CARGO_PKG_VERSION").into());
-            }
-        });
-    }
     if std::env::var_os("SIGWIN_DEMO_LOADING").is_some() {
         // the loading screen as while waiting for the phone's history, which a real start passes in a blink
         let weak = app.as_weak();
@@ -516,7 +502,10 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             }
             emit(Event::Threads(list));
         }
-        emit(Event::Messages { key: "c:demo-1".into(), items: first, paging: Paging::default(), scroll });
+        // SIGWIN_DEMO_EMPTY: no chat open, as at every start
+        if std::env::var_os("SIGWIN_DEMO_EMPTY").is_none() {
+            emit(Event::Messages { key: "c:demo-1".into(), items: first, paging: Paging::default(), scroll });
+        }
         let notes = std::env::var("SIGWIN_DEMO_NOTIFY").ok().map(|v| demo_notify(emit.clone(), v.parse().unwrap_or(10)));
         // clicking another thread shows the same rows under its key (drafts follow the key)
         let (emit, items, all_pins) = (emit.clone(), items.clone(), pins.clone());

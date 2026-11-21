@@ -49,9 +49,6 @@ pub struct Settings {
     /// (`view::media::set_sizes`)
     pub photo_size: u8,
     pub sticker_size: u8,
-    /// the newest version whose "what's new" was seen or dismissed ("" = never recorded; not a
-    /// preference, kept here for lack of a better file)
-    pub last_seen_version: String,
     /// the image viewer was once closed by a click or Esc, so its hint about that is no longer
     /// shown (not a preference)
     pub viewer_click_closed: bool,
@@ -99,7 +96,6 @@ impl Default for Settings {
             photo_quality: 0,
             photo_size: 1,
             sticker_size: 1,
-            last_seen_version: String::new(),
             viewer_click_closed: false,
             viewer_wheel_zoomed: false,
             window: None,

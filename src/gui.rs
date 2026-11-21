@@ -255,7 +255,6 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             app.set_page("link".into());
             // no account, so no sync to wait for
             crate::update::start();
-            whatsnew::on_need_link();
         }
         Event::LinkQr(url) => {
             if let Some(img) = qr_image(&url) {
@@ -265,10 +264,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         }
         Event::LinkStatus(s) => app.set_link_status(s.into()),
         Event::HistorySkippable(on) => app.set_history_skippable(on),
-        Event::Ready => {
-            app.set_page("main".into());
-            whatsnew::on_ready(app);
-        }
+        Event::Ready => app.set_page("main".into()),
         Event::Threads(list) => UI.with_borrow_mut(|ui| {
             ui.thread_dtos = list;
             show_open_unread(app, ui);

@@ -78,17 +78,12 @@ file.
 - Notes of past releases stay as they are.
 
 ### In the app
-After an update the sidebar offers "what's new" once (`gui/whatsnew.rs`), for a few seconds of
-the user looking at the window, then it goes away by itself; it and Settings > 정보
-open the GitHub releases page, which lists every version newest first, so an update that skipped
-versions loses nothing. The app carries no notes: embedding them took a history asset chained
-across releases, which one release made without the script would break (releases up to 0.2.11
-still carry a `changelog.md` asset and embed it; nothing reads it now).
-- Offered when `last_seen_version` in `settings.json` is older than the running version. An app
-  from before the offer recorded nothing: no value but an existing account means it was updated
-  (offer), no account means a fresh install (record, offer nothing). It records when the offer is
-  opened or dismissed. Dev builds neither offer nor record: they carry the next version's number
-  before its release exists.
+"What's new" sits under the version on the empty conversation pane, seen at every start, and in
+Settings > About (`gui/whatsnew.rs`). Nothing announces an update itself: the app needn't be
+known by its version. Both open the GitHub releases page, which lists every version newest first,
+so an update that skipped versions loses nothing. The app carries no notes: embedding them took a
+history asset chained across releases, which one release made without the script would break
+(releases up to 0.2.11 still carry a `changelog.md` asset and embed it; nothing reads it now).
 
 ## License notices
 `scripts\release.ps1` generates third-party notices with `cargo about`
