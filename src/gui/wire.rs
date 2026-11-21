@@ -860,14 +860,9 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             send_cmd(if pending { Command::CancelSend { id: id.to_string() } } else { Command::StopFileSave { id: id.to_string() } });
             return;
         }
-        let danger = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && m.file_danger));
-        let save = Command::SaveFiles { id: id.to_string(), owner: window::hwnd(&app), all };
-        if danger {
-            let text = tr!("Files of this kind can harm your computer. Save it only if you trust the sender. Save it?");
-            window::ask(&app, window::Ask::YesNo, tr!("Possibly dangerous file"), text.into(), move || send_cmd(save));
-            return;
-        }
-        send_cmd(save);
+        // the hover toolbar's save takes the pictures and videos too
+        let danger = UI.with_borrow(|ui| ui.last.iter().any(|m| m.id == id && (m.file_danger || (all && m.media_danger))));
+        save_received(&app, danger, Command::SaveFiles { id: id.to_string(), owner: window::hwnd(&app), all });
     };
     app.on_file_clicked({
         let weak = weak.clone();
@@ -1087,6 +1082,16 @@ pub(crate) fn start_updates(app: &AppWindow, exe: PathBuf) {
 }
 
 
+/// Sends `save`, a save of received files, after asking if one of them is `danger`ous.
+pub(super) fn save_received(app: &AppWindow, danger: bool, save: Command) {
+    if danger {
+        let text = tr!("Files of this kind can harm your computer. Save it only if you trust the sender. Save it?");
+        window::ask(app, window::Ask::YesNo, tr!("Possibly dangerous file"), text.into(), move || send_cmd(save));
+        return;
+    }
+    send_cmd(save);
+}
+
 /// Adds files to the composer's pending attachments.
 pub(crate) fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
     if files.is_empty() {
@@ -1095,7 +1100,7 @@ pub(crate) fn add_files(app: &AppWindow, files: Vec<PathBuf>) {
     let (all, why, danger) = UI.with_borrow_mut(|ui| {
         let (ok, why) = attach::admit(&ui.files, files, ui.send_limit);
         let name = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let danger = ok.iter().any(|p| view::media::is_dangerous_file(&name(p)));
+        let danger = ok.iter().any(|p| view::media::signal_refuses(&name(p)));
         ui.files.extend(ok);
         (ui.files.clone(), why, danger)
     });

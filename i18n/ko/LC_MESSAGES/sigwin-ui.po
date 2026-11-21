@@ -981,6 +981,9 @@ msgstr "서버가 거부했습니다 ({})"
 msgid "This image hasn't been downloaded yet."
 msgstr "아직 받지 않은 이미지입니다."
 
+msgid "This attachment can't be opened from here. You can save it instead."
+msgstr "이 첨부 파일은 여기서 열 수 없습니다. 대신 저장할 수 있습니다."
+
 msgid "This message can't be edited"
 msgstr "이 메시지는 수정할 수 없습니다"
 

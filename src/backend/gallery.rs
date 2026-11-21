@@ -251,7 +251,7 @@ fn item_dto(g: &Gallery, ts: u64, idx: usize) -> Option<GalleryItemDto> {
         }
         MediaKind::Files => {
             d.name = view::media::attachment_label(a);
-            d.danger = view::media::is_dangerous_file(&d.name);
+            d.danger = view::media::is_dangerous(a);
             let day = view::time::day_short(ts);
             d.sub = match a.size.filter(|s| *s > 0) {
                 Some(s) => format!("{} · {day}", view::media::size_text(s as u64)),

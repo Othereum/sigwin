@@ -985,6 +985,9 @@ msgstr "Der Server hat abgelehnt ({})"
 msgid "This image hasn't been downloaded yet."
 msgstr "Dieses Bild wurde noch nicht heruntergeladen."
 
+msgid "This attachment can't be opened from here. You can save it instead."
+msgstr "Dieser Anhang kann hier nicht geöffnet werden. Du kannst ihn stattdessen speichern."
+
 msgid "This message can't be edited"
 msgstr "Diese Nachricht kann nicht bearbeitet werden"
 

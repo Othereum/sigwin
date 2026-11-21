@@ -116,9 +116,15 @@ pub fn clean_preview_text(text: &str, max: usize) -> String {
 /// space, and control and direction marks go. Android wraps synced contact names in direction
 /// isolates, which would otherwise lead the name: its initial, its place in a sorted list.
 pub fn one_line(text: &str) -> String {
-    let hidden = |c: char| (c.is_control() && !c.is_whitespace()) || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}');
+    let hidden = |c: char| (c.is_control() && !c.is_whitespace()) || is_format_mark(c);
     let kept: String = text.chars().filter(|c| !hidden(*c)).collect();
     kept.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Invisible marks that change how the text around them reads: zero widths, direction marks,
+/// embeddings and isolates. In a file name they can make `exe` read as another extension.
+pub fn is_format_mark(c: char) -> bool {
+    matches!(c, '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
 }
 
 pub fn open(url: &str) {

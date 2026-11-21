@@ -98,7 +98,9 @@ pub(crate) fn wire(app: &AppWindow) {
     let weak = app.as_weak();
     d.on_save(move |id, index| {
         let Some(app) = weak.upgrade() else { return };
-        send_cmd(Command::GallerySave { id: id.to_string(), index: index.max(0) as usize, owner: window::hwnd(&app) });
+        let index = index.max(0) as usize;
+        let danger = PAGE.with_borrow(|p| p.as_ref().is_some_and(|p| p.items.iter().any(|it| it.id == id.as_str() && it.index == index && it.danger)));
+        super::wire::save_received(&app, danger, Command::GallerySave { id: id.to_string(), index, owner: window::hwnd(&app) });
     });
 }
 

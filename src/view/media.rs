@@ -316,17 +316,121 @@ pub fn file_line(first: &str, more: usize, bytes: Option<u64>) -> String {
     }
 }
 
-/// A file that runs or changes the system when opened: the official desktop app refuses to send
-/// or save these. We only warn. Trailing dots and spaces don't change what Windows opens.
+/// Kinds the official desktop app refuses to send or save.
+const SIGNAL_REFUSES: &[&str] = &[
+    "ade", "adp", "apk", "bat", "cab", "chm", "cmd", "com", "cpl", "diagcab", "dll", "dmg", "exe", "hta", "inf", "ins", "isp",
+    "jar", "js", "jse", "lib", "lnk", "mde", "mht", "msc", "msi", "msp", "mst", "nsh", "pif", "ps1", "psc1", "psm1", "psrc",
+    "reg", "scr", "sct", "settingcontent-ms", "shb", "sys", "vb", "vbe", "vbs", "vxd", "wsc", "wsf", "wsh",
+];
+
+/// Further kinds the shell runs, installs or mounts when opened, or that carry macros.
+const ALSO_DANGEROUS: &[&str] = &[
+    "appinstaller", "application", "appref-ms", "appx", "appxbundle", "docm", "gadget", "hlp", "img", "iso", "library-ms",
+    "msix", "msixbundle", "ocx", "pptm", "ps1xml", "psd1", "scf", "searchconnector-ms", "url", "vhd", "vhdx", "wsb", "xbap",
+    "xll", "xlsm",
+];
+
+fn kind_of(name: &str) -> Option<String> {
+    sanitize(name).rsplit_once('.').map(|(_, e)| e.to_lowercase())
+}
+
+/// A file that runs or changes the system when opened. We only warn. Judged on the name it
+/// would be saved under: Windows drops what `sanitize` drops too (trailing dots and spaces).
 pub fn is_dangerous_file(name: &str) -> bool {
-    const KINDS: &[&str] = &[
-        "ade", "adp", "apk", "bat", "cab", "chm", "cmd", "com", "cpl", "diagcab", "dll", "dmg", "exe", "hta", "inf", "ins",
-        "isp", "jar", "js", "jse", "lib", "lnk", "mde", "mht", "msc", "msi", "msp", "mst", "nsh", "pif", "ps1", "psc1",
-        "psm1", "psrc", "reg", "scr", "sct", "settingcontent-ms", "shb", "sys", "vb", "vbe", "vbs", "vxd", "wsc", "wsf",
-        "wsh",
-    ];
-    let name = name.trim_end_matches(['.', ' ']);
-    name.rsplit_once('.').is_some_and(|(_, e)| KINDS.contains(&e.to_ascii_lowercase().as_str()))
+    kind_of(name).is_some_and(|e| SIGNAL_REFUSES.contains(&e.as_str()) || ALSO_DANGEROUS.contains(&e.as_str()))
+}
+
+/// A file the official app won't take from us.
+pub fn signal_refuses(name: &str) -> bool {
+    kind_of(name).is_some_and(|e| SIGNAL_REFUSES.contains(&e.as_str()))
+}
+
+/// Whether saving attachment `ptr` is worth a warning first.
+pub fn is_dangerous(ptr: &AttachmentPointer) -> bool {
+    is_dangerous_file(&saved_name(ptr))
+}
+
+/// A name Windows will write as given: no reserved or invisible characters, no trailing dots
+/// or spaces (Windows drops them, so the name would end up different), no device name.
+pub fn sanitize(name: &str) -> String {
+    let s: String = name
+        .chars()
+        .map(|c| if c.is_control() || crate::link::is_format_mark(c) || r#"<>:"/\|?*"#.contains(c) { '_' } else { c })
+        .collect();
+    let s = s.trim_matches(|c: char| c.is_whitespace() || c == '.');
+    if s.is_empty() {
+        return "attachment".into();
+    }
+    if is_device_name(s) { format!("_{s}") } else { s.to_string() }
+}
+
+/// `CON`, `nul.txt`, `COM¹ .log`…: Windows opens the device instead of a file of that name,
+/// whatever the extension.
+fn is_device_name(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or_default().trim_end().to_ascii_uppercase();
+    match base.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" => true,
+        b => {
+            let mut c = b.chars();
+            let head: String = c.by_ref().take(3).collect();
+            matches!(head.as_str(), "COM" | "LPT")
+                && matches!((c.next(), c.next()), (Some('0'..='9' | '¹' | '²' | '³'), None))
+        }
+    }
+}
+
+/// The extension of a picture or video we show as one, from what it says it is: an outside app
+/// gets it only under a kind its default app plays, never under the sender's name for it (a
+/// "video" named `clip.exe` would run). `None`: not a kind we let the shell open.
+fn media_ext(ptr: &AttachmentPointer) -> Option<&'static str> {
+    if !is_media(ptr) {
+        return None;
+    }
+    let ct = ptr.content_type.as_deref()?.split(';').next()?.trim().to_ascii_lowercase();
+    Some(match ct.as_str() {
+        "image/jpeg" => "jpg",
+        "image/png" | "image/apng" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/avif" => "avif",
+        "image/heic" => "heic",
+        "image/heif" => "heif",
+        "image/bmp" => "bmp",
+        "image/tiff" => "tif",
+        "video/mp4" => "mp4",
+        "video/x-m4v" => "m4v",
+        "video/quicktime" => "mov",
+        "video/3gpp" => "3gp",
+        "video/webm" => "webm",
+        "video/x-msvideo" | "video/avi" => "avi",
+        "video/x-matroska" => "mkv",
+        _ => return None,
+    })
+}
+
+/// The name attachment `ptr` is saved or opened under: the sender's, cleaned, or one from its
+/// type. A picture or video keeps the sender's stem with the extension of what it's shown as.
+pub fn saved_name(ptr: &AttachmentPointer) -> String {
+    let given = ptr.file_name.as_deref().filter(|n| !n.is_empty()).map(sanitize);
+    if let Some(ext) = media_ext(ptr) {
+        let stem = given.as_deref().map_or("attachment", |n| n.rsplit_once('.').map_or(n, |(s, _)| s));
+        return sanitize(&format!("{stem}.{ext}"));
+    }
+    given.unwrap_or_else(|| {
+        let ext = ptr
+            .content_type
+            .as_deref()
+            .and_then(mime_guess::get_mime_extensions_str)
+            .and_then(|e| e.first().copied())
+            .unwrap_or("bin");
+        format!("attachment.{ext}")
+    })
+}
+
+/// The name of the plain copy an outside app opens picture or video `ptr` from, or `None` if
+/// it's no kind we let the shell open.
+pub fn open_name(ptr: &AttachmentPointer) -> Option<String> {
+    media_ext(ptr).map(|_| saved_name(ptr))
 }
 
 /// What a message's file card shows, taken from its [`file_line`]: the name (with "and N more")
@@ -361,8 +465,8 @@ pub fn length_text(seconds: u32) -> String {
 
 pub fn attachment_label(ptr: &AttachmentPointer) -> String {
     let ct = ptr.content_type.as_deref().unwrap_or("");
-    if let Some(name) = ptr.file_name.as_deref().filter(|n| !n.is_empty()) {
-        return name.to_string();
+    if let Some(name) = ptr.file_name.as_deref().map(crate::link::one_line).filter(|n| !n.is_empty()) {
+        return name;
     }
     if ct.starts_with("image/") {
         tr!("Photo").into()
@@ -575,7 +679,8 @@ pub(super) fn set_attachments(
         }
     }
     m.attachment = files_label(&files);
-    m.file_danger = files.iter().any(|a| is_dangerous_file(&attachment_label(a)));
+    m.file_danger = files.iter().any(|a| is_dangerous(a));
+    m.media_danger = photos.iter().any(|(_, a)| is_dangerous(a));
     if let [(i, a)] = photos[..] {
         let file_key = attachment_key(a, ts, i);
         // the sender's size may be missing or wrong: the picture is cut to fill the box
@@ -613,6 +718,50 @@ mod tests {
         assert!(!is_dangerous_file("보고서.pdf"));
         assert!(!is_dangerous_file("exe"));
         assert!(!is_dangerous_file("a.exe.txt"));
+        // saved as `a.exe`: Windows and `sanitize` drop what trails
+        assert!(is_dangerous_file("a.exe\u{3000}"));
+        assert!(is_dangerous_file("a.exe . "));
+        assert!(is_dangerous_file("Report.URL") && is_dangerous_file("disk.iso") && is_dangerous_file("book.xlsm"));
+        assert!(!signal_refuses("disk.iso") && signal_refuses("setup.exe"));
+    }
+
+    #[test]
+    fn sanitized_names_are_written_as_given() {
+        assert_eq!(sanitize(" 보고서.pdf. "), "보고서.pdf");
+        assert_eq!(sanitize("a:b/c?.txt"), "a_b_c_.txt");
+        assert_eq!(sanitize("photo\u{202e}gpj.exe"), "photo_gpj.exe");
+        assert_eq!(sanitize("\u{2066}x\u{2069}\u{200f}\u{061c}\u{feff}.pdf"), "_x____.pdf");
+        assert_eq!(sanitize("a.exe\u{3000}"), "a.exe");
+        assert_eq!(sanitize(" . "), "attachment");
+        for dev in ["CON", "con.txt", "Nul.tar.gz", "aux .log", "COM1", "lpt9.doc", "COM0", "com¹.txt", "LPT³", "CONIN$", "conout$.x"] {
+            assert_eq!(sanitize(dev), format!("_{dev}"), "{dev}");
+        }
+        for fine in ["CONSOLE.txt", "COM10", "LPT", "nul_x", "prnt.pdf", "COM¹0"] {
+            assert_eq!(sanitize(fine), fine);
+        }
+    }
+
+    fn ptr(content_type: &str, name: Option<&str>) -> AttachmentPointer {
+        AttachmentPointer { content_type: Some(content_type.into()), file_name: name.map(Into::into), ..Default::default() }
+    }
+
+    #[test]
+    fn media_opens_only_as_what_it_shows() {
+        assert_eq!(open_name(&ptr("video/mp4", Some("clip.exe"))).as_deref(), Some("clip.mp4"));
+        assert_eq!(open_name(&ptr("image/png", Some("cat.png"))).as_deref(), Some("cat.png"));
+        assert_eq!(open_name(&ptr("image/jpeg", Some("a.b.scr"))).as_deref(), Some("a.b.jpg"));
+        assert_eq!(open_name(&ptr("video/QuickTime; codecs=x", None)).as_deref(), Some("attachment.mov"));
+        assert_eq!(open_name(&ptr("video/mp4", Some("con.exe"))).as_deref(), Some("_con.mp4"));
+        assert_eq!(open_name(&ptr("video/mp4", Some("x\u{202e}4pm.exe"))).as_deref(), Some("x_4pm.mp4"));
+        // a kind we don't let the shell open, and never a file
+        assert_eq!(open_name(&ptr("video/x-ms-wmv", Some("a.wmv"))), None);
+        assert_eq!(open_name(&ptr("application/pdf", Some("a.pdf"))), None);
+        // saving keeps the shown kind too; what it can't be shown as is judged on its own name
+        assert_eq!(saved_name(&ptr("video/mp4", Some("clip.exe"))), "clip.mp4");
+        assert!(!is_dangerous(&ptr("video/mp4", Some("clip.exe"))));
+        assert!(is_dangerous(&ptr("video/x-ms-wmv", Some("clip.exe"))));
+        assert!(is_dangerous(&ptr("application/x-msdownload", None)));
+        assert_eq!(saved_name(&ptr("application/pdf", Some("a.pdf"))), "a.pdf");
     }
 
     #[test]

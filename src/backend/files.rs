@@ -301,7 +301,7 @@ impl App {
         if !path.exists() {
             return self.toggle_download(&file_key).await;
         }
-        let (tx, open_dir, name) = (self.tx.clone(), self.paths.open.clone(), attachment_name(a));
+        let (tx, open_dir, name) = (self.tx.clone(), self.paths.open.clone(), view::media::open_name(a));
         tokio::task::spawn_local(async move { open_outside(&tx, path, &open_dir, name).await });
     }
 
@@ -375,7 +375,7 @@ impl App {
         let tx = self.tx.clone();
         match save.jobs.as_slice() {
             [] => {}
-            [SaveJob { ptr, .. }] => crate::picker::spawn_save(owner, attachment_name(ptr), move |dst| {
+            [SaveJob { ptr, .. }] => crate::picker::spawn_save(owner, view::media::saved_name(ptr), move |dst| {
                 if let Some(dst) = dst {
                     let _ = tx.send(Internal::SaveFiles(save, SaveTo::File(dst)));
                 }
@@ -428,10 +428,13 @@ impl App {
                 }
                 let dst = match &to {
                     SaveTo::File(f) => f.clone(),
-                    SaveTo::Folder(dir) => free_name(dir, &attachment_name(ptr)),
+                    SaveTo::Folder(dir) => free_name(dir, &view::media::saved_name(ptr)),
                 };
                 match sigwin_vault::decrypt_file(path, &dst) {
-                    Ok(()) => saved.push(dst),
+                    Ok(()) => {
+                        mark_from_internet(&dst);
+                        saved.push(dst)
+                    }
                     Err(e) => {
                         let _ = tx.send(Internal::Notice(tr!("Save failed: {}", e)));
                         saved.clear();
@@ -592,7 +595,7 @@ impl App {
                         return;
                     }
                     // animated (not a GIF), huge or undecodable: an outside app may do better
-                    open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
+                    open_outside(&tx, path, &open_dir, view::media::open_name(&ptr)).await;
                 }
             }
         });
@@ -639,17 +642,20 @@ impl App {
         let tx = self.tx.clone();
         let open_dir = self.paths.open.clone();
         tokio::task::spawn_local(async move {
-            open_outside(&tx, path, &open_dir, attachment_name(&ptr)).await;
+            open_outside(&tx, path, &open_dir, view::media::open_name(&ptr)).await;
         });
     }
 
     pub(super) fn save_viewed(&self, id: &str, index: usize, owner: isize) {
         let Some((path, ptr)) = self.viewed(id, index) else { return };
         let tx = self.tx.clone();
-        crate::picker::spawn_save(owner, attachment_name(&ptr), move |dst| {
+        crate::picker::spawn_save(owner, view::media::saved_name(&ptr), move |dst| {
             let Some(dst) = dst else { return };
             let _ = tx.send(match sigwin_vault::decrypt_file(&path, &dst) {
-                Ok(()) => Internal::Saved(tr!("Saved.").into(), dst),
+                Ok(()) => {
+                    mark_from_internet(&dst);
+                    Internal::Saved(tr!("Saved.").into(), dst)
+                }
                 Err(e) => Internal::Notice(tr!("Save failed: {}", e)),
             });
         });
@@ -958,8 +964,14 @@ fn percent(got: u64, total: Option<u64>) -> u8 {
     total.filter(|t| *t > 0).map_or(0, |t| (got.saturating_mul(100) / t).min(100) as u8)
 }
 
-/// Decrypts a cached attachment to `open/` and opens it with the default app.
-async fn open_outside(tx: &UnboundedSender<Internal>, path: PathBuf, open_dir: &Path, name: String) {
+/// Decrypts a cached attachment to `open/` and opens it with the default app, under `name`
+/// (`view::media::open_name`). `None`: a kind the shell might run, which stays here.
+async fn open_outside(tx: &UnboundedSender<Internal>, path: PathBuf, open_dir: &Path, name: Option<String>) {
+    let Some(name) = name else {
+        let _ = tx.send(Internal::ProgressDone);
+        let _ = tx.send(Internal::Notice(tr!("This attachment can't be opened from here. You can save it instead.").into()));
+        return;
+    };
     let dir = open_dir.to_path_buf();
     match tokio::task::spawn_blocking(move || decrypt_for_open(&path, &dir, &name)).await {
         Ok(Ok(plain)) => {
@@ -1239,8 +1251,6 @@ pub(super) fn thumb_source(
     }
 }
 
-/// Encrypted copy of a downloaded attachment. The name says nothing about the file: its real
-/// name only appears on the plain copy made to open it (`attachment_name`).
 /// Writes a sticker's bytes from its installed pack to `path`, its attachment file. The attachment
 /// CDN drops files after some weeks (old stickers 404), while an installed pack keeps every
 /// sticker; it also saves the download. Reads the whole pack row, but only once per sticker.
@@ -1285,18 +1295,6 @@ pub(super) fn attachment_path(dir: &Path, key: &str) -> PathBuf {
     dir.join(format!("{key}.enc"))
 }
 
-pub(super) fn attachment_name(ptr: &AttachmentPointer) -> String {
-    ptr.file_name.as_deref().filter(|n| !n.is_empty()).map(sanitize).unwrap_or_else(|| {
-        let ext = ptr
-            .content_type
-            .as_deref()
-            .and_then(mime_guess::get_mime_extensions_str)
-            .and_then(|e| e.first().copied())
-            .unwrap_or("bin");
-        format!("attachment.{ext}")
-    })
-}
-
 /// Plain copy of an attachment for an outside app, in its own folder under `open/` (emptied on
 /// every start; files still open in another app then are left until the next one).
 pub(super) fn decrypt_for_open(src: &Path, open_dir: &Path, name: &str) -> std::io::Result<PathBuf> {
@@ -1306,7 +1304,25 @@ pub(super) fn decrypt_for_open(src: &Path, open_dir: &Path, name: &str) -> std::
     std::fs::create_dir_all(&dir)?;
     let dst = dir.join(name);
     sigwin_vault::decrypt_file(src, &dst)?;
+    mark_from_internet(&dst);
     Ok(dst)
+}
+
+/// Marks a plain copy of something received as downloaded from the internet, as browsers do,
+/// so Windows and other apps warn before running it or open it in protected mode. Written once
+/// the file is complete: the mark is a stream of that file.
+pub(super) fn mark_from_internet(path: &Path) {
+    #[cfg(windows)]
+    {
+        let mut stream = path.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        if let Err(e) = std::fs::write(&stream, "[ZoneTransfer]\r\nZoneId=3\r\n") {
+            // FAT and some network drives have no streams: the file is still there
+            warn!("mark of the web: {e}");
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = path;
 }
 
 /// 1: everything encrypted, thumbnails still named `.png`. 2: thumbnails named `.enc`.
@@ -1351,15 +1367,6 @@ pub(super) fn seal_legacy_files(attachments: &Path, thumbs: &Path) -> anyhow::Re
     }
     anyhow::ensure!(failed == 0, "{failed} attachments left unencrypted");
     Ok(())
-}
-
-pub(super) fn sanitize(name: &str) -> String {
-    let s: String = name
-        .chars()
-        .map(|c| if c.is_control() || r#"<>:"/\|?*"#.contains(c) { '_' } else { c })
-        .collect();
-    let s = s.trim().trim_matches('.').to_string();
-    if s.is_empty() { "attachment".into() } else { s }
 }
 
 pub(super) fn dir_size(dir: &Path) -> u64 {
@@ -1565,6 +1572,12 @@ mod tests {
         let plain = decrypt_for_open(&attachment_path(&att, "abc"), &open, "계약서.pdf").unwrap();
         assert_eq!(plain.file_name().unwrap(), "계약서.pdf");
         assert_eq!(std::fs::read(&plain).unwrap(), b"pdf bytes");
+        #[cfg(windows)]
+        {
+            let mut zone = plain.as_os_str().to_owned();
+            zone.push(":Zone.Identifier");
+            assert_eq!(std::fs::read_to_string(zone).unwrap(), "[ZoneTransfer]\r\nZoneId=3\r\n");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

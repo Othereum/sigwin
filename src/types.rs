@@ -274,6 +274,8 @@ pub struct MsgDto {
     pub attachment: String,
     /// one of the files is a kind that can run or change the system
     pub file_danger: bool,
+    /// one of the pictures or videos would be saved as such a kind (one we don't show it as)
+    pub media_danger: bool,
     /// a sticker's key into the UI thumbnail cache, empty for anything else (pictures are `cells`)
     pub image_key: String,
     pub img_w: u32,
