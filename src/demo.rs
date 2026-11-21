@@ -750,7 +750,9 @@ fn demo_link_rows(items: &mut [types::MsgDto]) {
     };
     let rows = [
         ("https://youtube.com/demo 이거 봐봐 창이 넓을 때 글이 길어서 말풍선이 카드보다 넓어지는 경우를 보려고 일부러 길게 쓴 메시지입니다 정말로 길게 씁니다 더 길게 씁니다 더 더 길게", false, card("합성 데이터로 만든 영상 제목인데 창이 넓을 때 카드가 늘어나는지 보려고 일부러 길게 쓴 제목입니다", "영상 설명이 이 자리에 나옵니다.", "youtube.com", "demo-link-wide", (300, 158))),
-        ("https://www.example.kr/demo", true, card("내가 보낸 링크의 제목", "", "example.kr", "demo-link-wide", (300, 158))),
+        // one unbreakable run longer than the bubble: it must wrap inside it, with a card and without
+        ("https://www.example.kr/demo/articles/2026/11/21/a-very-long-path-segment-with-no-spaces-at-all?ref=share&utm_source=messenger&utm_medium=link", true, card("내가 보낸 링크의 제목", "", "example.kr", "demo-link-wide", (300, 158))),
+        ("https://www.example.kr/demo/articles/2026/11/21/a-very-long-path-segment-with-no-spaces-at-all?ref=share&utm_source=messenger&utm_medium=link", true, None),
         ("https://news.example.kr/demo", false, card("아주 긴 뉴스 제목이 두 줄을 넘어가면 어떻게 잘리는지 확인하기 위해 일부러 길게 쓴 제목입니다 정말로 길게 썼습니다", "설명도 길게 씁니다. 두 줄을 넘는 설명은 끝에서 잘리고 말줄임표가 나와야 합니다. 그래서 충분히 길게 씁니다. 더 길게 씁니다.", "news.example.kr", "demo-link-small", (64, 64))),
         ("https://blog.example.kr/demo", false, card("이미지 없는 미리보기", "설명만 있습니다.", "blog.example.kr", "", (0, 0))),
         ("https://photo.example.kr/demo", false, card("이미지가 아직 도착하지 않은 카드", "", "photo.example.kr", "demo-link-missing", (300, 158))),

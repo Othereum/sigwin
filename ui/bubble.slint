@@ -565,6 +565,8 @@ export component Bubble inherits VerticalLayout {
             font-size: 12px;
             font-italic: true;
             wrap: word-wrap;
+            // a name without spaces mustn't widen the row past the window (see the bubble's text)
+            min-width: 0px;
             horizontal-alignment: center;
         }
     }
@@ -824,6 +826,9 @@ export component Bubble inherits VerticalLayout {
                     spacing: 8px;
                     if m.text != "": Rectangle {
                         horizontal-stretch: 1;
+                        // a word-wrapping Text's min width is its longest word (Slint 1.19) and reaches up
+                        // here: an unbreakable run (a long URL) would push the text out of the bubble
+                        min-width: 0px;
                         // trailing NBSPs stand in for the time: if they push the text onto another line,
                         // the time doesn't fit beside the last line and gets a row of its own
                         // (the time itself floats at the bottom right; `mm` measures its real width)
