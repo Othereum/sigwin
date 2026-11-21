@@ -34,7 +34,8 @@ mod win {
         Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
         NOTIFY_ICON_MESSAGE,
     };
-    use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+    use windows_sys::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
     /// Callback message of the icon (WM_APP + 1).
@@ -119,12 +120,9 @@ mod win {
         let n = crate::badge::count();
         // id 1 is the app icon, 2 the dev build's (only in dev builds, build.rs)
         let id: usize = if crate::install::is_dev_build() { 2 } else { 1 };
-        // SAFETY: plain queries on our own window; loads our own icon resource at the
-        // small-icon size for the DPI (not LR_SHARED: the size changes with it)
-        let (base, size) = unsafe {
-            let size = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForWindow(hwnd as HWND)).max(16);
-            (LoadImageW(GetModuleHandleW(std::ptr::null()), id as _, IMAGE_ICON, size, size, 0), size)
-        };
+        let size = icon_size();
+        // SAFETY: loads our own icon resource (not LR_SHARED: the size changes with the DPI)
+        let base = unsafe { LoadImageW(GetModuleHandleW(std::ptr::null()), id as _, IMAGE_ICON, size, size, 0) };
         let badged = if n > 0 && !base.is_null() {
             crate::badge::win::tray_icon(base as _, size, n)
         } else {
@@ -148,6 +146,21 @@ mod win {
                 DestroyIcon(base as _);
             }
             ok
+        }
+    }
+
+    /// The small-icon size at the primary monitor's DPI: the notification area is on its taskbar.
+    /// Not our window's DPI: the owner window is never shown, so it gets no `WM_DPICHANGED`.
+    fn icon_size() -> i32 {
+        let mut dpi = 0u32;
+        let mut unused = 0u32;
+        // SAFETY: plain queries; the outputs are locals
+        unsafe {
+            let monitor = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+            if GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut unused) != 0 || dpi == 0 {
+                dpi = 96;
+            }
+            GetSystemMetricsForDpi(SM_CXSMICON, dpi).max(16)
         }
     }
 
@@ -196,6 +209,11 @@ mod win {
         if msg == taskbar_created() {
             add_icon();
             return 0;
+        }
+        // The display scale or layout changed: the icon is redrawn at the new size. The work area
+        // notice comes last, once the monitors' DPI is settled.
+        if msg == WM_DISPLAYCHANGE || (msg == WM_SETTINGCHANGE && wparam == SPI_SETWORKAREA as usize) {
+            update();
         }
         // SAFETY: default handling of a message for our own window
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
