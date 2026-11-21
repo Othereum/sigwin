@@ -101,6 +101,8 @@ pub struct ThreadDto {
     /// last activity (ms), 0 = none; `time` is derived from it
     pub ts: u64,
     pub unread: u32,
+    /// an unread message gets through notifications off (an @mention of us, a reply to us)
+    pub loud: bool,
     pub is_group: bool,
     pub mute: Mute,
     /// Sigwin's per-thread notification choices (None = the default)

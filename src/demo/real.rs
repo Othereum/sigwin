@@ -86,6 +86,7 @@ fn data(ko: bool) -> Data {
         time,
         ts: 0,
         unread,
+        loud: false,
         is_group,
         mute: Mute::default(),
         prefs: ThreadPrefs::default(),

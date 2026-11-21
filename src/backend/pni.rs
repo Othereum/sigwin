@@ -123,6 +123,10 @@ impl App {
         if let Some(n) = p.unread.remove(from) {
             *p.unread.entry(to.into()).or_default() += n;
         }
+        if let Some(ts) = p.loud.remove(from) {
+            let e = p.loud.entry(to.into()).or_default();
+            *e = (*e).max(ts);
+        }
         if let Some(t) = p.read_upto.remove(from) {
             let e = p.read_upto.entry(to.into()).or_default();
             *e = (*e).max(t);

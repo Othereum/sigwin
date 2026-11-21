@@ -1150,6 +1150,10 @@ msgid_plural "{n} unread chats"
 msgstr[0] "{n} ungelesener Chat"
 msgstr[1] "{n} ungelesene Chats"
 
+msgctxt "badge, muted chats only"
+msgid "{0}, all in muted chats"
+msgstr "{0}, nur in stummgeschalteten Chats"
+
 msgid "{n} unread message"
 msgid_plural "{n} unread messages"
 msgstr[0] "{n} ungelesene Nachricht"

@@ -22,7 +22,8 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         });
     }
     if let Ok(v) = std::env::var("SIGWIN_DEMO_BADGE") {
-        // the real tray and taskbar badges, stepping through none and 1 to 12
+        // the real tray and taskbar badges, stepping through none and 1 to 12, grey (only muted
+        // chats) on odd counts
         let weak = app.as_weak();
         let n = std::cell::Cell::new(0u32);
         let timer = Box::leak(Box::new(slint::Timer::default()));
@@ -31,7 +32,7 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
             if let Some(app) = weak.upgrade() {
                 app.set_total_unread(n.get() as i32);
             }
-            badge::set_count(n.get(), false);
+            badge::set_count(n.get(), false, n.get() % 2 == 1);
         });
     }
     if std::env::var_os("SIGWIN_DEMO_INFO").is_some() {
@@ -188,6 +189,8 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             time: if i < 3 { "오후 3:12".into() } else { format!("10월 {}일", 30 - (i % 28)) },
             ts: 0,
             unread: if i % 5 == 0 { (i % 7) as u32 + 1 } else { 0 },
+            // muted, with a mention of us among its unread
+            loud: i == 5,
             is_group: i % 6 == 3 || i % 6 == 5,
             // off on the phone (forever / for a while), and off in Sigwin only
             mute: match i {
@@ -777,6 +780,7 @@ fn demo_results(threads: &[ThreadDto], query: &str, contacts: bool, find: types:
         time: String::new(),
         ts: 0,
         unread: 0,
+        loud: false,
         is_group: false,
         mute: Mute::default(),
         prefs: ThreadPrefs::default(),
@@ -823,6 +827,7 @@ fn demo_senders(query: &str) -> Vec<ResultDto> {
                 time: String::new(),
                 ts: 0,
                 unread: 0,
+                loud: false,
                 is_group: false,
                 mute: Mute::default(),
                 prefs: ThreadPrefs::default(),

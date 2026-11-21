@@ -501,6 +501,7 @@ impl App {
                 time: view::time::time_short(ts),
                 ts,
                 unread: 0,
+                loud: false,
                 readers: Vec::new(),
                 readers_more: 0,
                 ..chat
@@ -846,6 +847,7 @@ fn person_row(app: &App, key: String, name: String, phone: String) -> ThreadDto 
         time: String::new(),
         ts: 0,
         unread: 0,
+        loud: false,
         is_group: false,
         readers: Vec::new(),
         readers_more: 0,

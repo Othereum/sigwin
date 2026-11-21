@@ -1140,6 +1140,10 @@ msgid "{n} unread chat"
 msgid_plural "{n} unread chats"
 msgstr[0] "읽지 않은 대화 {n}개"
 
+msgctxt "badge, muted chats only"
+msgid "{0}, all in muted chats"
+msgstr "{0}, 모두 알림을 끈 대화"
+
 msgid "{n} unread message"
 msgid_plural "{n} unread messages"
 msgstr[0] "읽지 않은 메시지 {n}개"

@@ -201,7 +201,8 @@ pub(crate) fn show_open_unread(app: &AppWindow, ui: &Ui) {
 }
 
 /// Unread count for the taskbar and tray badges and the window title; chats with notifications off
-/// count only when the setting says so.
+/// count only when the setting says so. The badges go grey when nothing counted would have
+/// notified.
 pub(crate) fn show_total_unread(app: &AppWindow, ui: &Ui) {
     if ui.catching_up {
         return;
@@ -209,14 +210,15 @@ pub(crate) fn show_total_unread(app: &AppWindow, ui: &Ui) {
     let now = view::time::now_ms();
     let all = ui.settings.badge_muted;
     let counts = |t: &&ThreadDto| !t.mute.active(now) || t.prefs.badge.unwrap_or(all);
-    let counted = ui.thread_dtos.iter().filter(counts);
+    let counted = || ui.thread_dtos.iter().filter(counts);
     let (total, chats) = if ui.settings.badge_count == 1 {
-        (counted.filter(|t| t.unread > 0).count() as u32, true)
+        (counted().filter(|t| t.unread > 0).count() as u32, true)
     } else {
-        (counted.map(|t| t.unread).sum(), false)
+        (counted().map(|t| t.unread).sum(), false)
     };
+    let quiet = !counted().any(|t| t.unread > 0 && (t.loud || !t.mute.active(now)));
     app.set_total_unread(total as i32);
-    badge::set_count(total, chats);
+    badge::set_count(total, chats, quiet);
 }
 
 pub(crate) fn qr_image(url: &str) -> Option<Image> {

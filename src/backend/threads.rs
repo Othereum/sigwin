@@ -118,6 +118,7 @@ impl App {
                 self.index.seq_of(&row.thread, display_ts).await.ok().flatten().unwrap_or(0),
                 ThreadDto {
                     unread: self.persist.unread.get(&key).copied().unwrap_or(0),
+                    loud: self.persist.unread.contains_key(&key) && self.persist.loud.contains_key(&key),
                     is_group: matches!(row.thread, Thread::Group(_)),
                     mute: self.mute(&key),
                     prefs: self.prefs(&key),
@@ -152,6 +153,7 @@ impl App {
                         time: String::new(),
                         ts: 0,
                         unread: 0,
+                        loud: false,
                         is_group: true,
                         readers: Vec::new(),
                         readers_more: 0,
@@ -508,6 +510,12 @@ impl App {
             return;
         }
         let unread = self.persist.unread.get(&key).copied().unwrap_or(0);
+        let loud_seen = self.persist.loud.get(&key).is_some_and(|&ts| open.window[..=pos].iter().any(|(_, c)| c.timestamp() == ts));
+        if loud_seen {
+            self.persist.loud.remove(&key);
+            self.persist_dirty = true;
+            self.threads_dirty = true;
+        }
         let n = self.queue_reads_to(&key, unread, pos + 1);
         if n > 0 {
             match unread.saturating_sub(n) {

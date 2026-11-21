@@ -1,5 +1,5 @@
 //! Unread count on the taskbar button: `ITaskbarList3::SetOverlayIcon` with a small red
-//! circle and the number, drawn with GDI at the small-icon size for the window's DPI.
+//! (grey: only muted chats) circle and the number, drawn with GDI at the small-icon size for the window's DPI.
 //! Badge notifications (`BadgeUpdateManager`) would need package identity, so no.
 //! The notification-area icon (`tray`) gets a smaller badge drawn into the app icon.
 //!
@@ -12,6 +12,7 @@ thread_local! {
     static HWND: Cell<isize> = const { Cell::new(0) };
     static COUNT: Cell<u32> = const { Cell::new(0) };
     static CHATS: Cell<bool> = const { Cell::new(false) };
+    static QUIET: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The native window exists: remember it and show the current count.
@@ -20,10 +21,12 @@ pub fn set_hwnd(hwnd: isize) {
     refresh();
 }
 
-/// `chats`: the count is of chats, not messages (for the descriptions).
-pub fn set_count(n: u32, chats: bool) {
+/// `chats`: the count is of chats, not messages (for the descriptions). `quiet`: none of it
+/// would have notified (all in muted chats, no mention or reply among it): the badge goes grey.
+pub fn set_count(n: u32, chats: bool, quiet: bool) {
     let chats_changed = CHATS.replace(chats) != chats;
-    if COUNT.replace(n) != n || chats_changed {
+    let quiet_changed = QUIET.replace(quiet) != quiet;
+    if COUNT.replace(n) != n || chats_changed || quiet_changed {
         refresh();
     }
 }
@@ -35,7 +38,13 @@ pub fn count() -> u32 {
 /// The count in words, for the tooltip and screen readers.
 pub fn description() -> String {
     let n = COUNT.get();
-    if CHATS.get() { tr!("{n} unread chat" | "{n} unread chats" % n) } else { tr!("{n} unread message" | "{n} unread messages" % n) }
+    let d = if CHATS.get() { tr!("{n} unread chat" | "{n} unread chats" % n) } else { tr!("{n} unread message" | "{n} unread messages" % n) };
+    if QUIET.get() { tr!("badge, muted chats only" => "{0}, all in muted chats", d) } else { d }
+}
+
+#[cfg(windows)]
+fn color() -> [f32; 3] {
+    if QUIET.get() { GREY } else { RED }
 }
 
 /// Re-applies both badges (count changed, taskbar button (re)created, DPI changed).
@@ -128,7 +137,7 @@ pub(crate) mod win {
         } else {
             // SAFETY: plain queries on our own window
             let size = unsafe { GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForWindow(hwnd)) }.max(16);
-            let px = super::render(&super::label(n), size as usize, super::RED);
+            let px = super::render(&super::label(n), size as usize, super::color());
             let desc: Vec<u16> = super::description().encode_utf16().chain(Some(0)).collect();
             (make_icon(&px, size), desc)
         };
@@ -337,12 +346,20 @@ const RED: [f32; 3] = [0xe0 as f32, 0x30 as f32, 0x2c as f32]; // r, g, b
 /// The tray badge is small and sits on a colored icon: it needs to catch the eye more.
 #[cfg(windows)]
 const BRIGHT_RED: [f32; 3] = [0xff as f32, 0x3b as f32, 0x30 as f32]; // r, g, b
+/// Only muted chats: a plain dark count, leaving red for what would have notified.
+#[cfg(windows)]
+const GREY: [f32; 3] = [0x26 as f32, 0x25 as f32, 0x2d as f32]; // r, g, b
 
 /// Straight-alpha BGRA pixels of the badge: red circle, white text.
 #[cfg(windows)]
 fn render(text: &str, size: usize, color: [f32; 3]) -> Vec<u8> {
     render_pill(text, size, size, color)
 }
+
+/// Width of the black edge in pixels, which keeps the badge apart from a dark taskbar. Under
+/// one, it only darkens the edge pixels a little.
+#[cfg(windows)]
+const BORDER: f32 = 0.1;
 
 /// `render` stretched to `w` wide: a pill, round ends of `h`'s diameter.
 #[cfg(windows)]
@@ -356,12 +373,15 @@ fn render_pill(text: &str, w: usize, h: usize, color: [f32; 3]) -> Vec<u8> {
             let px = x as f32 + 0.5;
             let dx = px - px.clamp(r, w as f32 - r);
             let dy = y as f32 + 0.5 - r;
-            let a = (r - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0);
+            let dist = (dx * dx + dy * dy).sqrt();
+            let a = (r - dist + 0.5).clamp(0.0, 1.0);
             if a == 0.0 {
                 continue;
             }
+            let inner = (r - BORDER - dist + 0.5).clamp(0.0, 1.0);
+            let fill = color.map(|c| c * inner);
             let t = cov[y * w + x] as f32 / 255.0;
-            let c = |i: usize| (color[i] + (255.0 - color[i]) * t).round() as u8;
+            let c = |i: usize| (fill[i] + (255.0 - fill[i]) * t).round() as u8;
             let o = (y * w + x) * 4;
             out[o..o + 4].copy_from_slice(&[c(2), c(1), c(0), (a * 255.0).round() as u8]);
         }
@@ -376,7 +396,7 @@ fn add_badge(icon: &mut [u8], size: usize, n: u32) {
     let label = tray_label(n);
     // "9+" in a circle shrinks below readable: widen the circle leftward instead
     let w = if label.len() > 1 { ((d as f32 * 1.35).round() as usize).min(size) } else { d };
-    let badge = render_pill(&label, w, d, BRIGHT_RED);
+    let badge = render_pill(&label, w, d, if QUIET.get() { GREY } else { BRIGHT_RED });
     let off = size - w;
     for y in 0..d {
         for x in 0..w {

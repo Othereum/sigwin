@@ -130,6 +130,10 @@ const TEXT_FORMAT: u32 = 3;
 #[derive(Default, Serialize, Deserialize)]
 struct Persist {
     unread: HashMap<String, u32>,
+    /// thread key -> sent ts of the newest unread message that gets through notifications off
+    /// (`mute::breaks_mute`); only meaningful while the thread has unread messages
+    #[serde(default)]
+    loud: HashMap<String, u64>,
     /// key -> (db last_ts, display ts, text)
     snippets: HashMap<String, (u64, u64, String)>,
     /// receipts stored before they were dropped as they came and went are gone (indexed first)

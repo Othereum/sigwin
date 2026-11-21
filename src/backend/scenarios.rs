@@ -192,6 +192,49 @@ fn news_while_watching_stays_at_the_bottom_and_is_read_by_the_ui() {
     });
 }
 
+/// A reply to us among the unread keeps the badges colored while the chat is muted, until it
+/// has been read; what comes after it was all read doesn't inherit that.
+#[test]
+fn a_reply_to_us_stays_loud_until_read() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=20").await;
+        h.open(1).await;
+        h.focus(false).await;
+        h.watch(true).await;
+        let one = Thread::Contact(ServiceId::Aci(super::fixture::contact(1).into()));
+        let key = thread_key(&one);
+        let newest = h.app.index.page(&one, i64::MAX, 10).await.unwrap()[0].1;
+        let me = h.app.me;
+        let reply = DataMessage {
+            body: Some("응".into()),
+            quote: Some(Quote { author_aci: Some(me.to_string()), ..Default::default() }),
+            timestamp: Some(newest + 10),
+            ..Default::default()
+        };
+        let plain = DataMessage { body: Some("그리고".into()), timestamp: Some(newest + 20), ..Default::default() };
+        for dm in [reply, plain] {
+            let c = super::fixture::incoming_dm(1, dm, me);
+            h.app.store.save_message(&one, c.clone()).await.unwrap();
+            h.app.content(c).await;
+        }
+        h.app.flush().await;
+        assert_eq!(h.query("unread", 1), "2");
+        assert!(h.app.persist.loud.contains_key(&key));
+        // the reply came on screen, the plain one not yet
+        h.cmd(Command::ReadUpTo(h.row(20))).await;
+        assert_eq!(h.query("unread", 1), "1");
+        assert!(!h.app.persist.loud.contains_key(&key), "the reply was read");
+        h.cmd(Command::ReadUpTo(h.row(21))).await;
+        assert_eq!(h.query("unread", 1), "0");
+        // a stale mark from before everything was read doesn't color news
+        h.app.persist.loud.insert(key.clone(), newest + 10);
+        h.op("recv who=1 n=1").await;
+        assert_eq!(h.query("unread", 1), "1");
+        assert!(!h.app.persist.loud.contains_key(&key));
+    });
+}
+
 #[test]
 fn sending_drops_the_unread_line() {
     scenario(|| async {

@@ -483,6 +483,7 @@ pub(crate) fn thread_item(t: &ThreadDto, avatars: &HashMap<String, Image>) -> Th
         is_group: t.is_group,
         draft: false,
         muted: t.mute.active(view::time::now_ms()),
+        loud: t.loud,
         readers: readers_model(&t.readers, avatars, avatar::LIST_READ_PREFIX),
         readers_more: t.readers_more as i32,
     }

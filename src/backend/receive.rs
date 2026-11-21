@@ -357,12 +357,21 @@ impl App {
                 if !(is_open && self.focused && self.sees_latest()) {
                     let n = self.persist.unread.entry(key.clone()).or_default();
                     // the first news since everything was read: the open list marks where it starts
-                    if *n == 0 && !self.watching {
+                    let first = *n == 0;
+                    if first && !self.watching {
                         if let Some(open) = self.current.as_mut().filter(|o| o.key == key) {
                             open.divider_due = true;
                         }
                     }
                     *n += 1;
+                    // left over from unread messages that are all read now
+                    if first {
+                        self.persist.loud.remove(&key);
+                    }
+                    let nf = self.notify_for(&key);
+                    if view::data_message(&c).is_some_and(|dm| mute::breaks_mute(dm, self.me, nf.mentions, nf.replies)) {
+                        self.persist.loud.insert(key.clone(), c.timestamp());
+                    }
                     self.persist_dirty = true;
                 }
                 // watched: the user is at it, the list shows it
