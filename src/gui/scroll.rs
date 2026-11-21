@@ -207,6 +207,7 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, paging: Paging, scr
         sync_typing(ui);
         forget_unshown_thumbs(ui, &items);
         ui.last = items;
+        super::media::rows_changed(ui);
     });
     app.set_can_load_older(paging.older);
     app.set_can_load_newer(paging.newer);

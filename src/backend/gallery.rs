@@ -160,9 +160,9 @@ impl App {
                 continue;
             }
             if view::media::is_video(&ptr) {
-                self.request_video_thumb(key, file_key, ptr, (cell, cell), auto);
+                self.request_video_thumb(key, file_key, ptr, (cell, cell), auto, None);
             } else {
-                self.request_thumb(key, file_key, ptr, ThumbShape::Cover(cell, cell), auto, None);
+                self.request_thumb(key, file_key, ptr, ThumbShape::Cover(cell, cell), auto, None, None);
             }
         }
     }

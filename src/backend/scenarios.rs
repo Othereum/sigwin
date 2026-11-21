@@ -915,6 +915,38 @@ fn the_media_page_lists_what_arrived_and_drops_what_goes() {
     });
 }
 
+/// Whether a picture under `key` came within a second.
+async fn thumb_comes(h: &mut Harness, key: &str) -> bool {
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        if h.take_events().iter().any(|e| matches!(e, Event::Thumb(t) if t.key == key)) {
+            return true;
+        }
+    }
+    false
+}
+
+#[test]
+fn pictures_are_made_only_near_the_screen() {
+    scenario(|| async {
+        let mut h = Harness::new().await;
+        h.op("seed who=1 n=3").await;
+        h.op("gifs who=1 n=2").await;
+        h.open(1).await;
+        let ev = h.take_events();
+        let (items, _) = last_list(&ev).expect("a list");
+        let keys: Vec<String> = items.iter().flat_map(|m| m.cells.iter().map(|c| c.key.clone())).collect();
+        assert_eq!(keys.len(), 2);
+        // the UI hasn't said they're near
+        assert!(!thumb_comes(&mut h, &keys[0]).await, "made while not near");
+        h.cmd(Command::PicturesNear { near: vec![keys[0].clone()], again: vec![] }).await;
+        assert!(thumb_comes(&mut h, &keys[0]).await, "never made once near");
+        // let go of by the UI, on screen again
+        h.cmd(Command::PicturesNear { near: vec![keys[0].clone()], again: vec![keys[0].clone()] }).await;
+        assert!(thumb_comes(&mut h, &keys[0]).await, "not made again");
+    });
+}
+
 #[test]
 fn the_media_page_waits_for_the_backfill_of_its_chat() {
     scenario(|| async {

@@ -109,7 +109,13 @@ pub(crate) struct Shown {
     /// pictures let go of while their rows are loaded: asked for again when shown
     dropped: HashSet<String>,
     clock: u64,
+    /// the pictures near the screen the backend was told of, the only ones it makes
+    near: Vec<String>,
 }
+
+/// Rows above and below the screen whose pictures are made ahead, so a short scroll shows them
+/// at once. A few: what they hold beyond the screen counts in `OFF_SCREEN`.
+const NEAR_ROWS: usize = 3;
 
 impl Shown {
     fn tick(&mut self) -> u64 {
@@ -117,8 +123,11 @@ impl Shown {
         self.clock
     }
 
+    /// The rows went (the window hid). Where the list was stays: the same rows come back there,
+    /// and nothing tells it again.
     pub(crate) fn clear(&mut self) {
-        *self = Self::default();
+        let (top, bottom) = (std::mem::take(&mut self.top), std::mem::take(&mut self.bottom));
+        *self = Self { top, bottom, ..Self::default() };
     }
 
     /// The rows are now `items`: what was kept of others goes.
@@ -140,34 +149,62 @@ impl Shown {
 
     /// The rows on screen, of `items`.
     fn on_screen<'a>(&self, items: &'a [MsgDto]) -> &'a [MsgDto] {
+        self.rows_around(items, 0)
+    }
+
+    /// The rows on screen and `more` above and below it, of `items`.
+    fn rows_around<'a>(&self, items: &'a [MsgDto], more: usize) -> &'a [MsgDto] {
         let at = |id: &str| items.iter().position(|m| m.id == id);
         let top = at(&self.top).unwrap_or(0);
         let bottom = at(&self.bottom).unwrap_or(items.len().saturating_sub(1));
-        items.get(top.min(bottom)..=top.max(bottom)).unwrap_or_default()
+        let (top, bottom) = (top.min(bottom), top.max(bottom));
+        items.get(top.saturating_sub(more)..=(bottom + more).min(items.len().saturating_sub(1))).unwrap_or_default()
     }
 }
 
 /// The message list scrolled: `top` and `bottom` are the rows at its edges.
 pub(super) fn view_moved(top: &str, bottom: &str) {
-    let ask = UI.with_borrow_mut(|ui| {
+    UI.with_borrow_mut(|ui| {
         if ui.released {
-            return Vec::new();
+            return;
         }
         (ui.shown.top, ui.shown.bottom) = (top.to_string(), bottom.to_string());
         let clock = ui.shown.tick();
-        let mut ask = Vec::new();
-        let keys: Vec<String> = ui.shown.on_screen(&ui.last).iter().flat_map(rows::picture_keys).map(str::to_string).collect();
+        let mut again = Vec::new();
+        let keys: Vec<String> = ui.shown.on_screen_keys(&ui.last).into_iter().map(str::to_string).collect();
         for k in keys {
             if ui.shown.dropped.remove(&k) {
-                ask.push(k.clone());
+                again.push(k.clone());
             }
             ui.shown.left.insert(k, clock);
         }
         trim_pictures(ui);
-        ask
+        tell_near(ui, again);
     });
-    if !ask.is_empty() {
-        send_cmd(Command::WantPictures(ask));
+}
+
+/// The rows changed. A new set of rows doesn't hold the old edges, so until the list tells
+/// its new ones, all of them count as near. Harmless: the backend makes one picture at a time
+/// and asks late (`backend::files::Near`), so only the few made before the edges come are spent.
+/// And a short chat whose rows don't reach both edges never tells them.
+pub(super) fn rows_changed(ui: &mut Ui) {
+    tell_near(ui, Vec::new());
+}
+
+/// Tells the backend which pictures are near the screen, if that changed, and which of them to
+/// make again (`again`).
+fn tell_near(ui: &mut Ui, again: Vec<String>) {
+    let mut near: Vec<String> =
+        ui.shown.rows_around(&ui.last, NEAR_ROWS).iter().flat_map(rows::picture_keys).map(str::to_string).collect();
+    near.sort_unstable();
+    near.dedup();
+    if near == ui.shown.near && again.is_empty() {
+        return;
+    }
+    ui.shown.near = near.clone();
+    if let Some(tx) = &ui.tx {
+        crate::headless::bump();
+        let _ = tx.send(Command::PicturesNear { near, again });
     }
 }
 

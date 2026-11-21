@@ -19,40 +19,72 @@ pub(super) enum Picture {
     Cell(view::media::WantedCell),
 }
 
+/// The open chat's pictures the UI has near the screen (`Command::PicturesNear`). Only those
+/// are made: the window holds hundreds of rows, and a picture made for a row far off screen
+/// would be decoded and sent only for the UI to let it go. The rest still get their labels,
+/// blurhash and download, and are made once they come near.
+#[derive(Clone, Default)]
+pub(crate) struct Near {
+    keys: Rc<RefCell<HashSet<String>>>,
+    /// asked for while not near: made when they come near
+    waiting: Rc<RefCell<HashSet<String>>>,
+}
+
+impl Near {
+    /// Whether picture `key` may be made now; if not, it waits.
+    fn admits(&self, key: &str) -> bool {
+        if self.keys.borrow().contains(key) {
+            return true;
+        }
+        self.waiting.borrow_mut().insert(key.to_string());
+        false
+    }
+}
+
 impl App {
     /// Asks for picture `key` of thread `thread`'s rows.
     pub(super) fn ask_picture(&self, thread: &str, key: &str, p: &Picture) {
         // a stranger's pictures wait for a click until the request is accepted
         let auto = !self.is_request(thread);
+        let near = Some(self.near.clone());
         match p {
             Picture::Sticker(s) => {
                 let Some(ptr) = s.data.clone() else { return };
-                self.request_thumb(key.into(), key.into(), ptr, ThumbShape::Fit(view::media::sticker_size()), auto, Some(s.clone()));
+                let shape = ThumbShape::Fit(view::media::sticker_size());
+                self.request_thumb(key.into(), key.into(), ptr, shape, auto, Some(s.clone()), near);
             }
             Picture::Cell(c) if view::media::is_video(&c.ptr) => {
-                self.request_video_thumb(key.into(), c.file_key.clone(), c.ptr.clone(), c.size, auto);
+                self.request_video_thumb(key.into(), c.file_key.clone(), c.ptr.clone(), c.size, auto, near);
             }
             Picture::Cell(c) => {
                 let shape = ThumbShape::Cover(c.size.0, c.size.1);
-                self.request_thumb(key.into(), c.file_key.clone(), c.ptr.clone(), shape, auto, None);
+                self.request_thumb(key.into(), c.file_key.clone(), c.ptr.clone(), shape, auto, None, near);
             }
         }
     }
 
-    /// The UI let go of these pictures while their rows were off screen, and shows them again.
-    pub(super) fn want_pictures(&self, keys: Vec<String>) {
+    /// The UI's pictures near the screen are now `near`: those that waited are made. `again`:
+    /// ones the UI let go of off screen, shown again.
+    pub(super) fn pictures_near(&self, near: Vec<String>, again: Vec<String>) {
         let Some(thread) = self.current.as_ref().map(|o| o.key.clone()) else { return };
-        for k in keys {
-            let Some(p) = self.pictures.get(&k) else { continue };
+        let mut waiting = self.near.waiting.borrow_mut();
+        waiting.retain(|k| self.pictures.contains_key(k));
+        let come: Vec<String> = near.iter().filter(|k| waiting.remove(*k)).cloned().collect();
+        drop(waiting);
+        tracing::debug!(near = near.len(), come = come.len(), again = again.len(), "pictures near");
+        *self.near.keys.borrow_mut() = near.into_iter().collect();
+        for k in come.iter().chain(&again) {
+            let Some(p) = self.pictures.get(k) else { continue };
             self.thumbs_requested.borrow_mut().insert(k.clone());
-            self.ask_picture(&thread, &k, p);
+            self.ask_picture(&thread, k, p);
         }
     }
 
     /// `key` is what the UI knows the result by, `file_key` the attachment's files on disk.
     /// Not `auto`: it waits for a click whatever its size (a message request's).
     /// `sticker`: a sticker message's, taken from its pack when installed, and from the sticker CDN
-    /// when the attachment is gone.
+    /// when the attachment is gone. `near`: made only while near the screen (the rows').
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn request_thumb(
         &self,
         key: String,
@@ -61,6 +93,7 @@ impl App {
         shape: ThumbShape,
         auto: bool,
         sticker: Option<Sticker>,
+        near: Option<Near>,
     ) {
         let thumb_path = self.paths.thumbs.join(format!("{file_key}.enc"));
         let orig_path = attachment_path(&self.paths.attachments, &file_key);
@@ -132,6 +165,13 @@ impl App {
             let k = key.clone();
             // one at a time: an album would otherwise decode all its full-size originals at once
             let permit = gate.acquire_owned().await;
+            // asked late, as what's near can change while it waited
+            if near.is_some_and(|n| !n.admits(&key)) {
+                if labelled {
+                    emit(Event::MediaLabel { key, label: Default::default() });
+                }
+                return;
+            }
             let res = tokio::task::spawn_blocking(move || {
                 let _permit = permit;
                 make_shaped_thumb(&k, &orig_path, &thumb_path, shape, own)
@@ -151,8 +191,16 @@ impl App {
 
     /// A video's picture, cut to `size` (logical px): its blurhash right away, its first frame once
     /// that can be had. Videos are downloaded one at a time, newest first, and only while the row
-    /// is still in the window.
-    pub(super) fn request_video_thumb(&self, key: String, file_key: String, ptr: AttachmentPointer, size: (u32, u32), auto: bool) {
+    /// is still in the window. `near`: its frame is made only while near the screen (the rows').
+    pub(super) fn request_video_thumb(
+        &self,
+        key: String,
+        file_key: String,
+        ptr: AttachmentPointer,
+        size: (u32, u32),
+        auto: bool,
+        near: Option<Near>,
+    ) {
         let thumb_path = self.paths.thumbs.join(format!("{file_key}.enc"));
         let no_frame = no_frame_path(&self.paths.thumbs, &file_key);
         let length_path = length_path(&self.paths.thumbs, &file_key);
@@ -208,6 +256,9 @@ impl App {
                 }
             }
             let permit = gate.acquire_owned().await;
+            if near.is_some_and(|n| !n.admits(&key)) {
+                return;
+            }
             let k = key.clone();
             let emit_done = emit.clone();
             let res = tokio::task::spawn_blocking(move || {
