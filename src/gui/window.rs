@@ -52,24 +52,44 @@ pub(crate) fn apply_zoom(app: &AppWindow) {
     }
     let h = hwnd(app);
     if h == 0 {
-        scale_set(app.window().scale_factor());
+        scale_set(app, app.window().scale_factor());
         return;
     }
     let zoom = UI.with_borrow(|ui| ui.settings.zoom) as f32 / 100.0;
     let sf = monitor_scale(h) * zoom;
     let w = app.window();
     if (w.scale_factor() - sf).abs() > 0.001 {
-        let size = w.size();
-        w.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: sf });
-        w.dispatch_event(slint::platform::WindowEvent::Resized { size: size.to_logical(sf) });
+        set_scale(w, sf);
         winhook::repaint_all(app);
     }
-    scale_set(sf);
+    scale_set(app, sf);
+}
+
+/// Gives a window scale `sf` at the pixels it has now, the window item's logical size following.
+/// Slint's own scale change keeps that size until a resize arrives, and a paint before it
+/// overruns the buffer (the software renderer asserts).
+pub(crate) fn set_scale(w: &slint::Window, sf: f32) {
+    let size = w.size();
+    w.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: sf });
+    w.dispatch_event(slint::platform::WindowEvent::Resized { size: size.to_logical(sf) });
+}
+
+/// winit's scale change for one of our windows, handled instead of Slint, which has two faults
+/// there. It takes the new scale but keeps the window item's logical size until winit reports a
+/// resize, and none comes when the window keeps its size (maximized): the next paint overruns the
+/// buffer. And it asks winit to keep a size set before the window existed (`restore_geometry`,
+/// the viewer's first size) when the window got exactly that size, so the window kept its pixels
+/// instead of its logical size. Here winit's own new size stands, and the item fits the current
+/// pixels until it arrives. Upstream: https://github.com/slint-ui/slint/issues/15092
+pub(crate) fn scale_changed(w: &slint::Window, sf: f64) -> EventResult {
+    set_scale(w, sf as f32);
+    EventResult::PreventDefault
 }
 
 /// Thumbnails and photos are pre-scaled to physical pixels (the renderer samples images
-/// nearest-neighbor), so a new scale asks for them again.
-fn scale_set(sf: f32) {
+/// nearest-neighbor), so a new scale asks for them again: the message list and photos through
+/// the backend (`rescale`), and what the composer and the sticker panel show.
+fn scale_set(app: &AppWindow, sf: f32) {
     if !types::set_ui_scale(sf) {
         return;
     }
@@ -79,6 +99,12 @@ fn scale_set(sf: f32) {
         ui.anims.clear_list();
     });
     send_cmd(Command::ScaleChanged);
+    if app.get_sticker_open() {
+        // the pack list, then the open pack
+        send_cmd(Command::StickerPanel);
+    }
+    attach::rescale(app);
+    super::wire::reply_rescale(app);
 }
 
 #[cfg(windows)]
@@ -432,20 +458,7 @@ fn winit_events(app: &AppWindow) {
     let weak = app.as_weak();
     app.window().on_winit_window_event(move |window, event| {
         match event {
-            // Instead of Slint's handling, which has two faults. It takes the new scale but keeps
-            // the window item's logical size until winit reports a resize, and none comes when the
-            // window keeps its size (maximized): the next paint overruns the buffer and the software
-            // renderer asserts. And it asks winit to keep a size set before the window existed
-            // (`restore_geometry`) when the window got exactly that size, so the window kept its
-            // pixels instead of its logical size. Here winit's own new size stands, and the item
-            // fits the current pixels until it arrives.
-            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                let sf = *scale_factor as f32;
-                let size = window.size();
-                window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: sf });
-                window.dispatch_event(slint::platform::WindowEvent::Resized { size: size.to_logical(sf) });
-                return EventResult::PreventDefault;
-            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => return scale_changed(window, *scale_factor),
             WindowEvent::ModifiersChanged(m) => mods.set(m.state()),
             // files dragged in from Explorer: there is one event per file
             WindowEvent::HoveredFile(_) => {

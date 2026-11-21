@@ -87,6 +87,25 @@ impl App {
         (self.emit)(Event::LinkPreview { url, card });
     }
 
+    /// The scale changed: the composer card's pictures again, from the image it fetched (the
+    /// site isn't contacted again).
+    pub(super) async fn link_rescale(&mut self) {
+        let Some(d) = self.link_draft.as_ref() else { return };
+        let Some(Some(f)) = d.result.clone() else { return };
+        let Some(bytes) = f.content.image.clone() else { return };
+        let (url, key) = (d.url.clone(), f.card.image_key.clone());
+        let made = tokio::task::spawn_blocking(move || card_images(&bytes, &key)).await;
+        let Ok(Some((_, _, thumbs))) = made else { return };
+        // the composer's link may have changed meanwhile
+        if self.link_draft.as_ref().is_none_or(|d| d.url != url) {
+            return;
+        }
+        for t in thumbs {
+            (self.emit)(Event::Thumb(Arc::new(t)));
+        }
+        (self.emit)(Event::LinkPreview { url, card: Some(f.card.clone()) });
+    }
+
     /// What the message being sent does about `url`; the composer's fetch ends here either way.
     pub(super) fn link_for_send(&mut self, url: Option<String>) -> LinkSend {
         let draft = self.link_draft.take();

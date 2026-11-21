@@ -300,6 +300,8 @@ impl App {
             // also asks for the message list's avatars again
             self.emit_messages(crate::types::Scroll::Keep).await;
         }
+        self.gallery_rescale();
+        self.link_rescale().await;
     }
 
     /// Photos of the senders shown next to group messages; ahead of the thread list.

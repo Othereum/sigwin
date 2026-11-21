@@ -131,6 +131,17 @@ pub(crate) fn show(app: &AppWindow, files: &[PathBuf]) {
     }
 }
 
+/// The scale changed: the tiles' pictures are cut again at the new size.
+pub(crate) fn rescale(app: &AppWindow) {
+    let files = UI.with_borrow(|ui| ui.files.clone());
+    if files.is_empty() {
+        return;
+    }
+    stop_gif(app);
+    UI.with_borrow_mut(|ui| ui.pending_thumbs.clear());
+    show(app, &files);
+}
+
 /// The file's picture cropped to a `px` square. `None` when it can't be decoded.
 fn cut(path: &Path, px: u32) -> Option<(Vec<u8>, u32)> {
     if std::fs::metadata(path).ok()?.len() > MAX_BYTES {

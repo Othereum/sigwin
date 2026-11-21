@@ -24,6 +24,26 @@ pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     }
 }
 
+/// The reply box's picture of message `m`: its first photo, if it's loaded.
+fn reply_image(ui: &Ui, m: &MsgDto) -> Option<Image> {
+    let key = m.cells.first().map(|c| c.key.as_str());
+    key.filter(|_| !m.sticker).and_then(|k| ui.thumbs.get(k)).and_then(reply_thumb)
+}
+
+/// The scale changed: the reply box's picture is cut again from its message's.
+pub(super) fn reply_rescale(app: &AppWindow) {
+    if !app.get_reply_has_image() {
+        return;
+    }
+    let img = UI.with_borrow(|ui| {
+        let id = ui.reply_to.as_deref()?;
+        reply_image(ui, ui.last.iter().find(|m| m.id == id)?)
+    });
+    if let Some(img) = img {
+        app.set_reply_image(img);
+    }
+}
+
 /// A square cut of a message's photo at the reply box's size (nearest-neighbor scaling is jagged,
 /// so it's resampled once here). None when the pixels can't be read.
 fn reply_thumb(src: &Image) -> Option<Image> {
@@ -601,9 +621,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             } else {
                 view::text::mask_spoilers(m.text.clone(), &m.styles).replace('\n', " ")
             };
-            let key = m.cells.first().map(|c| c.key.as_str());
-            let thumb = key.filter(|_| !m.sticker).and_then(|k| ui.thumbs.get(k)).and_then(reply_thumb);
-            Some((if who.is_empty() { body } else { format!("{who}\n{body}") }, thumb))
+            Some((if who.is_empty() { body } else { format!("{who}\n{body}") }, reply_image(ui, m)))
         });
         if let Some((p, thumb)) = preview {
             drafts::set_reply(&app, &p);

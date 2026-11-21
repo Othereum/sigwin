@@ -167,6 +167,13 @@ impl App {
         }
     }
 
+    /// The scale changed: the cells in range ask for their pictures again, at the new size.
+    pub(super) fn gallery_rescale(&mut self) {
+        let Some(shown) = self.gallery.as_ref().map(|g| g.shown.clone()) else { return };
+        self.gallery_requested.borrow_mut().clear();
+        self.gallery_shown(shown.start, shown.end);
+    }
+
     /// `file_key` is here now, or was asked for: its cell asks for its picture again.
     pub(super) fn gallery_ask_again(&mut self, file_key: &str) {
         let Some(shown) = self.gallery.as_ref().map(|g| g.shown.clone()) else { return };

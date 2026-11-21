@@ -337,6 +337,36 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
         close();
         slint::CloseRequestResponse::HideWindow
     });
+    // its own monitor's scale, not the main window's. The picture keeps its pixels, so the window
+    // follows the same rule as on opening (`window_size`) around its old center, instead of
+    // winit's size, which keeps the logical size and leaves a margin around the picture. The strip
+    // asks for its cells at the new size.
+    win.window().on_winit_window_event(|w, event| match event {
+        slint::winit_030::winit::event::WindowEvent::ScaleFactorChanged { scale_factor, inner_size_writer } => {
+            let (pos, old) = (window_pos(w), w.size());
+            let done = window::scale_changed(w, *scale_factor);
+            let mut fit = None;
+            with_current(|v| {
+                if v.count > 1 {
+                    send_cmd(Command::ViewerThumbs { id: v.id.clone(), px: strip_px(&v.win) });
+                }
+                let (nw, nh) = window_size(v, shown(v));
+                let (cx, cy) = (pos.x + old.width as i32 / 2, pos.y + old.height as i32 / 2);
+                fit = Some(on_screen(work_area(viewer_hwnd(&v.win)), cx - nw as i32 / 2, cy - nh as i32 / 2, nw, nh));
+            });
+            if let Some(fit) = fit {
+                let size = slint::winit_030::winit::dpi::PhysicalSize::new(fit.2, fit.3);
+                let _ = inner_size_writer.clone().request_inner_size(size);
+                // winit places it at Windows' suggested corner after this: centered once it's done,
+                // unless it's being dragged to another monitor (winit keeps it under the cursor)
+                if !mouse_held() {
+                    let _ = slint::invoke_from_event_loop(move || place(fit));
+                }
+            }
+            done
+        }
+        _ => slint::winit_030::EventResult::Propagate,
+    });
     let scale = window::monitor_scale(window::hwnd(app));
     let first = img.pixels.take_first();
     let pixels = (first.width(), first.height());
@@ -583,6 +613,19 @@ fn cursor_pos() -> Option<(i32, i32)> {
 #[cfg(not(windows))]
 fn cursor_pos() -> Option<(i32, i32)> {
     None
+}
+
+/// Whether the left mouse button is down now.
+#[cfg(windows)]
+fn mouse_held() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+    // SAFETY: plain query
+    (unsafe { GetAsyncKeyState(VK_LBUTTON as i32) } as u16 & 0x8000) != 0
+}
+
+#[cfg(not(windows))]
+fn mouse_held() -> bool {
+    false
 }
 
 fn on_screen(area: Option<(i32, i32, i32, i32)>, x: i32, y: i32, w: u32, h: u32) -> Placement {
