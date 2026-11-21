@@ -53,6 +53,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/i18n.rs` | UI language: `tr!`, the catalogs build.rs makes from `i18n/` (the ones Slint bundles), the catalog check |
 | `src/emoji.rs` | emoji-only message detection, the reaction picker's emoji list and recent row |
 | `src/clip.rs` | pasting files and images from the clipboard |
+| `src/attached.rs` | reading files about to be sent: pasted images are sealed, the user's own files read as they are |
 | `src/shell.rs` | opening a file or link with its default app, never through `cmd` |
 | `src/picker.rs` | file dialogs in a child process |
 | `src/settings.rs` | user settings, owned by the UI thread |

@@ -1,8 +1,8 @@
 //! Pasting files and images from the Windows clipboard into the composer (Ctrl+V).
 //!
 //! Text paste stays with Slint's TextInput: we only step in when the clipboard holds no text.
-//! Images are streamed row by row into a PNG under `paste/`, so a 4K screenshot never sits in
-//! memory as a decoded copy.
+//! Images are encoded row by row into a PNG, so a 4K screenshot never sits in memory as a
+//! decoded copy, and sealed under `paste/`: nothing outside Sigwin reads them (`attached`).
 
 use std::path::Path;
 
@@ -16,8 +16,7 @@ pub enum Probe {
 
 #[cfg(windows)]
 mod win {
-    use std::fs::File;
-    use std::io::{BufWriter, Write};
+    use std::io::Write;
     use std::path::{Path, PathBuf};
 
     use anyhow::{bail, Context};
@@ -146,11 +145,12 @@ mod win {
         let _open = Open::new()?;
         // browsers put the original PNG on the clipboard: keep it as is (alpha included)
         if let Some(png) = Locked::get(png_format()) {
-            std::fs::write(&path, png.bytes())?;
+            sigwin_vault::write(&path, png.bytes())?;
             return Ok(path);
         }
         let dib = Locked::get(CF_DIBV5).or_else(|| Locked::get(CF_DIB)).context(tr!("No image on the clipboard"))?;
-        write_dib_png(dib.bytes(), &path)?;
+        let png = dib_png(dib.bytes())?;
+        sigwin_vault::write(&path, &png)?;
         Ok(path)
     }
 
@@ -158,8 +158,8 @@ mod win {
         Ok(u32::from_le_bytes(b.get(o..o + 4).context(tr!("Truncated image"))?.try_into()?))
     }
 
-    /// Streams a packed DIB (BITMAPINFOHEADER or V4/V5, 24 or 32 bpp) into a PNG file.
-    pub(super) fn write_dib_png(b: &[u8], path: &Path) -> anyhow::Result<()> {
+    /// Encodes a packed DIB (BITMAPINFOHEADER or V4/V5, 24 or 32 bpp) as a PNG, a row at a time.
+    pub(super) fn dib_png(b: &[u8]) -> anyhow::Result<Vec<u8>> {
         let hsize = u32_at(b, 0)? as usize;
         let w = u32_at(b, 4)? as i32;
         let h = u32_at(b, 8)? as i32;
@@ -187,7 +187,8 @@ mod win {
             && pixels.chunks_exact(stride).any(|row| row[..width * 4].chunks_exact(4).any(|p| p[3] != 0));
         let am = if am != 0 { am } else { 0xff00_0000 };
 
-        let mut enc = png::Encoder::new(BufWriter::new(File::create(path)?), width as u32, height as u32);
+        let mut out = Vec::new();
+        let mut enc = png::Encoder::new(&mut out, width as u32, height as u32);
         enc.set_color(if alpha { png::ColorType::Rgba } else { png::ColorType::Rgb });
         enc.set_depth(png::BitDepth::Eight);
         enc.set_compression(png::Compression::Fast);
@@ -213,7 +214,8 @@ mod win {
             stream.write_all(&line)?;
         }
         stream.finish()?;
-        Ok(())
+        writer.finish()?;
+        Ok(out)
     }
 }
 
@@ -252,16 +254,12 @@ mod tests {
         // bottom row: blue, green; top row: red, white (BGR order)
         dib.extend_from_slice(&[255, 0, 0, 0, 255, 0, 0, 0]);
         dib.extend_from_slice(&[0, 0, 255, 255, 255, 255, 0, 0]);
-        let dir = std::env::temp_dir().join(format!("ls-clip-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("t.png");
-        super::win::write_dib_png(&dib, &p).unwrap();
-        let img = image::open(&p).unwrap().to_rgb8();
+        let png = super::win::dib_png(&dib).unwrap();
+        let img = image::load_from_memory(&png).unwrap().to_rgb8();
         assert_eq!(img.dimensions(), (2, 2));
         assert_eq!(img.get_pixel(0, 0).0, [255, 0, 0]);
         assert_eq!(img.get_pixel(1, 0).0, [255, 255, 255]);
         assert_eq!(img.get_pixel(0, 1).0, [0, 0, 255]);
         assert_eq!(img.get_pixel(1, 1).0, [0, 255, 0]);
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

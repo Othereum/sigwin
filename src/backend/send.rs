@@ -86,7 +86,7 @@ impl App {
         let mut photos = Vec::new();
         let mut other_files = other_files;
         for f in photo_files {
-            match sigwin_thumb::photo_size(f) {
+            match crate::attached::photo_size(f) {
                 Ok(size) => {
                     photo_paths.push(f.clone());
                     photos.push(size);
@@ -96,7 +96,7 @@ impl App {
             }
         }
         let attachment = other_files.first().map_or(String::new(), |first| {
-            let bytes = other_files.iter().map(|f| std::fs::metadata(f).ok().map(|m| m.len())).sum();
+            let bytes = other_files.iter().map(|f| crate::attached::len(f).ok()).sum();
             view::media::file_line(&file_label(first), other_files.len() - 1, bytes)
         });
         // where each file's upload shows how far it is: its photo's cell, or the file line
@@ -149,7 +149,7 @@ impl App {
             let single = paths.len() == 1;
             let shown = paths.len().min(view::media::GRID_SHOWN);
             for (n, path) in paths.iter().take(shown).enumerate() {
-                let Ok(bytes) = std::fs::read(path) else { continue };
+                let Ok(bytes) = crate::attached::read(path) else { continue };
                 let key = pending_photo_key(ts, n, single);
                 // the cell it fills: one photo's own box, or its place in the grid
                 let (w, h) = if single {
@@ -387,7 +387,7 @@ impl Uploads {
                 let path = path.clone();
                 h = tokio::task::spawn_blocking(move || -> std::io::Result<_> {
                     use std::io::Read;
-                    let mut file = std::fs::File::open(path)?;
+                    let mut file = crate::attached::open(&path)?;
                     let mut buf = vec![0u8; 256 * 1024];
                     loop {
                         match file.read(&mut buf)? {
@@ -612,14 +612,15 @@ pub(super) async fn send_task(
     let mut specs = Vec::new();
     for (path, place) in &files {
         let mut ct = mime_guess::from_path(path).first_or_octet_stream().to_string();
-        let len = std::fs::metadata(path).with_context(|| tr!("Couldn't read {}", path.display()))?.len();
+        // not naming the file: the error ends up in the log (the row shows which files it has)
+        let len = crate::attached::len(path).context(tr!("Couldn't read an attached file"))?;
         // read as it uploads, unless it is a photo prepared here
         let mut data = upload::Source::File { path: path.clone(), len };
         let mut file_name = path.file_name().map(|s| s.to_string_lossy().to_string());
         let mut facts = None;
         // a photo is shrunk and loses its EXIF; one this can't handle goes as it is
         if ct.starts_with("image/") && len <= PREPARE_MAX_BYTES as u64 {
-            let bytes = std::fs::read(path).with_context(|| tr!("Couldn't read {}", path.display()))?;
+            let bytes = crate::attached::read(path).context(tr!("Couldn't read an attached file"))?;
             match prepare_photo(bytes, quality).await? {
                 (_, Ok(None)) => {}
                 (_, Err(e)) => warn!("prepare photo: {e:#}"),
@@ -708,7 +709,7 @@ type Facts = (Option<(u32, u32)>, Option<String>);
 const SEND_MAX_PIXELS: u64 = 100_000_000;
 
 fn photo_facts(path: &Path) -> anyhow::Result<Facts> {
-    let (size, hash) = sigwin_thumb::photo_facts(path, SEND_MAX_PIXELS)?;
+    let (size, hash) = crate::attached::photo_facts(path, SEND_MAX_PIXELS)?;
     Ok((Some(size), hash))
 }
 

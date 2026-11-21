@@ -1323,7 +1323,8 @@ pub(super) fn seal_legacy_files(attachments: &Path, thumbs: &Path) -> anyhow::Re
             let src = std::fs::read_dir(&p)?.flatten().map(|f| f.path()).find(|f| f.is_file());
             if let Some(src) = src.filter(|_| !dst.exists()) {
                 if let Err(e) = sigwin_vault::encrypt_file(&src, &dst, true) {
-                    warn!("encrypt {}: {e}", src.display());
+                    // not the path: it ends in the attachment's own name
+                    warn!("encrypt a cached attachment: {e}");
                     failed += 1;
                     continue;
                 }

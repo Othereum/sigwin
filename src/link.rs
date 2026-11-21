@@ -127,7 +127,7 @@ pub fn open(url: &str) {
         return;
     }
     if crate::headless::active() {
-        tracing::info!(url, "link clicked (headless: not opened)");
+        tracing::info!("link clicked (headless: not opened)");
         return;
     }
     crate::shell::open(url.as_ref());

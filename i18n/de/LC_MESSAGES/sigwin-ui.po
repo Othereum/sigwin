@@ -681,8 +681,8 @@ msgstr "Chat konnte nicht geöffnet werden: {}"
 msgid "Couldn't open the clipboard"
 msgstr "Zwischenablage konnte nicht geöffnet werden"
 
-msgid "Couldn't read {}"
-msgstr "{} konnte nicht gelesen werden"
+msgid "Couldn't read an attached file"
+msgstr "Eine angehängte Datei konnte nicht gelesen werden"
 
 msgid "Couldn't search. You can try again in a moment"
 msgstr "Suche fehlgeschlagen. Du kannst es gleich noch einmal versuchen"

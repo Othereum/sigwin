@@ -87,8 +87,6 @@ pub(crate) struct Ui {
     reply_to: Option<String>,
     /// id of our message being edited in the composer
     editing: Option<String>,
-    /// where pasted clipboard images are written
-    pub(crate) paste_dir: PathBuf,
     open_key: String,
     /// where the user left each thread not at its bottom: (row id, the row's top px from the
     /// list's top). In memory only, for this run.

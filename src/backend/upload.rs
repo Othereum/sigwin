@@ -41,7 +41,7 @@ impl Source {
     fn reader(&self) -> anyhow::Result<Box<dyn Read + Send + '_>> {
         Ok(match self {
             Source::Bytes(b) => Box::new(b.as_slice()),
-            Source::File { path, .. } => Box::new(std::fs::File::open(path).context("open file to send")?),
+            Source::File { path, .. } => crate::attached::open(path).context("open file to send")?,
         })
     }
 
@@ -49,7 +49,7 @@ impl Source {
     pub(super) fn into_bytes(self) -> anyhow::Result<Vec<u8>> {
         match self {
             Source::Bytes(b) => Ok(b),
-            Source::File { path, .. } => std::fs::read(&path).context("read file to send"),
+            Source::File { path, .. } => crate::attached::read(&path).context("read file to send"),
         }
     }
 }

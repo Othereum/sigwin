@@ -33,7 +33,7 @@ pub(crate) fn admit(have: &[PathBuf], new: Vec<PathBuf>, limit: Option<u64>) -> 
             why.get_or_insert_with(|| tr!("You can send only one file at a time.").to_string());
         } else if !is_media(&p) && !all.is_empty() {
             why.get_or_insert_with(|| tr!("Photos or videos and files can't be sent together.").to_string());
-        } else if std::fs::metadata(&p).is_ok_and(|m| sent_size(m.len()) > limit) {
+        } else if crate::attached::len(&p).is_ok_and(|n| sent_size(n) > limit) {
             why.get_or_insert_with(|| tr!("The file is too large. You can send up to {}.", crate::view::media::size_text(limit)));
         } else {
             all.push(p);
@@ -97,7 +97,7 @@ pub(crate) fn show(app: &AppWindow, files: &[PathBuf]) {
                 };
                 let is_file = !is_media(p);
                 let size = if is_file {
-                    std::fs::metadata(p).map(|m| crate::view::media::size_text(m.len())).unwrap_or_default()
+                    crate::attached::len(p).map(crate::view::media::size_text).unwrap_or_default()
                 } else {
                     String::new()
                 };
@@ -144,10 +144,10 @@ pub(crate) fn rescale(app: &AppWindow) {
 
 /// The file's picture cropped to a `px` square. `None` when it can't be decoded.
 fn cut(path: &Path, px: u32) -> Option<(Vec<u8>, u32)> {
-    if std::fs::metadata(path).ok()?.len() > MAX_BYTES {
+    if crate::attached::len(path).ok()? > MAX_BYTES {
         return None;
     }
-    let bytes = std::fs::read(path).ok()?;
+    let bytes = crate::attached::read(path).ok()?;
     let img = sigwin_thumb::decode_thumb(&bytes, px * 2).ok()?;
     let square = sigwin_thumb::cover(&sigwin_thumb::to_rgba(&img), px, px);
     Some((square.into_raw(), px))

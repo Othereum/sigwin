@@ -147,10 +147,10 @@ impl App {
             let Some(turn) = start.turn().await.filter(|_| !start.stopped()) else { return finish(&slot, &emit) };
             let read = tokio::task::spawn_blocking(move || {
                 // a safety limit: the tile only needs the picture, and the file stays in memory
-                if std::fs::metadata(&path).ok()?.len() > 30 * 1024 * 1024 {
+                if crate::attached::len(&path).ok()? > 30 * 1024 * 1024 {
                     return None;
                 }
-                let bytes = std::fs::read(&path).ok()?;
+                let bytes = crate::attached::read(&path).ok()?;
                 if !sigwin_thumb::is_animated_gif(&bytes) {
                     return None;
                 }

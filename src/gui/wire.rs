@@ -472,7 +472,7 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
                 true
             }
             clip::Probe::Image => {
-                let dir = UI.with_borrow(|ui| ui.paste_dir.clone());
+                let dir = crate::attached::paste_dir();
                 let weak = app.as_weak();
                 // encoding a large screenshot takes a moment: keep the UI responsive
                 std::thread::spawn(move || {

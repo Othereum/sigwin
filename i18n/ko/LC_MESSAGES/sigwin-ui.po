@@ -679,8 +679,8 @@ msgstr "대화를 열지 못했습니다: {}"
 msgid "Couldn't open the clipboard"
 msgstr "클립보드를 열 수 없습니다"
 
-msgid "Couldn't read {}"
-msgstr "{} 읽기 실패"
+msgid "Couldn't read an attached file"
+msgstr "첨부한 파일 읽기 실패"
 
 msgid "Couldn't search. You can try again in a moment"
 msgstr "찾지 못했습니다. 잠시 후 다시 시도할 수 있습니다"

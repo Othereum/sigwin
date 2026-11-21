@@ -169,6 +169,20 @@ pub fn encrypt_file(src: &Path, dst: &Path, durable: bool) -> io::Result<()> {
     replace(dst, durable, |f| encrypt(r, f))
 }
 
+/// The plain size of the vault file at `path`, from its size alone (nothing is decrypted, so a
+/// damaged file only shows when it is read).
+pub fn plain_len(path: &Path) -> io::Result<u64> {
+    plain_len_of(std::fs::metadata(path)?.len()).ok_or_else(|| bad("not a vault file"))
+}
+
+fn plain_len_of(sealed: u64) -> Option<u64> {
+    let body = sealed.checked_sub((MAGIC.len() + SALT) as u64)?;
+    let record = (CHUNK + TAG) as u64;
+    // every chunk but the last is full; the last one, maybe empty, still has its tag
+    let last = (body % record).checked_sub(TAG as u64)?;
+    Some(body / record * CHUNK as u64 + last)
+}
+
 /// Whether `path` is already in vault format.
 pub fn is_sealed(path: &Path) -> bool {
     let mut m = [0u8; 4];
@@ -198,6 +212,7 @@ mod tests {
             let sealed = seal(&data);
             assert_eq!(sealed.len(), 4 + SALT + len + (len / CHUNK + 1) * TAG, "len {len}");
             assert_eq!(open(&sealed).unwrap(), data, "len {len}");
+            assert_eq!(plain_len_of(sealed.len() as u64), Some(len as u64), "len {len}");
         }
     }
 

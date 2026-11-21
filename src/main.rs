@@ -4,6 +4,7 @@
 #[macro_use]
 mod i18n;
 mod alloc;
+mod attached;
 mod autostart;
 mod away;
 mod avatar;
@@ -130,6 +131,7 @@ fn claim_instance() -> Option<instance::Instance> {
 fn load_ui_state(app: &AppWindow, cmd_tx: UnboundedSender<Command>) {
     let paste_dir = data_dir().join("paste");
     clip::clean(&paste_dir);
+    attached::set_paste_dir(paste_dir);
     let settings_path = settings::path(&data_dir());
     let prefs = settings::Settings::load(&settings_path);
     prefs.publish();
@@ -151,7 +153,6 @@ fn load_ui_state(app: &AppWindow, cmd_tx: UnboundedSender<Command>) {
     });
     UI.with_borrow_mut(|ui| {
         ui.tx = Some(cmd_tx);
-        ui.paste_dir = paste_dir;
         ui.settings = prefs;
         ui.settings_path = settings_path;
         ui.drafts_path = data_dir().join("drafts.enc");
@@ -295,7 +296,7 @@ fn main() -> anyhow::Result<()> {
     // plain copies of opened attachments; the backend also empties this on start (crashes,
     // files another app still held)
     backend::files::clear_open(&data_dir());
-    // pasted images, plain as well: a draft's paste doesn't outlive the run anyway (`clip::clean`)
-    clip::clean(&data_dir().join("paste"));
+    // pasted images: a draft's paste doesn't outlive the run (`clip::clean`)
+    clip::clean(attached::paste_dir());
     Ok(())
 }

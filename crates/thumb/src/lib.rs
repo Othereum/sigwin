@@ -137,17 +137,32 @@ fn cover_side_is_just_enough() {
     }
 }
 
-/// A photo file's size as shown (EXIF applied), from its header alone.
-pub fn photo_size(path: &std::path::Path) -> ImageResult<(u32, u32)> {
-    let mut decoder = file_decoder(path)?;
+/// A photo being sent: a file read as it is, or one already in memory.
+pub enum Photo<'a> {
+    File(&'a std::path::Path),
+    Bytes(&'a [u8]),
+}
+
+impl Photo<'_> {
+    fn decoder(&self) -> ImageResult<Box<dyn image::ImageDecoder + '_>> {
+        match self {
+            Photo::File(path) => file_decoder(path),
+            Photo::Bytes(bytes) => decoder(bytes),
+        }
+    }
+}
+
+/// A photo's size as shown (EXIF applied), from its header alone.
+pub fn photo_size(photo: Photo) -> ImageResult<(u32, u32)> {
+    let mut decoder = photo.decoder()?;
     let (w, h) = decoder.dimensions();
     Ok(if turns(decoder.orientation()?) { (h, w) } else { (w, h) })
 }
 
-/// A photo file's size as shown (EXIF applied) and its blurhash. Past `max_pixels` it isn't
+/// A photo's size as shown (EXIF applied) and its blurhash. Past `max_pixels` it isn't
 /// decoded and has no blurhash, nor does one that turns out broken after its header.
-pub fn photo_facts(path: &std::path::Path, max_pixels: u64) -> ImageResult<((u32, u32), Option<String>)> {
-    let mut decoder = file_decoder(path)?;
+pub fn photo_facts(photo: Photo, max_pixels: u64) -> ImageResult<((u32, u32), Option<String>)> {
+    let mut decoder = photo.decoder()?;
     let (w, h) = decoder.dimensions();
     let orientation = decoder.orientation()?;
     let size = if turns(orientation) { (h, w) } else { (w, h) };
@@ -907,18 +922,20 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("a.jpg");
         std::fs::write(&path, &jpeg).unwrap();
-        let (size, hash) = photo_facts(&path, u64::MAX).unwrap();
+        let (size, hash) = photo_facts(Photo::File(&path), u64::MAX).unwrap();
         assert_eq!(size, (20, 40));
         let drawn = blurhash(&hash.unwrap(), 8, 16).unwrap();
         assert!(drawn.get_pixel(4, 1)[0] < drawn.get_pixel(4, 14)[0]);
+        // the same from memory
+        assert_eq!(photo_facts(Photo::Bytes(&jpeg), u64::MAX).unwrap().0, (20, 40));
         // too large to decode: the size alone
-        assert_eq!(photo_facts(&path, 799).unwrap(), ((20, 40), None));
+        assert_eq!(photo_facts(Photo::File(&path), 799).unwrap(), ((20, 40), None));
         // cut after its header: the size alone too
         let scan = jpeg.windows(2).position(|m| m == [0xFF, 0xDA]).unwrap();
         std::fs::write(&path, &jpeg[..scan + 14]).unwrap();
-        assert_eq!(photo_facts(&path, u64::MAX).unwrap().0, (20, 40));
+        assert_eq!(photo_facts(Photo::File(&path), u64::MAX).unwrap().0, (20, 40));
         std::fs::write(&path, b"junk").unwrap();
-        assert!(photo_facts(&path, u64::MAX).is_err());
+        assert!(photo_facts(Photo::File(&path), u64::MAX).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
