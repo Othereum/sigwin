@@ -197,6 +197,77 @@ export component HStrip inherits TouchArea {
     }
 }
 
+// The app's scrollbar: a thin thumb over the right edge of a list whose own bar is off
+// (`vertical-scrollbar-policy: always-off`), shown only while `active`. The stock bar is a 14px
+// strip that fattens and gets a ground and arrows on hover, covering the rows it sits on. Size it
+// as a 12px-wide strip along the list's right edge; it covers only the thumb's own height.
+export component ThinThumb inherits Rectangle {
+    in-out property <length> content-y;
+    in property <length> content-height;
+    in property <length> visible-height;
+    in property <bool> active;
+    property <length> max-y: max(0px, root.content-height - root.visible-height);
+    property <length> thumb-h: root.content-height <= 0px ? 0px
+        : min(root.visible-height, max(24px, root.visible-height * root.visible-height / root.content-height));
+    property <length> saved-y;
+    property <length> saved-pos;
+
+    thumb := Rectangle {
+        width: grab.has-hover || grab.pressed ? 6px : 3px;
+        height: root.thumb-h;
+        x: parent.width - self.width - 2px;
+        y: root.max-y <= 0px ? 0px : (root.visible-height - self.height) * (-root.content-y / root.max-y);
+        border-radius: self.width / 2;
+        background: Theme.subtle;
+        visible: root.max-y > 0px;
+        opacity: root.active || grab.pressed ? 0.7 : 0;
+        animate opacity { duration: 150ms; }
+        animate width { duration: 100ms; easing: ease-out; }
+    }
+    grab := TouchArea {
+        enabled: root.active || self.pressed;
+        visible: root.max-y > 0px;
+        x: 0px;
+        y: thumb.y;
+        width: parent.width;
+        height: thumb.height;
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.saved-y = -root.content-y;
+                root.saved-pos = self.absolute-position.y + self.mouse-y;
+            }
+        }
+        moved => {
+            if (self.pressed && root.visible-height > root.thumb-h) {
+                root.content-y = -clamp(root.saved-y + (self.absolute-position.y + self.mouse-y - root.saved-pos)
+                    * root.max-y / (root.visible-height - root.thumb-h), 0px, root.max-y);
+            }
+        }
+    }
+}
+
+// Wraps a ListView with the thumb above: it shows while the pointer is over the list.
+export component ThinScroll inherits TouchArea {
+    in-out property <length> content-y;
+    in property <length> content-height;
+    in property <length> visible-height;
+
+    @children
+
+    // keeps the thumb up while something drawn over the list has the pointer instead
+    in property <bool> keep;
+
+    ThinThumb {
+        x: parent.width - 12px;
+        width: 12px;
+        height: parent.height;
+        content-y <=> root.content-y;
+        content-height: root.content-height;
+        visible-height: root.visible-height;
+        active: root.has-hover || root.keep;
+    }
+}
+
 // one-line text field on a grey ground, no border; the accent ring while it has the focus
 // a one-line text field (the search box with `icon: Icons.search`)
 export component Field inherits Rectangle {
