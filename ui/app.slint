@@ -2129,6 +2129,9 @@ export component AppWindow inherits Window {
         drop-shadow-color: #00000040;
         // the wheel, which the row lets through, still moves the rail under it
         TouchArea {
+            // only over the rail's own place, like the row: the rest of the card lets the pointer through
+            x: 0px;
+            width: root.rail-w - 16px;
             scroll-event(e) => {
                 root.peek-on = false;
                 thread-list.content-y = max(thread-list.visible-height - thread-list.content-height, min(0px, thread-list.content-y + e.delta-y));
@@ -2139,6 +2142,7 @@ export component AppWindow inherits Window {
             x: -8px;
             y: -1px;
             width: root.side-open-w;
+            hit-width: root.rail-w;
             item: root.peek-item;
             selected: root.peek-item.key == root.current-key;
             clicked => { root.pick-thread(root.peek-item.key); }

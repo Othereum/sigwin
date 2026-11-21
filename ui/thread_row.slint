@@ -27,6 +27,12 @@ export component ThreadRow inherits Rectangle {
     in property <bool> selected;
     // in the folded sidebar: the photo alone, with the unread count on it
     in property <bool> folded;
+    // how much of the row's left takes the pointer; the folded sidebar's card shown whole over the
+    // pane limits it to the rail's width, so only the photo's own place counts
+    in property <length> hit-width: root.width;
+    // the pointer lands on the visible card alone, not the margin and the 2px around it, where the
+    // photo is all there is of the row
+    property <bool> card-hit: root.folded || root.hit-width < root.width;
     out property <bool> hovered: ta.has-hover;
     callback clicked;
     // right click, at window coordinates
@@ -53,6 +59,10 @@ export component ThreadRow inherits Rectangle {
         background: root.selected ? Theme.selected : (ta.has-hover ? Theme.hover : transparent);
     }
     ta := TouchArea {
+        x: root.card-hit ? 8px : 0px;
+        y: root.card-hit ? 1px : 0px;
+        width: min(root.hit-width, root.width) - (root.card-hit ? 16px : 0px);
+        height: root.height - (root.card-hit ? 2px : 0px);
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
         pointer-event(e) => {
