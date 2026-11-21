@@ -1,4 +1,5 @@
-//! Pasting files and images from the Windows clipboard into the composer (Ctrl+V).
+//! Pasting files and images from the Windows clipboard into the composer (Ctrl+V), and copying a
+//! received image to it (`set_image`).
 //!
 //! Text paste stays with Slint's TextInput: we only step in when the clipboard holds no text.
 //! Images are encoded row by row into a PNG, so a 4K screenshot never sits in memory as a
@@ -21,9 +22,11 @@ mod win {
 
     use anyhow::{bail, Context};
     use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW,
+        CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+        RegisterClipboardFormatW, SetClipboardData,
     };
-    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+    use windows_sys::Win32::Foundation::GlobalFree;
+    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
     use windows_sys::Win32::UI::Shell::DragQueryFileW;
 
     use super::Probe;
@@ -154,6 +157,85 @@ mod win {
         Ok(path)
     }
 
+    /// Puts a picture on the clipboard as PNG (what browsers and Office take, alpha kept) and as a
+    /// DIB (what older apps take). `rgba` is `w` x `h` straight RGBA; `png` is the same picture.
+    pub fn set_image(png: &[u8], rgba: &[u8], w: u32, h: u32) -> anyhow::Result<()> {
+        let (dib, dib_format) = rgba_dib(rgba, w, h)?;
+        let _open = Open::new()?;
+        // SAFETY: clipboard is open; EmptyClipboard makes us its owner for the formats set below
+        if unsafe { EmptyClipboard() } == 0 {
+            bail!(tr!("Couldn't open the clipboard"));
+        }
+        put(png_format(), png)?;
+        put(dib_format, &dib)
+    }
+
+    /// Hands a copy of `data` to the clipboard, which owns it from then on.
+    fn put(format: u32, data: &[u8]) -> anyhow::Result<()> {
+        // SAFETY: the block is filled before it is handed over; on failure it is still ours to free
+        unsafe {
+            let handle = GlobalAlloc(GMEM_MOVEABLE, data.len());
+            if handle.is_null() {
+                bail!(tr!("Out of memory"));
+            }
+            let ptr = GlobalLock(handle) as *mut u8;
+            if ptr.is_null() {
+                GlobalFree(handle);
+                bail!(tr!("Out of memory"));
+            }
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+            GlobalUnlock(handle);
+            if SetClipboardData(format, handle).is_null() {
+                GlobalFree(handle);
+                bail!(tr!("Couldn't open the clipboard"));
+            }
+        }
+        Ok(())
+    }
+
+    /// A packed bottom-up DIB of straight RGBA: 24bpp when it is opaque, else a V5 one with an alpha
+    /// mask.
+    pub(super) fn rgba_dib(rgba: &[u8], w: u32, h: u32) -> anyhow::Result<(Vec<u8>, u32)> {
+        let (w, h) = (w as usize, h as usize);
+        if w == 0 || h == 0 || rgba.len() != w * h * 4 {
+            bail!(tr!("Truncated image"));
+        }
+        let alpha = rgba.chunks_exact(4).any(|p| p[3] != 255);
+        let (bpp, hsize) = if alpha { (32usize, 124usize) } else { (24, 40) };
+        let stride = (w * bpp).div_ceil(32) * 4;
+        let mut out = vec![0u8; hsize + stride * h];
+        let mut set = |o: usize, v: u32| out[o..o + 4].copy_from_slice(&v.to_le_bytes());
+        set(0, hsize as u32);
+        set(4, w as u32);
+        set(8, h as u32);
+        set(20, (stride * h) as u32);
+        let mut set16 = |o: usize, v: u16| out[o..o + 2].copy_from_slice(&v.to_le_bytes());
+        set16(12, 1);
+        set16(14, bpp as u16);
+        if alpha {
+            let mut set = |o: usize, v: u32| out[o..o + 4].copy_from_slice(&v.to_le_bytes());
+            set(16, 3); // BI_BITFIELDS
+            set(40, 0x00ff_0000);
+            set(44, 0x0000_ff00);
+            set(48, 0x0000_00ff);
+            set(52, 0xff00_0000);
+            set(56, 0x7352_4742); // LCS_sRGB
+        }
+        for y in 0..h {
+            let dst = &mut out[hsize + (h - 1 - y) * stride..][..stride];
+            for (x, p) in rgba[y * w * 4..][..w * 4].chunks_exact(4).enumerate() {
+                let d = &mut dst[x * bpp / 8..][..bpp / 8];
+                d[0] = p[2];
+                d[1] = p[1];
+                d[2] = p[0];
+                if alpha {
+                    d[3] = p[3];
+                }
+            }
+        }
+        Ok((out, if alpha { CF_DIBV5 } else { CF_DIB }))
+    }
+
     fn u32_at(b: &[u8], o: usize) -> anyhow::Result<u32> {
         Ok(u32::from_le_bytes(b.get(o..o + 4).context(tr!("Truncated image"))?.try_into()?))
     }
@@ -220,7 +302,7 @@ mod win {
 }
 
 #[cfg(windows)]
-pub use win::{files, probe, save_image};
+pub use win::{files, probe, save_image, set_image};
 
 #[cfg(not(windows))]
 pub fn probe() -> Probe {
@@ -235,6 +317,11 @@ pub fn save_image(_: &Path) -> anyhow::Result<std::path::PathBuf> {
     anyhow::bail!("not supported")
 }
 
+#[cfg(not(windows))]
+pub fn set_image(_: &[u8], _: &[u8], _: u32, _: u32) -> anyhow::Result<()> {
+    anyhow::bail!("not supported")
+}
+
 /// Removes pasted images left from earlier runs.
 pub fn clean(dir: &Path) {
     let _ = std::fs::remove_dir_all(dir);
@@ -242,6 +329,23 @@ pub fn clean(dir: &Path) {
 
 #[cfg(all(test, windows))]
 mod tests {
+    #[test]
+    fn rgba_to_dib_and_back() {
+        // 2x1: red, then half-transparent blue
+        let rgba = [255, 0, 0, 255, 0, 0, 255, 128];
+        let (dib, format) = super::win::rgba_dib(&rgba, 2, 1).unwrap();
+        assert_eq!(format, 17);
+        let png = super::win::dib_png(&dib).unwrap();
+        let img = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert_eq!(img.get_pixel(0, 0).0, [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(1, 0).0, [0, 0, 255, 128]);
+        // opaque: plain 24bpp
+        let (dib, format) = super::win::rgba_dib(&[1, 2, 3, 255], 1, 1).unwrap();
+        assert_eq!(format, 8);
+        let img = image::load_from_memory(&super::win::dib_png(&dib).unwrap()).unwrap().to_rgb8();
+        assert_eq!(img.get_pixel(0, 0).0, [1, 2, 3]);
+    }
+
     #[test]
     fn dib_to_png() {
         // 2x2 bottom-up 24bpp: rows padded to 8 bytes

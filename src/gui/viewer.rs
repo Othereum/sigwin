@@ -315,6 +315,9 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
             send_cmd(Command::SaveViewed { id: v.id.clone(), index: v.index, owner: viewer_hwnd(&v.win) });
         });
     });
+    win.on_copy(|| {
+        with_current(|v| send_cmd(Command::CopyViewed { id: v.id.clone(), index: v.index }));
+    });
     win.on_open_outside(|| {
         with_current(|v| send_cmd(Command::OpenViewed { id: v.id.clone(), index: v.index }));
     });

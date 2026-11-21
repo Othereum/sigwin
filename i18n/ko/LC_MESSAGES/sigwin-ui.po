@@ -906,6 +906,24 @@ msgstr[0] "첨부 파일 {n}개를 저장했습니다."
 msgid "Saved."
 msgstr "저장했습니다."
 
+msgid "Copy"
+msgstr "복사"
+
+msgid "Copy image"
+msgstr "이미지 복사"
+
+msgid "Copied."
+msgstr "복사했습니다."
+
+msgid "Copy failed: {}"
+msgstr "복사 실패: {}"
+
+msgid "This image is too large to copy."
+msgstr "이미지가 너무 커서 복사할 수 없습니다."
+
+msgid "Out of memory"
+msgstr "메모리가 부족합니다"
+
 msgid "Scan the QR code with your phone."
 msgstr "휴대폰으로 QR 코드를 스캔하세요."
 

@@ -778,6 +778,8 @@ pub enum Command {
     OpenViewed { id: String, index: usize },
     /// the viewer's "저장"; `owner`: HWND for the file dialog
     SaveViewed { id: String, index: usize, owner: isize },
+    /// copy picture `index` of message `id` to the clipboard
+    CopyViewed { id: String, index: usize },
     /// "더 읽기" on a row: show more of its text
     ReadMore(String),
     /// the sidebar's search; `contacts`: the contact list the ✎ button opens; `scope`: the

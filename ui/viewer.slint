@@ -1,6 +1,6 @@
 // The image viewer window. Fixed dark look: globals (`Theme`) aren't shared between windows.
 
-import { HStrip, Notice } from "widgets.slint";
+import { HStrip, Notice, Tip, TipPlace } from "widgets.slint";
 import { MediaLabel, VideoMark } from "bubble.slint";
 import { MediaState } from "types.slint";
 import { Icon, Icons } from "icons.slint";
@@ -9,6 +9,8 @@ component ViewerButton inherits Rectangle {
     in property <string> text;
     // one of `Icons`, before the text or alone
     in property <string> icon;
+    // the key that does the same, shown as a tooltip
+    in property <string> shortcut;
     out property <bool> hovered: ta.has-hover;
     callback clicked();
     min-height: 30px;
@@ -35,6 +37,14 @@ component ViewerButton inherits Rectangle {
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+    Tip {
+        hovered: root.shortcut != "" && ta.has-hover;
+        place: TipPlace.below-center;
+        text: root.shortcut;
+        fill: #202020;
+        line: #ffffff30;
+        ink: white;
     }
 }
 
@@ -106,6 +116,7 @@ export component ImageViewer inherits Window {
     callback prev();
     callback next();
     callback save();
+    callback copy();
     callback open-outside();
     // a view-once picture: nothing to save it or hand it on with
     in property <bool> once;
@@ -154,8 +165,10 @@ export component ImageViewer inherits Window {
     animate strip-lift { duration: root.strip-shown ? 100ms : 250ms; }
     // height of the cursor where the previous and next buttons may show
     property <bool> near-side: hover.has-hover && root.has-strip && abs(hover.mouse-y - root.height / 2) < 130px;
-    // the buttons at the top right show when the cursor is about where they appear
-    property <bool> near-top: hover.has-hover && hover.mouse-y < 100px && hover.mouse-x > root.width - 300px;
+    // the buttons at the top right show when the cursor is about where they appear: as far left as
+    // the bar reaches (its width follows its buttons and the language), its offset from the edge
+    // (✕ and gaps) and some margin
+    property <bool> near-top: hover.has-hover && hover.mouse-y < 100px && hover.mouse-x > root.width - bar.preferred-width - 56px - 60px;
     property <bool> top-shown: root.near-top || root.top-on;
     property <bool> dragged;
     property <bool> panning;
@@ -185,6 +198,15 @@ export component ImageViewer inherits Window {
             if (e.text == Key.Escape) {
                 root.quick-closed();
                 root.dismiss();
+                return accept;
+            }
+            if (e.modifiers.control && e.text == "c" && !root.once) {
+                root.copy();
+                return accept;
+            }
+            // the buttons are hidden for a view-once picture, and so are their keys
+            if (e.modifiers.control && e.text == "s" && !root.once) {
+                root.save();
                 return accept;
             }
             if (e.text == Key.LeftArrow) {
@@ -291,7 +313,14 @@ export component ImageViewer inherits Window {
                 ViewerButton {
                     text: @tr("Save");
                     icon: Icons.download;
+                    shortcut: "Ctrl+S";
                     clicked => { root.save(); }
+                }
+                ViewerButton {
+                    text: @tr("Copy");
+                    icon: Icons.copy;
+                    shortcut: "Ctrl+C";
+                    clicked => { root.copy(); }
                 }
                 ViewerButton {
                     text: @tr("Open in default app");

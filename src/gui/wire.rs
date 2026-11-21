@@ -650,18 +650,21 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     app.on_open_menu(move |id, x, y| {
         let Some(app) = weak.upgrade() else { return };
-        let Some((mine, can_edit, can_delete, pinned, info, media, can_save)) = UI.with_borrow(|ui| {
+        let Some((mine, can_edit, can_delete, pinned, info, media, can_save, can_copy)) = UI.with_borrow(|ui| {
             let m = ui.last.iter().find(|m| m.id == id.as_str())?;
             // the size choice for what it shows: its sticker, or its photos and videos
             let media = if m.sticker && m.img_w > 0 { 2 } else if !m.cells.is_empty() { 1 } else { 0 };
             // as the hover tools' save (`can-save` in ui/bubble.slint)
             let can_save = !m.sticker && (!m.cells.is_empty() || !m.attachment.is_empty());
+            // one picture: which one is unambiguous (several are copied from the viewer)
+            let can_copy = !m.sticker && m.cells.len() == 1 && !m.cells[0].video;
             (!m.system && !m.deleted && !m.pending)
-                .then(|| (m.my_reaction.clone(), m.can_edit, m.can_delete, m.pinned, m.receipt_info.clone(), media, can_save))
+                .then(|| (m.my_reaction.clone(), m.can_edit, m.can_delete, m.pinned, m.receipt_info.clone(), media, can_save, can_copy))
         }) else {
             return;
         };
         app.set_menu_can_save(can_save);
+        app.set_menu_can_copy(can_copy);
         app.set_menu_info(info.into());
         app.set_menu_pinned(pinned);
         app.set_menu_media(media);
@@ -675,6 +678,9 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         app.set_menu_y(y);
         app.set_menu_id(id);
     });
+
+    let s = send.clone();
+    app.on_copy_image_clicked(move |id| s(Command::CopyViewed { id: id.to_string(), index: 0 }));
 
     // the emoji grid exists only while the picker is open: built per tab, dropped on close
     let weak = app.as_weak();

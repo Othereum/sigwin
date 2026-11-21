@@ -833,6 +833,7 @@ impl App {
             Command::ViewerThumbs { id, px } => self.viewer_thumbs(&id, px),
             Command::OpenViewed { id, index } => self.open_viewed(&id, index),
             Command::SaveViewed { id, index, owner } => self.save_viewed(&id, index, owner),
+            Command::CopyViewed { id, index } => self.copy_viewed(&id, index),
             Command::GalleryOpen { files } => self.gallery_open(files).await,
             Command::GalleryMore => self.gallery_more().await,
             Command::GalleryShown { from, to } => self.gallery_shown(from, to),

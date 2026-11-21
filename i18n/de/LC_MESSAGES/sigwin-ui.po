@@ -910,6 +910,24 @@ msgstr[1] "{n} Anhänge gespeichert."
 msgid "Saved."
 msgstr "Gespeichert."
 
+msgid "Copy"
+msgstr "Kopieren"
+
+msgid "Copy image"
+msgstr "Bild kopieren"
+
+msgid "Copied."
+msgstr "Kopiert."
+
+msgid "Copy failed: {}"
+msgstr "Kopieren fehlgeschlagen: {}"
+
+msgid "This image is too large to copy."
+msgstr "Das Bild ist zu groß zum Kopieren."
+
+msgid "Out of memory"
+msgstr "Nicht genügend Arbeitsspeicher"
+
 msgid "Scan the QR code with your phone."
 msgstr "Scanne den QR-Code mit deinem Telefon."
 

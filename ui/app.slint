@@ -1,7 +1,7 @@
 import { ListView, Palette, ScrollView } from "std-widgets.slint";
 import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, BusySpinner, DangerButton, HStrip, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton, TextBox, TextOps, ThinScroll } from "widgets.slint";
+import { Avatar, BusySpinner, DangerButton, HStrip, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton, TextBox, TextOps, ThinScroll, Tip, TipPlace } from "widgets.slint";
 export { TextOps } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
 import { Bubble, MediaLabel, QuoteBox } from "bubble.slint";
@@ -110,14 +110,6 @@ component FootBar inherits Rectangle {
     // the TouchArea holds the rest, so this stays on over the buttons in it
     out property <bool> hovered: ta.has-hover;
     callback clicked;
-    // the tip waits as briefly as the rail's row preview: only for a pointer passing by
-    property <bool> tip-ready;
-    Timer {
-        running: root.folded && ta.has-hover && !root.tip-ready;
-        interval: 100ms;
-        triggered => { root.tip-ready = true; }
-    }
-    changed hovered => { root.tip-ready = false; }
     ta := TouchArea {
         mouse-cursor: root.enabled ? pointer : default;
         clicked => {
@@ -148,23 +140,14 @@ component FootBar inherits Rectangle {
             @children
         }
     }
-    // beside the rail, over the pane
-    if root.folded && root.tip-ready && ta.has-hover: Rectangle {
-        x: root.width + 6px;
-        y: (root.height - self.height) / 2;
-        width: tip-text.preferred-width + 20px;
-        height: tip-text.preferred-height + 14px;
-        border-radius: 6px;
-        background: Theme.sidebar;
-        border-width: 1px;
-        border-color: Theme.border;
-        tip-text := Text {
-            x: 10px;
-            y: 7px;
-            text: root.tip;
-            color: Theme.text;
-            font-size: 12px;
-        }
+    // beside the rail, over the pane; it waits as briefly as the rail's row preview: only for a
+    // pointer passing by
+    Tip {
+        hovered: root.folded && ta.has-hover;
+        place: TipPlace.right-center;
+        gap: 6px;
+        delay: 100ms;
+        text: root.tip;
     }
 }
 
@@ -332,6 +315,7 @@ export component AppWindow inherits Window {
     callback file-clicked(string);
     callback view-once-clicked(string);
     callback save-clicked(string);
+    callback copy-image-clicked(string);
     callback reply(string);
     callback cancel-reply();
     callback unlink();
@@ -435,6 +419,7 @@ export component AppWindow inherits Window {
     in property <bool> menu-can-delete;
     // its pictures or files can be saved (the hover tools' save, which a narrow chat hides)
     in property <bool> menu-can-save;
+    in property <bool> menu-can-copy;
     in property <bool> menu-pinned;
     // what the message's "Info" shows; "" hides the row (incoming messages have none)
     in property <string> menu-info;
@@ -1491,22 +1476,11 @@ export component AppWindow inherits Window {
                             height: 34px;
                             border-radius: 17px;
                             background: once-area.has-hover ? Theme.field-off : transparent;
-                            property <bool> tip-ready;
-                            Timer {
-                                running: once-area.has-hover && !once-btn.tip-ready;
-                                interval: 400ms;
-                                triggered => { once-btn.tip-ready = true; }
-                            }
                             once-area := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => {
                                     root.view-once = !root.view-once;
                                     composer.focus();
-                                }
-                                changed has-hover => {
-                                    if (!self.has-hover) {
-                                        once-btn.tip-ready = false;
-                                    }
                                 }
                             }
                             Icon {
@@ -1526,23 +1500,9 @@ export component AppWindow inherits Window {
                                 stroke-width: 1.5px;
                                 stroke-line-cap: round;
                             }
-                            // ends at the button's right edge: the button sits by the window's
-                            if once-area.has-hover && once-btn.tip-ready: Rectangle {
-                                x: parent.width - self.width;
-                                y: -self.height - 8px;
-                                width: once-tip.preferred-width + 20px;
-                                height: once-tip.preferred-height + 14px;
-                                border-radius: 6px;
-                                background: Theme.sidebar;
-                                border-width: 1px;
-                                border-color: Theme.border;
-                                once-tip := Text {
-                                    x: 10px;
-                                    y: 7px;
-                                    text: root.view-once ? @tr("Sending as view once: it can be opened one time\nClick to send normally") : @tr("Sending normally\nClick to send as view once");
-                                    color: Theme.text;
-                                    font-size: 12px;
-                                }
+                            Tip {
+                                hovered: once-area.has-hover;
+                                text: root.view-once ? @tr("Sending as view once: it can be opened one time\nClick to send normally") : @tr("Sending normally\nClick to send as view once");
                             }
                         }
                         // drawn like its neighbors (an outline, no fill), crossed out when off and lit
@@ -1552,23 +1512,11 @@ export component AppWindow inherits Window {
                             height: 34px;
                             border-radius: 17px;
                             background: hd-area.has-hover ? Theme.field-off : transparent;
-                            // the hint shows after the pointer rests on the button
-                            property <bool> tip-ready;
-                            Timer {
-                                running: hd-area.has-hover && !hd-btn.tip-ready;
-                                interval: 400ms;
-                                triggered => { hd-btn.tip-ready = true; }
-                            }
                             hd-area := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => {
                                     SettingsData.photo-quality = SettingsData.photo-quality == 1 ? 0 : 1;
                                     SettingsData.changed();
-                                }
-                                changed has-hover => {
-                                    if (!self.has-hover) {
-                                        hd-btn.tip-ready = false;
-                                    }
                                 }
                             }
                             Rectangle {
@@ -1597,23 +1545,9 @@ export component AppWindow inherits Window {
                                 stroke-width: 1.5px;
                                 stroke-line-cap: round;
                             }
-                            // ends at the button's right edge: the button sits by the window's
-                            if hd-area.has-hover && hd-btn.tip-ready: Rectangle {
-                                x: parent.width - self.width;
-                                y: -self.height - 8px;
-                                width: hd-tip.preferred-width + 20px;
-                                height: hd-tip.preferred-height + 14px;
-                                border-radius: 6px;
-                                background: Theme.sidebar;
-                                border-width: 1px;
-                                border-color: Theme.border;
-                                hd-tip := Text {
-                                    x: 10px;
-                                    y: 7px;
-                                    text: SettingsData.photo-quality == 1 ? @tr("Sending in high quality\nClick to switch to standard") : @tr("Sending in standard quality\nClick to switch to high");
-                                    color: Theme.text;
-                                    font-size: 12px;
-                                }
+                            Tip {
+                                hovered: hd-area.has-hover;
+                                text: SettingsData.photo-quality == 1 ? @tr("Sending in high quality\nClick to switch to standard") : @tr("Sending in standard quality\nClick to switch to high");
                             }
                         }
                         send-btn := Rectangle {
@@ -2432,6 +2366,14 @@ export component AppWindow inherits Window {
                     text: @tr("Save");
                     clicked => {
                         root.save-clicked(root.menu-id);
+                        root.menu-id = "";
+                    }
+                }
+                if root.menu-can-copy && root.menu-actions: MenuRow {
+                    icon: Icons.copy;
+                    text: @tr("Copy image");
+                    clicked => {
+                        root.copy-image-clicked(root.menu-id);
                         root.menu-id = "";
                     }
                 }

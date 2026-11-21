@@ -646,6 +646,29 @@ impl App {
         });
     }
 
+    /// Puts the picture on the clipboard. It is decoded in full here, so a limit well under
+    /// `VIEW_MAX_PIXELS` applies: the clipboard gets the PNG and the DIB, both held at once.
+    pub(super) fn copy_viewed(&self, id: &str, index: usize) {
+        let Some((path, _)) = self.viewed(id, index) else { return };
+        let tx = self.tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let done = (|| -> anyhow::Result<()> {
+                let bytes = sigwin_vault::read(&path).map_err(|_| anyhow::anyhow!(tr!("This image hasn't been downloaded yet.")))?;
+                let img = sigwin_thumb::decode_within(&bytes, CLIP_MAX_PIXELS)
+                    .map_err(|_| anyhow::anyhow!(tr!("This image is too large to copy.")))?;
+                drop(bytes);
+                let rgba = img.to_rgba8();
+                drop(img);
+                let png = sigwin_thumb::png_rgba(&rgba)?;
+                crate::clip::set_image(&png, rgba.as_raw(), rgba.width(), rgba.height())
+            })();
+            let _ = tx.send(Internal::Notice(match done {
+                Ok(()) => tr!("Copied.").into(),
+                Err(e) => tr!("Copy failed: {}", format!("{e:#}")),
+            }));
+        });
+    }
+
     pub(super) fn save_viewed(&self, id: &str, index: usize, owner: isize) {
         let Some((path, ptr)) = self.viewed(id, index) else { return };
         let tx = self.tx.clone();
@@ -703,6 +726,9 @@ fn free_name(dir: &Path, name: &str) -> PathBuf {
 /// The peak is 7 bytes per pixel for photos, 8 with transparency; the viewer holds the original at 4
 /// until it closes.
 const VIEW_MAX_PIXELS: u64 = 100_000_000;
+
+/// The most pixels copied to the clipboard (about 150MB of RGBA while it is encoded).
+const CLIP_MAX_PIXELS: u64 = 36_000_000;
 
 /// What presage calls itself to the CDN: its own constant is private, and a download that says
 /// something else would stand out for no reason.
