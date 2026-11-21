@@ -28,6 +28,7 @@ mod mention;
 mod sealed;
 mod secret;
 mod settings;
+mod shell;
 mod toast;
 mod tray;
 mod types;

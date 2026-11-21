@@ -964,7 +964,7 @@ async fn open_outside(tx: &UnboundedSender<Internal>, path: PathBuf, open_dir: &
     match tokio::task::spawn_blocking(move || decrypt_for_open(&path, &dir, &name)).await {
         Ok(Ok(plain)) => {
             let _ = tx.send(Internal::ProgressDone);
-            open_with_default_app(&plain);
+            crate::shell::open(plain.as_os_str());
         }
         Ok(Err(e)) => {
             let _ = tx.send(Internal::Notice(tr!("Couldn't open the attachment: {}", e)));
@@ -1359,23 +1359,6 @@ pub(super) fn sanitize(name: &str) -> String {
         .collect();
     let s = s.trim().trim_matches('.').to_string();
     if s.is_empty() { "attachment".into() } else { s }
-}
-
-pub(super) fn open_with_default_app(path: &Path) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", ""])
-            .arg(path)
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn();
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
-    }
 }
 
 pub(super) fn dir_size(dir: &Path) -> u64 {

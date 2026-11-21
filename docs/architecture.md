@@ -49,10 +49,11 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/winhook.rs` | window-proc subclass: repaint on restore, focus events, close to tray |
 | `src/format.rs` | composing text styles with markers |
 | `src/mention.rs` | composing @mentions: finding the query, filtering members, Signal's wire form |
-| `src/link.rs` | URL detection in message text, opening links |
+| `src/link.rs` | URL detection in message text, which links may be opened |
 | `src/i18n.rs` | UI language: `tr!`, the catalogs build.rs makes from `i18n/` (the ones Slint bundles), the catalog check |
 | `src/emoji.rs` | emoji-only message detection, the reaction picker's emoji list and recent row |
 | `src/clip.rs` | pasting files and images from the clipboard |
+| `src/shell.rs` | opening a file or link with its default app, never through `cmd` |
 | `src/picker.rs` | file dialogs in a child process |
 | `src/settings.rs` | user settings, owned by the UI thread |
 | `src/badge.rs` | unread count on the taskbar and tray icons |
