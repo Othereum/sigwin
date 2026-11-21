@@ -452,7 +452,10 @@ impl State {
     /// Draws if something changed; true when it did.
     fn draw(&mut self) -> bool {
         let size = self.w.window().size();
-        if size != self.size {
+        // a new buffer is blank: the renderer must paint all of it, not only what it thinks
+        // changed (after a scale change alone, next to nothing)
+        let fresh = size != self.size;
+        if fresh {
             self.size = size;
             self.buf = vec![Rgb8Pixel::default(); (size.width * size.height) as usize];
             self.w.window().request_redraw();
@@ -460,7 +463,13 @@ impl State {
         let width = size.width as usize;
         let buf = &mut self.buf;
         self.w.draw_if_needed(|r| {
+            if fresh {
+                r.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+            }
             r.render(buf, width);
+            if fresh {
+                r.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
+            }
         })
     }
 
