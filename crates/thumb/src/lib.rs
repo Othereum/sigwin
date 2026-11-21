@@ -61,27 +61,53 @@ pub fn decode(bytes: &[u8]) -> ImageResult<DynamicImage> {
     DynamicImage::from_decoder(decoder(bytes)?)
 }
 
-/// Decodes, turned the way its EXIF says.
-fn decode_upright(bytes: &[u8]) -> ImageResult<DynamicImage> {
-    let mut decoder = decoder(bytes)?;
-    let orientation = decoder.orientation()?;
-    let mut img = DynamicImage::from_decoder(decoder)?;
-    img.apply_orientation(orientation);
-    Ok(img)
-}
-
 /// Decodes upright and resizes to fit in `max` x `max`, enlarging a smaller image too.
 pub fn decode_thumb(bytes: &[u8], max: u32) -> ImageResult<DynamicImage> {
-    Ok(decode_upright(bytes)?.thumbnail(max, max))
+    decode_thumb_for(bytes, max, |_| max)
 }
 
 /// Decodes upright and resizes so its longer side is what `side` asks for its size, as far as
 /// the image has it, and at least `floor` (enlarging a smaller image to that, like `decode_thumb`).
 pub fn decode_thumb_for(bytes: &[u8], floor: u32, side: impl FnOnce((u32, u32)) -> u32) -> ImageResult<DynamicImage> {
-    let img = decode_upright(bytes)?;
-    let own = img.width().max(img.height());
-    let max = side((img.width(), img.height())).min(own).max(floor);
-    Ok(if max == own { img } else { img.thumbnail(max, max) })
+    let mut decoder = decoder(bytes)?;
+    let (w, h) = decoder.dimensions();
+    let orientation = decoder.orientation()?;
+    let own = w.max(h);
+    let max = side(if turns(orientation) { (h, w) } else { (w, h) }).min(own).max(floor);
+    let mut img = match jpeg_at_least(bytes, (w, h), max) {
+        Some(img) => img,
+        None => DynamicImage::from_decoder(decoder)?,
+    };
+    img.apply_orientation(orientation);
+    Ok(if img.width().max(img.height()) == max { img } else { img.thumbnail(max, max) })
+}
+
+/// A JPEG of `size` decoded at the smallest of 1/8, 1/4 and 1/2 that keeps `long` px on its
+/// longer side, never whole first: a 12MP photo is 36MB decoded, a quarter of it 2MB. `None`
+/// when no smaller scale keeps that, or it isn't a JPEG this decodes (CMYK, lossless, broken):
+/// it is decoded whole then.
+fn jpeg_at_least(bytes: &[u8], (w, h): (u32, u32), long: u32) -> Option<DynamicImage> {
+    use jpeg_decoder::PixelFormat;
+    let own = w.max(h);
+    if !bytes.starts_with(&[0xFF, 0xD8]) || long.saturating_mul(2) > own {
+        return None;
+    }
+    let at = |side: u32| u16::try_from((u64::from(side) * u64::from(long)).div_ceil(u64::from(own))).ok();
+    let mut d = jpeg_decoder::Decoder::new(bytes);
+    let (sw, sh) = d.scale(at(w)?, at(h)?).ok()?;
+    let px = d.decode().ok()?;
+    let (sw, sh) = (u32::from(sw), u32::from(sh));
+    match d.info()?.pixel_format {
+        PixelFormat::RGB24 => image::RgbImage::from_raw(sw, sh, px).map(DynamicImage::ImageRgb8),
+        PixelFormat::L8 => image::GrayImage::from_raw(sw, sh, px).map(DynamicImage::ImageLuma8),
+        PixelFormat::L16 | PixelFormat::CMYK32 => None,
+    }
+}
+
+/// Whether an image stored with `o` is shown turned a quarter, its sides swapped.
+fn turns(o: image::metadata::Orientation) -> bool {
+    use image::metadata::Orientation::{Rotate90, Rotate90FlipH, Rotate270, Rotate270FlipH};
+    matches!(o, Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH)
 }
 
 /// The longer side an image of `size` needs to fill `w` x `h` (cut around its center, as
@@ -113,23 +139,18 @@ fn cover_side_is_just_enough() {
 
 /// A photo file's size as shown (EXIF applied), from its header alone.
 pub fn photo_size(path: &std::path::Path) -> ImageResult<(u32, u32)> {
-    use image::metadata::Orientation::{Rotate90, Rotate90FlipH, Rotate270, Rotate270FlipH};
     let mut decoder = file_decoder(path)?;
     let (w, h) = decoder.dimensions();
-    Ok(match decoder.orientation()? {
-        Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH => (h, w),
-        _ => (w, h),
-    })
+    Ok(if turns(decoder.orientation()?) { (h, w) } else { (w, h) })
 }
 
 /// A photo file's size as shown (EXIF applied) and its blurhash. Past `max_pixels` it isn't
 /// decoded and has no blurhash, nor does one that turns out broken after its header.
 pub fn photo_facts(path: &std::path::Path, max_pixels: u64) -> ImageResult<((u32, u32), Option<String>)> {
-    use image::metadata::Orientation::{Rotate90, Rotate90FlipH, Rotate270, Rotate270FlipH};
     let mut decoder = file_decoder(path)?;
     let (w, h) = decoder.dimensions();
     let orientation = decoder.orientation()?;
-    let size = if matches!(orientation, Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH) { (h, w) } else { (w, h) };
+    let size = if turns(orientation) { (h, w) } else { (w, h) };
     if w as u64 * h as u64 > max_pixels {
         return Ok((size, None));
     }
@@ -790,12 +811,17 @@ mod tests {
     /// A JPEG of 40 x 20 whose EXIF says to turn it 90 degrees clockwise to show it: dark on the
     /// left, bright on the right.
     fn sideways_jpeg() -> Vec<u8> {
+        sideways_jpeg_of(40, 20)
+    }
+
+    /// `sideways_jpeg` at `w` x `h`.
+    fn sideways_jpeg_of(w: u32, h: u32) -> Vec<u8> {
         use image::ImageEncoder;
-        let img = RgbaImage::from_fn(40, 20, |x, _| if x < 20 { image::Rgba([0, 0, 0, 255]) } else { image::Rgba([255, 255, 255, 255]) });
+        let img = RgbaImage::from_fn(w, h, |x, _| if x < w / 2 { image::Rgba([0, 0, 0, 255]) } else { image::Rgba([255, 255, 255, 255]) });
         let rgb = DynamicImage::ImageRgba8(img).to_rgb8();
         let mut jpeg = Vec::new();
         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 95)
-            .write_image(rgb.as_raw(), 40, 20, image::ExtendedColorType::Rgb8)
+            .write_image(rgb.as_raw(), w, h, image::ExtendedColorType::Rgb8)
             .unwrap();
         // little-endian TIFF with one entry: Orientation (0x0112), a short, 6
         let tiff = [b"II*\0".as_slice(), &[8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0]].concat();
@@ -804,6 +830,30 @@ mod tests {
         let app1 = [[0xFF, 0xE1].as_slice(), &len.to_be_bytes(), &exif].concat();
         jpeg.splice(2..2, app1);
         jpeg
+    }
+
+    #[test]
+    fn a_big_jpeg_is_decoded_small_for_its_thumbnail() {
+        let jpeg = sideways_jpeg_of(1600, 800);
+        // stored 1600 x 800: a quarter (400 x 200) still has the 300 px asked for
+        assert!(jpeg_at_least(&jpeg, (1600, 800), 300).is_some_and(|i| (i.width(), i.height()) == (400, 200)));
+        // half of it wouldn't have it: decoded whole
+        assert!(jpeg_at_least(&jpeg, (1600, 800), 900).is_none());
+        let thumb = decode_thumb_for(&jpeg, 0, |size| {
+            assert_eq!(size, (800, 1600), "asked with the size as shown");
+            300
+        })
+        .unwrap()
+        .to_rgba8();
+        assert_eq!(thumb.dimensions(), (150, 300));
+        // upright: the dark half on top
+        assert!(thumb.get_pixel(75, 40)[0] < 50 && thumb.get_pixel(75, 260)[0] > 200);
+        // as the whole decode would have made it
+        let mut whole = decode(&jpeg).unwrap();
+        whole.apply_orientation(image::metadata::Orientation::Rotate90);
+        let whole = whole.thumbnail(300, 300).to_rgba8();
+        let diff = thumb.as_raw().iter().zip(whole.as_raw()).map(|(a, b)| u64::from(a.abs_diff(*b))).sum::<u64>();
+        assert!(diff / thumb.as_raw().len() as u64 <= 2, "mean difference {}", diff as f64 / thumb.as_raw().len() as f64);
     }
 
     #[test]
