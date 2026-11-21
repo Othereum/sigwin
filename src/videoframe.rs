@@ -23,6 +23,8 @@ const TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 /// Before the frame's pixels, the child writes the video's width, height and seconds, then the
 /// frame's width and height.
 const HEADER: usize = 20;
+/// Longest side of a frame asked for: past any picture's box at any scale.
+const MAX_SIDE: u32 = 2048;
 
 /// Call first thing in `main`: returns true if this process was the decoding child.
 pub fn run_if_child() -> bool {
@@ -38,7 +40,8 @@ pub fn run_if_child() -> bool {
     if read.is_err() || data.len() as u64 > MAX_INPUT {
         return true;
     }
-    if let Some(v) = decode(data) {
+    let side = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(crate::view::media::PHOTO_THUMB_MAX);
+    if let Some(v) = decode(data, side.min(MAX_SIDE)) {
         let mut out = std::io::stdout().lock();
         for n in [v.size.0, v.size.1, v.seconds, v.frame.width(), v.frame.height()] {
             let _ = out.write_all(&n.to_le_bytes());
@@ -51,7 +54,8 @@ pub fn run_if_child() -> bool {
 
 /// What the child read from a video.
 pub struct Decoded {
-    /// Upright, at most `PHOTO_THUMB_MAX` on its longer side.
+    /// Upright, at most the side asked for on its longer side (`PHOTO_THUMB_MAX` for a video being
+    /// sent).
     pub frame: RgbaImage,
     /// The video's own size, as shown (upright).
     pub size: (u32, u32),
@@ -66,22 +70,24 @@ impl Decoded {
     }
 }
 
-/// Reads an encrypted video file. `None`: the child couldn't decode it, and wouldn't next time either.
-pub fn first_frame(src: &Path) -> anyhow::Result<Option<Decoded>> {
+/// Reads an encrypted video file, its frame cut down to `side` on its longer side. `None`: the
+/// child couldn't decode it, and wouldn't next time either.
+pub fn first_frame(src: &Path, side: u32) -> anyhow::Result<Option<Decoded>> {
     let file = std::fs::File::open(src).context("open video")?;
-    run_child(|stdin| sigwin_vault::decrypt(file, stdin))
+    run_child(side, |stdin| sigwin_vault::decrypt(file, stdin))
 }
 
 /// Same for a plain file, one the user is sending.
 pub fn first_frame_plain(src: &Path) -> anyhow::Result<Option<Decoded>> {
     let mut file = std::fs::File::open(src).context("open video")?;
-    run_child(|mut stdin| std::io::copy(&mut file, &mut stdin).map(drop))
+    run_child(crate::view::media::PHOTO_THUMB_MAX, |mut stdin| std::io::copy(&mut file, &mut stdin).map(drop))
 }
 
 /// `feed` writes the plain video, and closes the pipe by dropping it.
-fn run_child(feed: impl FnOnce(ChildStdin) -> std::io::Result<()>) -> anyhow::Result<Option<Decoded>> {
+fn run_child(side: u32, feed: impl FnOnce(ChildStdin) -> std::io::Result<()>) -> anyhow::Result<Option<Decoded>> {
+    let side = side.min(MAX_SIDE);
     let mut cmd = Command::new(std::env::current_exe().context("own path")?);
-    cmd.arg(ARG).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.arg(ARG).arg(side.to_string()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -93,7 +99,7 @@ fn run_child(feed: impl FnOnce(ChildStdin) -> std::io::Result<()>) -> anyhow::Re
     let stdout = child.stdout.take().context("decoder stdout")?;
     // the child reads all of it before it writes anything. A child that died breaks the pipe.
     let fed = feed(stdin);
-    let max = crate::view::media::PHOTO_THUMB_MAX as u64;
+    let max = u64::from(side);
     let mut out = Vec::new();
     let read = stdout.take(HEADER as u64 + max * max * 4).read_to_end(&mut out);
     let _ = child.kill();
@@ -125,15 +131,15 @@ fn whole_seconds(hns: u64) -> u32 {
 }
 
 #[cfg(windows)]
-fn decode(data: Vec<u8>) -> Option<Decoded> {
+fn decode(data: Vec<u8>, side: u32) -> Option<Decoded> {
     let (img, rotation, seconds) = mf::first_frame(data)?;
     let (w, h) = img.dimensions();
     let size = if matches!(rotation, 90 | 270) { (h, w) } else { (w, h) };
-    Some(Decoded { frame: sigwin_thumb::rotated(sigwin_thumb::downscale(img, crate::view::media::PHOTO_THUMB_MAX), rotation), size, seconds })
+    Some(Decoded { frame: sigwin_thumb::rotated(sigwin_thumb::downscale(img, side), rotation), size, seconds })
 }
 
 #[cfg(not(windows))]
-fn decode(_data: Vec<u8>) -> Option<Decoded> {
+fn decode(_data: Vec<u8>, _side: u32) -> Option<Decoded> {
     None
 }
 

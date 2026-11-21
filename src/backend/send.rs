@@ -147,12 +147,12 @@ impl App {
             let shown = paths.len().min(view::media::GRID_SHOWN);
             for (n, path) in paths.iter().take(shown).enumerate() {
                 let Ok(bytes) = std::fs::read(path) else { continue };
-                let Ok(img) = sigwin_thumb::decode_thumb(&bytes, view::media::PHOTO_THUMB_MAX) else { continue };
-                let rgba = sigwin_thumb::to_rgba(&img);
                 let key = pending_photo_key(ts, n, single);
                 // the cell it fills: one photo's own box, or its place in the grid
                 let (w, h) = if single { view::media::fit(Some(sizes[0].0), Some(sizes[0].1)) } else { view::media::grid_cell_size(paths.len(), n) };
-                let rgba = sigwin_thumb::cover(&rgba, crate::types::physical_px(w), crate::types::physical_px(h));
+                let (w, h) = (crate::types::physical_px(w), crate::types::physical_px(h));
+                let Ok(img) = sigwin_thumb::decode_thumb_for(&bytes, 0, |d| sigwin_thumb::cover_side(d, (w, h))) else { continue };
+                let rgba = sigwin_thumb::cover(&sigwin_thumb::to_rgba(&img), w, h);
                 emit(Event::Thumb(Arc::new(Thumb { key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })));
             }
         });

@@ -1256,7 +1256,7 @@ fn demo_video_frame(path: &std::path::Path) -> Option<(image::RgbaImage, u32)> {
     let sealed = std::env::temp_dir().join(format!("sigwin-demo-video-{}.enc", std::process::id()));
     sigwin_vault::write(&sealed, &std::fs::read(path).ok()?).ok()?;
     let started = std::time::Instant::now();
-    let decoded = crate::videoframe::first_frame(&sealed);
+    let decoded = crate::videoframe::first_frame(&sealed, view::media::PHOTO_THUMB_MAX);
     let shown = decoded.as_ref().map(|d| d.as_ref().map(|d| (d.frame.dimensions(), d.seconds))).map_err(|e| e.to_string());
     tracing::info!("demo video frame and seconds: {shown:?} in {:?}", started.elapsed());
     let _ = std::fs::remove_file(&sealed);

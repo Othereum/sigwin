@@ -35,6 +35,7 @@ impl App {
         let tx = self.tx.clone();
         let gate = self.thumb_gate.clone();
         let downloads = self.attachment_downloads.clone();
+        let own = own_side(&ptr);
         // the same picture can be shown at another size; each shows how far it is
         let mut shown: Vec<String> = self.thumbs_requested.borrow().iter().filter(|k| k.starts_with(&file_key)).cloned().collect();
         // the media page's take turns, and only while they're still on screen there: scrolling
@@ -98,7 +99,7 @@ impl App {
             let permit = gate.acquire_owned().await;
             let res = tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                make_shaped_thumb(&k, &orig_path, &thumb_path, shape)
+                make_shaped_thumb(&k, &orig_path, &thumb_path, shape, own)
             })
             .await;
             if labelled {
@@ -122,6 +123,7 @@ impl App {
         let length_path = length_path(&self.paths.thumbs, &file_key);
         let orig_path = attachment_path(&self.paths.attachments, &file_key);
         let (w, h) = (crate::types::physical_px(size.0), crate::types::physical_px(size.1));
+        let own = ptr.width.zip(ptr.height).filter(|(w, h)| *w > 0 && *h > 0);
         let manager = self.manager.clone();
         let emit = self.emit.clone();
         let tx = self.tx.clone();
@@ -175,7 +177,7 @@ impl App {
             let emit_done = emit.clone();
             let res = tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                let t = make_video_thumb(&k, &orig_path, &thumb_path, &length_path, &no_frame, w, h)?;
+                let t = make_video_thumb(&k, &orig_path, &thumb_path, &length_path, &no_frame, w, h, own)?;
                 emit_done(Event::Thumb(Arc::new(t)));
                 // the picture doesn't wait for this: a thumbnail cached before lengths were kept
                 // has to read its video again
@@ -513,12 +515,13 @@ impl App {
     pub(super) fn viewer_thumbs(&self, id: &str, px: u32) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let images = viewer_images(dm, ts).into_iter();
-        let jobs: Vec<(String, Option<String>)> = images.map(|(i, a)| (view::media::attachment_key(a, ts, i), a.blur_hash.clone())).collect();
+        let jobs: Vec<(String, Option<String>, Option<u32>)> =
+            images.map(|(i, a)| (view::media::attachment_key(a, ts, i), a.blur_hash.clone(), own_side(a))).collect();
         let id = id.to_string();
         let emit = self.emit.clone();
         let (attachments, thumbs) = (self.paths.attachments.clone(), self.paths.thumbs.clone());
         tokio::task::spawn_local(async move {
-            for (index, (key, blur)) in jobs.into_iter().enumerate() {
+            for (index, (key, blur, own)) in jobs.into_iter().enumerate() {
                 let orig = attachment_path(&attachments, &key);
                 let thumb = thumbs.join(format!("{key}.enc"));
                 // not here: its blurhash, until going to it gets it
@@ -528,11 +531,10 @@ impl App {
                     }
                     continue;
                 }
-                let made = tokio::task::spawn_blocking(move || -> anyhow::Result<Thumb> {
-                    let t = make_thumb(&key, &orig, &thumb, 0)?;
-                    let img = image::RgbaImage::from_raw(t.width, t.height, t.rgba).context("thumbnail size")?;
-                    let square = sigwin_thumb::square(&image::DynamicImage::ImageRgba8(img), px);
-                    Ok(Thumb { key, width: square.width(), height: square.height(), rgba: square.into_raw() })
+                let made = tokio::task::spawn_blocking(move || {
+                    let target = Target::Cover(px, px);
+                    let source = thumb_source(|| Ok(sigwin_vault::read(&orig)?), view::media::PHOTO_THUMB_MAX, &thumb, target, own)?;
+                    anyhow::Ok(target.draw(&key, source))
                 })
                 .await;
                 match made {
@@ -921,7 +923,7 @@ fn video_length(path: &Path, orig: &Path) -> u32 {
     if !orig.exists() {
         return 0;
     }
-    match crate::videoframe::first_frame(orig) {
+    match crate::videoframe::first_frame(orig, view::media::PHOTO_THUMB_MAX) {
         Ok(v) => {
             let seconds = v.map_or(0, |v| v.seconds);
             save_length(path, seconds);
@@ -1016,12 +1018,26 @@ fn blur_for(key: &str, hash: &str, ptr: &AttachmentPointer, shape: &ThumbShape) 
     blur_thumb(key, hash, crate::types::physical_px(w), crate::types::physical_px(h))
 }
 
-fn make_video_thumb(key: &str, orig: &Path, thumb: &Path, length: &Path, no_frame: &Path, w: u32, h: u32) -> anyhow::Result<Thumb> {
+/// `own`: the video's size as its sender gave it.
+#[allow(clippy::too_many_arguments)]
+fn make_video_thumb(
+    key: &str,
+    orig: &Path,
+    thumb: &Path,
+    length: &Path,
+    no_frame: &Path,
+    w: u32,
+    h: u32,
+    own: Option<(u32, u32)>,
+) -> anyhow::Result<Thumb> {
+    let target = Target::Cover(w, h);
     let cached = if thumb.exists() { load_cached(thumb).ok() } else { None };
+    // having the frame doesn't mean having the video
     let frame = match cached {
-        Some(f) => f,
-        None => {
-            let Some(v) = crate::videoframe::first_frame(orig)? else {
+        Some(f) if !orig.exists() || !too_small(&f, target, own.map(|(w, h)| w.max(h))) => f,
+        _ => {
+            let side = target.side(own.unwrap_or((w, h))).max(view::media::PHOTO_THUMB_MAX);
+            let Some(v) = crate::videoframe::first_frame(orig, side)? else {
                 let _ = std::fs::write(no_frame, []);
                 anyhow::bail!("not decodable here");
             };
@@ -1030,23 +1046,65 @@ fn make_video_thumb(key: &str, orig: &Path, thumb: &Path, length: &Path, no_fram
             v.frame
         }
     };
-    let cell = sigwin_thumb::cover(&frame, w, h);
-    Ok(Thumb { key: key.to_string(), width: cell.width(), height: cell.height(), rgba: cell.into_raw() })
+    Ok(target.draw(key, frame))
 }
 
-fn make_shaped_thumb(key: &str, orig: &Path, thumb: &Path, shape: ThumbShape) -> anyhow::Result<Thumb> {
-    let (w, h) = match shape {
-        ThumbShape::Fit(fit) => return make_thumb(key, orig, thumb, fit),
-        ThumbShape::Cover(w, h) => (crate::types::physical_px(w), crate::types::physical_px(h)),
-    };
-    let t = make_thumb(key, orig, thumb, 0)?;
-    let img = image::RgbaImage::from_raw(t.width, t.height, t.rgba).context("thumbnail size")?;
-    let cell = sigwin_thumb::cover(&img, w, h);
-    Ok(Thumb { key: t.key, width: cell.width(), height: cell.height(), rgba: cell.into_raw() })
+fn make_shaped_thumb(key: &str, orig: &Path, thumb: &Path, shape: ThumbShape, own: Option<u32>) -> anyhow::Result<Thumb> {
+    let target = shape.target();
+    let source = thumb_source(|| Ok(sigwin_vault::read(orig)?), view::media::PHOTO_THUMB_MAX, thumb, target, own)?;
+    Ok(target.draw(key, source))
 }
 
-pub(super) fn make_thumb(key: &str, orig: &Path, thumb: &Path, fit: u32) -> anyhow::Result<Thumb> {
-    make_thumb_from(key, || Ok(sigwin_vault::read(orig)?), view::media::PHOTO_THUMB_MAX, thumb, fit)
+/// The longer side of an attachment as its sender gave it.
+fn own_side(ptr: &AttachmentPointer) -> Option<u32> {
+    Some(ptr.width?.max(ptr.height?)).filter(|s| *s > 0)
+}
+
+/// What a picture is drawn at, physical px.
+#[derive(Clone, Copy)]
+pub(super) enum Target {
+    /// the longer side is this long
+    Fit(u32),
+    /// fills this size, cut off around its center
+    Cover(u32, u32),
+}
+
+impl ThumbShape {
+    fn target(&self) -> Target {
+        let px = crate::types::physical_px;
+        match *self {
+            ThumbShape::Fit(fit) => Target::Fit(px(fit)),
+            ThumbShape::Cover(w, h) => Target::Cover(px(w), px(h)),
+        }
+    }
+}
+
+impl Target {
+    /// The longer side a source of `size` needs to be drawn without being enlarged.
+    fn side(self, size: (u32, u32)) -> u32 {
+        match self {
+            Target::Fit(px) => px,
+            Target::Cover(w, h) => sigwin_thumb::cover_side(size, (w, h)),
+        }
+    }
+
+    /// Resampled to exactly its size: the software renderer would scale it nearest-neighbor,
+    /// which shreds stickers.
+    pub(super) fn draw(self, key: &str, source: image::RgbaImage) -> Thumb {
+        let img = match self {
+            Target::Fit(px) => sigwin_thumb::fit(source, px),
+            Target::Cover(w, h) => sigwin_thumb::cover(&source, w, h),
+        };
+        Thumb { key: key.to_string(), width: img.width(), height: img.height(), rgba: img.into_raw() }
+    }
+}
+
+/// Whether a cached source would be enlarged for `target` while the original has more. That
+/// comes from `own`, the sender's word for its longer side: a cache holds small pictures enlarged
+/// (`decode_thumb_for`), so it can't tell. Without it, the cache is kept.
+fn too_small(cached: &image::RgbaImage, target: Target, own: Option<u32>) -> bool {
+    let side = cached.width().max(cached.height());
+    side < target.side(cached.dimensions()) && own.is_some_and(|o| o > side)
 }
 
 /// A cached (encrypted) PNG.
@@ -1060,29 +1118,31 @@ pub(crate) fn save_cached(path: &Path, png: image::ImageResult<Vec<u8>>) {
     }
 }
 
-/// Decodes (sniffing the format, file names may lie) and downsizes to `max`, caching the result as PNG.
-/// With `fit` > 0 the result is then resampled (down or up) so its longer side is exactly `fit` logical
-/// px on screen: the software renderer scales images nearest-neighbor, which shreds stickers.
-pub(super) fn make_thumb_from(
-    key: &str,
+/// What a picture is drawn from at `target`: its cached PNG, or one decoded from `bytes` (sniffing
+/// the format, file names may lie) and cached. That holds at least `floor` on its longer side,
+/// and enough for `target` as far as the original has it. A cache made for a smaller size is
+/// made again (`too_small`, with `own`), unless the original can't be had.
+pub(super) fn thumb_source(
     bytes: impl FnOnce() -> anyhow::Result<Vec<u8>>,
-    max: u32,
+    floor: u32,
     thumb: &Path,
-    fit: u32,
-) -> anyhow::Result<Thumb> {
+    target: Target,
+    own: Option<u32>,
+) -> anyhow::Result<image::RgbaImage> {
     let cached = if thumb.exists() { load_cached(thumb).ok() } else { None };
-    let mut rgba = match cached {
-        Some(rgba) => rgba,
-        None => {
-            let img = sigwin_thumb::decode_thumb(&bytes()?, max)?;
-            save_cached(thumb, sigwin_thumb::png(&img));
-            sigwin_thumb::to_rgba(&img)
-        }
+    let cached = match cached {
+        Some(c) if !too_small(&c, target, own) => return Ok(c),
+        c => c,
     };
-    if fit > 0 {
-        rgba = sigwin_thumb::fit(rgba, crate::types::physical_px(fit));
+    let made = bytes().and_then(|b| Ok(sigwin_thumb::decode_thumb_for(&b, floor, |size| target.side(size))?));
+    match (made, cached) {
+        (Ok(img), _) => {
+            save_cached(thumb, sigwin_thumb::png(&img));
+            Ok(sigwin_thumb::to_rgba(&img))
+        }
+        (Err(_), Some(c)) => Ok(c),
+        (Err(e), None) => Err(e),
     }
-    Ok(Thumb { key: key.to_string(), width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
 }
 
 /// Encrypted copy of a downloaded attachment. The name says nothing about the file: its real
@@ -1366,6 +1426,41 @@ mod tests {
         // a broken file is read as missing
         std::fs::write(&path, b"junk").unwrap();
         assert_eq!(video_length(&path, &orig), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cache_too_small_for_its_picture_is_made_again() {
+        sigwin_vault::init([3; 32]);
+        let dir = std::env::temp_dir().join(format!("sigwin-thumbsize-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = |w, h| sigwin_thumb::png_rgba(&image::RgbaImage::from_pixel(w, h, image::Rgba([90, 90, 90, 255]))).unwrap();
+        let (big, small) = (png(1200, 900), png(100, 100));
+        let thumb = dir.join("t.enc");
+        let long = |img: &image::RgbaImage| img.width().max(img.height());
+        let source = |bytes: &[u8], target, own| thumb_source(|| Ok(bytes.to_vec()), 450, &thumb, target, own).unwrap();
+
+        // made for a small cell: the floor
+        assert_eq!(long(&source(&big, Target::Cover(150, 150), Some(1200))), 450);
+        // a bigger box: made again, enough to fill it, and kept so
+        assert_eq!(long(&source(&big, Target::Cover(800, 600), Some(1200))), 800);
+        assert_eq!(long(&load_cached(&thumb).unwrap()), 800);
+        // never past the original
+        assert_eq!(long(&source(&big, Target::Cover(1600, 1200), Some(1200))), 1200);
+        // without the sender's size, or when it's no bigger, the cache stays
+        let _ = std::fs::remove_file(&thumb);
+        source(&big, Target::Cover(150, 150), None);
+        assert_eq!(long(&source(&big, Target::Cover(800, 600), None)), 450);
+        // a small picture is held enlarged to the floor, and not made again
+        let _ = std::fs::remove_file(&thumb);
+        assert_eq!(long(&source(&small, Target::Cover(100, 100), Some(100))), 450);
+        assert_eq!(long(&source(&small, Target::Fit(675), Some(100))), 450);
+        // the original gone: the cache it had
+        let _ = std::fs::remove_file(&thumb);
+        source(&big, Target::Cover(150, 150), Some(1200));
+        let gone = thumb_source(|| anyhow::bail!("gone"), 450, &thumb, Target::Cover(800, 600), Some(1200)).unwrap();
+        assert_eq!(long(&gone), 450);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

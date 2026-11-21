@@ -388,7 +388,8 @@ impl StickerJob {
         }
         let source = self.source(dir);
         let bytes = self.bytes;
-        let t = make_thumb_from(&self.key, || bytes.context("no sticker bytes"), THUMB_MAX, &source, self.fit)?;
+        let target = Target::Fit(px);
+        let t = target.draw(&self.key, thumb_source(|| bytes.context("no sticker bytes"), THUMB_MAX, &source, target, None)?);
         if let Some(img) = image::RgbaImage::from_raw(t.width, t.height, t.rgba.clone()) {
             save_cached(&fitted, sigwin_thumb::png_rgba(&img));
         }

@@ -164,16 +164,18 @@ async fn fetch(url: String, key: String) -> Option<(Fetched, Vec<Thumb>)> {
 /// The image's size, its size on the card, and thumbnails for the card and the composer.
 fn card_images(bytes: &[u8], key: &str) -> Option<((u32, u32), (u32, u32), Vec<Thumb>)> {
     let dims = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
-    let img = sigwin_thumb::decode_thumb(bytes, view::media::PHOTO_THUMB_MAX).ok()?;
-    let rgba = sigwin_thumb::to_rgba(&img);
     let size = view::media::link_image_size(Some(dims.0), Some(dims.1));
+    let card = (crate::types::physical_px(size.0), crate::types::physical_px(size.1));
     let small = crate::types::physical_px(COMPOSER_IMAGE);
+    let side = |d| sigwin_thumb::cover_side(d, card).max(sigwin_thumb::cover_side(d, (small, small)));
+    let img = sigwin_thumb::decode_thumb_for(bytes, 0, side).ok()?;
+    let rgba = sigwin_thumb::to_rgba(&img);
     let thumb = |key: String, w, h| {
         let cell = sigwin_thumb::cover(&rgba, w, h);
         Thumb { key, width: cell.width(), height: cell.height(), rgba: cell.into_raw() }
     };
     let thumbs = vec![
-        thumb(key.to_string(), crate::types::physical_px(size.0), crate::types::physical_px(size.1)),
+        thumb(key.to_string(), card.0, card.1),
         thumb(format!("{key}{COMPOSER_KEY}"), small, small),
     ];
     Some((dims, size, thumbs))

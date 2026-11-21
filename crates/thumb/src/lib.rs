@@ -75,6 +75,42 @@ pub fn decode_thumb(bytes: &[u8], max: u32) -> ImageResult<DynamicImage> {
     Ok(decode_upright(bytes)?.thumbnail(max, max))
 }
 
+/// Decodes upright and resizes so its longer side is what `side` asks for its size, as far as
+/// the image has it, and at least `floor` (enlarging a smaller image to that, like `decode_thumb`).
+pub fn decode_thumb_for(bytes: &[u8], floor: u32, side: impl FnOnce((u32, u32)) -> u32) -> ImageResult<DynamicImage> {
+    let img = decode_upright(bytes)?;
+    let own = img.width().max(img.height());
+    let max = side((img.width(), img.height())).min(own).max(floor);
+    Ok(if max == own { img } else { img.thumbnail(max, max) })
+}
+
+/// The longer side an image of `size` needs to fill `w` x `h` (cut around its center, as
+/// `cover` does) without being enlarged.
+pub fn cover_side((sw, sh): (u32, u32), (w, h): (u32, u32)) -> u32 {
+    if sw == 0 || sh == 0 {
+        return w.max(h);
+    }
+    let long = u64::from(sw.max(sh));
+    let need = (long * u64::from(w)).div_ceil(u64::from(sw)).max((long * u64::from(h)).div_ceil(u64::from(sh)));
+    u32::try_from(need).unwrap_or(u32::MAX)
+}
+
+#[test]
+fn cover_side_is_just_enough() {
+    // a wide photo in a taller box is held by its height
+    assert_eq!(cover_side((4000, 3000), (600, 450)), 600);
+    assert_eq!(cover_side((4000, 2000), (600, 450)), 900);
+    assert_eq!(cover_side((450, 600), (300, 300)), 600 * 300 / 450);
+    // made at that size, cutting it never enlarges it
+    for (size, target) in [((4000, 3000), (601, 449)), ((1000, 7), (150, 150)), ((333, 1000), (253, 450))] {
+        let side = cover_side(size, target);
+        // what `thumbnail` gives
+        let ratio = f64::from(side) / f64::from(size.0.max(size.1));
+        let (w, h) = ((f64::from(size.0) * ratio).round() as u32, (f64::from(size.1) * ratio).round() as u32);
+        assert!(w >= target.0 && h >= target.1, "{size:?} {target:?}: {w}x{h}");
+    }
+}
+
 /// A photo file's size as shown (EXIF applied), from its header alone.
 pub fn photo_size(path: &std::path::Path) -> ImageResult<(u32, u32)> {
     use image::metadata::Orientation::{Rotate90, Rotate90FlipH, Rotate270, Rotate270FlipH};
