@@ -264,6 +264,8 @@ export component MenuRow inherits Rectangle {
     // before the text (one of `Icons`)
     in property <string> icon;
     in property <bool> danger;
+    // the current one of a choice: a check at the end
+    in property <bool> checked;
     callback clicked;
     height: 32px;
     border-radius: 6px;
@@ -271,6 +273,13 @@ export component MenuRow inherits Rectangle {
     ta := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+    if root.checked: Icon {
+        x: parent.width - self.width - 10px;
+        y: (parent.height - self.height) / 2;
+        size: 16px;
+        icon: Icons.check;
+        tint: Theme.accent;
     }
     if root.icon != "": Icon {
         x: 10px;

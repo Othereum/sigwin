@@ -683,7 +683,7 @@ impl App {
         for (k, s) in built.wanted_stickers {
             let Some(ptr) = s.data.clone() else { continue };
             if self.thumbs_requested.borrow_mut().insert(k.clone()) {
-                self.request_thumb(k.clone(), k, ptr, ThumbShape::Fit(view::media::STICKER_SIZE), auto, Some(s));
+                self.request_thumb(k.clone(), k, ptr, ThumbShape::Fit(view::media::sticker_size()), auto, Some(s));
             }
         }
         // newest first: videos take turns, and the newest are the ones on screen

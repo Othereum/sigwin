@@ -1163,7 +1163,7 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
         return;
     }
     let (key, fit) = match c {
-        Command::StickerFrames(k) => (k.clone(), view::media::STICKER_SIZE),
+        Command::StickerFrames(k) => (k.clone(), view::media::sticker_size()),
         Command::PickerFrames { pack, id } => (format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX), 72),
         _ => return,
     };

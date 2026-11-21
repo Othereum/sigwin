@@ -231,6 +231,12 @@ export component AppWindow inherits Window {
     property <length> pin-menu-y;
     // the menu shows only the reactions (opened by the hover tools' reaction button)
     in-out property <bool> menu-reacts;
+    // what the message shows that has a size choice: 0 none, 1 photos, 2 a sticker
+    in property <int> menu-media;
+    // the menu shows that size's choices instead of the actions, and stays open as they apply
+    in-out property <bool> menu-size-step;
+    // the menu shows its actions (not a step, the picker or only the reactions)
+    property <bool> menu-actions: !root.menu-pin-step && !root.menu-size-step && !root.menu-picker && !root.menu-reacts;
     in-out property <int> picker-tab;
     // the open tab's rows (empty while the picker is closed) and the emoji we reacted with lately
     in property <[[string]]> picker-rows;
@@ -2077,7 +2083,7 @@ export component AppWindow inherits Window {
                         root.menu-id = "";
                     }
                 }
-                if !root.menu-pin-step && !root.menu-picker && !root.menu-reacts: MenuRow {
+                if root.menu-actions: MenuRow {
                     icon: Icons.reply;
                     text: @tr("Reply");
                     clicked => {
@@ -2085,7 +2091,7 @@ export component AppWindow inherits Window {
                         root.menu-id = "";
                     }
                 }
-                if !root.menu-pin-step && !root.menu-picker && !root.menu-reacts: MenuRow {
+                if root.menu-actions: MenuRow {
                     icon: Icons.pin;
                     text: root.menu-pinned ? @tr("Unpin") : @tr("Pin");
                     clicked => {
@@ -2097,7 +2103,7 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                if root.menu-can-edit && !root.menu-pin-step && !root.menu-picker && !root.menu-reacts: MenuRow {
+                if root.menu-can-edit && root.menu-actions: MenuRow {
                     icon: Icons.edit;
                     text: @tr("Edit");
                     clicked => {
@@ -2105,7 +2111,35 @@ export component AppWindow inherits Window {
                         root.menu-id = "";
                     }
                 }
-                if root.menu-info != "" && !root.menu-pin-step && !root.menu-picker && !root.menu-reacts: MenuRow {
+                if root.menu-media > 0 && root.menu-actions: MenuRow {
+                    icon: root.menu-media == 2 ? Icons.sticker : Icons.gallery;
+                    text: root.menu-media == 2 ? @tr("Sticker size") : @tr("Photo size");
+                    clicked => { root.menu-size-step = true; }
+                }
+                if root.menu-size-step && !root.menu-picker: HorizontalLayout {
+                    padding-left: 10px;
+                    Text {
+                        height: 28px;
+                        text: root.menu-media == 2 ? @tr("Sticker size in chats") : @tr("Photo size in chats");
+                        color: Theme.subtle;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+                for s[i] in root.menu-size-step && !root.menu-picker ? [@tr("Small"), @tr("Medium"), @tr("Large")] : []: MenuRow {
+                    text: s;
+                    checked: i == (root.menu-media == 2 ? SettingsData.sticker-size : SettingsData.photo-size);
+                    // the menu stays: the message changes beside it, and another size is a click away
+                    clicked => {
+                        if (root.menu-media == 2) {
+                            SettingsData.sticker-size = i;
+                        } else {
+                            SettingsData.photo-size = i;
+                        }
+                        SettingsData.changed();
+                    }
+                }
+                if root.menu-info != "" && root.menu-actions: MenuRow {
                     icon: Icons.info;
                     text: @tr("Info");
                     clicked => {
@@ -2114,7 +2148,7 @@ export component AppWindow inherits Window {
                         root.menu-id = "";
                     }
                 }
-                if root.menu-can-delete && !root.menu-pin-step && !root.menu-picker && !root.menu-reacts: MenuRow {
+                if root.menu-can-delete && root.menu-actions: MenuRow {
                     icon: Icons.trash;
                     text: @tr("Delete for everyone");
                     danger: true;

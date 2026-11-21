@@ -838,6 +838,8 @@ pub enum Command {
     ClearThumbs,
     /// the window's scale factor changed: every picture shown was sized for the old one
     ScaleChanged,
+    /// the photo or sticker size in chats changed (`view::media::set_sizes`)
+    MediaResized,
     /// the clock format changed: the thread list's times are said again
     ClockChanged,
     /// turn a thread's notifications off / on, or follow the phone again

@@ -135,7 +135,7 @@ impl App {
         tokio::task::spawn_blocking(move || {
             let started = std::time::Instant::now();
             let f = match sigwin_vault::read(&path) {
-                Ok(bytes) => Frames::decode(key, &bytes, view::media::STICKER_SIZE),
+                Ok(bytes) => Frames::decode(key, &bytes, view::media::sticker_size()),
                 Err(_) => Frames::still(key),
             };
             debug!(ms = started.elapsed().as_millis() as u64, kb = f.png.len() / 1024, "sticker frames");
@@ -221,7 +221,7 @@ impl App {
         let key = image_key.clone();
         tokio::task::spawn_blocking(move || {
             let img = sigwin_thumb::decode(&bytes).map(|i| {
-                sigwin_thumb::fit(sigwin_thumb::to_rgba(&i), crate::types::physical_px(view::media::STICKER_SIZE))
+                sigwin_thumb::fit(sigwin_thumb::to_rgba(&i), crate::types::physical_px(view::media::sticker_size()))
             });
             if let Ok(rgba) = img {
                 let t = Thumb { key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() };

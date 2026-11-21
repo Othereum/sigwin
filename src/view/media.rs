@@ -6,15 +6,46 @@ use presage::proto::AttachmentPointer;
 use super::text::is_long_text;
 use crate::types::MsgDto;
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
 /// Decode size of stickers (also part of their cache file names).
 pub const THUMB_MAX: u32 = 400;
-/// Photo boxes in the chat, logical px (w, h): landscape and square vs portrait. A square comes out 300x300.
+/// Photo boxes in the chat at the medium size, logical px (w, h): landscape and square vs
+/// portrait. A square comes out 300x300.
 const PHOTO_BOX_WIDE: (u32, u32) = (400, 300);
 const PHOTO_BOX_TALL: (u32, u32) = (300, 450);
-/// Decode size of photo thumbnails: the longest side a photo can show.
+/// Least longer side of photo thumbnail caches: a medium photo's longest. Larger ones are made
+/// for what is drawn bigger (`backend::files::thumb_source`).
 pub const PHOTO_THUMB_MAX: u32 = PHOTO_BOX_TALL.1;
 
-pub const STICKER_SIZE: u32 = 180;
+/// The sizes chosen for photos and stickers in chats (`Settings::photo_size`, `sticker_size`):
+/// 0 small, 1 medium, 2 large.
+static PHOTO_SIZE: AtomicU8 = AtomicU8::new(1);
+static STICKER_CHOICE: AtomicU8 = AtomicU8::new(1);
+
+/// Sets the sizes. Whether they changed.
+pub fn set_sizes(photo: u8, sticker: u8) -> bool {
+    let old = (PHOTO_SIZE.swap(photo.min(2), Ordering::Relaxed), STICKER_CHOICE.swap(sticker.min(2), Ordering::Relaxed));
+    old != (photo.min(2), sticker.min(2))
+}
+
+fn photo_choice() -> u8 {
+    PHOTO_SIZE.load(Ordering::Relaxed)
+}
+
+/// `v` logical px at the medium photo size, at size `choice`.
+fn photo_px(v: u32, choice: u8) -> u32 {
+    match choice {
+        0 => (v * 3).div_ceil(4),
+        2 => (v * 4).div_ceil(3),
+        _ => v,
+    }
+}
+
+/// A sticker's longer side in chats, logical px.
+pub fn sticker_size() -> u32 {
+    [120, 180, 240][STICKER_CHOICE.load(Ordering::Relaxed).min(2) as usize]
+}
 
 /// A cell of a chat's media page, square, logical px (`GalleryData.cell` in the UI).
 pub const GALLERY_CELL: u32 = 120;
@@ -272,14 +303,53 @@ pub const GRID_SHOWN: usize = 5;
 
 /// Where a grid of `count` images (2 or more) puts them: x, y, width and height in logical px,
 /// with a 1px gap. As in Signal's apps, the first ones are the largest.
-fn grid_cells(count: usize) -> &'static [(u32, u32, u32, u32)] {
+fn grid_cells(count: usize) -> Vec<(u32, u32, u32, u32)> {
+    grid_cells_at(count, photo_choice())
+}
+
+fn grid_cells_at(count: usize, choice: u8) -> Vec<(u32, u32, u32, u32)> {
+    // 300 wide at the medium size, and its 1px gap
+    let width = photo_px(300, choice) + 1;
     match count {
-        0 | 1 => &[],
-        2 => &[(0, 0, 150, 150), (151, 0, 150, 150)],
-        3 => &[(0, 0, 200, 201), (201, 0, 100, 100), (201, 101, 100, 100)],
-        4 => &[(0, 0, 150, 150), (151, 0, 150, 150), (0, 151, 150, 150), (151, 151, 150, 150)],
-        _ => &[(0, 0, 150, 150), (151, 0, 150, 150), (0, 151, 100, 100), (101, 151, 99, 100), (201, 151, 100, 100)],
+        0 | 1 => Vec::new(),
+        2 => split(width, &[1, 1]).into_iter().map(|(x, w)| (x, 0, w, w)).collect(),
+        3 => {
+            // a large one, and two stacked beside it as tall as it
+            let [(bx, bw), (sx, sw)] = split(width, &[2, 1])[..] else { unreachable!() };
+            let side = split(2 * sw + 1, &[1, 1]);
+            let mut cells = vec![(bx, 0, bw, 2 * sw + 1)];
+            cells.extend(side.into_iter().map(|(y, h)| (sx, y, sw, h)));
+            cells
+        }
+        4 => {
+            let half = split(width, &[1, 1]);
+            half.iter().flat_map(|&(y, h)| half.iter().map(move |&(x, w)| (x, y, w, h))).collect()
+        }
+        _ => {
+            let (top, bottom) = (split(width, &[1, 1]), split(width, &[1, 1, 1]));
+            let (top_h, bottom_h) = (top[0].1, bottom[0].1);
+            let mut cells: Vec<_> = top.into_iter().map(|(x, w)| (x, 0, w, top_h)).collect();
+            cells.extend(bottom.into_iter().map(|(x, w)| (x, top_h + 1, w, bottom_h)));
+            cells
+        }
     }
+}
+
+/// `total` px cut into parts of these weights, with a 1px gap between them: (start, length).
+fn split(total: u32, weights: &[u32]) -> Vec<(u32, u32)> {
+    let free = u64::from(total - (weights.len() as u32 - 1));
+    let sum: u64 = weights.iter().map(|&w| u64::from(w)).sum();
+    let mut before = 0u64;
+    let edge = |weight: u64| ((free * weight * 2 + sum) / (2 * sum)) as u32;
+    weights
+        .iter()
+        .enumerate()
+        .map(|(n, &w)| {
+            let (start, end) = (edge(before), edge(before + u64::from(w)));
+            before += u64::from(w);
+            (start + n as u32, end - start)
+        })
+        .collect()
 }
 
 /// Width and height of cell `n` in a grid of `count` images (logical px).
@@ -340,18 +410,24 @@ pub fn captioned(m: &MsgDto) -> bool {
 }
 
 /// Size a lone photo of `w` x `h` is shown at (logical px): scaled into the box for its
-/// orientation, never up, unless it is smaller than the least it is shown at. An extreme shape
-/// is cut to the box.
+/// orientation at the chosen size, never up, unless it is smaller than the least it is shown at.
+/// An extreme shape is cut to the box.
 pub fn fit(w: Option<u32>, h: Option<u32>, captioned: bool) -> (u32, u32) {
-    let (Some(w), Some(h)) = (w, h) else { return PHOTO_BOX_WIDE };
+    fit_at(w, h, captioned, photo_choice())
+}
+
+fn fit_at(w: Option<u32>, h: Option<u32>, captioned: bool, choice: u8) -> (u32, u32) {
+    let sized = |(w, h): (u32, u32)| (photo_px(w, choice), photo_px(h, choice));
+    let (Some(w), Some(h)) = (w, h) else { return sized(PHOTO_BOX_WIDE) };
     if w == 0 || h == 0 {
-        return PHOTO_BOX_WIDE;
+        return sized(PHOTO_BOX_WIDE);
     }
-    let (bw, bh) = if h > w { PHOTO_BOX_TALL } else { PHOTO_BOX_WIDE };
+    let (bw, bh) = sized(if h > w { PHOTO_BOX_TALL } else { PHOTO_BOX_WIDE });
     let (w, h) = (w as f64, h as f64);
     let into_box = (bw as f64 / w).min(bh as f64 / h).min(1.0);
+    // the bubble's width is the UI's, at any size
     let min_w = if captioned { CAPTIONED_MIN_WIDTH } else { 0 };
-    let least = (PHOTO_MIN as f64 / w.min(h)).max(min_w as f64 / w);
+    let least = (photo_px(PHOTO_MIN, choice) as f64 / w.min(h)).max(min_w as f64 / w);
     let s = into_box.max(least);
     let side = |v: f64, most: u32| ((v * s).round() as u32).clamp(1, most);
     let (w, h) = (side(w, bw), side(h, bh));
@@ -426,7 +502,7 @@ mod tests {
 
     #[test]
     fn photo_size_caps() {
-        let f = |w, h| fit(Some(w), Some(h), false);
+        let f = |w, h| fit_at(Some(w), Some(h), false, 1);
         assert_eq!(f(3000, 3000), (300, 300)); // square
         assert_eq!(f(4000, 3000), (400, 300)); // 4:3 unchanged
         assert_eq!(f(3000, 4000), (300, 400)); // 3:4 is width-limited
@@ -434,12 +510,12 @@ mod tests {
         assert_eq!(f(900, 1600), (253, 450)); // 9:16
         assert_eq!(f(1600, 900), (400, 225)); // 16:9 unchanged
         assert_eq!(f(150, 120), (150, 120)); // never upscaled
-        assert_eq!(fit(None, None, false), (400, 300));
+        assert_eq!(fit_at(None, None, false, 1), (400, 300));
     }
 
     #[test]
     fn small_photos_have_a_least_size() {
-        let f = |w, h, c| fit(Some(w), Some(h), c);
+        let f = |w, h, c| fit_at(Some(w), Some(h), c, 1);
         assert_eq!(f(1, 1, false), (100, 100));
         assert_eq!(f(60, 40, false), (150, 100)); // its shape kept
         // extreme shapes are cut to the box
@@ -450,24 +526,41 @@ mod tests {
         assert_eq!(f(300, 100, true), (300, 100));
         assert_eq!(f(150, 120, true), (200, 160));
         assert_eq!(f(10, 1000, true), (200, 450));
-        assert_eq!(fit(None, None, true), (400, 300));
+        assert_eq!(fit_at(None, None, true, 1), (400, 300));
+    }
+
+    #[test]
+    fn photos_follow_the_chosen_size() {
+        let f = |w, h, c, choice| fit_at(Some(w), Some(h), c, choice);
+        assert_eq!(f(4000, 3000, false, 0), (300, 225));
+        assert_eq!(f(4000, 3000, false, 2), (533, 400));
+        assert_eq!(f(3000, 4000, false, 2), (400, 533));
+        assert_eq!(fit_at(None, None, false, 0), (300, 225));
+        // the least size follows; the caption's bubble doesn't
+        assert_eq!(f(1, 1, false, 0), (75, 75));
+        assert_eq!(f(1, 1, false, 2), (134, 134));
+        assert_eq!(f(16, 16, true, 0), (200, 200));
+        assert_eq!(f(16, 16, true, 2), (200, 200));
     }
 
     #[test]
     fn grid_cells_fill_their_box_without_touching() {
-        for count in 2..8 {
-            let cells = grid_cells(count);
+        // the medium size, as it always was
+        assert_eq!(grid_cells_at(3, 1), [(0, 0, 200, 201), (201, 0, 100, 100), (201, 101, 100, 100)]);
+        assert_eq!(grid_cells_at(5, 1), [(0, 0, 150, 150), (151, 0, 150, 150), (0, 151, 100, 100), (101, 151, 99, 100), (201, 151, 100, 100)]);
+        for (count, choice) in (2..8).flat_map(|n| (0..3).map(move |c| (n, c))) {
+            let cells = grid_cells_at(count, choice);
             assert_eq!(cells.len(), count.min(GRID_SHOWN));
             let width = cells.iter().map(|c| c.0 + c.2).max().unwrap();
             let height = cells.iter().map(|c| c.1 + c.3).max().unwrap();
-            assert_eq!(width, 301);
+            assert_eq!(width, [226, 301, 401][choice as usize]);
             let area: u32 = cells.iter().map(|c| c.2 * c.3).sum();
             // what's left of the box is the 1px gaps
-            assert!(area < width * height && width * height - area <= 2 * width + height, "{count}");
+            assert!(area < width * height && width * height - area <= 2 * width + height, "{count} {choice}");
             for (i, a) in cells.iter().enumerate() {
                 for b in &cells[i + 1..] {
                     let apart = a.0 + a.2 < b.0 + 1 || b.0 + b.2 < a.0 + 1 || a.1 + a.3 < b.1 + 1 || b.1 + b.3 < a.1 + 1;
-                    assert!(apart, "{count}: {a:?} {b:?}");
+                    assert!(apart, "{count} {choice}: {a:?} {b:?}");
                 }
             }
         }

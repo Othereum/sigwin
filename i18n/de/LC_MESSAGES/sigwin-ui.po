@@ -1224,3 +1224,30 @@ msgstr "Keine Dateien in diesem Chat"
 
 msgid "Preparing older messages…"
 msgstr "Ältere Nachrichten werden vorbereitet …"
+
+msgid "Photo size in chats"
+msgstr "Fotogröße in Chats"
+
+msgid "Sticker size in chats"
+msgstr "Stickergröße in Chats"
+
+msgid "Photo size"
+msgstr "Fotogröße"
+
+msgid "Sticker size"
+msgstr "Stickergröße"
+
+msgid "Small"
+msgstr "Klein"
+
+msgid "Medium"
+msgstr "Mittel"
+
+msgid "Large"
+msgstr "Groß"
+
+msgid "You can also change it by right-clicking a photo in a chat"
+msgstr "Lässt sich auch per Rechtsklick auf ein Foto im Chat ändern"
+
+msgid "You can also change it by right-clicking a sticker in a chat"
+msgstr "Lässt sich auch per Rechtsklick auf einen Sticker im Chat ändern"

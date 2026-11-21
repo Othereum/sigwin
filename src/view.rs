@@ -18,7 +18,7 @@ use presage::proto::{receipt_message, AttachmentPointer, EditMessage, ReceiptMes
 use presage::store::ContentExt;
 
 use crate::types::MsgDto;
-use media::{attachment_key, link_card, set_attachments, shown_attachments, WantedCell, STICKER_SIZE};
+use media::{attachment_key, link_card, set_attachments, shown_attachments, WantedCell, sticker_size};
 use text::{
     body_text_spans, cut_for_read_more, long_text, pin_label, push_with_mentions, quote_author_name, LongTexts,
     READ_MORE_AT, STYLE_SPOILER,
@@ -299,8 +299,7 @@ pub fn build(
                     let key = attachment_key(data, *ts, 99);
                     wanted.push((key.clone(), s.clone()));
                     m.image_key = key;
-                    m.img_w = STICKER_SIZE;
-                    m.img_h = STICKER_SIZE;
+                    (m.img_w, m.img_h) = (sticker_size(), sticker_size());
                     m.sticker = true;
                     m.text.clear();
                     m.mentions.clear();
@@ -656,7 +655,7 @@ mod tests {
         let b = build(&window, Uuid::from_u128(1), &[], &Default::default(), &LongTexts::default(), &|_: &Uuid| String::new());
         let m = &b.items[0];
         assert!(m.sticker && m.cells.is_empty());
-        assert_eq!((m.img_w, m.img_h), (STICKER_SIZE, STICKER_SIZE));
+        assert_eq!((m.img_w, m.img_h), (sticker_size(), sticker_size()));
         assert_eq!(b.wanted_stickers[0].0, m.image_key);
     }
 

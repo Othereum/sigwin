@@ -787,8 +787,7 @@ pub(super) fn pending_row(p: &Pending, prev_ts: Option<u64>) -> MsgDto {
     }
     if !p.image_key.is_empty() {
         m.image_key = p.image_key.clone();
-        m.img_w = view::media::STICKER_SIZE;
-        m.img_h = view::media::STICKER_SIZE;
+        (m.img_w, m.img_h) = (view::media::sticker_size(), view::media::sticker_size());
         m.sticker = true;
     }
     m.big_emoji = !m.sticker

@@ -648,14 +648,18 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     app.on_open_menu(move |id, x, y| {
         let Some(app) = weak.upgrade() else { return };
-        let Some((mine, can_edit, can_delete, pinned, info)) = UI.with_borrow(|ui| {
+        let Some((mine, can_edit, can_delete, pinned, info, media)) = UI.with_borrow(|ui| {
             let m = ui.last.iter().find(|m| m.id == id.as_str())?;
-            (!m.system && !m.deleted && !m.pending).then(|| (m.my_reaction.clone(), m.can_edit, m.can_delete, m.pinned, m.receipt_info.clone()))
+            // the size choice for what it shows: its sticker, or its photos and videos
+            let media = if m.sticker && m.img_w > 0 { 2 } else if !m.cells.is_empty() { 1 } else { 0 };
+            (!m.system && !m.deleted && !m.pending).then(|| (m.my_reaction.clone(), m.can_edit, m.can_delete, m.pinned, m.receipt_info.clone(), media))
         }) else {
             return;
         };
         app.set_menu_info(info.into());
         app.set_menu_pinned(pinned);
+        app.set_menu_media(media);
+        app.set_menu_size_step(false);
         app.set_menu_pin_step(false);
         app.set_menu_picker(false);
         app.set_menu_mine(mine.into());
@@ -978,6 +982,8 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             link_previews: d.get_link_previews(),
             screen_security: d.get_screen_security(),
             photo_quality: d.get_photo_quality().clamp(0, 1) as u8,
+            photo_size: d.get_photo_size().clamp(0, 2) as u8,
+            sticker_size: d.get_sticker_size().clamp(0, 2) as u8,
             last_seen_version: UI.with_borrow(|ui| ui.settings.last_seen_version.clone()),
             viewer_click_closed: UI.with_borrow(|ui| ui.settings.viewer_click_closed),
             viewer_wheel_zoomed: UI.with_borrow(|ui| ui.settings.viewer_wheel_zoomed),
@@ -988,6 +994,9 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             return;
         }
         new.publish();
+        if (old.photo_size, old.sticker_size) != (new.photo_size, new.sticker_size) {
+            window::media_resized();
+        }
         if old.link_previews != new.link_previews {
             linkcard::update(&app);
         }

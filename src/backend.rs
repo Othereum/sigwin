@@ -903,6 +903,7 @@ impl App {
                 self.emit_storage();
             }
             Command::ScaleChanged => self.rescale().await,
+            Command::MediaResized => self.reshow_rows().await,
             Command::ClockChanged => self.retime_threads().await,
             Command::SetMute { key, set } => self.set_mute(&key, set),
             Command::SetPref { key, pref } => self.set_pref(&key, pref),

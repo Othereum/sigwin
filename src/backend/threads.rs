@@ -295,13 +295,18 @@ impl App {
         self.avatar_refresh.clear();
         self.load_avatars();
         self.load_list_reader_avatars();
-        if self.current.is_some() {
-            self.thumbs_requested.borrow_mut().clear();
-            // also asks for the message list's avatars again
-            self.emit_messages(crate::types::Scroll::Keep).await;
-        }
+        // also asks for the message list's avatars again
+        self.reshow_rows().await;
         self.gallery_rescale();
         self.link_rescale().await;
+    }
+
+    /// The open chat's rows built again, and their pictures asked for again at their new size.
+    pub(super) async fn reshow_rows(&mut self) {
+        if self.current.is_some() {
+            self.thumbs_requested.borrow_mut().clear();
+            self.emit_messages(crate::types::Scroll::Keep).await;
+        }
     }
 
     /// Photos of the senders shown next to group messages; ahead of the thread list.

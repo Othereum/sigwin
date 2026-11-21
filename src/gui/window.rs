@@ -93,11 +93,7 @@ fn scale_set(app: &AppWindow, sf: f32) {
     if !types::set_ui_scale(sf) {
         return;
     }
-    UI.with_borrow_mut(|ui| {
-        // frames come at the old size; the new stills report their rows again
-        anim::stop_gif(ui);
-        ui.anims.clear_list();
-    });
+    drop_frames();
     send_cmd(Command::ScaleChanged);
     if app.get_sticker_open() {
         // the pack list, then the open pack
@@ -119,6 +115,21 @@ pub(crate) fn monitor_scale(_: isize) -> f32 {
     1.0
 }
 
+/// Animation frames come at the old size; the new stills report their rows again.
+fn drop_frames() {
+    UI.with_borrow_mut(|ui| {
+        anim::stop_gif(ui);
+        ui.anims.clear_list();
+    });
+}
+
+/// The photo or sticker size in chats changed: the open chat's rows are built again at the new
+/// sizes, and their pictures made for them.
+pub(crate) fn media_resized() {
+    drop_frames();
+    send_cmd(Command::MediaResized);
+}
+
 /// Settings -> the page's controls.
 pub(crate) fn show_settings(app: &AppWindow, s: &settings::Settings) {
     let d = app.global::<SettingsData>();
@@ -134,6 +145,8 @@ pub(crate) fn show_settings(app: &AppWindow, s: &settings::Settings) {
     d.set_link_previews(s.link_previews);
     d.set_screen_security(s.screen_security);
     d.set_photo_quality(s.photo_quality as i32);
+    d.set_photo_size(s.photo_size as i32);
+    d.set_sticker_size(s.sticker_size as i32);
     d.set_autostart(s.autostart);
     d.set_start_hidden(s.start_hidden);
     d.set_auto_update(s.auto_update);

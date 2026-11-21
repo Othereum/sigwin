@@ -45,6 +45,10 @@ pub struct Settings {
     pub screen_security: bool,
     /// photos are sent at: 0 = standard, 1 = high (see `sigwin_thumb::photo::Quality`)
     pub photo_quality: u8,
+    /// how big photos and stickers are shown in chats: 0 = small, 1 = medium, 2 = large
+    /// (`view::media::set_sizes`)
+    pub photo_size: u8,
+    pub sticker_size: u8,
     /// the newest version whose "what's new" was seen or dismissed ("" = never recorded; not a
     /// preference, kept here for lack of a better file)
     pub last_seen_version: String,
@@ -89,6 +93,8 @@ impl Default for Settings {
             link_previews: true,
             screen_security: screen_security_default(),
             photo_quality: 0,
+            photo_size: 1,
+            sticker_size: 1,
             last_seen_version: String::new(),
             viewer_click_closed: false,
             viewer_wheel_zoomed: false,
@@ -127,6 +133,8 @@ impl Settings {
         s.clock = s.clock.min(2);
         s.badge_count = s.badge_count.min(1);
         s.photo_quality = s.photo_quality.min(1);
+        s.photo_size = s.photo_size.min(2);
+        s.sticker_size = s.sticker_size.min(2);
         if !LANGUAGES.contains(&s.language.as_str()) {
             s.language.clear();
         }
@@ -147,12 +155,13 @@ impl Settings {
         }
     }
 
-    /// Makes the notification choice visible to the backend thread.
+    /// Makes the notification choice and the media sizes visible to the backend thread.
     pub fn publish(&self) {
         NOTIFY.store(if self.notify { self.preview } else { OFF }, Ordering::Relaxed);
         MUTED.store(self.muted_mentions as u8 | (self.muted_replies as u8) << 1, Ordering::Relaxed);
         SOUND.store(self.sound, Ordering::Relaxed);
         crate::update::set_auto(self.auto_update);
+        crate::view::media::set_sizes(self.photo_size, self.sticker_size);
     }
 }
 

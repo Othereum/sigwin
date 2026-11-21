@@ -1212,3 +1212,30 @@ msgstr "이 대화에 파일이 없습니다"
 
 msgid "Preparing older messages…"
 msgstr "이전 메시지 준비 중…"
+
+msgid "Photo size in chats"
+msgstr "대화 속 사진 크기"
+
+msgid "Sticker size in chats"
+msgstr "대화 속 스티커 크기"
+
+msgid "Photo size"
+msgstr "사진 크기"
+
+msgid "Sticker size"
+msgstr "스티커 크기"
+
+msgid "Small"
+msgstr "작게"
+
+msgid "Medium"
+msgstr "보통"
+
+msgid "Large"
+msgstr "크게"
+
+msgid "You can also change it by right-clicking a photo in a chat"
+msgstr "대화에서 사진을 우클릭해서 바꿀 수도 있습니다"
+
+msgid "You can also change it by right-clicking a sticker in a chat"
+msgstr "대화에서 스티커를 우클릭해서 바꿀 수도 있습니다"

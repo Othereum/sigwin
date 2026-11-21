@@ -90,6 +90,9 @@ export global SettingsData {
     in-out property <bool> link-previews: true;
     in-out property <bool> screen-security;
     in-out property <int> photo-quality: 0;
+    // photos and stickers in chats: 0 small, 1 medium, 2 large
+    in-out property <int> photo-size: 1;
+    in-out property <int> sticker-size: 1;
     in-out property <bool> autostart;
     in-out property <bool> start-hidden: true;
     in-out property <bool> auto-update: true;
@@ -328,6 +331,24 @@ export component SettingsPage inherits Rectangle {
                             Segmented {
                                 options: ["90%", "100%", "110%", "125%", "150%"];
                                 current <=> SettingsData.zoom;
+                                changed => { SettingsData.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: @tr("Photo size in chats");
+                            hint: @tr("You can also change it by right-clicking a photo in a chat");
+                            Segmented {
+                                options: [@tr("Small"), @tr("Medium"), @tr("Large")];
+                                current <=> SettingsData.photo-size;
+                                changed => { SettingsData.changed(); }
+                            }
+                        }
+                        SettingRow {
+                            label: @tr("Sticker size in chats");
+                            hint: @tr("You can also change it by right-clicking a sticker in a chat");
+                            Segmented {
+                                options: [@tr("Small"), @tr("Medium"), @tr("Large")];
+                                current <=> SettingsData.sticker-size;
                                 changed => { SettingsData.changed(); }
                             }
                         }

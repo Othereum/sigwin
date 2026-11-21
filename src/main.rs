@@ -169,6 +169,8 @@ fn main() -> anyhow::Result<()> {
     let offscreen = std::env::var_os("SIGWIN_HEADLESS").is_some();
     let lang = i18n::init(offscreen, &prefs.language);
     view::time::set_clock(prefs.clock, offscreen);
+    // before the backend builds a row
+    view::media::set_sizes(prefs.photo_size, prefs.sticker_size);
     if uninstall {
         install::uninstall(&data_dir());
         return Ok(());
