@@ -13,6 +13,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # made from a photo needn't hold all of it decoded. No rayon: thumbnails are made one at a time
 jpeg-decoder = { version = "0.3.2", default-features = false }
 slint = { version = "1.19.0", default-features = false, features = ["std", "compat-1-2"] }
+# `image`'s JPEG decoder, used directly to decode into RGBA for the viewer (same versions)
+zune-jpeg = "0.5.15"
+zune-core = "0.5.3"
+# counts a GIF's frames without decoding them (same version the image crate uses)
+gif = { version = "0.14.2", default-features = false, features = ["std"] }
 # APNG encoder for animated stickers (same version the image crate uses)
 png = "0.18.1"
 # AVIF: `image` decodes it only through the dav1d C library (see src/avif.rs)

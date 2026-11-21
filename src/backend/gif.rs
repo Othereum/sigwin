@@ -47,8 +47,43 @@ fn cover_px(bytes: &[u8], (w, h): (u32, u32)) -> Option<u32> {
     Some(((f64::from(fw.max(fh)) * s).round() as u32).max(1))
 }
 
-/// Plays `bytes` until `stop` is set or `limit` runs out, then reports the end.
-pub(super) fn stream(bytes: Vec<u8>, px: u32, slot: Arc<GifSlot>, stop: Arc<AtomicBool>, emit: Emit, limit: Option<Duration>) {
+/// Tells the UI a GIF won't play after all.
+fn finish(slot: &Arc<GifSlot>, emit: &Emit) {
+    if slot.finish() {
+        emit(Event::Gif(slot.clone()));
+    }
+}
+
+/// A GIF about to play: its stop flag, and its turn. GIFs take turns: the next one's file is read
+/// only once the one before let go of its own, which takes up to a frame after its stop is set.
+/// Otherwise moving the pointer from GIF to GIF held both files.
+pub(super) struct GifStart {
+    pub(super) stop: Arc<AtomicBool>,
+    turn: Arc<tokio::sync::Semaphore>,
+}
+
+impl GifStart {
+    pub(super) fn stopped(&self) -> bool {
+        self.stop.load(Ordering::Relaxed)
+    }
+
+    /// Waits for the GIF before to let go of its file.
+    pub(super) async fn turn(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.turn.clone().acquire_owned().await.ok()
+    }
+}
+
+/// Plays `bytes` until `stop` is set or `limit` runs out, then reports the end. `turn` goes with
+/// the bytes.
+pub(super) fn stream(
+    bytes: Vec<u8>,
+    px: u32,
+    slot: Arc<GifSlot>,
+    stop: Arc<AtomicBool>,
+    emit: Emit,
+    limit: Option<Duration>,
+    turn: tokio::sync::OwnedSemaphorePermit,
+) {
     let spawned = std::thread::Builder::new().name("gif".into()).spawn(move || {
         let started = Instant::now();
         let mut due = started;
@@ -78,9 +113,9 @@ pub(super) fn stream(bytes: Vec<u8>, px: u32, slot: Arc<GifSlot>, stop: Arc<Atom
             true
         });
         tracing::debug!(frames = shown, ms = started.elapsed().as_millis() as u64, ok = played.is_ok(), "gif stopped");
-        if slot.finish() {
-            emit(Event::Gif(slot.clone()));
-        }
+        drop(bytes);
+        drop(turn);
+        finish(&slot, &emit);
     });
     if let Err(e) = spawned {
         warn!("gif thread: {e}");
@@ -88,12 +123,12 @@ pub(super) fn stream(bytes: Vec<u8>, px: u32, slot: Arc<GifSlot>, stop: Arc<Atom
 }
 
 impl App {
-    /// A new stop flag for the GIF that is about to play; the old one stops.
-    pub(super) fn new_gif_stop(&mut self) -> Arc<AtomicBool> {
+    /// What the GIF about to play needs; the old one stops.
+    pub(super) fn new_gif_stop(&mut self) -> GifStart {
         self.stop_gif();
         let stop = Arc::new(AtomicBool::new(false));
         self.gif_stop = Some(stop.clone());
-        stop
+        GifStart { stop, turn: self.gif_turn.clone() }
     }
 
     pub(super) fn stop_gif(&mut self) {
@@ -105,10 +140,11 @@ impl App {
     /// Plays a GIF file of the user's, waiting in the composer, in a tile `tile` physical px wide.
     /// Frames are cut to fill it by the tile itself, so the short side is `tile` here.
     pub(super) fn play_pending_gif(&mut self, path: PathBuf, seq: u64, tile: u32) {
-        let stop = self.new_gif_stop();
+        let start = self.new_gif_stop();
         let emit = self.emit.clone();
         let slot = Arc::new(GifSlot::new(String::new(), seq, GifTarget::Composer));
         tokio::task::spawn_local(async move {
+            let Some(turn) = start.turn().await.filter(|_| !start.stopped()) else { return finish(&slot, &emit) };
             let read = tokio::task::spawn_blocking(move || {
                 // a safety limit: the tile only needs the picture, and the file stays in memory
                 if std::fs::metadata(&path).ok()?.len() > 30 * 1024 * 1024 {
@@ -123,12 +159,8 @@ impl App {
             })
             .await;
             match read {
-                Ok(Some((bytes, px))) if !stop.load(Ordering::Relaxed) => stream(bytes, px, slot, stop, emit, Some(LIST_LIMIT)),
-                _ => {
-                    if slot.finish() {
-                        emit(Event::Gif(slot.clone()));
-                    }
-                }
+                Ok(Some((bytes, px))) if !start.stopped() => stream(bytes, px, slot, start.stop, emit, Some(LIST_LIMIT), turn),
+                _ => finish(&slot, &emit),
             }
         });
     }
@@ -136,31 +168,27 @@ impl App {
     /// Plays image `index` of row `id` in the message list, in a cell `size` physical px big.
     pub(super) fn play_gif(&mut self, id: &str, index: usize, seq: u64, size: (u32, u32)) {
         let Some((path, _)) = self.viewed(id, index) else { return };
-        let stop = self.new_gif_stop();
+        let start = self.new_gif_stop();
         let emit = self.emit.clone();
         let slot = Arc::new(GifSlot::new(id.to_string(), seq, GifTarget::List));
         tokio::task::spawn_local(async move {
             // not here yet: the picture's own download shows how far it is, and it plays once that
             // is done and the pointer is on it again
             if !path.exists() {
-                if slot.finish() {
-                    emit(Event::Gif(slot.clone()));
-                }
-                return;
+                return finish(&slot, &emit);
             }
+            let Some(turn) = start.turn().await.filter(|_| !start.stopped()) else { return finish(&slot, &emit) };
             let read = tokio::task::spawn_blocking(move || sigwin_vault::read(&path)).await;
             match read {
-                Ok(Ok(bytes)) if !stop.load(Ordering::Relaxed) && sigwin_thumb::is_animated_gif(&bytes) => {
+                Ok(Ok(bytes)) if !start.stopped() && sigwin_thumb::is_animated_gif(&bytes) => {
                     let px = cover_px(&bytes, size).unwrap_or(size.0.max(size.1));
-                    stream(bytes, px, slot, stop, emit, Some(LIST_LIMIT));
+                    stream(bytes, px, slot, start.stop, emit, Some(LIST_LIMIT), turn);
                 }
                 other => {
                     if let Ok(Err(e)) = other {
                         warn!("play gif: {e}");
                     }
-                    if slot.finish() {
-                        emit(Event::Gif(slot.clone()));
-                    }
+                    finish(&slot, &emit);
                 }
             }
         });

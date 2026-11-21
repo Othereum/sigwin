@@ -7086,6 +7086,7 @@ name = "sigwin-thumb"
 version = "0.1.0"
 dependencies = [
  "fast_image_resize",
+ "gif",
  "image",
  "jpeg-decoder",
  "libc",
@@ -7093,6 +7094,8 @@ dependencies = [
  "png",
  "rav1d",
  "slint",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]

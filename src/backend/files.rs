@@ -519,7 +519,7 @@ impl App {
         // its cells in the list show the download too
         let mut keys: Vec<String> = self.thumbs_requested.borrow().iter().filter(|k| k.starts_with(&file_key)).cloned().collect();
         // what played before stops now; a GIF opened here plays until the next one replaces it
-        let stop = self.new_gif_stop();
+        let start = self.new_gif_stop();
         tokio::task::spawn_local(async move {
             // going to a picture that isn't here asks for it: its blurhash shows meanwhile
             if !path.exists() {
@@ -547,6 +547,8 @@ impl App {
                     }
                 }
             }
+            // a GIF that played before lets go of its file first
+            let Some(turn) = start.turn().await else { return };
             let p = path.clone();
             enum Decoded {
                 Still(crate::types::ViewerPixels),
@@ -574,9 +576,9 @@ impl App {
                     let _ = tx.send(Internal::ProgressDone);
                     let px = pixels.full().0.max(pixels.full().1);
                     emit(Event::ViewerImage(crate::types::ViewerImage { id: id.clone(), index, count, pixels, animated: true, pending: String::new(), once }));
-                    if !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    if !start.stopped() {
                         let slot = Arc::new(crate::types::GifSlot::new(id, super::gif::next_gen(), crate::types::GifTarget::Viewer(index)));
-                        super::gif::stream(bytes, px, slot, stop, emit, None);
+                        super::gif::stream(bytes, px, slot, start.stop, emit, None, turn);
                     }
                 }
                 other => {

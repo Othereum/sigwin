@@ -489,6 +489,8 @@ struct App {
     logged_requests: Option<usize>,
     /// stops the GIF that plays (`gif.rs`)
     gif_stop: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// held by the GIF playing (`gif::GifStart`)
+    gif_turn: Arc<tokio::sync::Semaphore>,
 }
 
 pub fn spawn(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit) -> std::thread::JoinHandle<()> {
@@ -654,6 +656,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         not_written: HashSet::new(),
         logged_requests: None,
         gif_stop: None,
+        gif_turn: Arc::new(tokio::sync::Semaphore::new(1)),
     };
     if sealed_now {
         app.save_persist();

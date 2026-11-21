@@ -391,15 +391,46 @@ pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> Ima
         return Ok(None);
     }
     let orientation = decoder.orientation()?;
-    let mut img = DynamicImage::from_decoder(decoder)?;
-    img.apply_orientation(orientation);
-    let full = (img.width(), img.height());
-    let opaque = !img.color().has_alpha();
+    let (original, opaque) = match jpeg_rgba(bytes, orientation) {
+        Some(p) => (p, true),
+        None => {
+            let mut img = DynamicImage::from_decoder(decoder)?;
+            img.apply_orientation(orientation);
+            let opaque = !img.color().has_alpha();
+            (to_pixels(img), opaque)
+        }
+    };
+    let full = (original.width(), original.height());
     let out = fit_size(full, (box_w, box_h));
-    let original = to_pixels(img);
     let crop = (0.0, 0.0, full.0 as f64, full.1 as f64);
     let fitted = if out == full { None } else { resize_view(original.as_bytes(), full, crop, out, opaque) };
     Ok(Some(ViewImage { original, fitted, opaque }))
+}
+
+/// An upright JPEG decoded straight into what the UI draws. Decoded to RGB and widened, both were
+/// held at once: 7 bytes a pixel instead of 4 (88MB instead of 50 for a 12MP photo). `None`
+/// when its EXIF turns it (turning takes a second buffer anyway) or it isn't YCbCr or RGB: it is
+/// decoded as other images are then.
+fn jpeg_rgba(bytes: &[u8], orientation: image::metadata::Orientation) -> Option<Pixels> {
+    use zune_core::colorspace::ColorSpace;
+    if orientation != image::metadata::Orientation::NoTransforms || !bytes.starts_with(&[0xFF, 0xD8]) {
+        return None;
+    }
+    // as `image` sets it up; the output can't change once the headers are read
+    let options = zune_core::options::DecoderOptions::default()
+        .set_strict_mode(false)
+        .set_max_width(usize::MAX)
+        .set_max_height(usize::MAX)
+        .jpeg_set_out_colorspace(ColorSpace::RGBA);
+    let mut d = zune_jpeg::JpegDecoder::new_with_options(zune_core::bytestream::ZCursor::new(bytes), options);
+    d.decode_headers().ok()?;
+    if !matches!(d.input_colorspace()?, ColorSpace::YCbCr | ColorSpace::RGB) {
+        return None;
+    }
+    let (w, h) = d.dimensions()?;
+    let mut out = Pixels::new(u32::try_from(w).ok()?, u32::try_from(h).ok()?);
+    d.decode_into(out.make_mut_bytes()).ok()?;
+    Some(out)
 }
 
 /// The one conversion from a decoded image to what the UI draws: photos decode to RGB, and going
@@ -574,6 +605,15 @@ pub fn animation_png(bytes: &[u8], px: u32) -> ImageResult<Option<Vec<u8>>> {
     Ok(Some(out))
 }
 
+/// Whether a GIF has `n` frames, counted without decoding them: `image`'s frames are each a
+/// whole decoded canvas, megabytes for one picture just to be counted.
+fn gif_frames_at_least(bytes: &[u8], n: usize) -> bool {
+    let mut options = gif::DecodeOptions::new();
+    options.skip_frame_decoding(true);
+    let Ok(mut d) = options.read_info(bytes) else { return false };
+    (0..n).all(|_| d.read_next_frame().is_ok_and(|f| f.is_some()))
+}
+
 /// Whether `bytes` are an animation (GIF, animated WebP or APNG) with more than one frame.
 pub fn is_animated_gif(bytes: &[u8]) -> bool {
     is_animated(bytes)
@@ -637,16 +677,15 @@ pub fn gif(frames: Vec<RgbaImage>, delay_ms: u32) -> ImageResult<Vec<u8>> {
     Ok(out)
 }
 
-/// Whether `bytes` hold an animation, from the headers (GIFs decode their first two frames).
+/// Whether `bytes` hold an animation, from the headers (GIFs: whether a second frame follows).
 pub fn is_animated(bytes: &[u8]) -> bool {
-    use image::AnimationDecoder;
-    use image::codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder};
+    use image::codecs::{png::PngDecoder, webp::WebPDecoder};
     let cur = || std::io::Cursor::new(bytes);
     let Ok(reader) = image::ImageReader::new(cur()).with_guessed_format() else { return false };
     match reader.format() {
         Some(image::ImageFormat::WebP) => WebPDecoder::new(cur()).is_ok_and(|d| d.has_animation()),
         Some(image::ImageFormat::Png) => PngDecoder::new(cur()).is_ok_and(|d| d.is_apng().unwrap_or(false)),
-        Some(image::ImageFormat::Gif) => GifDecoder::new(cur()).is_ok_and(|d| d.into_frames().take(2).count() == 2),
+        Some(image::ImageFormat::Gif) => gif_frames_at_least(bytes, 2),
         _ => false,
     }
 }
@@ -894,6 +933,26 @@ mod tests {
         assert!(decode_view(&png, 100, 100, 79_999).unwrap().is_none());
         assert!(decode_view(&gif(3, 50), 100, 100, u64::MAX).unwrap().is_none());
         assert!(decode_view(b"junk", 100, 100, u64::MAX).is_err());
+    }
+
+    #[test]
+    fn an_upright_jpeg_decodes_straight_to_what_is_drawn() {
+        use image::ImageEncoder;
+        let rgb = image::RgbImage::from_fn(64, 48, |x, y| image::Rgb([(x * 4) as u8, (y * 5) as u8, 128]));
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90)
+            .write_image(rgb.as_raw(), 64, 48, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let direct = jpeg_rgba(&jpeg, image::metadata::Orientation::NoTransforms).expect("decoded directly");
+        // the same pixels the RGB decode gives
+        assert_eq!(direct.as_bytes(), to_pixels(decode(&jpeg).unwrap()).as_bytes());
+        let v = decode_view(&jpeg, 1000, 1000, u64::MAX).unwrap().unwrap();
+        assert!(v.opaque && v.original.as_bytes() == direct.as_bytes());
+        // turned by its EXIF: decoded as before, still upright
+        let sideways = sideways_jpeg();
+        assert!(jpeg_rgba(&sideways, image::metadata::Orientation::Rotate90).is_none());
+        let v = decode_view(&sideways, 1000, 1000, u64::MAX).unwrap().unwrap();
+        assert_eq!((v.original.width(), v.original.height()), (20, 40));
     }
 
     #[test]
