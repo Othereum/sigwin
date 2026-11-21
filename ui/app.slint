@@ -393,6 +393,12 @@ export component AppWindow inherits Window {
     in-out property <length> view-top-off;
     // the message list moved: the hover is brought up to date for the cursor (gui::anim)
     callback gif-scrolled();
+    // the width a picture may take in the message list: the row's padding (16px a side in
+    // `Bubble`) and a group's avatar column (28px and 8px of spacing) left out. The backend sizes
+    // pictures to it, so a narrow chat shrinks them instead of cutting them.
+    out property <length> photo-room: msg-list.visible-width - 2 * 16px - 36px;
+    changed photo-room => { root.photo-room-changed(); }
+    callback photo-room-changed();
     // the date shown at the top while scrolling: "Today", "Yesterday", "Sat, Nov 7" for a day number
     pure callback day-label(int) -> string;
     // scroll to the first message of a day (a day number, as in `Message.day`)
@@ -872,6 +878,7 @@ export component AppWindow inherits Window {
                         last: idx == root.messages.length - 1;
                         tail: root.under-h;
                         max-w: min(560px, msg-list.visible-width * 0.75);
+                        room: root.photo-room;
                         flash: m.id == root.flash-id;
                         property <int> probe: root.jump-probe;
                         changed probe => {

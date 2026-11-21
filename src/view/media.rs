@@ -6,7 +6,7 @@ use presage::proto::AttachmentPointer;
 use super::text::is_long_text;
 use crate::types::MsgDto;
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 /// Decode size of stickers (also part of their cache file names).
 pub const THUMB_MAX: u32 = 400;
@@ -31,6 +31,34 @@ pub fn set_sizes(photo: u8, sticker: u8) -> bool {
 
 fn photo_choice() -> u8 {
     PHOTO_SIZE.load(Ordering::Relaxed)
+}
+
+/// The width a picture may take in the chat, logical px (`set_room`): a narrow chat shrinks its
+/// pictures rather than cutting them. 0 until the UI says, no limit.
+static ROOM: AtomicU32 = AtomicU32::new(0);
+
+/// Sets the width pictures may take in the chat. Whether any picture's size changes: past the
+/// widest box at the chosen size, the room makes no difference.
+pub fn set_room(px: u32) -> bool {
+    // the UI's least pane leaves more; a caption's bubble is never narrower anyway
+    let px = px.max(CAPTIONED_MIN_WIDTH);
+    let old = ROOM.swap(px, Ordering::Relaxed);
+    let widest = photo_px(PHOTO_BOX_WIDE.0, photo_choice());
+    let bound = |r: u32| if r == 0 { widest } else { r.min(widest) };
+    bound(old) != bound(px)
+}
+
+/// Whether the UI has said how wide the chat is.
+pub fn has_room() -> bool {
+    ROOM.load(Ordering::Relaxed) != 0
+}
+
+/// The room set, or no limit.
+fn room() -> u32 {
+    match ROOM.load(Ordering::Relaxed) {
+        0 => u32::MAX,
+        r => r,
+    }
 }
 
 /// `v` logical px at the medium photo size, at size `choice`.
@@ -322,12 +350,12 @@ pub const GRID_SHOWN: usize = 5;
 /// Where a grid of `count` images (2 or more) puts them: x, y, width and height in logical px,
 /// with a 1px gap. As in Signal's apps, the first ones are the largest.
 fn grid_cells(count: usize) -> Vec<(u32, u32, u32, u32)> {
-    grid_cells_at(count, photo_choice())
+    grid_cells_at(count, photo_choice(), room())
 }
 
-fn grid_cells_at(count: usize, choice: u8) -> Vec<(u32, u32, u32, u32)> {
+fn grid_cells_at(count: usize, choice: u8, room: u32) -> Vec<(u32, u32, u32, u32)> {
     // 300 wide at the medium size, and its 1px gap
-    let width = photo_px(300, choice) + 1;
+    let width = (photo_px(300, choice) + 1).min(room);
     match count {
         0 | 1 => Vec::new(),
         2 => split(width, &[1, 1]).into_iter().map(|(x, w)| (x, 0, w, w)).collect(),
@@ -428,14 +456,18 @@ pub fn captioned(m: &MsgDto) -> bool {
 }
 
 /// Size a lone photo of `w` x `h` is shown at (logical px): scaled into the box for its
-/// orientation at the chosen size, never up, unless it is smaller than the least it is shown at.
-/// An extreme shape is cut to the box.
+/// orientation at the chosen size and no wider than the room, never up, unless it is smaller
+/// than the least it is shown at. An extreme shape is cut to the box.
 pub fn fit(w: Option<u32>, h: Option<u32>, captioned: bool) -> (u32, u32) {
-    fit_at(w, h, captioned, photo_choice())
+    fit_at(w, h, captioned, photo_choice(), room())
 }
 
-fn fit_at(w: Option<u32>, h: Option<u32>, captioned: bool, choice: u8) -> (u32, u32) {
-    let sized = |(w, h): (u32, u32)| (photo_px(w, choice), photo_px(h, choice));
+fn fit_at(w: Option<u32>, h: Option<u32>, captioned: bool, choice: u8, room: u32) -> (u32, u32) {
+    // a box narrowed by the room keeps its shape
+    let sized = |(w, h): (u32, u32)| {
+        let (w, h) = (photo_px(w, choice), photo_px(h, choice));
+        if w <= room { (w, h) } else { (room, ((u64::from(h) * u64::from(room) * 2 + u64::from(w)) / (2 * u64::from(w))) as u32) }
+    };
     let (Some(w), Some(h)) = (w, h) else { return sized(PHOTO_BOX_WIDE) };
     if w == 0 || h == 0 {
         return sized(PHOTO_BOX_WIDE);
@@ -518,9 +550,12 @@ mod tests {
         assert_eq!(card("File"), (tr!("File").into(), String::new()));
     }
 
+    /// A chat wide enough for every box.
+    const WIDE: u32 = u32::MAX;
+
     #[test]
     fn photo_size_caps() {
-        let f = |w, h| fit_at(Some(w), Some(h), false, 1);
+        let f = |w, h| fit_at(Some(w), Some(h), false, 1, WIDE);
         assert_eq!(f(3000, 3000), (300, 300)); // square
         assert_eq!(f(4000, 3000), (400, 300)); // 4:3 unchanged
         assert_eq!(f(3000, 4000), (300, 400)); // 3:4 is width-limited
@@ -528,12 +563,26 @@ mod tests {
         assert_eq!(f(900, 1600), (253, 450)); // 9:16
         assert_eq!(f(1600, 900), (400, 225)); // 16:9 unchanged
         assert_eq!(f(150, 120), (150, 120)); // never upscaled
-        assert_eq!(fit_at(None, None, false, 1), (400, 300));
+        assert_eq!(fit_at(None, None, false, 1, WIDE), (400, 300));
+    }
+
+    #[test]
+    fn a_narrow_chat_shrinks_photos() {
+        let f = |w, h, c| fit_at(Some(w), Some(h), c, 2, 280);
+        // the box narrows and keeps its shape: nothing is cut that a wide chat shows
+        assert_eq!(f(4000, 3000, false), (280, 210));
+        assert_eq!(f(2000, 3000, false), (280, 420));
+        assert_eq!(fit_at(None, None, false, 2, 280), (280, 210));
+        // a photo that fits is left alone
+        assert_eq!(f(200, 150, false), (200, 150));
+        assert_eq!(f(16, 16, true), (200, 200));
+        let cells = grid_cells_at(5, 2, 280);
+        assert_eq!(cells.iter().map(|c| c.0 + c.2).max(), Some(280));
     }
 
     #[test]
     fn small_photos_have_a_least_size() {
-        let f = |w, h, c| fit_at(Some(w), Some(h), c, 1);
+        let f = |w, h, c| fit_at(Some(w), Some(h), c, 1, WIDE);
         assert_eq!(f(1, 1, false), (100, 100));
         assert_eq!(f(60, 40, false), (150, 100)); // its shape kept
         // extreme shapes are cut to the box
@@ -544,16 +593,16 @@ mod tests {
         assert_eq!(f(300, 100, true), (300, 100));
         assert_eq!(f(150, 120, true), (200, 160));
         assert_eq!(f(10, 1000, true), (200, 450));
-        assert_eq!(fit_at(None, None, true, 1), (400, 300));
+        assert_eq!(fit_at(None, None, true, 1, WIDE), (400, 300));
     }
 
     #[test]
     fn photos_follow_the_chosen_size() {
-        let f = |w, h, c, choice| fit_at(Some(w), Some(h), c, choice);
+        let f = |w, h, c, choice| fit_at(Some(w), Some(h), c, choice, WIDE);
         assert_eq!(f(4000, 3000, false, 0), (300, 225));
         assert_eq!(f(4000, 3000, false, 2), (533, 400));
         assert_eq!(f(3000, 4000, false, 2), (400, 533));
-        assert_eq!(fit_at(None, None, false, 0), (300, 225));
+        assert_eq!(fit_at(None, None, false, 0, WIDE), (300, 225));
         // the least size follows; the caption's bubble doesn't
         assert_eq!(f(1, 1, false, 0), (75, 75));
         assert_eq!(f(1, 1, false, 2), (134, 134));
@@ -564,10 +613,10 @@ mod tests {
     #[test]
     fn grid_cells_fill_their_box_without_touching() {
         // the medium size, as it always was
-        assert_eq!(grid_cells_at(3, 1), [(0, 0, 200, 201), (201, 0, 100, 100), (201, 101, 100, 100)]);
-        assert_eq!(grid_cells_at(5, 1), [(0, 0, 150, 150), (151, 0, 150, 150), (0, 151, 100, 100), (101, 151, 99, 100), (201, 151, 100, 100)]);
+        assert_eq!(grid_cells_at(3, 1, WIDE), [(0, 0, 200, 201), (201, 0, 100, 100), (201, 101, 100, 100)]);
+        assert_eq!(grid_cells_at(5, 1, WIDE), [(0, 0, 150, 150), (151, 0, 150, 150), (0, 151, 100, 100), (101, 151, 99, 100), (201, 151, 100, 100)]);
         for (count, choice) in (2..8).flat_map(|n| (0..3).map(move |c| (n, c))) {
-            let cells = grid_cells_at(count, choice);
+            let cells = grid_cells_at(count, choice, WIDE);
             assert_eq!(cells.len(), count.min(GRID_SHOWN));
             let width = cells.iter().map(|c| c.0 + c.2).max().unwrap();
             let height = cells.iter().map(|c| c.1 + c.3).max().unwrap();

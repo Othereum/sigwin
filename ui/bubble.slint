@@ -459,6 +459,8 @@ export component QuoteBox inherits Rectangle {
 export component Bubble inherits VerticalLayout {
     in property <MsgItem> m;
     in property <length> max-w;
+    // the width a picture may take (`photo-room` in app.slint)
+    in property <length> room: 100000px;
     // briefly outlined after jumping to it (pinned message bar)
     in property <bool> flash;
     callback attachment-clicked(string, int);
@@ -514,10 +516,12 @@ export component Bubble inherits VerticalLayout {
     property <bool> flush: m.has-image && !m.sticker && m.text != "" && m.quote == "";
     property <bool> no-bubble: m.sticker || m.big-emoji || bare;
     property <bool> photo-only: bare && !m.sticker && !m.big-emoji;
-    // a received bare photo: its time sits beside it, so the chips straddle the picture's bottom edge like a bubble's
-    property <bool> side-time: photo-only && !m.outgoing && !m.hide-time;
-    // a sent bare photo: the time row sits under the picture, so the chips straddle its edge, above that row
-    property <bool> under-time: photo-only && m.outgoing && !m.hide-time;
+    // a received bare photo: its time sits beside it, so the chips straddle the picture's bottom edge like a bubble's.
+    // Not when the photo takes the row's width (a narrow chat): the time goes under it. 72px: the
+    // spacing, a pin and the time. The avatar column is already out of the room.
+    property <bool> side-time: photo-only && !m.outgoing && !m.hide-time && m.img-w + 72px <= root.room + (m.avatar-col ? 0px : 36px);
+    // a bare photo with its time row under the picture (sent, or received in a narrow chat): the chips straddle its edge, above that row
+    property <bool> under-time: photo-only && !m.hide-time && !side-time;
     // height of the day separator above the message itself (centering a jump on the bubble)
     out property <length> lead: m.day-sep || m.unread-divider ? root.padding-top + (m.day-sep ? 36px + root.spacing : 0px) + (m.unread-divider ? 28px + root.spacing : 0px) : 0px;
 

@@ -130,6 +130,32 @@ pub(crate) fn media_resized() {
     send_cmd(Command::MediaResized);
 }
 
+/// The message list's width decides how wide its pictures may be (`photo-room`). Rows are built
+/// again once a resize settles, not on every step of a drag: each build resamples the pictures.
+pub(crate) fn wire_photo_room(app: &AppWindow) {
+    thread_local! {
+        static SETTLE: slint::Timer = slint::Timer::default();
+    }
+    const SETTLE_AFTER: std::time::Duration = std::time::Duration::from_millis(200);
+    let weak = app.as_weak();
+    let apply = move || {
+        let Some(app) = weak.upgrade() else { return };
+        // not laid out yet
+        let room = app.get_photo_room();
+        if room > 0.0 && crate::view::media::set_room(room as u32) {
+            media_resized();
+        }
+    };
+    app.on_photo_room_changed(move || {
+        if crate::view::media::has_room() {
+            SETTLE.with(|t| t.start(slint::TimerMode::SingleShot, SETTLE_AFTER, apply.clone()));
+        } else {
+            // the first width usually comes before any rows: no reason to wait
+            apply();
+        }
+    });
+}
+
 /// Settings -> the page's controls.
 pub(crate) fn show_settings(app: &AppWindow, s: &settings::Settings) {
     let d = app.global::<SettingsData>();
