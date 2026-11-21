@@ -352,7 +352,11 @@ export component MsgTools inherits Rectangle {
     callback reply();
     callback save();
     callback more(length, length);
-    width: (root.can-save ? 4 : 3) * 28px + 8px;
+    // the width all the buttons take
+    out property <length> full-width: (root.can-save ? 4 : 3) * 28px + 8px;
+    // not room beside the bubble for all of them: only "more", whose menu has the rest
+    in property <bool> compact;
+    width: root.compact ? 28px + 8px : root.full-width;
     height: 28px;
     opacity: shown || hovered ? 1.0 : 0.0;
     // 4px transparent gap next to the bubble keeps the hover from dropping while crossing to the buttons
@@ -365,24 +369,26 @@ export component MsgTools inherits Rectangle {
         b-react := ToolButton {
             x: root.slot-x(0);
             height: 28px;
+            visible: !root.compact;
             icon: Icons.react;
             clicked(x, y) => { root.react(x, y); }
         }
         b-reply := ToolButton {
             x: root.slot-x(1);
             height: 28px;
+            visible: !root.compact;
             icon: Icons.reply;
             clicked(x, y) => { root.reply(); }
         }
         b-save := ToolButton {
             x: root.slot-x(2);
             height: 28px;
-            visible: root.can-save;
+            visible: root.can-save && !root.compact;
             icon: Icons.download;
             clicked(x, y) => { root.save(); }
         }
         b-more := ToolButton {
-            x: root.slot-x(root.can-save ? 3 : 2);
+            x: root.slot-x(root.compact ? 0 : root.can-save ? 3 : 2);
             height: 28px;
             icon: Icons.more;
             filled: true;
@@ -629,7 +635,7 @@ export component Bubble inherits VerticalLayout {
         }
     }
 
-    if !m.system && !m.typing: HorizontalLayout {
+    if !m.system && !m.typing: lane := HorizontalLayout {
         alignment: m.outgoing ? end : start;
         spacing: 8px;
         if m.avatar-col: Rectangle {
@@ -658,6 +664,9 @@ export component Bubble inherits VerticalLayout {
             border-color: Theme.border;
             if !m.pending && !m.deleted: tools := MsgTools {
                 x: m.outgoing ? -self.width : parent.width;
+                // the room beside the bubble, the row's padding included: at the least the
+                // "more" button's (`photo-room` in app.slint keeps it)
+                compact: (m.outgoing ? parent.x : lane.width - parent.x - parent.width) + root.padding-right < self.full-width;
                 y: (parent.height - self.height) / 2;
                 shown: bta.has-hover;
                 mirrored: m.outgoing;

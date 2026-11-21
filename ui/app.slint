@@ -393,14 +393,17 @@ export component AppWindow inherits Window {
     in-out property <length> view-top-off;
     // the message list moved: the hover is brought up to date for the cursor (gui::anim)
     callback gif-scrolled();
-    // the width a picture may take in the message list: the row's padding (16px a side in
-    // `Bubble`) and a group's avatar column (28px and 8px of spacing) left out. The backend sizes
-    // pictures to it, so a narrow chat shrinks them instead of cutting them. Whole px: the rows
-    // compare it with the room they were sized for (`Bubble.k`).
-    out property <length> photo-room: floor((msg-list.visible-width - 2 * 16px - 36px) / 1px) * 1px;
+    // the widest a message may be in the message list: the row's padding (16px a side in
+    // `Bubble`), a group's avatar column (28px and 8px of spacing) and 20px more left out, so the
+    // hover tools' "more" (36px, `MsgTools.compact`) fits beside any message, past the padding.
+    property <length> lane-room: msg-list.visible-width - 2 * 16px - 36px - 20px;
+    // the width a picture may take. The backend sizes pictures to it, so a narrow chat shrinks
+    // them instead of cutting them. Whole px: the rows compare it with the room they were sized
+    // for (`Bubble.k`).
+    out property <length> photo-room: floor(root.lane-room / 1px) * 1px;
     changed photo-room => { root.photo-room-changed(); }
-    // the widest a message's bubble gets
-    property <length> bubble-max-w: min(560px, msg-list.visible-width * 0.75);
+    // the widest a message's bubble gets, leaving the same room for the tools
+    property <length> bubble-max-w: min(560px, msg-list.visible-width * 0.75, root.lane-room);
     // the same inside a bubble's padding (12px a side in `Bubble`): a reply's picture, one with a
     // file line, a link preview's image
     out property <length> photo-room-boxed: floor((root.bubble-max-w - 2 * 12px) / 1px) * 1px;
@@ -430,6 +433,8 @@ export component AppWindow inherits Window {
     in property <string> menu-mine;
     in property <bool> menu-can-edit;
     in property <bool> menu-can-delete;
+    // its pictures or files can be saved (the hover tools' save, which a narrow chat hides)
+    in property <bool> menu-can-save;
     in property <bool> menu-pinned;
     // what the message's "Info" shows; "" hides the row (incoming messages have none)
     in property <string> menu-info;
@@ -2419,6 +2424,14 @@ export component AppWindow inherits Window {
                     text: @tr("Reply");
                     clicked => {
                         root.reply(root.menu-id);
+                        root.menu-id = "";
+                    }
+                }
+                if root.menu-can-save && root.menu-actions: MenuRow {
+                    icon: Icons.download;
+                    text: @tr("Save");
+                    clicked => {
+                        root.save-clicked(root.menu-id);
                         root.menu-id = "";
                     }
                 }
