@@ -82,6 +82,16 @@ pub(crate) fn redraw_rows(ui: &Ui, uses: impl Fn(&MsgDto) -> bool) {
     }
 }
 
+/// The keys of the pictures the message shows (`Ui::thumbs`).
+pub(crate) fn picture_keys(m: &MsgDto) -> impl Iterator<Item = &str> {
+    let link = m.link.as_ref().map(|l| l.image_key.as_str());
+    [m.image_key.as_str(), m.quote_image_key.as_str()]
+        .into_iter()
+        .chain(link)
+        .chain(m.cells.iter().map(|c| c.key.as_str()))
+        .filter(|k| !k.is_empty())
+}
+
 /// Whether the message shows the picture or label cached under `key`, anywhere.
 pub(crate) fn shows_key(m: &MsgDto, key: &str) -> bool {
     m.image_key == key

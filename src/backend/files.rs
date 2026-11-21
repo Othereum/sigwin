@@ -13,7 +13,42 @@ pub(super) enum ThumbShape {
     Cover(u32, u32),
 }
 
+/// What a picture of the open chat's rows is made from (`App::pictures`).
+pub(super) enum Picture {
+    Sticker(Sticker),
+    Cell(view::media::WantedCell),
+}
+
 impl App {
+    /// Asks for picture `key` of thread `thread`'s rows.
+    pub(super) fn ask_picture(&self, thread: &str, key: &str, p: &Picture) {
+        // a stranger's pictures wait for a click until the request is accepted
+        let auto = !self.is_request(thread);
+        match p {
+            Picture::Sticker(s) => {
+                let Some(ptr) = s.data.clone() else { return };
+                self.request_thumb(key.into(), key.into(), ptr, ThumbShape::Fit(view::media::sticker_size()), auto, Some(s.clone()));
+            }
+            Picture::Cell(c) if view::media::is_video(&c.ptr) => {
+                self.request_video_thumb(key.into(), c.file_key.clone(), c.ptr.clone(), c.size, auto);
+            }
+            Picture::Cell(c) => {
+                let shape = ThumbShape::Cover(c.size.0, c.size.1);
+                self.request_thumb(key.into(), c.file_key.clone(), c.ptr.clone(), shape, auto, None);
+            }
+        }
+    }
+
+    /// The UI let go of these pictures while their rows were off screen, and shows them again.
+    pub(super) fn want_pictures(&self, keys: Vec<String>) {
+        let Some(thread) = self.current.as_ref().map(|o| o.key.clone()) else { return };
+        for k in keys {
+            let Some(p) = self.pictures.get(&k) else { continue };
+            self.thumbs_requested.borrow_mut().insert(k.clone());
+            self.ask_picture(&thread, &k, p);
+        }
+    }
+
     /// `key` is what the UI knows the result by, `file_key` the attachment's files on disk.
     /// Not `auto`: it waits for a click whatever its size (a message request's).
     /// `sticker`: a sticker message's, taken from its pack when installed, and from the sticker CDN

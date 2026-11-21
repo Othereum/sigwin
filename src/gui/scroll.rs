@@ -252,18 +252,10 @@ pub(crate) fn show_rows(app: &AppWindow, items: Vec<MsgDto>, paging: Paging, scr
 /// them would grow with how far the user scrolled. The backend sends them again if they return.
 fn forget_unshown_thumbs(ui: &mut Ui, items: &[MsgDto]) {
     use crate::backend::linkpreview::COMPOSER_KEY;
-    let shown: std::collections::HashSet<&str> = items
-        .iter()
-        .flat_map(|m| {
-            let link = m.link.as_ref().map(|l| l.image_key.as_str());
-            std::iter::once(m.image_key.as_str())
-                .chain(std::iter::once(m.quote_image_key.as_str()))
-                .chain(link)
-                .chain(m.cells.iter().map(|c| c.key.as_str()))
-        })
-        .collect();
+    let shown: std::collections::HashSet<&str> = items.iter().flat_map(rows::picture_keys).collect();
     let card = ui.link.key.clone();
     ui.thumbs.retain(|k, _| shown.contains(k.as_str()) || k.ends_with(COMPOSER_KEY) || *k == card);
+    ui.shown.keep_rows(items);
     // and the file lines: keyed by their row
     let lines: std::collections::HashSet<&str> = items.iter().filter(|m| !m.attachment.is_empty()).map(|m| m.id.as_str()).collect();
     ui.media_labels.retain(|k| {

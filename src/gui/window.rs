@@ -713,6 +713,7 @@ pub(crate) fn visibility(app: &AppWindow, shown: bool) {
                 anim::stop_gif(ui);
                 ui.anims.clear_list();
                 ui.thumbs.clear();
+                ui.shown.clear();
                 ui.media_labels.clear();
                 ui.sender_avatars.clear();
                 ui.messages.set_vec(Vec::new());

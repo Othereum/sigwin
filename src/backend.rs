@@ -399,6 +399,9 @@ struct App {
     /// thumbnails and long texts asked for in the open thread
     /// (shared with the tasks: a video waiting for its turn is dropped once it's no longer in here)
     thumbs_requested: Rc<RefCell<HashSet<String>>>,
+    /// what each picture of the open chat's rows is made from, to make it again when the UI let
+    /// it go (`Command::WantPictures`)
+    pictures: HashMap<String, files::Picture>,
     attachment_downloads: files::AttachmentDownloads,
     /// held while making a message's thumbnail
     thumb_gate: Arc<tokio::sync::Semaphore>,
@@ -597,6 +600,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         current_dirty: false,
         threads_dirty: false,
         thumbs_requested: Default::default(),
+        pictures: HashMap::new(),
         attachment_downloads: Default::default(),
         thumb_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         video_gate: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -904,6 +908,7 @@ impl App {
             }
             Command::ScaleChanged => self.rescale().await,
             Command::MediaResized => self.reshow_rows().await,
+            Command::WantPictures(keys) => self.want_pictures(keys),
             Command::ClockChanged => self.retime_threads().await,
             Command::SetMute { key, set } => self.set_mute(&key, set),
             Command::SetPref { key, pref } => self.set_pref(&key, pref),

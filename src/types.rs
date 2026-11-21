@@ -840,6 +840,8 @@ pub enum Command {
     ScaleChanged,
     /// the photo or sticker size in chats changed (`view::media::set_sizes`)
     MediaResized,
+    /// pictures of the open chat's rows the UI let go of off screen, on screen again
+    WantPictures(Vec<String>),
     /// the clock format changed: the thread list's times are said again
     ClockChanged,
     /// turn a thread's notifications off / on, or follow the phone again

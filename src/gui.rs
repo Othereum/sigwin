@@ -58,6 +58,8 @@ pub(crate) struct Ui {
     pub(crate) messages: Rc<VecModel<MsgItem>>,
     /// thumbnails for the open thread only; cleared on thread switch to bound memory
     thumbs: held::Pictures<{ held::THUMBS }>,
+    /// rows on screen, and the pictures off it let go of (`media::row_shown`)
+    shown: media::Shown,
     /// text over pictures, by the same keys
     media_labels: rows::MediaStates,
     /// animated stickers' frames (message list, open thread; the hovered picker sticker)

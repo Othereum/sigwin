@@ -2,6 +2,7 @@
 //!
 //! They often come after their rows: each one patches the rows that show it.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::*;
@@ -81,9 +82,115 @@ pub(super) fn thumb_arrived(t: Arc<types::Thumb>) {
     let img = Image::from_rgba8(buf);
     UI.with_borrow_mut(|ui| {
         ui.thumbs.insert(t.key.clone(), img);
+        ui.shown.dropped.remove(&t.key);
+        // the rows' pictures come before the rows are on screen: kept like one that just left it
+        let clock = ui.shown.tick();
+        ui.shown.left.insert(t.key.clone(), clock);
         // every place that shows it: the same picture twice in a grid has one key for both cells
         rows::redraw_rows(ui, |m| rows::shows_key(m, &t.key));
+        trim_pictures(ui);
     });
+}
+
+/// What the open chat's pictures off screen may hold together. The ones longest off screen are
+/// let go of past it, and asked for again when their row comes back (from the thumbnail cache:
+/// no download, no original decoded). Those on screen are always kept.
+const OFF_SCREEN: usize = 8 << 20;
+
+/// Which rows are on screen, and what became of the pictures that aren't.
+#[derive(Default)]
+pub(crate) struct Shown {
+    /// the ids of the rows at the list's top and bottom edges ("": its first or last). Not the
+    /// rows the list's instances show: it drops them without a word as they leave the screen.
+    top: String,
+    bottom: String,
+    /// when each picture was last on screen (or arrived), by `clock`
+    left: HashMap<String, u64>,
+    /// pictures let go of while their rows are loaded: asked for again when shown
+    dropped: HashSet<String>,
+    clock: u64,
+}
+
+impl Shown {
+    fn tick(&mut self) -> u64 {
+        self.clock += 1;
+        self.clock
+    }
+
+    pub(crate) fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    /// The rows are now `items`: what was kept of others goes.
+    pub(crate) fn keep_rows(&mut self, items: &[MsgDto]) {
+        let keys: HashSet<&str> = items.iter().flat_map(rows::picture_keys).collect();
+        self.left.retain(|k, _| keys.contains(k.as_str()));
+        self.dropped.retain(|k| keys.contains(k.as_str()));
+    }
+
+    /// The rows on screen, of `items`.
+    fn on_screen<'a>(&self, items: &'a [MsgDto]) -> &'a [MsgDto] {
+        let at = |id: &str| items.iter().position(|m| m.id == id);
+        let top = at(&self.top).unwrap_or(0);
+        let bottom = at(&self.bottom).unwrap_or(items.len().saturating_sub(1));
+        items.get(top.min(bottom)..=top.max(bottom)).unwrap_or_default()
+    }
+}
+
+/// The message list scrolled: `top` and `bottom` are the rows at its edges.
+pub(super) fn view_moved(top: &str, bottom: &str) {
+    let ask = UI.with_borrow_mut(|ui| {
+        if ui.released {
+            return Vec::new();
+        }
+        (ui.shown.top, ui.shown.bottom) = (top.to_string(), bottom.to_string());
+        let clock = ui.shown.tick();
+        let mut ask = Vec::new();
+        let keys: Vec<String> = ui.shown.on_screen(&ui.last).iter().flat_map(rows::picture_keys).map(str::to_string).collect();
+        for k in keys {
+            if ui.shown.dropped.remove(&k) {
+                ask.push(k.clone());
+            }
+            ui.shown.left.insert(k, clock);
+        }
+        trim_pictures(ui);
+        ask
+    });
+    if !ask.is_empty() {
+        send_cmd(Command::WantPictures(ask));
+    }
+}
+
+/// Lets go of the pictures longest off screen past `OFF_SCREEN`, taking them out of their rows.
+fn trim_pictures(ui: &mut Ui) {
+    let on_screen: HashSet<&str> = ui.shown.on_screen(&ui.last).iter().flat_map(rows::picture_keys).collect();
+    // the rows' only: the composer's and the link card's stay
+    let rows: HashSet<&str> = ui.last.iter().flat_map(rows::picture_keys).collect();
+    let mut off: Vec<(u64, &String, usize)> = ui
+        .thumbs
+        .iter()
+        .filter(|(k, _)| rows.contains(k.as_str()) && !on_screen.contains(k.as_str()))
+        .map(|(k, img)| (ui.shown.left.get(k).copied().unwrap_or(0), k, held::Measured::bytes(img)))
+        .collect();
+    let mut over = off.iter().map(|o| o.2).sum::<usize>().saturating_sub(OFF_SCREEN);
+    if over == 0 {
+        return;
+    }
+    off.sort_by_key(|o| o.0);
+    let mut gone = HashSet::new();
+    for (_, k, bytes) in off {
+        if over == 0 {
+            break;
+        }
+        gone.insert(k.clone());
+        over = over.saturating_sub(bytes);
+    }
+    for k in &gone {
+        ui.thumbs.remove(k);
+        ui.shown.left.remove(k);
+        ui.shown.dropped.insert(k.clone());
+    }
+    rows::redraw_rows(ui, |m| rows::picture_keys(m).any(|k| gone.contains(k)));
 }
 
 pub(super) fn label_arrived(key: String, label: types::MediaLabel) {

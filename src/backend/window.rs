@@ -678,23 +678,15 @@ impl App {
             self.long.full.retain(|k, _| keep.contains(k.as_str()));
             self.long.shown.retain(|row, _| open.window.iter().any(|(t, _)| t == row));
         }
-        // a stranger's pictures wait for a click until the request is accepted
-        let auto = !self.is_request(&key);
-        for (k, s) in built.wanted_stickers {
-            let Some(ptr) = s.data.clone() else { continue };
-            if self.thumbs_requested.borrow_mut().insert(k.clone()) {
-                self.request_thumb(k.clone(), k, ptr, ThumbShape::Fit(view::media::sticker_size()), auto, Some(s));
-            }
-        }
         // newest first: videos take turns, and the newest are the ones on screen
-        for c in built.wanted_cells.into_iter().rev() {
-            if self.thumbs_requested.borrow_mut().insert(c.key.clone()) {
-                if view::media::is_video(&c.ptr) {
-                    self.request_video_thumb(c.key, c.file_key, c.ptr, c.size, auto);
-                } else {
-                    self.request_thumb(c.key, c.file_key, c.ptr, ThumbShape::Cover(c.size.0, c.size.1), auto, None);
-                }
+        self.pictures.clear();
+        let wanted = built.wanted_stickers.into_iter().map(|(k, s)| (k, Picture::Sticker(s)));
+        let wanted = wanted.chain(built.wanted_cells.into_iter().rev().map(|c| (c.key.clone(), Picture::Cell(c))));
+        for (k, p) in wanted {
+            if self.thumbs_requested.borrow_mut().insert(k.clone()) {
+                self.ask_picture(&key, &k, &p);
             }
+            self.pictures.insert(k, p);
         }
         for (k, ptr) in built.wanted_texts {
             if self.thumbs_requested.borrow_mut().insert(k.clone()) {

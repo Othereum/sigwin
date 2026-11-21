@@ -75,6 +75,11 @@ export component AppWindow inherits Window {
     callback jump-to-bottom();
     // row id: the row's bottom edge is on screen, so everything above it has been seen
     callback row-seen(string);
+    // the rows on screen run from `view-top-id` to `view-bottom-id` ("": the list's first or
+    // last); only theirs keep their pictures (gui::media::view_moved)
+    callback view-moved(string, string);
+    changed view-top-id => { root.view-moved(root.view-top-id, root.view-bottom-id); }
+    changed view-bottom-id => { root.view-moved(root.view-top-id, root.view-bottom-id); }
     // a short message over the conversation pane (gui::notice)
     in property <string> notice-text;
     // the notice's button ("" for none)
@@ -191,6 +196,7 @@ export component AppWindow inherits Window {
     in-out property <int> jump-probe;
     // the row across the message list's top edge (0 = its top, above the edge when negative)
     in-out property <string> view-top-id;
+    in-out property <string> view-bottom-id;
     in-out property <length> view-top-off;
     // the message list moved: the hover is brought up to date for the cursor (gui::anim)
     callback gif-scrolled();
@@ -1152,9 +1158,13 @@ export component AppWindow inherits Window {
                         property <bool> sep-near: m.day-sep && self.screen-top + 14px < date-pill.y + date-pill.height + 8px && self.screen-top + 14px + 24px > date-pill.y - 8px;
                         changed sep-near => { root.sep-near = self.sep-near; }
                         changed top-id => { if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; root.top-day = self.top-day; } }
+                        // the row at the list's bottom edge: what's on screen runs from `top-id` to it
+                        property <string> bottom-id: !m.typing && self.screen-top < msg-list.visible-height && self.screen-top + self.height >= msg-list.visible-height ? m.id : "";
+                        changed bottom-id => { if (self.bottom-id != "") { root.view-bottom-id = self.bottom-id; } }
                         changed screen-top => {
                             if (self.is-divider) { root.divider-top = self.screen-top; }
                             if (self.top-id != "") { root.view-top-id = self.top-id; root.view-top-off = self.screen-top; root.top-day = self.top-day; }
+                            if (self.bottom-id != "") { root.view-bottom-id = self.bottom-id; }
                             // a row scrolled in (or reused) already near never changes `sep-near`
                             if (self.sep-near) { root.sep-near = true; }
                         }
