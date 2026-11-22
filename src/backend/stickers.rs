@@ -148,6 +148,17 @@ impl App {
         });
     }
 
+    /// Whether a message-list sticker is animated, for its mark while only the hovered one plays.
+    pub(super) fn sticker_animated(&self, key: String) {
+        let path = attachment_path(&self.paths.attachments, &key);
+        let emit = self.emit.clone();
+        tokio::task::spawn_blocking(move || {
+            if sigwin_vault::read(&path).is_ok_and(|bytes| sigwin_thumb::is_animated(&bytes)) {
+                emit(Event::StickerAnimated(key));
+            }
+        });
+    }
+
     /// Picker stickers' frames, from the bytes `open_pack` kept for animated stickers. One at a
     /// time on one blocking thread, in the order asked: a screenful asks for tens at once, each
     /// tens of ms, and the grid's thumbnails come first. A new list replaces what's left of the old.

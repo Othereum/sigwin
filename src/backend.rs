@@ -886,6 +886,7 @@ impl App {
             Command::CreatePack(job) => self.create_pack(job),
             Command::CancelPack => self.cancel_pack(),
             Command::StickerFrames(key) => self.sticker_frames(key),
+            Command::StickerAnimated(key) => self.sticker_animated(key),
             Command::PickerFrames { pack, ids } => self.picker_frames(pack, ids),
             Command::React { id, emoji, remove } => self.react(&id, emoji, remove).await,
             Command::Edit { id, text, mentions } => self.edit(&id, text, &mentions).await,

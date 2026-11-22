@@ -355,6 +355,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::ViewerImage(v) => viewer::arrived(app, v),
         Event::ViewerThumb(id, index, t) => viewer::thumb_arrived(&id, index, t),
         Event::Frames(f) => anim::frames_arrived(f),
+        Event::StickerAnimated(key) => anim::sticker_animated(&key),
         Event::Gif(slot) if slot.target == types::GifTarget::Composer => attach::gif_arrived(app, &slot),
         Event::Gif(slot) => anim::gif_arrived(slot),
         Event::Notice(s) => notice::show(app, &s),

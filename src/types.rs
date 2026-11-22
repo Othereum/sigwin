@@ -675,6 +675,8 @@ pub enum Event {
     ViewerThumb(String, usize, Thumb),
     /// answer to `StickerFrames` / `PickerFrames`
     Frames(Frames),
+    /// answer to `StickerAnimated`: this key's sticker is animated
+    StickerAnimated(String),
     /// sticker picker images (grid cells, pack covers), batched
     StickerThumbs(Vec<Thumb>),
     /// round photo of a thread (key = thread key); width 0 = none
@@ -835,6 +837,9 @@ pub enum Command {
     CancelPack,
     /// the frames of the sticker with this thumbnail key (message list), if it is animated
     StickerFrames(String),
+    /// whether the sticker with this thumbnail key (message list) is animated, read from its
+    /// header; answered by `Event::StickerAnimated` only if it is
+    StickerAnimated(String),
     /// the frames of these picker stickers, in order, each answered by `Event::Frames`; replaces
     /// the ones of an earlier call not made yet (empty: stop)
     PickerFrames { pack: String, ids: Vec<u32> },

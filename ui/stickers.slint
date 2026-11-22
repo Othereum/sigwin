@@ -5,6 +5,7 @@ import { Anim, Theme } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
 import { Field, HStrip, PlainButton, TextButton, ThinScroll } from "widgets.slint";
 import { Icons } from "icons.slint";
+import { MediaLabel } from "bubble.slint";
 
 export component StickerPanel inherits Rectangle {
     in property <[PackItem]> packs;
@@ -98,6 +99,12 @@ export component StickerPanel inherits Rectangle {
                         height: root.cell - 12px;
                         source: s.anim.width > 0 ? s.anim : s.img;
                         image-fit: contain;
+                    }
+                    // the pointer on it plays it
+                    if Anim.hover-only && s.animated && !sta.has-hover: MediaLabel {
+                        icon: Icons.play;
+                        x: 6px;
+                        y: parent.height - self.height - 6px;
                     }
                     sta := TouchArea {
                         mouse-cursor: pointer;

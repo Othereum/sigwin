@@ -6,8 +6,10 @@
 //! drawn. Those off screen keep `OFF_SCREEN` together, the longest off screen going back to its
 //! still first (asked for again when its row comes back), and all of them keep `ANIM_BUDGET`.
 //! Picker: the animated stickers on screen play, asked for as the grid reports its rows on screen
-//! (`Anim.picker-view`), or only the hovered one when Windows' animation effects are off. Those
-//! that scroll away keep `OFF_SCREEN` together, so scrolling back plays them right away.
+//! (`Anim.picker-view`). Those that scroll away keep `OFF_SCREEN` together, so scrolling back
+//! plays them right away.
+//! With Windows' animation effects off, a sticker plays only while hovered, in the list and the
+//! picker, and animated ones have a mark until then (the list asks only whether one is).
 //!
 //! GIFs play from frames the backend streams (`backend::gif`): one at a time, decoded off the UI
 //! thread, which Slint's player can't do for big ones.
@@ -87,6 +89,12 @@ pub(crate) struct Anims {
     list: HashMap<String, Sticker>,
     /// keys asked from the backend, answered or not (an evicted key leaves, so it can come back)
     asked: HashSet<String>,
+    /// Windows' animation effects are off: a sticker plays only while hovered, and those known
+    /// to be animated (`animated`, message list) have a mark until then
+    hover_only: bool,
+    animated: HashSet<String>,
+    /// the hovered message-list sticker's key, while `hover_only`
+    list_hovered: Option<String>,
     picker: Picker,
 }
 
@@ -106,8 +114,6 @@ struct Picker {
     /// the grid's cells on screen, [first, end)
     range: (usize, usize),
     hovered: Option<String>,
-    /// Windows' animation effects are off: only the hovered sticker plays
-    hover_only: bool,
     turn: u64,
 }
 
@@ -125,10 +131,25 @@ impl Anims {
         }
     }
 
-    /// Thread switch: the old thread's stickers go.
+    /// Whether a message row's sticker has the mark of an animated one that plays when hovered.
+    pub(crate) fn marked(&self, key: &str) -> bool {
+        self.hover_only && self.animated.contains(key)
+    }
+
+    /// Thread switch: the old thread's stickers go, and Windows' animation effects are read again.
     pub(crate) fn clear_list(&mut self) {
         self.list.clear();
         self.asked.clear();
+        self.animated.clear();
+        self.list_hovered = None;
+        self.read_motion();
+    }
+
+    fn read_motion(&mut self) {
+        self.hover_only = !super::window::animations_on();
+        if let Some(app) = APP.with_borrow(|a| a.as_ref().and_then(|w| w.upgrade())) {
+            app.global::<Anim>().set_hover_only(self.hover_only);
+        }
     }
 
     fn bytes(&self) -> usize {
@@ -195,6 +216,10 @@ pub(crate) fn wire(app: &AppWindow) {
     g.on_hover(|pack, id, on| {
         let pack = pack.to_string();
         slint::Timer::single_shot(Duration::ZERO, move || hover(&pack, id as u32, on));
+    });
+    g.on_sticker_hover(|id, on| {
+        let id = id.to_string();
+        slint::Timer::single_shot(Duration::ZERO, move || sticker_hover(&id, on));
     });
     g.on_picker_view(|first, end| {
         slint::Timer::single_shot(Duration::ZERO, move || {
@@ -341,18 +366,54 @@ fn shown(id: &str) {
         if ui.anims.list.contains_key(&key) || !ui.thumbs.contains_key(&key) || !ui.anims.asked.insert(key.clone()) {
             return;
         }
+        // played only when hovered: until then, only whether it gets the mark
+        let cmd = if ui.anims.hover_only { Command::StickerAnimated(key) } else { Command::StickerFrames(key) };
         if let Some(tx) = &ui.tx {
-            let _ = tx.send(Command::StickerFrames(key));
+            let _ = tx.send(cmd);
+        }
+    });
+}
+
+/// A message-list sticker turned out animated: its rows get the mark.
+pub(crate) fn sticker_animated(key: &str) {
+    UI.with_borrow_mut(|ui| {
+        // a key not asked belongs to a thread left meanwhile
+        if ui.anims.hover_only && ui.anims.asked.contains(key) && ui.anims.animated.insert(key.to_string()) {
+            set_rows(ui, key);
+        }
+    });
+}
+
+/// The pointer came onto a marked message-list sticker (row `id`) or left it: it plays meanwhile.
+fn sticker_hover(id: &str, on: bool) {
+    UI.with_borrow_mut(|ui| {
+        let Some(key) = ui.last.iter().find(|m| m.id == id).map(|m| m.image_key.clone()) else { return };
+        if on {
+            if let Some(old) = ui.anims.list_hovered.replace(key.clone()) {
+                if old != key && ui.anims.list.remove(&old).is_some() {
+                    set_rows(ui, &old);
+                }
+            }
+            if !ui.anims.list.contains_key(&key) {
+                if let Some(tx) = &ui.tx {
+                    let _ = tx.send(Command::StickerFrames(key));
+                }
+            }
+        } else if ui.anims.list_hovered.as_deref() == Some(key.as_str()) {
+            ui.anims.list_hovered = None;
+            if ui.anims.list.remove(&key).is_some() {
+                set_rows(ui, &key);
+            }
         }
     });
 }
 
 fn hover(pack: &str, id: u32, on: bool) {
     UI.with_borrow_mut(|ui| {
-        let p = &mut ui.anims.picker;
-        if !p.hover_only {
+        if !ui.anims.hover_only {
             return;
         }
+        let p = &mut ui.anims.picker;
         let key = format!("{STICKER_THUMB_PREFIX}{pack}_{id}");
         if on {
             p.hovered = Some(key);
@@ -367,7 +428,7 @@ fn hover(pack: &str, id: u32, on: bool) {
 
 /// The sticker panel opened: whether all on screen play follows Windows' animation effects.
 pub(crate) fn picker_opened(ui: &mut Ui) {
-    ui.anims.picker.hover_only = !super::window::animations_on();
+    ui.anims.read_motion();
 }
 
 /// The picker shows the grid of `pack` (in `ui.sticker.grid`) or none (""): the old grid's
@@ -375,7 +436,6 @@ pub(crate) fn picker_opened(ui: &mut Ui) {
 pub(crate) fn picker_grid(ui: &mut Ui, pack: &str) {
     let p = std::mem::take(&mut ui.anims.picker);
     ui.anims.picker.range = p.range;
-    ui.anims.picker.hover_only = p.hover_only;
     ui.anims.picker.pack = pack.to_string();
     if p.asked.iter().any(|k| !p.made.contains_key(k) && !p.stills.contains(k)) {
         if let Some(tx) = &ui.tx {
@@ -388,11 +448,12 @@ pub(crate) fn picker_grid(ui: &mut Ui, pack: &str) {
 /// Puts the animations on the picker cells that should play and takes them off the others, asks
 /// for the ones missing, and lets go of those not shown past `OFF_SCREEN`.
 pub(crate) fn update_picker(ui: &mut Ui) {
+    let hover_only = ui.anims.hover_only;
     let p = &mut ui.anims.picker;
     let grid = &ui.sticker.grid;
     p.turn += 1;
     let (first, end) = p.range;
-    let want: HashSet<&str> = if p.hover_only {
+    let want: HashSet<&str> = if hover_only {
         p.hovered.iter().map(String::as_str).collect()
     } else {
         grid.iter().skip(first).take(end.saturating_sub(first)).filter(|s| s.animated).map(|s| s.key.as_str()).collect()
@@ -484,6 +545,10 @@ pub(crate) fn frames_arrived(f: Frames) {
         }
         // a key not asked belongs to a thread left meanwhile
         if !ui.anims.asked.contains(&f.key) || ui.anims.list.contains_key(&f.key) {
+            return;
+        }
+        // played only while hovered, and the pointer has left
+        if ui.anims.hover_only && ui.anims.list_hovered.as_deref() != Some(f.key.as_str()) {
             return;
         }
         let Some(mut s) = Sticker::new(&f) else { return };

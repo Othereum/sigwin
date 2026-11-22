@@ -174,8 +174,17 @@ export component MsgImage inherits Rectangle {
         x: 6px;
         y: parent.height - self.height - 6px;
     }
-    if m.cells.length == 0: TouchArea {
+    if m.cells.length == 0: sticker-ta := TouchArea {
         mouse-cursor: pointer;
+        // the row id with it: a reused row instance keeps the hover while its message changes
+        property <string> hover-id: m.animated-sticker && self.has-hover ? m.id : "";
+        changed hover-id => { Anim.sticker-hover(self.hover-id == "" ? m.id : self.hover-id, self.hover-id != ""); }
+        // the pointer on it plays it
+        if m.animated-sticker && !sticker-ta.has-hover: MediaLabel {
+            icon: Icons.play;
+            x: 6px;
+            y: parent.height - self.height - 6px;
+        }
         clicked => { root.attachment-clicked(m.id, 0); }
         pointer-event(e) => {
             if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {

@@ -1243,6 +1243,7 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
     }
     match c {
         Command::StickerFrames(k) => demo_sticker(emit, k.clone(), view::media::sticker_size()),
+        Command::StickerAnimated(k) if k == "demo-st-1" => emit(Event::StickerAnimated(k.clone())),
         Command::PickerFrames { pack, ids } => {
             for id in ids {
                 demo_sticker(emit, format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX), 72);

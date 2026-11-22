@@ -205,6 +205,9 @@ pub(crate) fn cursor_in_window(_: &AppWindow) -> Option<slint::LogicalPosition> 
 #[cfg(windows)]
 pub(crate) fn animations_on() -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETCLIENTAREAANIMATION};
+    if std::env::var_os("SIGWIN_DEMO").is_some() && std::env::var_os("SIGWIN_DEMO_NO_MOTION").is_some() {
+        return false;
+    }
     let mut on: i32 = 1;
     // SAFETY: SPI_GETCLIENTAREAANIMATION writes a BOOL through the pointer
     let ok = unsafe { SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, (&mut on as *mut i32).cast(), 0) };

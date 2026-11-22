@@ -361,6 +361,7 @@ pub(crate) fn to_item(
     // stickers: the picture and its animation
     let image = thumbs.get(&m.image_key).cloned();
     let anim = anims.image(&m.image_key);
+    let animated_sticker = m.sticker && anims.marked(&m.image_key);
     let cells: Vec<ImageCell> = m
         .cells
         .iter()
@@ -451,6 +452,7 @@ pub(crate) fn to_item(
         has_image: !m.image_key.is_empty() || !m.cells.is_empty(),
         image: image.unwrap_or_default(),
         anim,
+        animated_sticker,
         img_w: m.img_w as f32,
         img_h: m.img_h as f32,
         img_full_w: m.img_full_w as f32,

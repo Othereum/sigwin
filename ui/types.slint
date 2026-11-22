@@ -124,6 +124,8 @@ export struct MsgItem {
     image: image,
     // an animated sticker, which the Image plays (empty: show `image`)
     anim: image,
+    // a sticker known to be animated that plays only while hovered (`Anim.hover-only`): it has a mark
+    animated-sticker: bool,
     img-w: length,
     img-h: length,
     // how the pictures follow the chat's width until the row is built for it (`MsgDto::img_full_w`)
@@ -219,7 +221,7 @@ export struct StickerItem {
     id: int,
     emoji: string,
     img: image,
-    // plays while hovered (the animation is loaded then and dropped after)
+    // plays while on screen, or while hovered (`Anim.hover-only`)
     animated: bool,
     anim: image,
 }
