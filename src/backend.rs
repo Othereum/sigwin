@@ -727,7 +727,10 @@ impl App {
         (self.emit)(Event::Progress(s.into()));
     }
     fn connection(&self, s: impl Into<String>, at_once: bool) {
-        (self.emit)(Event::Connection { text: s.into(), at_once });
+        (self.emit)(Event::Connection { text: s.into(), at_once, busy: false });
+    }
+    fn syncing(&self, at_once: bool) {
+        (self.emit)(Event::Connection { text: tr!("Syncing…").into(), at_once, busy: true });
     }
     fn catching_up(&mut self, on: bool) {
         if self.catching_up != on {
@@ -1025,7 +1028,7 @@ impl App {
             Internal::Received(r) => self.received(r).await,
             Internal::Reconnected => {
                 self.catching_up(true);
-                self.connection(tr!("Syncing…"), false);
+                self.syncing(false);
             }
             Internal::DeviceRenamed => self.emit_account().await,
             Internal::ReceiveStopped(msg) => {

@@ -358,7 +358,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::Saved(s, path) => notice::saved(app, &s, path),
         Event::Progress(s) => notice::progress(app, &s),
         Event::ProgressDone => notice::progress_done(app),
-        Event::Connection { text, at_once } => notice::connection(app, text, at_once),
+        Event::Connection { text, at_once, busy } => notice::connection(app, text, at_once, busy),
         Event::CatchingUp(on) => UI.with_borrow_mut(|ui| {
             ui.catching_up = on;
             show_total_unread(app, ui);

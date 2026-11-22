@@ -22,7 +22,7 @@ thread_local! {
     static REVEAL: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static CONNECTION: Timer = Timer::default();
     /// what the banner will say when `CONNECTION` fires
-    static NEXT_CONNECTION: RefCell<String> = const { RefCell::new(String::new()) };
+    static NEXT_CONNECTION: RefCell<(String, bool)> = const { RefCell::new((String::new(), false)) };
 }
 
 fn set(app: &AppWindow, text: SharedString) {
@@ -87,19 +87,22 @@ pub(crate) fn progress_done(app: &AppWindow) {
     }
 }
 
-pub(crate) fn connection(app: &AppWindow, text: String, at_once: bool) {
+pub(crate) fn connection(app: &AppWindow, text: String, at_once: bool, busy: bool) {
     CONNECTION.with(|t| {
         if text.is_empty() || at_once || !app.get_connection_text().is_empty() {
             t.stop();
+            app.set_connection_busy(busy);
             app.set_connection_text(text.into());
             return;
         }
-        NEXT_CONNECTION.with_borrow_mut(|n| *n = text);
+        NEXT_CONNECTION.with_borrow_mut(|n| *n = (text, busy));
         if !t.running() {
             let weak = app.as_weak();
             t.start(TimerMode::SingleShot, CONNECTION_DELAY, move || {
                 if let Some(app) = weak.upgrade() {
-                    app.set_connection_text(NEXT_CONNECTION.take().into());
+                    let (text, busy) = NEXT_CONNECTION.take();
+                    app.set_connection_busy(busy);
+                    app.set_connection_text(text.into());
                 }
             });
         }

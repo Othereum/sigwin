@@ -267,6 +267,8 @@ export component AppWindow inherits Window {
     callback notice-action-clicked();
     // what's going on with the connection, "" when all is well
     in property <string> connection-text;
+    // the text is work going on (a spinner before it), not a failure (a warning icon when folded)
+    in property <bool> connection-busy;
     // the message being replied to: its text (empty: no reply) and who wrote it
     in property <string> reply-preview;
     in property <string> reply-author;
@@ -1877,16 +1879,23 @@ export component AppWindow inherits Window {
                     border-radius: 8px;
                     background: Theme.selected;
                 }
-                // folded: only that something is wrong
-                if !root.side-wide: Icon {
+                // folded: only what kind of thing it is
+                if !root.side-wide && !root.connection-busy: Icon {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
                     size: 18px;
                     icon: Icons.warning;
                 }
+                if root.connection-busy: BusySpinner {
+                    x: root.side-wide ? 20px : (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 16px;
+                    height: 16px;
+                    thickness: 2px;
+                }
                 if root.side-wide: Text {
-                    x: 20px;
-                    width: parent.width - 40px;
+                    x: root.connection-busy ? 44px : 20px;
+                    width: parent.width - self.x - 20px;
                     text: root.connection-text;
                     color: Theme.text;
                     font-size: 13px;

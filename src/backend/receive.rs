@@ -110,7 +110,7 @@ impl App {
             t.abort();
         }
         let tx = self.tx.clone();
-        self.connection(tr!("Syncing…"), true);
+        self.syncing(true);
         self.recv_task = Some(tokio::task::spawn_local(async move {
             let mut backoff = 2u64;
             loop {

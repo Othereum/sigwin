@@ -602,7 +602,8 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
         emit(Event::Notice(text));
     }
     if let Ok(text) = std::env::var("SIGWIN_DEMO_CONNECTION") {
-        emit(Event::Connection { text, at_once: false });
+        // "동기화" stands for the syncing state, anything else for a failure
+        emit(Event::Connection { busy: text.starts_with("동기화"), text, at_once: false });
     }
     if std::env::var_os("SIGWIN_DEMO_STATUS").is_some() {
         demo_status(emit.clone());
@@ -966,7 +967,7 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
     let (tx, rx) = std::sync::mpsc::channel::<Command>();
     let every = std::time::Duration::from_secs(secs.max(2));
     std::thread::spawn(move || {
-        emit(Event::Connection { text: format!("알림 테스트: {}초마다 메시지", every.as_secs()), at_once: true });
+        emit(Event::Connection { text: format!("알림 테스트: {}초마다 메시지", every.as_secs()), at_once: true, busy: false });
         // a demo photo as stored bytes, like a profile avatar
         let src = image::RgbaImage::from_fn(320, 240, |x, y| {
             let (cx, cy) = (x as f32 - 160.0, y as f32 - 110.0);
@@ -1081,7 +1082,7 @@ fn demo_viewer_count() -> usize {
 fn demo_status(emit: backend::Emit) {
     let wait = |secs: f32| std::thread::sleep(std::time::Duration::from_secs_f32(secs));
     std::thread::spawn(move || {
-        let connection = |text: &str, at_once: bool| emit(Event::Connection { text: text.into(), at_once });
+        let connection = |text: &str, at_once: bool| emit(Event::Connection { text: text.into(), at_once, busy: text.starts_with("동기화") });
         loop {
             // start
             connection("동기화 중…", true);

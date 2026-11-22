@@ -63,6 +63,7 @@ export component Tip inherits Rectangle {
 // start, so its head runs backwards half the time; here head and tail take turns moving ahead.
 export component BusySpinner {
     in property <brush> stroke: Theme.accent;
+    in property <length> thickness: 3.5px;
     width: 36px;
     height: 36px;
     private property <duration> cycle: 1.4s;
@@ -81,7 +82,7 @@ export component BusySpinner {
         viewbox-width: 100;
         viewbox-height: 100;
         stroke: root.stroke;
-        stroke-width: 3.5px;
+        stroke-width: root.thickness;
         stroke-line-cap: round;
         MoveTo {
             x: 50 + 44 * sin(root.from * 360deg);
