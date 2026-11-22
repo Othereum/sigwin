@@ -137,6 +137,8 @@ export struct MsgItem {
     link-title: string,
     link-desc: string,
     link-domain: string,
+    // a sticker pack's link: a click shows the pack in the panel, not the site
+    link-sticker: bool,
     link-image: image,
     link-img-w: length,
     link-img-h: length,
@@ -213,7 +215,17 @@ export struct PendingFile {
 export struct PackItem {
     id: string,
     title: string,
+    author: string,
     cover: image,
+}
+
+// a pack shown before it is installed
+export struct PreviewItem {
+    pack: PackItem,
+    count: int,
+    loading: bool,
+    failed: bool,
+    installing: bool,
 }
 
 export struct StickerItem {
@@ -223,4 +235,6 @@ export struct StickerItem {
     // plays while on screen, or while hovered (`Anim.hover-only`)
     animated: bool,
     anim: image,
+    // a previewed pack's sticker that couldn't be downloaded
+    failed: bool,
 }

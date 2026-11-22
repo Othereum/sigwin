@@ -106,8 +106,11 @@ pub fn manifest(title: &str, author: &str, emoji: &[String], cover: (u32, Option
     .encode_to_vec()
 }
 
+/// What a pack's link starts with.
+pub const LINK: &str = "https://signal.art/addstickers/";
+
 pub fn link(pack_id: &str, pack_key: &[u8]) -> String {
-    format!("https://signal.art/addstickers/#pack_id={pack_id}&pack_key={}", hex::encode(pack_key))
+    format!("{LINK}#pack_id={pack_id}&pack_key={}", hex::encode(pack_key))
 }
 
 #[cfg(test)]

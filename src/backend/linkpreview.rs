@@ -1,4 +1,5 @@
-//! Link previews on outgoing messages: fetching the site, attaching the result.
+//! Link previews on outgoing messages: fetching the site (a sticker pack's: the pack), attaching
+//! the result.
 //!
 //! presage fetches a preview by itself for any outgoing message with a link and none set, with
 //! no way to turn that off, blocking the send and logging the url when it fails. So every message
@@ -63,8 +64,9 @@ impl App {
         let key = format!("link-draft-{}", self.link_seq);
         let tx = self.tx.clone();
         let u = url.clone();
+        let m = self.manager.clone();
         let task = tokio::task::spawn_local(async move {
-            let res = fetch(u.clone(), key).await;
+            let res = fetch(m.as_ref(), u.clone(), key).await;
             let _ = tx.send(Internal::LinkFetched(u, res.map(Box::new)));
         });
         self.link_draft = Some(LinkDraft { url, task, result: None });
@@ -122,13 +124,13 @@ impl App {
     }
 }
 
-/// Contacts the link's site. A client of its own, dropped after: nothing stays in memory.
-async fn fetch(url: String, key: String) -> Option<(Fetched, Vec<Thumb>)> {
-    let started = Instant::now();
-    let client = previews::client_builder().build().ok()?;
-    let res = tokio::time::timeout(FETCH_TIMEOUT, previews::generate_preview_from_url(url.as_str(), &client)).await;
-    debug!(ms = started.elapsed().as_millis() as u64, ok = matches!(res, Ok(Ok(_))), "link preview fetched");
-    let mut content = res.ok()?.ok()?;
+/// The preview of `url`: a sticker pack's from the pack, as Signal's apps make it; any other
+/// link's from its site.
+async fn fetch(m: Option<&Mgr>, url: String, key: String) -> Option<(Fetched, Vec<Thumb>)> {
+    let mut content = match stickers::parse_pack_url(&url).filter(|_| url.starts_with(crate::stickerpack::LINK)) {
+        Some((id, pack_key)) => sticker_pack(m?, &id, &pack_key).await?,
+        None => fetch_site(&url).await?,
+    };
     let title = content.title.as_deref().map(|t| link::clean_preview_text(t, view::media::LINK_TITLE_MAX)).filter(|t| !t.is_empty())?;
     let description = content.description.as_deref().map(|d| link::clean_preview_text(d, view::media::LINK_DESC_MAX)).unwrap_or_default();
     content.title = Some(title.clone());
@@ -159,6 +161,48 @@ async fn fetch(url: String, key: String) -> Option<(Fetched, Vec<Thumb>)> {
         img_h: size.1,
     };
     Some((Fetched { content, url, dims, card }, thumbs))
+}
+
+/// Contacts the link's site. A client of its own, dropped after: nothing stays in memory.
+async fn fetch_site(url: &str) -> Option<PreviewContent> {
+    let started = Instant::now();
+    let client = previews::client_builder().build().ok()?;
+    let res = tokio::time::timeout(FETCH_TIMEOUT, previews::generate_preview_from_url(url, &client)).await;
+    debug!(ms = started.elapsed().as_millis() as u64, ok = matches!(res, Ok(Ok(_))), "link preview fetched");
+    res.ok()?.ok()
+}
+
+/// A sticker pack's title, author and cover, from the installed pack or the sticker CDN: its
+/// link's site has only a page about stickers in general.
+async fn sticker_pack(m: &Mgr, id: &[u8], key: &[u8]) -> Option<PreviewContent> {
+    let started = Instant::now();
+    let (manifest, cover) = match m.store().sticker_pack(id).await {
+        Ok(Some(p)) => {
+            let cover = p.manifest.cover.as_ref().map(|c| c.id).or_else(|| p.manifest.stickers.first().map(|s| s.id));
+            let bytes = p.manifest.stickers.iter().find(|s| Some(s.id) == cover).and_then(|s| s.bytes.clone());
+            (p.manifest, bytes)
+        }
+        _ => {
+            let manifest = tokio::time::timeout(FETCH_TIMEOUT, m.sticker_pack_manifest(id, key)).await.ok()?.ok()?;
+            let cover = manifest.cover.as_ref().map(|c| c.id).or_else(|| manifest.stickers.first().map(|s| s.id));
+            let bytes = match cover {
+                // the card is still useful without its picture
+                Some(c) => tokio::time::timeout(FETCH_TIMEOUT, m.download_sticker(id, key, c)).await.ok().and_then(Result::ok),
+                None => None,
+            };
+            (manifest, bytes)
+        }
+    };
+    debug!(ms = started.elapsed().as_millis() as u64, image = cover.is_some(), "sticker pack preview");
+    let image_content_type = cover.as_deref().and_then(|b| image::guess_format(b).ok()).map(|f| f.to_mime_type().to_string());
+    Some(PreviewContent {
+        url: None,
+        title: Some(manifest.title),
+        description: (!manifest.author.is_empty()).then(|| tr!("Sticker pack by {}", manifest.author)),
+        image: cover.filter(|_| image_content_type.is_some()),
+        image_content_type,
+        date: None,
+    })
 }
 
 /// The image's size, its size on the card, and thumbnails for the card and the composer.
@@ -200,7 +244,7 @@ pub(super) async fn for_message(m: &Mgr, body: &str, has_files: bool, link: Link
         _ if has_files => None,
         LinkSend::None => None,
         LinkSend::Ready(f) => Some(f),
-        LinkSend::Fetch(url) => fetch(url, String::new()).await.map(|(f, _)| Arc::new(f)),
+        LinkSend::Fetch(url) => fetch(Some(m), url, String::new()).await.map(|(f, _)| Arc::new(f)),
     };
     // a long message's body keeps only its start, and receivers look for the url there
     let Some(f) = fetched.filter(|f| urls.contains(&f.url)) else { return vec![no_preview()] };

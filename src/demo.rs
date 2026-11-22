@@ -1427,15 +1427,19 @@ fn demo_grids(emit: &backend::Emit) {
 }
 
 pub(crate) fn demo_stickers(emit: backend::Emit) {
-    let add = std::env::var("SIGWIN_DEMO_STICKERS").as_deref() == Ok("add");
+    let var = std::env::var("SIGWIN_DEMO_STICKERS").unwrap_or_default();
+    let add = var == "add";
     // `many`: more tabs than fit, for the fade at the strip's edges
-    let count = match std::env::var("SIGWIN_DEMO_STICKERS").as_deref() {
-        Ok("add") => 0,
-        Ok("many") => 16,
+    let count = match var.as_str() {
+        "add" => 0,
+        "many" => 16,
         _ => 2,
     };
+    if let Some(state) = var.strip_prefix("preview") {
+        return demo_preview(emit, state);
+    }
     let packs: Vec<types::PackDto> = (0..count)
-        .map(|i| types::PackDto { id: format!("p{i}"), title: format!("Pack {i}"), cover_key: format!("sp_p{i}_0") })
+        .map(|i| types::PackDto { id: format!("p{i}"), title: format!("Pack {i}"), author: format!("Artist {i}"), cover_key: format!("sp_p{i}_0") })
         .collect();
     let items: Vec<types::StickerDto> =
         (0..20).map(|i| types::StickerDto { key: format!("sp_p0_{i}"), id: i, emoji: String::new(), animated: i % 4 == 0 }).collect();
@@ -1448,5 +1452,40 @@ pub(crate) fn demo_stickers(emit: backend::Emit) {
         let mut thumbs: Vec<_> = (0..20u32).map(|i| demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8)).collect();
         thumbs.extend((1..count.max(2)).map(|i| demo_blob(&format!("sp_p{i}_0"), 96, (i * 40) as u8)));
         emit(Event::StickerThumbs(thumbs));
+    });
+}
+
+/// `SIGWIN_DEMO_STICKERS=preview[-loading|-failed]`: two packs and one not installed, shown in
+/// the panel. Ready: 30 stickers, the first 12 here (every 4th animated), two of them failed.
+fn demo_preview(emit: backend::Emit, state: &str) {
+    let packs: Vec<types::PackDto> = (0..2)
+        .map(|i| types::PackDto { id: format!("p{i}"), title: format!("Pack {i}"), author: format!("Artist {i}"), cover_key: format!("sp_p{i}_0-c") })
+        .collect();
+    let state = match state {
+        "-loading" => types::PreviewState::Loading,
+        "-failed" => types::PreviewState::Failed,
+        _ => types::PreviewState::Ready,
+    };
+    let ready = state == types::PreviewState::Ready;
+    let pack = types::PackDto {
+        id: "pv".into(),
+        title: if ready { "A rather long name for a sticker pack that doesn't fit".into() } else { String::new() },
+        author: if ready { "Someone".into() } else { String::new() },
+        cover_key: if ready { "sp_pv_0-c".into() } else { String::new() },
+    };
+    slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
+        emit(Event::StickerPacks(packs));
+        emit(Event::PackPreview(types::PreviewDto { pack, state, count: if ready { 30 } else { 0 } }));
+        let mut thumbs: Vec<_> = (0..2u32).map(|i| demo_blob(&format!("sp_p{i}_0-c"), 64, (i * 40) as u8)).collect();
+        if ready {
+            let items = (0..30).map(|i| types::StickerDto { key: format!("sp_pv_{i}"), id: i, emoji: String::new(), animated: false }).collect();
+            emit(Event::StickerGrid { pack: "pv".into(), items });
+            thumbs.push(demo_blob("sp_pv_0-c", 64, 200));
+            thumbs.extend((0..12u32).filter(|i| *i != 5 && *i != 9).map(|i| demo_blob(&format!("sp_pv_{i}"), 96, (i * 20) as u8)));
+        }
+        emit(Event::StickerThumbs(thumbs));
+        for i in (0..12u32).filter(|_| ready) {
+            emit(Event::PreviewSticker { key: format!("sp_pv_{i}"), animated: i % 4 == 0 && i != 0, failed: i == 5 || i == 9 });
+        }
     });
 }

@@ -50,9 +50,6 @@ msgstr "Annehmen"
 msgid "Account"
 msgstr "Konto"
 
-msgid "Add"
-msgstr "Hinzufügen"
-
 
 msgid "Adds the title and image of a link to messages you send. Sigwin visits the site to get them, so the site sees your IP address."
 msgstr "Fügt Nachrichten, die du sendest, den Titel und das Bild eines Links hinzu. Sigwin ruft dafür die Website auf, sodass sie deine IP-Adresse sieht."
@@ -596,8 +593,25 @@ msgstr "Eine Nachricht darf höchstens 64 KB groß sein. Diese hat {} KB.\nBitte
 msgid "A message to another chat couldn't be sent"
 msgstr "Eine Nachricht an einen anderen Chat konnte nicht gesendet werden"
 
-msgid "Add the pack this sticker is from?"
-msgstr "Das Sticker-Set dieses Stickers hinzufügen?"
+msgid "Couldn't load the sticker pack"
+msgstr "Das Sticker-Set konnte nicht geladen werden"
+
+msgid "Install"
+msgstr "Installieren"
+
+msgid "Installing…"
+msgstr "Wird installiert …"
+
+msgid "View sticker pack"
+msgstr "Sticker-Set ansehen"
+
+msgid "Sticker pack by {}"
+msgstr "Sticker-Set von {}"
+
+msgid "{n} sticker"
+msgid_plural "{n} stickers"
+msgstr[0] "{n} Sticker"
+msgstr[1] "{n} Sticker"
 
 msgid "Audio"
 msgstr "Audio"
@@ -979,9 +993,6 @@ msgstr "Chat mit diesem Nutzernamen beginnen"
 
 msgid "Sticker"
 msgstr "Sticker"
-
-msgid "Sticker pack"
-msgstr "Sticker-Set"
 
 msgid "Syncing…"
 msgstr "Wird synchronisiert …"

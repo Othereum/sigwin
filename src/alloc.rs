@@ -106,11 +106,13 @@ pub enum Gauge {
     Gallery,
     /// the picture open in the image viewer
     Viewer,
+    /// the downloaded stickers of a pack shown before it is installed (backend)
+    StickerPreview,
 }
 
 impl Gauge {
     /// By number, for a const generic (`gui::held::ImageMap`).
-    pub const ALL: [Gauge; 8] = [
+    pub const ALL: [Gauge; 9] = [
         Gauge::Thumbs,
         Gauge::Avatars,
         Gauge::SenderAvatars,
@@ -119,10 +121,12 @@ impl Gauge {
         Gauge::StickerCovers,
         Gauge::Gallery,
         Gauge::Viewer,
+        Gauge::StickerPreview,
     ];
 }
 
-const GAUGES: [&str; 8] = ["thumbs", "avatars", "sender avatars", "anims", "composer", "sticker covers", "gallery", "viewer"];
+const GAUGES: [&str; 9] =
+    ["thumbs", "avatars", "sender avatars", "anims", "composer", "sticker covers", "gallery", "viewer", "sticker preview"];
 
 /// Bytes and items of each gauge.
 static HELD: [(AtomicUsize, AtomicUsize); GAUGES.len()] = [const { (AtomicUsize::new(0), AtomicUsize::new(0)) }; GAUGES.len()];

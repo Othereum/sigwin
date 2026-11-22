@@ -9,13 +9,13 @@ impl App {
         let started = std::time::Instant::now();
         let mut out = Vec::new();
         let ids = self.index.pack_ids().await.unwrap_or_default();
-        let mut cached: HashMap<Vec<u8>, (String, Option<u32>)> = self
+        let mut cached: HashMap<Vec<u8>, ((String, String), Option<u32>)> = self
             .index
             .cached_packs()
             .await
             .unwrap_or_default()
             .into_iter()
-            .map(|(id, title, cover)| (id, (title, cover)))
+            .map(|(id, names, cover)| (id, (names, cover)))
             .collect();
         // packs removed since, here or on another device: their files go too
         let gone: Vec<Vec<u8>> = cached.keys().filter(|k| !ids.contains(k)).cloned().collect();
@@ -35,8 +35,8 @@ impl App {
                 Some(c) => self.sticker_cover_path(&id, *c).exists(),
                 None => true,
             });
-            let (title, cover_id, bytes) = match hit {
-                Some((title, cover)) => (title.clone(), *cover, None),
+            let ((title, author), cover_id, bytes) = match hit {
+                Some((names, cover)) => (names.clone(), *cover, None),
                 None => {
                     let Ok(Some(p)) = self.store.sticker_pack(&raw).await else { continue };
                     loaded += 1;
@@ -48,22 +48,22 @@ impl App {
                         Some(s) => (Some(s.id), s.bytes.clone()),
                         None => (None, None),
                     };
-                    if let Err(e) = self.index.cache_pack(&raw, &p.manifest.title, cid).await {
+                    if let Err(e) = self.index.cache_pack(&raw, &p.manifest.title, &p.manifest.author, cid).await {
                         warn!("cache pack: {e}");
                     }
-                    (p.manifest.title, cid, bytes)
+                    ((p.manifest.title, p.manifest.author), cid, bytes)
                 }
             };
             let cover_key = match cover_id {
                 Some(cid) => {
                     let base = sticker_thumb_key(&id, cid);
-                    let key = format!("{base}-c");
+                    let key = cover_key(&base);
                     jobs.push(StickerJob { base, key: key.clone(), bytes, fit: PACK_COVER });
                     key
                 }
                 None => String::new(),
             };
-            out.push(PackDto { id, title, cover_key });
+            out.push(PackDto { id, title, author, cover_key });
         }
         debug!(ms = started.elapsed().as_millis() as u64, packs = out.len(), loaded, "sticker packs");
         (self.emit)(Event::StickerPacks(out));
@@ -73,6 +73,10 @@ impl App {
     /// The grid comes from `ls_stickers` and the thumb files when all are cached; otherwise the
     /// pack is read from presage once (it holds every sticker's bytes) and cached.
     pub(super) async fn open_pack(&mut self, hex_id: &str) {
+        if self.preview.as_ref().is_some_and(|p| p.hex == hex_id) {
+            self.preview_grid();
+            return;
+        }
         let started = std::time::Instant::now();
         let Ok(id) = hex::decode(hex_id) else { return };
         let cached = self.index.cached_stickers(&id).await.unwrap_or_default();
@@ -162,10 +166,20 @@ impl App {
     /// time on one blocking thread, in the order asked: a screenful asks for tens at once, each
     /// tens of ms, and the grid's thumbnails come first. A new list replaces what's left of the old.
     pub(super) fn picker_frames(&self, pack: String, ids: Vec<u32>) {
+        // the previewed pack's stickers are only in memory
+        let held = self.preview.as_ref().filter(|p| p.hex == pack).map(|p| &p.bytes);
         let mut q = self.picker_queue.lock().unwrap_or_else(|e| e.into_inner());
         // the one being made comes anyway
         let busy = q.busy.clone();
-        q.todo = ids.into_iter().map(|id| (pack.clone(), id)).filter(|j| Some(j) != busy.as_ref()).collect();
+        q.todo = ids
+            .into_iter()
+            .map(|id| (pack.clone(), id))
+            .filter(|j| Some(j) != busy.as_ref())
+            .map(|j| {
+                let bytes = held.and_then(|b| b.get(&j.1)).map(|(b, _)| b.clone());
+                (j, bytes)
+            })
+            .collect();
         if q.running || q.todo.is_empty() {
             return;
         }
@@ -174,20 +188,23 @@ impl App {
         let dir = self.paths.thumbs.clone();
         let emit = self.emit.clone();
         tokio::task::spawn_blocking(move || loop {
-            let (pack, id) = {
+            let ((pack, id), held) = {
                 let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
                 let Some(j) = q.todo.pop_front() else {
                     q.running = false;
                     q.busy = None;
                     return;
                 };
-                q.busy = Some(j.clone());
+                q.busy = Some(j.0.clone());
                 j
             };
             let key = sticker_thumb_key(&pack, id);
-            let f = match sigwin_vault::read(&anim_source(&dir, &pack, id)) {
-                Ok(bytes) => Frames::decode(key, &bytes, PICKER_CELL),
-                Err(_) => Frames::still(key),
+            let f = match held {
+                Some(bytes) => Frames::decode(key, &bytes, PICKER_CELL),
+                None => match sigwin_vault::read(&anim_source(&dir, &pack, id)) {
+                    Ok(bytes) => Frames::decode(key, &bytes, PICKER_CELL),
+                    Err(_) => Frames::still(key),
+                },
             };
             emit(Event::Frames(f));
         });
@@ -256,11 +273,7 @@ impl App {
         let emit = self.emit.clone();
         let key = image_key.clone();
         tokio::task::spawn_blocking(move || {
-            let img = sigwin_thumb::decode(&bytes).map(|i| {
-                sigwin_thumb::fit(sigwin_thumb::to_rgba(&i), crate::types::physical_px(view::media::sticker_size()))
-            });
-            if let Ok(rgba) = img {
-                let t = Thumb { key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() };
+            if let Some(t) = still_thumb(key, &bytes, view::media::sticker_size()) {
                 emit(Event::Thumb(Arc::new(t)));
             }
         });
@@ -314,31 +327,30 @@ impl App {
         });
     }
 
-    /// Installed pack: open the panel on it. Otherwise ask the user whether to install it.
+    /// The panel opens on the sticker's pack: installed, on that sticker; otherwise a preview.
     pub(super) async fn sticker_clicked(&mut self, msg_id: &str) {
-        let pack_id = self.current.as_ref().and_then(|open| {
+        let pack = self.current.as_ref().and_then(|open| {
             let ts = msg_id.parse::<u64>().ok()?;
             let (_, c) = open.window.iter().find(|(t, _)| *t == ts)?;
             let Kind::Msg { dm, .. } = view::classify(c, self.me) else { return None };
-            dm.sticker.as_ref()?.pack_id.clone()
+            let s = dm.sticker.as_ref()?;
+            Some((s.pack_id.clone()?, s.pack_key.clone(), s.sticker_id))
         });
-        let Some(pack_id) = pack_id else { return };
-        match self.store.sticker_pack(&pack_id).await {
-            Ok(Some(_)) => (self.emit)(Event::OpenStickerPanel(hex::encode(&pack_id))),
-            _ => (self.emit)(Event::AskInstallPack(msg_id.to_string())),
-        }
+        let Some((id, key, sticker)) = pack else { return };
+        self.preview_pack(id, key, sticker).await;
     }
+}
 
-    pub(super) fn install_pack_from_message(&self, msg_id: &str) {
-        let Some(open) = self.current.as_ref() else { return };
-        let Ok(ts) = msg_id.parse::<u64>() else { return };
-        let Some((_, c)) = open.window.iter().find(|(t, _)| *t == ts) else { return };
-        let Kind::Msg { dm, .. } = view::classify(c, self.me) else { return };
-        let Some(s) = &dm.sticker else { return };
-        if let (Some(id), Some(key)) = (s.pack_id.clone(), s.pack_key.clone()) {
-            self.install_pack(id, key);
-        }
-    }
+/// A sticker resampled to `logical` px from its bytes, with no disk cache.
+pub(super) fn still_thumb(key: String, bytes: &[u8], logical: u32) -> Option<Thumb> {
+    let i = sigwin_thumb::decode(bytes).ok()?;
+    let rgba = sigwin_thumb::fit(sigwin_thumb::to_rgba(&i), crate::types::physical_px(logical));
+    Some(Thumb { key, width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
+}
+
+/// The thumbnail key of a pack's cover in its tab, from its sticker's key.
+pub(super) fn cover_key(sticker_key: &str) -> String {
+    format!("{sticker_key}-c")
 }
 
 #[derive(Clone)]
@@ -466,7 +478,8 @@ fn anim_marker(dir: &Path, pack_hex: &str) -> PathBuf {
 /// `App::picker_frames`' work: (pack, sticker id) to make, the one being made, whether a thread runs.
 #[derive(Default)]
 pub(super) struct PickerQueue {
-    todo: std::collections::VecDeque<(String, u32)>,
+    /// with the bytes when they are held in memory (a previewed pack)
+    todo: std::collections::VecDeque<((String, u32), Option<Arc<[u8]>>)>,
     busy: Option<(String, u32)>,
     running: bool,
 }

@@ -309,11 +309,30 @@ component LinkPreview inherits Rectangle {
                     overflow: elide;
                     height: min(self.preferred-height, 34px);
                 }
-                Text {
+                if !m.link-sticker: Text {
                     text: m.link-domain;
                     color: m.outgoing ? #ffffffb0 : Theme.subtle;
                     font-size: 11px;
                     overflow: elide;
+                }
+                // it opens in the app, unlike other links
+                if m.link-sticker: HorizontalLayout {
+                    spacing: 4px;
+                    alignment: start;
+                    Icon {
+                        y: (parent.height - self.height) / 2;
+                        icon: Icons.sticker;
+                        size: 14px;
+                        tint: m.outgoing ? white : Theme.accent;
+                    }
+                    Text {
+                        text: @tr("View sticker pack");
+                        color: m.outgoing ? white : Theme.accent;
+                        font-size: 12px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
                 }
             }
         }

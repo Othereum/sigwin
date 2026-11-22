@@ -886,6 +886,9 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             s(Command::RetrySend(id.to_string()));
         } else if let Some(id) = url.strip_prefix(DISCARD_URL) {
             s(Command::DiscardFailed(id.to_string()));
+        } else if url.starts_with(crate::stickerpack::LINK) {
+            // the page can't install it on a desktop: the panel shows the pack instead
+            s(Command::PreviewPackUrl(url.to_string()));
         } else {
             link::open(&url);
         }
@@ -939,11 +942,20 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         if url.trim().is_empty() {
             return;
         }
-        s(Command::InstallPackUrl(url.to_string()));
+        s(Command::PreviewPackUrl(url.to_string()));
         if let Some(app) = weak.upgrade() {
             app.global::<StickerData>().set_pack_url(SharedString::new());
         }
     });
+
+    let weak = app.as_weak();
+    d.on_install_preview(move || {
+        if let Some(app) = weak.upgrade() {
+            stickers::install_preview(&app);
+        }
+    });
+    let s = send.clone();
+    d.on_retry_preview(move || s(Command::RetryPreview));
 
     d.on_move_pack(|from, to| stickers::move_pack(from as usize, to as usize));
 

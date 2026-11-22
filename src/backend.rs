@@ -53,6 +53,7 @@ mod once;
 mod opening;
 mod ops;
 mod packmaker;
+mod packpreview;
 mod pni;
 mod receive;
 mod requests;
@@ -266,6 +267,10 @@ enum Internal {
     ProgressDone,
     PackInstalled(Result<String, String>),
     PackRemoved(Result<(), String>),
+    /// the previewed pack's manifest, for preview `seq`
+    PreviewManifest(u64, Result<presage::store::StickerPackManifest, String>),
+    /// one of its stickers: (seq, sticker id, bytes)
+    PreviewSticker(u64, u32, Result<Vec<u8>, String>),
     ReceiptsMoved,
     PinsIndexed,
     /// the backfill went through this thread's media
@@ -476,6 +481,8 @@ struct App {
     grid_gen: Arc<std::sync::atomic::AtomicU64>,
     /// picker stickers waiting for their frames (`stickers.rs`)
     picker_queue: Arc<std::sync::Mutex<stickers::PickerQueue>>,
+    /// the pack the sticker panel shows before it is installed
+    preview: Option<packpreview::Preview>,
     /// the sticker pack being uploaded (`packmaker.rs`)
     pack_task: Option<tokio::task::AbortHandle>,
     /// the toast slot (`notify.rs`)
@@ -652,6 +659,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         avatar_refresh: Default::default(),
         grid_gen: Default::default(),
         picker_queue: Default::default(),
+        preview: None,
         pack_task: None,
         notes: Default::default(),
         mute_due: None,
@@ -878,11 +886,14 @@ impl App {
                 (Ok(id), Ok(key)) => self.install_pack(id, key),
                 _ => self.notice(tr!("Invalid sticker pack")),
             },
-            Command::InstallPackUrl(url) => match parse_pack_url(&url) {
-                Some((id, key)) => self.install_pack(id, key),
+            Command::PreviewPackUrl(url) => match parse_pack_url(&url) {
+                Some((id, key)) => self.preview_pack(id, Some(key), None).await,
                 None => self.notice(tr!("Not a sticker link (a signal.art/addstickers link)")),
             },
-            Command::InstallPackFromMessage(id) => self.install_pack_from_message(&id),
+            Command::PreviewWant(ids) => self.preview_want(ids),
+            Command::RetryPreview => self.retry_preview(),
+            Command::InstallPreview => self.install_preview(),
+            Command::ClosePreview => self.preview = None,
             Command::SetPackOrder(ids) => self.set_pack_order(&ids).await,
             Command::RemovePack(id) => self.remove_pack(&id).await,
             Command::StickerClicked(id) => self.sticker_clicked(&id).await,
@@ -1080,8 +1091,11 @@ impl App {
             Internal::ProgressDone => (self.emit)(Event::ProgressDone),
             Internal::PackInstalled(Ok(id)) => {
                 (self.emit)(Event::ProgressDone);
-                (self.emit)(Event::OpenStickerPanel(id));
+                self.preview_installed(&Ok(id.clone()));
+                (self.emit)(Event::OpenStickerPanel { pack: id, sticker: None });
             }
+            Internal::PreviewManifest(seq, res) => self.manifest_arrived(seq, res),
+            Internal::PreviewSticker(seq, id, res) => self.preview_sticker_arrived(seq, id, res),
             Internal::PinsIndexed => {
                 self.persist.pins_indexed = true;
                 self.persist.edits_indexed = true;
@@ -1108,7 +1122,10 @@ impl App {
                 self.current_dirty = true;
                 self.threads_dirty = true;
             }
-            Internal::PackInstalled(Err(e)) => self.notice(tr!("Couldn't add the sticker pack: {}", e)),
+            Internal::PackInstalled(Err(e)) => {
+                self.notice(tr!("Couldn't add the sticker pack: {}", e));
+                self.preview_installed(&Err(e));
+            }
             Internal::PackRemoved(res) => {
                 (self.emit)(Event::ProgressDone);
                 if let Err(e) = res {

@@ -50,9 +50,6 @@ msgstr "수락"
 msgid "Account"
 msgstr "계정"
 
-msgid "Add"
-msgstr "추가"
-
 
 msgid "Adds the title and image of a link to messages you send. Sigwin visits the site to get them, so the site sees your IP address."
 msgstr "보내는 메시지에 링크의 제목과 이미지를 붙입니다. 이를 위해 그 사이트에 접속하므로 사이트에 내 IP 주소가 보입니다."
@@ -594,8 +591,24 @@ msgstr "한 메시지는 64KB까지 보낼 수 있습니다. 지금 {}KB입니�
 msgid "A message to another chat couldn't be sent"
 msgstr "다른 대화로 보낸 메시지를 전송하지 못했습니다"
 
-msgid "Add the pack this sticker is from?"
-msgstr "이 스티커가 들어 있는 팩을 추가할까요?"
+msgid "Couldn't load the sticker pack"
+msgstr "스티커 팩을 불러오지 못했습니다"
+
+msgid "Install"
+msgstr "설치"
+
+msgid "Installing…"
+msgstr "설치 중…"
+
+msgid "View sticker pack"
+msgstr "스티커 팩 보기"
+
+msgid "Sticker pack by {}"
+msgstr "{} 님의 스티커 팩"
+
+msgid "{n} sticker"
+msgid_plural "{n} stickers"
+msgstr[0] "스티커 {n}개"
 
 msgid "Audio"
 msgstr "오디오"
@@ -975,9 +988,6 @@ msgstr "사용자 이름으로 대화 시작"
 
 msgid "Sticker"
 msgstr "스티커"
-
-msgid "Sticker pack"
-msgstr "스티커 팩"
 
 msgid "Syncing…"
 msgstr "동기화 중…"

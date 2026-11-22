@@ -5,7 +5,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 ## Demo modes (synthetic data, no backend)
 `SIGWIN_DEMO=1`, plus:
 - `SIGWIN_DEMO_REAL=1` (believable chats instead of test rows, for the README's pictures, plus one with view-once photos both ways; Korean people and chats with `SIGWIN_LANG=ko`, English otherwise). `scripts/readme-media.ps1` shoots them all into `docs/media`: rerun it when a UI change shows in them
-- `SIGWIN_DEMO_STICKERS=1|add|many` (`add`: no packs yet; `many`: 16 packs, more tabs than fit)
+- `SIGWIN_DEMO_STICKERS=1|add|many|preview|preview-loading|preview-failed` (`add`: no packs yet; `many`: 16 packs, more tabs than fit; `preview`: a pack not installed, partly downloaded, two stickers failed)
 - `SIGWIN_DEMO_NO_MOTION=1` (as with Windows' animation effects off: animated stickers have a mark and play only while hovered)
 - `SIGWIN_DEMO_UNREAD=<n>` (the thread opens with its last n rows unread: the line above the first, the list scrolled to it, the count on the jump button)
 - `SIGWIN_DEMO_INFO=1`

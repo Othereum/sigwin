@@ -1,9 +1,9 @@
 // Sticker picker panel.
 
-import { PackItem, StickerItem } from "types.slint";
+import { PackItem, PreviewItem, StickerItem } from "types.slint";
 import { Anim, Theme } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
-import { Field, HStrip, IconButton, PlainButton, Tip, ThinScroll } from "widgets.slint";
+import { Field, HStrip, IconButton, PlainButton, PrimaryButton, Tip, TipPlace, ThinScroll } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
 import { MediaLabel } from "bubble.slint";
 
@@ -22,6 +22,13 @@ export global StickerData {
     callback move-pack(int, int);
     // asks first
     callback remove-pack(int);
+    // a pack not installed, in a tab of its own after the installed ones
+    in property <bool> has-preview;
+    in property <PreviewItem> preview;
+    callback install-preview();
+    callback retry-preview();
+    // the grid's sticker to show (scrolled to and marked for a moment), -1 none
+    in-out property <int> focus-index: -1;
 }
 
 // Installed packs: drag a row to reorder, click it to open the pack.
@@ -104,12 +111,20 @@ component PackList inherits Rectangle {
                         source: p.cover;
                         image-fit: contain;
                     }
-                    Text {
+                    VerticalLayout {
                         horizontal-stretch: 1;
-                        text: p.title;
-                        color: Theme.text;
-                        vertical-alignment: center;
-                        overflow: elide;
+                        alignment: center;
+                        Text {
+                            text: p.title;
+                            color: Theme.text;
+                            overflow: elide;
+                        }
+                        if p.author != "": Text {
+                            text: p.author;
+                            color: Theme.subtle;
+                            font-size: 12px;
+                            overflow: elide;
+                        }
                     }
                     IconButton {
                         y: (parent.height - self.height) / 2;
@@ -151,6 +166,12 @@ export component StickerPanel inherits Rectangle {
     // the side paddings, and room for the grid's scrollbar thumb
     property <int> cols: max(1, floor((self.width - 50px) / cell));
     property <bool> manage: StickerData.current-pack == "" || StickerData.current-pack == "+";
+    property <bool> previewing: StickerData.has-preview && StickerData.current-pack == StickerData.preview.pack.id;
+    // the tab under the pointer (the preview's is `packs.length`), and its x in the strip's view:
+    // the hint is drawn outside the strip, which would clip it
+    property <int> tip-i: -1;
+    property <length> tip-x;
+    property <PackItem> tip-pack: root.tip-i >= 0 && root.tip-i < StickerData.packs.length ? StickerData.packs[root.tip-i] : StickerData.preview.pack;
 
     height: 308px;
     // a card over the composer, inset like it
@@ -181,7 +202,7 @@ export component StickerPanel inherits Rectangle {
                     content-width: tabs.preferred-width;
                     tabs := HorizontalLayout {
                         spacing: 4px;
-                        for p in StickerData.packs: Rectangle {
+                        for p[i] in StickerData.packs: Rectangle {
                             width: 40px;
                             height: 40px;
                             accessible-role: button;
@@ -192,6 +213,38 @@ export component StickerPanel inherits Rectangle {
                             pta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { StickerData.pick-pack(p.id); }
+                                changed has-hover => {
+                                    if self.has-hover {
+                                        root.tip-i = i;
+                                        root.tip-x = parent.x + strip.content-x;
+                                    } else if root.tip-i == i {
+                                        root.tip-i = -1;
+                                    }
+                                }
+                            }
+                        }
+                        // not installed: outlined, apart from the installed ones
+                        if StickerData.has-preview: Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            accessible-role: button;
+                            accessible-label: StickerData.preview.pack.title;
+                            border-radius: 10px;
+                            border-width: 1px;
+                            border-color: Theme.accent;
+                            background: root.previewing ? Theme.selected : (prta.has-hover ? Theme.hover : transparent);
+                            Image { width: 32px; height: 32px; source: StickerData.preview.pack.cover; image-fit: contain; }
+                            prta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { StickerData.pick-pack(StickerData.preview.pack.id); }
+                                changed has-hover => {
+                                    if self.has-hover {
+                                        root.tip-i = StickerData.packs.length;
+                                        root.tip-x = parent.x + strip.content-x;
+                                    } else if root.tip-i == StickerData.packs.length {
+                                        root.tip-i = -1;
+                                    }
+                                }
                             }
                         }
                     }
@@ -223,13 +276,80 @@ export component StickerPanel inherits Rectangle {
                 Tip { hovered: parent.hovered; text: @tr("Manage packs"); }
             }
         }
+        // a pack not installed: what it is, and installing it
+        if root.previewing && !StickerData.preview.failed: HorizontalLayout {
+            height: 40px;
+            spacing: 10px;
+            padding-left: 4px;
+            padding-right: 4px;
+            Image {
+                y: (parent.height - self.height) / 2;
+                width: 32px;
+                height: 32px;
+                source: StickerData.preview.pack.cover;
+                image-fit: contain;
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                Text {
+                    text: StickerData.preview.loading ? @tr("Loading…") : StickerData.preview.pack.title;
+                    color: StickerData.preview.loading ? Theme.subtle : Theme.text;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+                if !StickerData.preview.loading && !StickerData.preview.failed: Text {
+                    text: (StickerData.preview.pack.author != "" ? StickerData.preview.pack.author + " · " : "")
+                        + @tr("{n} sticker" | "{n} stickers" % StickerData.preview.count);
+                    color: Theme.subtle;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+            }
+            PrimaryButton {
+                y: (parent.height - self.height) / 2;
+                text: StickerData.preview.installing ? @tr("Installing…") : @tr("Install");
+                enabled: !StickerData.preview.loading && !StickerData.preview.failed && !StickerData.preview.installing;
+                clicked => { StickerData.install-preview(); }
+            }
+        }
+        if root.previewing && StickerData.preview.failed: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            spacing: 10px;
+            Text {
+                text: @tr("Couldn't load the sticker pack");
+                color: Theme.subtle;
+                horizontal-alignment: center;
+            }
+            HorizontalLayout {
+                alignment: center;
+                PlainButton {
+                    text: @tr("Try again");
+                    clicked => { StickerData.retry-preview(); }
+                }
+            }
+        }
+        // the manifest on its way: the header says so
+        if root.previewing && StickerData.preview.loading: Rectangle { vertical-stretch: 1; }
         // sticker grid
-        if !root.manage: ThinScroll {
+        if !root.manage && !(root.previewing && (StickerData.preview.loading || StickerData.preview.failed)): ThinScroll {
             property <int> first: max(0, floor(-grid-view.content-y / root.cell)) * root.cols;
             property <int> end: min(StickerData.stickers.length, ceil((-grid-view.content-y + grid-view.visible-height) / root.cell) * root.cols);
-            init => { Anim.picker-view(self.first, self.end); }
+            property <int> focused: StickerData.focus-index;
+            init => {
+                Anim.picker-view(self.first, self.end);
+                self.show-focus();
+            }
             changed first => { Anim.picker-view(self.first, self.end); }
             changed end => { Anim.picker-view(self.first, self.end); }
+            changed focused => { self.show-focus(); }
+            // the focused sticker's row in the middle, as far as the grid goes
+            function show-focus() {
+                if self.focused >= 0 {
+                    grid-view.content-y = -clamp(floor(self.focused / root.cols) * root.cell - (grid-view.visible-height - root.cell) / 2, 0px, max(0px, grid-view.content-height - grid-view.visible-height));
+                }
+            }
             vertical-stretch: 1;
             max-width: 100000px;
             content-y <=> grid-view.content-y;
@@ -246,12 +366,27 @@ export component StickerPanel inherits Rectangle {
                     width: root.cell;
                     height: root.cell;
                     border-radius: 12px;
-                    background: sta.has-hover ? Theme.hover : transparent;
+                    // a preview's stickers aren't sent: no hover that says they are
+                    background: !root.previewing && sta.has-hover ? Theme.hover : transparent;
+                    border-width: i == StickerData.focus-index ? 2px : 0px;
+                    border-color: Theme.accent;
                     Image {
                         width: root.cell - 12px;
                         height: root.cell - 12px;
                         source: s.anim.width > 0 ? s.anim : s.img;
                         image-fit: contain;
+                    }
+                    // a previewed pack's sticker on its way
+                    if root.previewing && s.img.width == 0 && !s.failed: Rectangle {
+                        width: root.cell - 12px;
+                        height: root.cell - 12px;
+                        border-radius: 10px;
+                        background: Theme.loading;
+                    }
+                    if s.failed: Icon {
+                        icon: Icons.warning;
+                        size: 20px;
+                        tint: Theme.subtle;
                     }
                     // the pointer on it plays it
                     if Anim.hover-only && s.animated && !sta.has-hover: MediaLabel {
@@ -260,8 +395,12 @@ export component StickerPanel inherits Rectangle {
                         y: parent.height - self.height - 6px;
                     }
                     sta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { StickerData.send-sticker(StickerData.current-pack, s.id); }
+                        mouse-cursor: root.previewing ? MouseCursor.default : MouseCursor.pointer;
+                        clicked => {
+                            if !root.previewing {
+                                StickerData.send-sticker(StickerData.current-pack, s.id);
+                            }
+                        }
                         changed has-hover => {
                             if s.animated { Anim.hover(StickerData.current-pack, s.id, self.has-hover); }
                         }
@@ -292,7 +431,7 @@ export component StickerPanel inherits Rectangle {
                     }
                 }
                 PlainButton {
-                    text: @tr("Add");
+                    text: @tr("Open");
                     clicked => { StickerData.add-pack-url(StickerData.pack-url); }
                 }
                 PlainButton {
@@ -318,5 +457,24 @@ export component StickerPanel inherits Rectangle {
                 }
             }
         }
+    }
+
+    // the hovered tab's title, below it (padding-left / padding-top of the layout)
+    Rectangle {
+        x: 20px + root.tip-x;
+        y: 16px;
+        width: 40px;
+        height: 40px;
+        Tip {
+            hovered: root.tip-i >= 0 && root.tip-pack.title != "";
+            place: TipPlace.below-center;
+            text: root.tip-pack.title;
+        }
+    }
+
+    Timer {
+        interval: 1500ms;
+        running: StickerData.focus-index >= 0;
+        triggered => { StickerData.focus-index = -1; }
     }
 }

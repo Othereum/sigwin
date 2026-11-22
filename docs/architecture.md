@@ -35,7 +35,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/gui/notice.rs` | short notices and the connection banner |
 | `src/gui/rows.rs` | DTOs → Slint rows: rich text, row diffing |
 | `src/gui/media.rs` | thumbnails, their labels and photos arriving for rows already shown |
-| `src/gui/stickers.rs` | sticker panel: pack tabs, the open pack's grid |
+| `src/gui/stickers.rs` | sticker panel: pack tabs, the open pack's grid, a pack previewed before it is installed |
 | `src/gui/packmaker.rs` | the page that makes a sticker pack: the pictures added, the steps, their thumbnails |
 | `src/gui/scroll.rs` | message list scrolling and jumps |
 | `src/gui/anim.rs` | animated stickers (APNGs that Slint's `Image` plays) under a memory budget; the one GIF playing in the message list |
@@ -79,6 +79,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/backend/once.rs` | view-once pictures: used up when shown, here or on another device |
 | `src/backend/typing.rs` | typing indicators |
 | `src/backend/stickers.rs` | sticker packs: picker, sending, installing |
+| `src/backend/packpreview.rs` | a pack shown before it is installed: its manifest and the stickers on screen, in memory only |
 | `src/backend/packmaker.rs` | uploading a new sticker pack: form, manifest, pictures a few at a time |
 | `src/stickerpack.rs` | making a pack: pack.json, the manifest, sealing files; `crates/thumb/src/sticker.rs` holds the picture rules |
 | `src/backend/gallery.rs` | a chat's media page: pages from the media index, the messages it loaded (the viewer finds them there), its thumbnails |

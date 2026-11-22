@@ -21,7 +21,7 @@ use crate::types::SearchKind;
 ///   again over moving columns;
 /// - `ls_deleted_mine` has no source to rebuild from (which deleted rows were ours): its data
 ///   must be carried over.
-const SCHEMA: i64 = 1;
+const SCHEMA: i64 = 2;
 
 async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query("CREATE TABLE IF NOT EXISTS ls_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID")
@@ -49,9 +49,23 @@ async fn migrate(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 /// One migration step up from `v`; returns the new version. Run in order, each exactly once.
-async fn step(_pool: &SqlitePool, v: i64) -> anyhow::Result<i64> {
+async fn step(pool: &SqlitePool, v: i64) -> anyhow::Result<i64> {
     match v {
-        // 1 => { DROP TABLE ls_pins; CREATE the new one; reset `Persist.pins_indexed`; Ok(2) }
+        // packs get their author; the picker reads each pack from presage again once
+        1 => {
+            sqlx::query("DROP TABLE ls_packs").execute(pool).await?;
+            sqlx::query(
+                "CREATE TABLE ls_packs (
+                    id BLOB PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    author TEXT NOT NULL,
+                    cover INTEGER
+                ) WITHOUT ROWID",
+            )
+            .execute(pool)
+            .await?;
+            Ok(2)
+        }
         _ => anyhow::bail!("db: no migration from schema {v}"),
     }
 }
@@ -462,7 +476,8 @@ impl Index {
         .await?;
         sqlx::query("CREATE INDEX IF NOT EXISTS ls_media_by_kind ON ls_media (thread, kind, ts)").execute(&pool).await?;
         // title and cover of installed sticker packs: presage keeps every sticker's bytes in one
-        // JSON column, so listing packs from its table means reading all of them
+        // JSON column, so listing packs from its table means reading all of them. Schema 1's
+        // shape: `step` gives it its author
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS ls_packs (
                 id BLOB PRIMARY KEY,
@@ -1429,22 +1444,24 @@ impl Index {
         Ok(row.and_then(|r| r.try_get("key").ok()))
     }
 
-    /// Cached pack metadata: (id, title, cover sticker id).
-    pub async fn cached_packs(&self) -> anyhow::Result<Vec<(Vec<u8>, String, Option<u32>)>> {
-        let rows = sqlx::query("SELECT id, title, cover FROM ls_packs").fetch_all(&self.pool).await?;
+    /// Cached pack metadata: (id, (title, author), cover sticker id).
+    pub async fn cached_packs(&self) -> anyhow::Result<Vec<(Vec<u8>, (String, String), Option<u32>)>> {
+        let rows = sqlx::query("SELECT id, title, author, cover FROM ls_packs").fetch_all(&self.pool).await?;
         Ok(rows
             .into_iter()
             .filter_map(|r| {
                 let cover: Option<i64> = r.try_get("cover").ok()?;
-                Some((r.try_get("id").ok()?, r.try_get("title").ok()?, cover.map(|c| c as u32)))
+                let names = (r.try_get("title").ok()?, r.try_get("author").ok()?);
+                Some((r.try_get("id").ok()?, names, cover.map(|c| c as u32)))
             })
             .collect())
     }
 
-    pub async fn cache_pack(&self, id: &[u8], title: &str, cover: Option<u32>) -> anyhow::Result<()> {
-        sqlx::query("INSERT OR REPLACE INTO ls_packs (id, title, cover) VALUES (?, ?, ?)")
+    pub async fn cache_pack(&self, id: &[u8], title: &str, author: &str, cover: Option<u32>) -> anyhow::Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO ls_packs (id, title, author, cover) VALUES (?, ?, ?, ?)")
             .bind(id)
             .bind(title)
+            .bind(author)
             .bind(cover.map(|c| c as i64))
             .execute(&self.pool)
             .await?;
@@ -2152,5 +2169,25 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(v, 99);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn packs_from_schema_1_get_their_author() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        let pool = &index.pool;
+        sqlx::query("DROP TABLE ls_packs").execute(pool).await.unwrap();
+        sqlx::query("CREATE TABLE ls_packs (id BLOB PRIMARY KEY, title TEXT NOT NULL, cover INTEGER) WITHOUT ROWID")
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO ls_packs (id, title, cover) VALUES (x'01', 'old', 1)").execute(pool).await.unwrap();
+        sqlx::query("UPDATE ls_meta SET value = 1 WHERE key = 'schema'").execute(pool).await.unwrap();
+        migrate(pool).await.unwrap();
+        // a cache: emptied, the picker fills it again from presage
+        assert!(index.cached_packs().await.unwrap().is_empty());
+        index.cache_pack(&[2], "new", "someone", Some(3)).await.unwrap();
+        let packs = index.cached_packs().await.unwrap();
+        assert_eq!(packs, vec![(vec![2], ("new".to_string(), "someone".to_string()), Some(3))]);
     }
 }

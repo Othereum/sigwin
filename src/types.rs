@@ -434,8 +434,25 @@ pub struct PackDto {
     /// hex pack id
     pub id: String,
     pub title: String,
+    pub author: String,
     /// thumbnail key of the cover sticker
     pub cover_key: String,
+}
+
+/// A pack shown in the sticker panel before it is installed.
+#[derive(Debug, Clone)]
+pub struct PreviewDto {
+    pub pack: PackDto,
+    pub state: PreviewState,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewState {
+    /// the manifest is on its way
+    Loading,
+    Ready,
+    Failed,
 }
 
 /// A pack to make. The pictures are read one at a time as they are uploaded.
@@ -700,10 +717,14 @@ pub enum Event {
     /// and whether older ones remain. `files`: the page's files rather than its pictures.
     /// `indexing`: the chat's older messages haven't been gone through yet; a page follows when they have.
     Gallery { files: bool, items: Vec<GalleryItemDto>, more: bool, reset: bool, indexing: bool },
-    /// open the sticker panel on this (installed) pack
-    OpenStickerPanel(String),
-    /// the clicked sticker's pack is not installed: ask, then InstallPackFromMessage(msg id)
-    AskInstallPack(String),
+    /// open the sticker panel on this (installed) pack, showing this sticker of it
+    OpenStickerPanel { pack: String, sticker: Option<u32> },
+    /// open the sticker panel on a pack not installed, or its state changed (also after an
+    /// install failed: the button is back)
+    PackPreview(PreviewDto),
+    /// a sticker of the previewed pack arrived (its thumb comes in `StickerThumbs` first) or
+    /// couldn't be downloaded
+    PreviewSticker { key: String, animated: bool, failed: bool },
     /// files of the new pack uploaded so far
     PackProgress { done: usize, total: usize },
     /// the new pack's hex id and key
@@ -823,10 +844,15 @@ pub enum Command {
     SendSticker { pack: String, id: u32 },
     /// hex id + hex key
     InstallPack { id: String, key: String },
-    /// https://signal.art/addstickers/#pack_id=..&pack_key=..
-    InstallPackUrl(String),
-    /// install the pack of the sticker in this message
-    InstallPackFromMessage(String),
+    /// show the pack of https://signal.art/addstickers/#pack_id=..&pack_key=.. (installed: open it)
+    PreviewPackUrl(String),
+    /// the stickers of the previewed pack on screen, in order: download those not here yet
+    PreviewWant(Vec<u32>),
+    /// fetch the previewed pack's manifest again
+    RetryPreview,
+    InstallPreview,
+    /// the panel let go of the previewed pack
+    ClosePreview,
     /// every installed pack's hex id, in the order the picker shows them
     SetPackOrder(Vec<String>),
     /// uninstall this hex id here and on the other devices; answered by a new `StickerPacks`

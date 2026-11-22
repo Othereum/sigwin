@@ -226,6 +226,7 @@ pub(crate) fn wire(app: &AppWindow) {
             UI.with_borrow_mut(|ui| {
                 ui.anims.picker.range = (first.max(0) as usize, end.max(0) as usize);
                 update_picker(ui);
+                super::stickers::preview_want(ui);
             })
         });
     });
@@ -424,6 +425,16 @@ fn hover(pack: &str, id: u32, on: bool) {
         }
         update_picker(ui);
     });
+}
+
+/// The picker's cells on screen, [first, end).
+pub(crate) fn picker_range(ui: &Ui) -> (usize, usize) {
+    ui.anims.picker.range
+}
+
+/// The pack whose grid the picker shows ("" none).
+pub(crate) fn picker_pack(ui: &Ui) -> &str {
+    &ui.anims.picker.pack
 }
 
 /// The sticker panel opened: whether all on screen play follows Windows' animation effects.

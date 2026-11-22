@@ -12,7 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::types::{ClickedMedia, Command, Event, Find, MsgDto, Paging, ResultDto, Scroll, ThreadDto};
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
-    AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem, RequestData,
+    AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, PackItem, PendingFile, PreviewItem, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem, RequestData,
     FindKind, PackCell, PackData, ResultItem, ResultKind, SearchData, SettingsData, StickerData, StickerItem, TextOps, Theme, ThreadItem, ThreadMenuData,
 };
 
@@ -379,8 +379,9 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             }
         }
         Event::StickerPacks(list) => stickers::packs_arrived(app, list),
-        Event::OpenStickerPanel(pack) => stickers::open(app, Some(pack)),
-        Event::AskInstallPack(msg_id) => stickers::ask_install(app, msg_id),
+        Event::OpenStickerPanel { pack, sticker } => stickers::open_at(app, pack, sticker),
+        Event::PackPreview(v) => stickers::preview_arrived(app, v),
+        Event::PreviewSticker { key, animated, failed } => stickers::preview_sticker(&key, animated, failed),
         Event::Account { name, number, device, receipts, typing } => {
             let state = |v: Option<bool>| if v == Some(false) { tr!("Off") } else { tr!("On") };
             let phone = if receipts.is_none() || typing.is_none() {
