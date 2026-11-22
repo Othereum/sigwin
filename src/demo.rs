@@ -1428,7 +1428,13 @@ fn demo_grids(emit: &backend::Emit) {
 
 pub(crate) fn demo_stickers(emit: backend::Emit) {
     let add = std::env::var("SIGWIN_DEMO_STICKERS").as_deref() == Ok("add");
-    let packs: Vec<types::PackDto> = (0..if add { 0 } else { 2 })
+    // `many`: more tabs than fit, for the fade at the strip's edges
+    let count = match std::env::var("SIGWIN_DEMO_STICKERS").as_deref() {
+        Ok("add") => 0,
+        Ok("many") => 16,
+        _ => 2,
+    };
+    let packs: Vec<types::PackDto> = (0..count)
         .map(|i| types::PackDto { id: format!("p{i}"), title: format!("Pack {i}"), cover_key: format!("sp_p{i}_0") })
         .collect();
     let items: Vec<types::StickerDto> =
@@ -1440,7 +1446,7 @@ pub(crate) fn demo_stickers(emit: backend::Emit) {
             emit(Event::StickerGrid { pack: "p0".into(), items });
         }
         let mut thumbs: Vec<_> = (0..20u32).map(|i| demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8)).collect();
-        thumbs.push(demo_blob("sp_p1_0", 96, 200));
+        thumbs.extend((1..count.max(2)).map(|i| demo_blob(&format!("sp_p{i}_0"), 96, (i * 40) as u8)));
         emit(Event::StickerThumbs(thumbs));
     });
 }
