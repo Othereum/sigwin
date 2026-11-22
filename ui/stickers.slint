@@ -71,6 +71,11 @@ export component StickerPanel inherits Rectangle {
         }
         // sticker grid
         if !root.suggest: ThinScroll {
+            property <int> first: max(0, floor(-grid-view.content-y / root.cell)) * root.cols;
+            property <int> end: min(root.stickers.length, ceil((-grid-view.content-y + grid-view.visible-height) / root.cell) * root.cols);
+            init => { Anim.picker-view(self.first, self.end); }
+            changed first => { Anim.picker-view(self.first, self.end); }
+            changed end => { Anim.picker-view(self.first, self.end); }
             vertical-stretch: 1;
             max-width: 100000px;
             content-y <=> grid-view.content-y;

@@ -454,7 +454,7 @@ pub struct StickerDto {
     pub key: String,
     pub id: u32,
     pub emoji: String,
-    /// plays on hover (`Command::PickerFrames`)
+    /// plays in the picker (`Command::PickerFrames`)
     pub animated: bool,
 }
 
@@ -568,9 +568,9 @@ impl GifSlot {
     }
 }
 
-/// What the message list's playing stickers hold together (each: its APNG plus the two frames
-/// a playing `Image` keeps decoded); the least recently shown sticker beyond this goes back to
-/// its still image.
+/// What the message list's playing stickers hold together (each: its APNG, its first frame and
+/// what an `Image` playing it adds, `gui::anim::PLAYING_FRAMES`); the least recently shown
+/// sticker beyond this goes back to its still image.
 pub const ANIM_BUDGET: usize = 12 << 20;
 
 /// An animated sticker as an APNG of frames at the size shown, for Slint's `Image` to play.
@@ -835,8 +835,9 @@ pub enum Command {
     CancelPack,
     /// the frames of the sticker with this thumbnail key (message list), if it is animated
     StickerFrames(String),
-    /// the frames of a picker sticker (hovered), if it is animated
-    PickerFrames { pack: String, id: u32 },
+    /// the frames of these picker stickers, in order, each answered by `Event::Frames`; replaces
+    /// the ones of an earlier call not made yet (empty: stop)
+    PickerFrames { pack: String, ids: Vec<u32> },
     /// react to message `id`; `remove` takes back our reaction `emoji`
     React { id: String, emoji: String, remove: bool },
     /// replace the text of our message `id`

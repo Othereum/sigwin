@@ -13,8 +13,10 @@ export global Links {
 export global Anim {
     // a sticker row was put on screen or changed (message id): load its frames, keep them longer
     callback shown(string);
-    // a picker sticker gained or lost the hover
+    // a picker sticker gained or lost the hover (it plays meanwhile if not all on screen do)
     callback hover(string, int, bool);
+    // the picker grid's cells on screen, as indices [first, end): their stickers play
+    callback picker-view(int, int);
     // a GIF picture in the message list (message id) gained or lost the hover: it plays meanwhile
     callback gif-hover(string, int, bool);
 }

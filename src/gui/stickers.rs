@@ -16,10 +16,11 @@ pub(crate) struct Panel {
 pub(crate) fn close(app: &AppWindow) {
     app.set_sticker_open(false);
     UI.with_borrow_mut(|ui| {
-        anim::stop_picker(ui);
         let p = &mut ui.sticker;
         p.covers.clear();
         p.grid.clear();
+        anim::picker_grid(ui, "");
+        let p = &mut ui.sticker;
         p.stickers.set_vec(Vec::new());
         p.packs.set_vec(Vec::new());
     });
@@ -82,6 +83,7 @@ pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>) {
 pub(super) fn open(app: &AppWindow, pack: String) {
     app.set_current_pack(pack.into());
     app.set_sticker_open(true);
+    UI.with_borrow_mut(anim::picker_opened);
     // reloads the pack list, then opens the current pack
     send_cmd(Command::StickerPanel);
 }
@@ -95,14 +97,14 @@ pub(super) fn grid_arrived(app: &AppWindow, pack: String, items: Vec<types::Stic
     if !app.get_sticker_open() {
         return;
     }
-    app.set_current_pack(pack.into());
+    app.set_current_pack(pack.as_str().into());
     UI.with_borrow_mut(|ui| {
-        anim::stop_picker(ui);
         let rows: Vec<StickerItem> = items
             .iter()
             .map(|s| StickerItem { id: s.id as i32, emoji: s.emoji.as_str().into(), animated: s.animated, ..Default::default() })
             .collect();
         ui.sticker.stickers.set_vec(rows);
         ui.sticker.grid = items;
+        anim::picker_grid(ui, &pack);
     });
 }

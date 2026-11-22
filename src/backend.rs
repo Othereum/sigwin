@@ -473,6 +473,8 @@ struct App {
     avatar_refresh: std::collections::VecDeque<crate::avatar::Want>,
     /// bumped per opened sticker pack: image work for an older grid stops
     grid_gen: Arc<std::sync::atomic::AtomicU64>,
+    /// picker stickers waiting for their frames (`stickers.rs`)
+    picker_queue: Arc<std::sync::Mutex<stickers::PickerQueue>>,
     /// the sticker pack being uploaded (`packmaker.rs`)
     pack_task: Option<tokio::task::AbortHandle>,
     /// the toast slot (`notify.rs`)
@@ -648,6 +650,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         avatar_queue: Default::default(),
         avatar_refresh: Default::default(),
         grid_gen: Default::default(),
+        picker_queue: Default::default(),
         pack_task: None,
         notes: Default::default(),
         mute_due: None,
@@ -883,7 +886,7 @@ impl App {
             Command::CreatePack(job) => self.create_pack(job),
             Command::CancelPack => self.cancel_pack(),
             Command::StickerFrames(key) => self.sticker_frames(key),
-            Command::PickerFrames { pack, id } => self.picker_frames(&pack, id),
+            Command::PickerFrames { pack, ids } => self.picker_frames(pack, ids),
             Command::React { id, emoji, remove } => self.react(&id, emoji, remove).await,
             Command::Edit { id, text, mentions } => self.edit(&id, text, &mentions).await,
             Command::Delete(id) => self.delete(&id).await,

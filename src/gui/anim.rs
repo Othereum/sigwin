@@ -5,7 +5,9 @@
 //! decoding a frame when it draws one, so nothing ticks here and nothing decodes while it isn't
 //! drawn. Those off screen keep `OFF_SCREEN` together, the longest off screen going back to its
 //! still first (asked for again when its row comes back), and all of them keep `ANIM_BUDGET`.
-//! Picker: only the hovered sticker plays.
+//! Picker: the animated stickers on screen play, asked for as the grid reports its rows on screen
+//! (`Anim.picker-view`), or only the hovered one when Windows' animation effects are off. Those
+//! that scroll away keep `OFF_SCREEN` together, so scrolling back plays them right away.
 //!
 //! GIFs play from frames the backend streams (`backend::gif`): one at a time, decoded off the UI
 //! thread, which Slint's player can't do for big ones.
@@ -24,22 +26,46 @@ use crate::{Anim, AppWindow};
 struct Sticker {
     /// the APNG, played by the rows' `Image`s
     image: Image,
-    /// what it holds while playing: its bytes and the two frames `Image` keeps decoded
-    bytes: usize,
+    /// what it holds loaded: a copy of the APNG and its first frame
+    loaded: usize,
     _held: crate::alloc::Held,
+    /// what an `Image` playing it adds, while one does (`PLAYING_FRAMES`)
+    playing: Option<crate::alloc::Held>,
 }
 
-/// What the open chat's playing stickers off screen may hold together. Coming back on screen,
-/// one let go of is decoded again from its attachment.
+/// What the open chat's playing stickers off screen may hold together, and the picker's. Coming
+/// back on screen, one let go of is decoded again.
 const OFF_SCREEN: usize = 4 << 20;
+
+/// What an `Image` playing an APNG holds besides it, in frames: the decoder's canvas and
+/// buffers (about four) and the frame shown, plus up to `PLAYING_EXTRA` of zlib state. Measured
+/// on stickers at picker size; it goes when the `Image` stops showing it.
+const PLAYING_FRAMES: usize = 5;
+const PLAYING_EXTRA: usize = 32 << 10;
 
 impl Sticker {
     fn new(f: &Frames) -> Option<Self> {
         let image = Image::load_from_data(&f.png, Some("png")).ok()?;
-        let size = image.size();
-        let bytes = f.png.len() + 2 * 4 * (size.width * size.height) as usize;
-        Some(Sticker { image, bytes, _held: crate::alloc::Held::new(crate::alloc::Gauge::Anims, bytes) })
+        let loaded = f.png.len() + frame_bytes(&image);
+        Some(Sticker { image, loaded, _held: crate::alloc::Held::new(crate::alloc::Gauge::Anims, loaded), playing: None })
     }
+
+    fn playing_bytes(&self) -> usize {
+        PLAYING_FRAMES * frame_bytes(&self.image) + PLAYING_EXTRA
+    }
+
+    fn set_playing(&mut self, on: bool) {
+        self.playing = on.then(|| crate::alloc::Held::new(crate::alloc::Gauge::Anims, self.playing_bytes()));
+    }
+
+    fn bytes(&self) -> usize {
+        self.loaded + self.playing.as_ref().map_or(0, |_| self.playing_bytes())
+    }
+}
+
+fn frame_bytes(image: &Image) -> usize {
+    let size = image.size();
+    4 * (size.width * size.height) as usize
 }
 
 /// The GIF playing in the message list (one at a time): its frames come from the backend one by
@@ -61,9 +87,28 @@ pub(crate) struct Anims {
     list: HashMap<String, Sticker>,
     /// keys asked from the backend, answered or not (an evicted key leaves, so it can come back)
     asked: HashSet<String>,
-    /// the hovered picker sticker's key, and whether it plays (its APNG arrived)
+    picker: Picker,
+}
+
+/// The sticker picker's animations, emptied when its grid changes or closes.
+#[derive(Default)]
+struct Picker {
+    /// animations by key, with the turn each was last on its cell (the oldest goes first)
+    made: HashMap<String, (Sticker, u64)>,
+    /// keys whose cells show their animation now
+    shown: HashSet<String>,
+    /// keys answered with a still (nothing to play, don't ask again)
+    stills: HashSet<String>,
+    /// what the last `PickerFrames` asked for
+    asked: Vec<String>,
+    /// the grid's pack
+    pack: String,
+    /// the grid's cells on screen, [first, end)
+    range: (usize, usize),
     hovered: Option<String>,
-    picker: bool,
+    /// Windows' animation effects are off: only the hovered sticker plays
+    hover_only: bool,
+    turn: u64,
 }
 
 impl Anims {
@@ -87,7 +132,7 @@ impl Anims {
     }
 
     fn bytes(&self) -> usize {
-        self.list.values().map(|s| s.bytes).sum()
+        self.list.values().map(Sticker::bytes).sum()
     }
 }
 
@@ -99,7 +144,7 @@ pub(super) fn trim_list(ui: &mut Ui) {
         .anims
         .list
         .iter()
-        .map(|(k, s)| (ui.shown.last_seen(k), k, s.bytes, on_screen.contains(k.as_str())))
+        .map(|(k, s)| (ui.shown.last_seen(k), k, s.bytes(), on_screen.contains(k.as_str())))
         .collect();
     by_age.sort_by_key(|o| o.0);
     let mut off = by_age.iter().filter(|o| !o.3).map(|o| o.2).sum::<usize>();
@@ -150,6 +195,14 @@ pub(crate) fn wire(app: &AppWindow) {
     g.on_hover(|pack, id, on| {
         let pack = pack.to_string();
         slint::Timer::single_shot(Duration::ZERO, move || hover(&pack, id as u32, on));
+    });
+    g.on_picker_view(|first, end| {
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            UI.with_borrow_mut(|ui| {
+                ui.anims.picker.range = (first.max(0) as usize, end.max(0) as usize);
+                update_picker(ui);
+            })
+        });
     });
 }
 
@@ -296,63 +349,155 @@ fn shown(id: &str) {
 
 fn hover(pack: &str, id: u32, on: bool) {
     UI.with_borrow_mut(|ui| {
+        let p = &mut ui.anims.picker;
+        if !p.hover_only {
+            return;
+        }
         let key = format!("{STICKER_THUMB_PREFIX}{pack}_{id}");
         if on {
-            stop_picker(ui);
-            ui.anims.hovered = Some(key);
-            if let Some(tx) = &ui.tx {
-                let _ = tx.send(Command::PickerFrames { pack: pack.to_string(), id });
-            }
-        } else if ui.anims.hovered.as_deref() == Some(key.as_str()) {
-            stop_picker(ui);
+            p.hovered = Some(key);
+        } else if p.hovered.as_deref() == Some(key.as_str()) {
+            p.hovered = None;
+        } else {
+            return;
         }
+        update_picker(ui);
     });
 }
 
-/// The hovered picker sticker stops and its animation goes (also when the grid changes or closes).
-pub(crate) fn stop_picker(ui: &mut Ui) {
-    let Some(key) = ui.anims.hovered.take() else { return };
-    if std::mem::take(&mut ui.anims.picker) {
-        set_picker_row(ui, &key, Image::default());
+/// The sticker panel opened: whether all on screen play follows Windows' animation effects.
+pub(crate) fn picker_opened(ui: &mut Ui) {
+    ui.anims.picker.hover_only = !super::window::animations_on();
+}
+
+/// The picker shows the grid of `pack` (in `ui.sticker.grid`) or none (""): the old grid's
+/// animations go, and what's still to make for it is dropped.
+pub(crate) fn picker_grid(ui: &mut Ui, pack: &str) {
+    let p = std::mem::take(&mut ui.anims.picker);
+    ui.anims.picker.range = p.range;
+    ui.anims.picker.hover_only = p.hover_only;
+    ui.anims.picker.pack = pack.to_string();
+    if p.asked.iter().any(|k| !p.made.contains_key(k) && !p.stills.contains(k)) {
+        if let Some(tx) = &ui.tx {
+            let _ = tx.send(Command::PickerFrames { pack: String::new(), ids: Vec::new() });
+        }
+    }
+    update_picker(ui);
+}
+
+/// Puts the animations on the picker cells that should play and takes them off the others, asks
+/// for the ones missing, and lets go of those not shown past `OFF_SCREEN`.
+pub(crate) fn update_picker(ui: &mut Ui) {
+    let p = &mut ui.anims.picker;
+    let grid = &ui.sticker.grid;
+    p.turn += 1;
+    let (first, end) = p.range;
+    let want: HashSet<&str> = if p.hover_only {
+        p.hovered.iter().map(String::as_str).collect()
+    } else {
+        grid.iter().skip(first).take(end.saturating_sub(first)).filter(|s| s.animated).map(|s| s.key.as_str()).collect()
+    };
+    let mut ask = Vec::new();
+    for (i, s) in grid.iter().enumerate() {
+        let key = s.key.as_str();
+        let on = want.contains(key);
+        if p.shown.contains(key) == on {
+            continue;
+        }
+        let image = match p.made.get_mut(key) {
+            Some((st, seen)) => {
+                *seen = p.turn;
+                st.set_playing(on);
+                if on { st.image.clone() } else { Image::default() }
+            }
+            None if on => {
+                if !p.stills.contains(key) {
+                    ask.push(s);
+                }
+                continue;
+            }
+            None => Image::default(),
+        };
+        if on {
+            p.shown.insert(s.key.clone());
+        } else {
+            p.shown.remove(key);
+        }
+        if let Some(mut row) = ui.sticker.stickers.row_data(i) {
+            row.anim = image;
+            ui.sticker.stickers.set_row_data(i, row);
+        }
+    }
+    // the backend works through what it was asked; ask again only when that changes
+    let pending = p.asked.iter().filter(|k| !p.made.contains_key(*k) && !p.stills.contains(*k));
+    if !pending.eq(ask.iter().map(|s| &s.key)) {
+        p.asked = ask.iter().map(|s| s.key.clone()).collect();
+        if let Some(tx) = &ui.tx {
+            let _ = tx.send(Command::PickerFrames { pack: p.pack.clone(), ids: ask.iter().map(|s| s.id).collect() });
+        }
+    }
+    let mut off: Vec<(u64, &String, usize)> =
+        p.made.iter().filter(|(k, _)| !p.shown.contains(*k)).map(|(k, (s, seen))| (*seen, k, s.bytes())).collect();
+    let mut held = off.iter().map(|o| o.2).sum::<usize>();
+    if held > OFF_SCREEN {
+        off.sort_by_key(|o| o.0);
+        let gone: Vec<String> = off
+            .into_iter()
+            .take_while(|o| {
+                let over = held > OFF_SCREEN;
+                held -= o.2;
+                over
+            })
+            .map(|o| o.1.clone())
+            .collect();
+        for k in gone {
+            p.made.remove(&k);
+        }
     }
 }
 
 pub(crate) fn frames_arrived(f: Frames) {
     UI.with_borrow_mut(|ui| {
+        if f.key.starts_with(STICKER_THUMB_PREFIX) {
+            // one of a grid no longer shown
+            if !ui.sticker.grid.iter().any(|s| s.key == f.key) || ui.anims.picker.made.contains_key(&f.key) {
+                return;
+            }
+            let p = &mut ui.anims.picker;
+            match Sticker::new(&f) {
+                Some(s) => {
+                    p.made.insert(f.key.clone(), (s, p.turn));
+                }
+                None => {
+                    p.stills.insert(f.key.clone());
+                }
+            }
+            update_picker(ui);
+            let p = &ui.anims.picker;
+            let kb = p.made.values().map(|s| s.0.bytes()).sum::<usize>() / 1024;
+            tracing::debug!(playing = p.shown.len(), made = p.made.len(), kb, "picker frames");
+            return;
+        }
         if f.png.is_empty() {
             // a still; it stays in `asked`
             return;
         }
-        if f.key.starts_with(STICKER_THUMB_PREFIX) {
-            if ui.anims.hovered.as_deref() != Some(f.key.as_str()) {
-                return;
-            }
-            let Some(s) = Sticker::new(&f) else { return };
-            set_picker_row(ui, &f.key, s.image);
-            ui.anims.picker = true;
-        } else {
-            // a key not asked belongs to a thread left meanwhile
-            if !ui.anims.asked.contains(&f.key) || ui.anims.list.contains_key(&f.key) {
-                return;
-            }
-            let Some(s) = Sticker::new(&f) else { return };
-            ui.anims.list.insert(f.key.clone(), s);
-            set_rows(ui, &f.key);
-            trim_list(ui);
-            tracing::debug!(playing = ui.anims.list.len(), kb = ui.anims.bytes() / 1024, "anim frames");
+        // a key not asked belongs to a thread left meanwhile
+        if !ui.anims.asked.contains(&f.key) || ui.anims.list.contains_key(&f.key) {
+            return;
         }
+        let Some(mut s) = Sticker::new(&f) else { return };
+        // counted as playing for as long as it's kept: off screen, its rows are gone and it
+        // holds less, but which rows are on screen isn't followed here
+        s.set_playing(true);
+        ui.anims.list.insert(f.key.clone(), s);
+        set_rows(ui, &f.key);
+        trim_list(ui);
+        tracing::debug!(playing = ui.anims.list.len(), kb = ui.anims.bytes() / 1024, "anim frames");
     });
 }
 
 /// Puts a key's animation (or none) on its message rows.
 fn set_rows(ui: &Ui, key: &str) {
     super::rows::redraw_rows(ui, |m| m.image_key == key);
-}
-
-fn set_picker_row(ui: &Ui, key: &str, anim: Image) {
-    let Some(i) = ui.sticker.grid.iter().position(|s| s.key == key) else { return };
-    if let Some(mut row) = ui.sticker.stickers.row_data(i) {
-        row.anim = anim;
-        ui.sticker.stickers.set_row_data(i, row);
-    }
 }

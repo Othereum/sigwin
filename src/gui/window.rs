@@ -201,6 +201,21 @@ pub(crate) fn cursor_in_window(_: &AppWindow) -> Option<slint::LogicalPosition> 
     None
 }
 
+/// Windows' "Animation effects" setting: off, things should move only when the user asks.
+#[cfg(windows)]
+pub(crate) fn animations_on() -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETCLIENTAREAANIMATION};
+    let mut on: i32 = 1;
+    // SAFETY: SPI_GETCLIENTAREAANIMATION writes a BOOL through the pointer
+    let ok = unsafe { SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, (&mut on as *mut i32).cast(), 0) };
+    ok == 0 || on != 0
+}
+
+#[cfg(not(windows))]
+pub(crate) fn animations_on() -> bool {
+    true
+}
+
 pub(crate) fn hwnd(app: &AppWindow) -> isize {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let wh = app.window().window_handle();

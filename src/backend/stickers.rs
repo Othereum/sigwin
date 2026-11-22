@@ -83,6 +83,7 @@ impl App {
         let animated = if cached.is_empty() { None } else { read_marker(&marker) };
         let from_cache = animated.is_some() && all_thumbs(self);
         let mut jobs = Vec::new();
+        let mut saved = None;
         if let (true, Some(animated)) = (from_cache, animated) {
             for (sid, emoji) in cached {
                 let key = sticker_thumb_key(hex_id, sid);
@@ -108,9 +109,9 @@ impl App {
             if let Err(e) = self.index.cache_stickers(&id, &meta).await {
                 warn!("cache stickers: {e}");
             }
-            // hovering a picker sticker plays it: keep the animated ones' bytes next to the thumbs
+            // the picker plays them from the animated ones' bytes kept next to the thumbs
             let ids: Vec<String> = items.iter().filter(|s| s.animated).map(|s| s.id.to_string()).collect();
-            tokio::task::spawn_blocking(move || {
+            saved = Some(tokio::task::spawn_blocking(move || {
                 for (path, bytes) in sources {
                     if let Err(e) = sigwin_vault::write_cache(&path, &bytes) {
                         warn!("save {}: {e}", path.display());
@@ -120,12 +121,16 @@ impl App {
                 if let Err(e) = sigwin_vault::write_cache(&marker, ids.join(",").as_bytes()) {
                     warn!("save {}: {e}", marker.display());
                 }
-            });
+            }));
         }
         debug!(ms = started.elapsed().as_millis() as u64, stickers = items.len(), from_cache, "open pack");
         // grid first: the UI only keeps images for the grid it shows
         (self.emit)(Event::StickerGrid { pack: hex_id.to_string(), items });
         self.sticker_thumbs(jobs, true);
+        // the grid asks for its frames as it shows: commands wait for this, so they find the files
+        if let Some(saved) = saved {
+            let _ = saved.await;
+        }
     }
 
     /// A message-list sticker's frames, from its downloaded attachment (`key` is its thumbnail key).
@@ -143,13 +148,34 @@ impl App {
         });
     }
 
-    /// A hovered picker sticker's frames, from the bytes `open_pack` kept for animated stickers.
-    pub(super) fn picker_frames(&self, pack_hex: &str, id: u32) {
-        let path = anim_source(&self.paths.thumbs, pack_hex, id);
-        let key = sticker_thumb_key(pack_hex, id);
+    /// Picker stickers' frames, from the bytes `open_pack` kept for animated stickers. One at a
+    /// time on one blocking thread, in the order asked: a screenful asks for tens at once, each
+    /// tens of ms, and the grid's thumbnails come first. A new list replaces what's left of the old.
+    pub(super) fn picker_frames(&self, pack: String, ids: Vec<u32>) {
+        let mut q = self.picker_queue.lock().unwrap_or_else(|e| e.into_inner());
+        // the one being made comes anyway
+        let busy = q.busy.clone();
+        q.todo = ids.into_iter().map(|id| (pack.clone(), id)).filter(|j| Some(j) != busy.as_ref()).collect();
+        if q.running || q.todo.is_empty() {
+            return;
+        }
+        q.running = true;
+        let queue = self.picker_queue.clone();
+        let dir = self.paths.thumbs.clone();
         let emit = self.emit.clone();
-        tokio::task::spawn_blocking(move || {
-            let f = match sigwin_vault::read(&path) {
+        tokio::task::spawn_blocking(move || loop {
+            let (pack, id) = {
+                let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+                let Some(j) = q.todo.pop_front() else {
+                    q.running = false;
+                    q.busy = None;
+                    return;
+                };
+                q.busy = Some(j.clone());
+                j
+            };
+            let key = sticker_thumb_key(&pack, id);
+            let f = match sigwin_vault::read(&anim_source(&dir, &pack, id)) {
                 Ok(bytes) => Frames::decode(key, &bytes, PICKER_CELL),
                 Err(_) => Frames::still(key),
             };
@@ -407,6 +433,14 @@ fn anim_marker(dir: &Path, pack_hex: &str) -> PathBuf {
 }
 
 /// An animated picker sticker's original bytes.
+/// `App::picker_frames`' work: (pack, sticker id) to make, the one being made, whether a thread runs.
+#[derive(Default)]
+pub(super) struct PickerQueue {
+    todo: std::collections::VecDeque<(String, u32)>,
+    busy: Option<(String, u32)>,
+    running: bool,
+}
+
 fn anim_source(dir: &Path, pack_hex: &str, id: u32) -> PathBuf {
     dir.join(format!("{}-anim.enc", sticker_thumb_key(pack_hex, id)))
 }

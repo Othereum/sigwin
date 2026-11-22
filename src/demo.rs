@@ -1210,8 +1210,6 @@ fn demo_status(emit: backend::Emit) {
     });
 }
 
-/// `StickerFrames` / `PickerFrames`: `demo-st-1` and every 4th picker sticker are animated GIFs
-/// (a pulsing blob), decoded like real stickers.
 /// The date picker's answer from the demo rows' days.
 fn demo_calendar(emit: &backend::Emit, key: &str, days: &[i32], bounds: &[i32]) {
     let marks = bounds.windows(2).map(|w| days.iter().any(|d| (w[0]..w[1]).contains(d))).collect();
@@ -1243,11 +1241,20 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
         }
         return;
     }
-    let (key, fit) = match c {
-        Command::StickerFrames(k) => (k.clone(), view::media::sticker_size()),
-        Command::PickerFrames { pack, id } => (format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX), 72),
-        _ => return,
-    };
+    match c {
+        Command::StickerFrames(k) => demo_sticker(emit, k.clone(), view::media::sticker_size()),
+        Command::PickerFrames { pack, ids } => {
+            for id in ids {
+                demo_sticker(emit, format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX), 72);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `StickerFrames` / `PickerFrames`: `demo-st-1` and every 4th picker sticker are animated GIFs
+/// (a pulsing blob), decoded like real stickers.
+fn demo_sticker(emit: &backend::Emit, key: String, fit: u32) {
     let animated = key == "demo-st-1" || key.rsplit('_').next().and_then(|i| i.parse::<u32>().ok()).is_some_and(|i| i % 4 == 0);
     if !animated {
         emit(Event::Frames(types::Frames::still(key)));
