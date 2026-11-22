@@ -167,9 +167,6 @@ msgstr "Telefonnummer eingeben"
 msgid "Enter starts a new line"
 msgstr "Enter beginnt eine neue Zeile"
 
-msgid "Featured sticker packs"
-msgstr "Empfohlene Sticker-Sets"
-
 msgid "Follow phone setting"
 msgstr "Telefoneinstellung folgen"
 

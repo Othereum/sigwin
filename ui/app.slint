@@ -478,7 +478,6 @@ export component AppWindow inherits Window {
     in-out property <string> info-title: @tr("Message info");
     callback pick-pack(string);
     callback send-sticker(string, int);
-    callback install-pack(string);
     callback add-pack-url(string);
 
     // headless test mode: no platform color scheme, set it explicitly
@@ -1028,7 +1027,6 @@ export component AppWindow inherits Window {
                 url-text <=> root.pack-url;
                 pick-pack(id) => { root.pick-pack(id); }
                 send-sticker(p, i) => { root.send-sticker(p, i); }
-                install-pack(id) => { root.install-pack(id); }
                 add-pack-url(u) => { root.add-pack-url(u); }
                 create-pack => { PackData.start(); }
                 close => {

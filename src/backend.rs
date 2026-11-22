@@ -873,8 +873,8 @@ impl App {
             Command::StickerPanel => self.sticker_packs().await,
             Command::OpenPack(id) => self.open_pack(&id).await,
             Command::SendSticker { pack, id } => self.send_sticker(&pack, id).await,
-            Command::InstallPack { id, key } => match (hex::decode(&id), blessed_key(&id).or_else(|| hex::decode(&key).ok())) {
-                (Ok(id), Some(key)) => self.install_pack(id, key),
+            Command::InstallPack { id, key } => match (hex::decode(&id), hex::decode(&key)) {
+                (Ok(id), Ok(key)) => self.install_pack(id, key),
                 _ => self.notice(tr!("Invalid sticker pack")),
             },
             Command::InstallPackUrl(url) => match parse_pack_url(&url) {

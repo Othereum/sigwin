@@ -434,8 +434,7 @@ pub struct PackDto {
     /// hex pack id
     pub id: String,
     pub title: String,
-    pub installed: bool,
-    /// thumbnail key of the cover sticker (installed packs only)
+    /// thumbnail key of the cover sticker
     pub cover_key: String,
 }
 

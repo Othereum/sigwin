@@ -1427,20 +1427,16 @@ fn demo_grids(emit: &backend::Emit) {
 }
 
 pub(crate) fn demo_stickers(emit: backend::Emit) {
-    let packs: Vec<types::PackDto> = (0..3)
-        .map(|i| types::PackDto {
-            id: format!("p{i}"),
-            title: format!("추천 팩 {i}"),
-            installed: i < 2 && std::env::var("SIGWIN_DEMO_STICKERS").as_deref() != Ok("add"),
-            cover_key: format!("sp_p{i}_0"),
-        })
+    let add = std::env::var("SIGWIN_DEMO_STICKERS").as_deref() == Ok("add");
+    let packs: Vec<types::PackDto> = (0..if add { 0 } else { 2 })
+        .map(|i| types::PackDto { id: format!("p{i}"), title: format!("Pack {i}"), cover_key: format!("sp_p{i}_0") })
         .collect();
     let items: Vec<types::StickerDto> =
         (0..20).map(|i| types::StickerDto { key: format!("sp_p0_{i}"), id: i, emoji: String::new(), animated: i % 4 == 0 }).collect();
     // the panel is opened by main(); give it a moment before filling it
     slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
         emit(Event::StickerPacks(packs));
-        if std::env::var("SIGWIN_DEMO_STICKERS").as_deref() != Ok("add") {
+        if !add {
             emit(Event::StickerGrid { pack: "p0".into(), items });
         }
         let mut thumbs: Vec<_> = (0..20u32).map(|i| demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8)).collect();

@@ -63,12 +63,12 @@ pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>) {
     let first = UI.with_borrow_mut(|ui| {
         let p = &mut ui.sticker;
         p.packs.set_vec(list.iter().map(|d| pack_item(d, &p.covers)).collect::<Vec<_>>());
-        let first = list.iter().find(|d| d.installed).map(|d| d.id.clone());
+        let first = list.first().map(|d| d.id.clone());
         p.pack_dtos = list;
         first
     });
     let cur = app.get_current_pack().to_string();
-    let still_there = UI.with_borrow(|ui| ui.sticker.pack_dtos.iter().any(|d| d.installed && d.id == cur));
+    let still_there = UI.with_borrow(|ui| ui.sticker.pack_dtos.iter().any(|d| d.id == cur));
     // the grid is emptied when the panel closes, so always (re)load the selected pack
     let target = if still_there { Some(cur) } else { first };
     match target {

@@ -148,7 +148,6 @@ pub(crate) fn pack_item(p: &types::PackDto, thumbs: &HashMap<String, Image>) -> 
     PackItem {
         id: p.id.as_str().into(),
         title: p.title.as_str().into(),
-        installed: p.installed,
         cover: thumbs.get(&p.cover_key).cloned().unwrap_or_default(),
     }
 }

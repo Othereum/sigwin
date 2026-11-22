@@ -935,9 +935,6 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let s = send.clone();
-    app.on_install_pack(move |id| s(Command::InstallPack { id: id.to_string(), key: String::new() }));
-
-    let s = send.clone();
     let weak = app.as_weak();
     app.on_add_pack_url(move |url| {
         if url.trim().is_empty() {

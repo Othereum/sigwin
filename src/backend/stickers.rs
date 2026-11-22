@@ -8,7 +8,6 @@ impl App {
     pub(super) async fn sticker_packs(&mut self) {
         let started = std::time::Instant::now();
         let mut out = Vec::new();
-        let mut installed = HashSet::new();
         let ids = self.index.pack_ids().await.unwrap_or_default();
         let mut cached: HashMap<Vec<u8>, (String, Option<u32>)> = self
             .index
@@ -49,7 +48,6 @@ impl App {
                     (p.manifest.title, cid, bytes)
                 }
             };
-            installed.insert(id.clone());
             let cover_key = match cover_id {
                 Some(cid) => {
                     let base = sticker_thumb_key(&id, cid);
@@ -59,14 +57,9 @@ impl App {
                 }
                 None => String::new(),
             };
-            out.push(PackDto { id, title, installed: true, cover_key });
+            out.push(PackDto { id, title, cover_key });
         }
         debug!(ms = started.elapsed().as_millis() as u64, packs = out.len(), loaded, "sticker packs");
-        for (id, _, title) in BLESSED_PACKS {
-            if !installed.contains(*id) {
-                out.push(PackDto { id: id.to_string(), title: title.to_string(), installed: false, cover_key: String::new() });
-            }
-        }
         (self.emit)(Event::StickerPacks(out));
         self.sticker_thumbs(jobs, false);
     }
@@ -461,24 +454,6 @@ fn read_marker(path: &Path) -> Option<HashSet<u32>> {
     Some(String::from_utf8_lossy(&bytes).split(',').filter_map(|s| s.parse().ok()).collect())
 }
 
-/// Signal's built-in packs (Signal-Desktop `BLESSED_PACKS`): hex id, base64 key, title.
-pub(super) const BLESSED_PACKS: &[(&str, &str, &str)] = &[
-    ("42fb75e1827c0c945cfb5ca0975db03c", "7uJ+K593PgpV6iTDQLe+hYcRpuK9m27nBEND4OQovmU=", "Rocky Talk"),
-    ("ccc89a05dc077856b57351e90697976c", "RXMOYPCdVWYRUiN0RTemt9nqmc7qy3eh+9aAG5YH+88=", "My Daily Life 1"),
-    ("fb535407d2f6497ec074df8b9c51dd1d", "F+lxwTQDViJ4HS7iSeZHO3dFg3ULaMEbuCt1CcaLbf0=", "Zozo the French Bulldog"),
-    ("3044281a51307306e5442f2e9070953a", "xMqqhDl+GmMKWWD1SguCdTyIpeUuDe/mFbpN2A8TDL8=", "Croco's Feelings"),
-    ("a2414255948558316f37c1d36c64cd28", "/aEpNxltI28cqeEZalZULh0c72/4TivgOChxf6IK02Y=", "My Daily Life 2"),
-    ("684d2b7bcfc2eec6f57f2e7be0078e0f", "hm4Ny0obJfKwTfJwzXQnI+SmVVwKGrw/PzDcxaIBDFU=", "Cozy Season"),
-    ("f19548e5afa38d1ce4f5c3191eba5e30", "LLMHZ0D2aapExsBjKQskmn0ApLAu2PnppbkCo38bvEE=", "Chug the Mouse"),
-    ("9acc9e8aba563d26a4994e69263e3b25", "Wm3/OUjCjvubeq+T7MN1xp/DFueAd+0mhnoU0QoPahI=", "Bandit the Cat"),
-];
-
-pub(super) fn blessed_key(hex_id: &str) -> Option<Vec<u8>> {
-    use base64::Engine;
-    let (_, b64, _) = BLESSED_PACKS.iter().find(|(id, _, _)| *id == hex_id)?;
-    base64::engine::general_purpose::STANDARD.decode(b64).ok()
-}
-
 /// Accepts `https://signal.art/addstickers/#pack_id=<hex>&pack_key=<hex>` (or a bare query string).
 pub(super) fn parse_pack_url(url: &str) -> Option<(Vec<u8>, Vec<u8>)> {
     let mut id = None;
@@ -496,14 +471,6 @@ pub(super) fn parse_pack_url(url: &str) -> Option<(Vec<u8>, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn blessed_keys_are_32_bytes() {
-        for (id, _, title) in BLESSED_PACKS {
-            assert_eq!(hex::decode(id).unwrap().len(), 16, "{title} id");
-            assert_eq!(blessed_key(id).unwrap().len(), 32, "{title} key");
-        }
-    }
 
     #[test]
     fn parses_signal_art_links() {

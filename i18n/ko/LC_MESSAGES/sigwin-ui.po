@@ -167,9 +167,6 @@ msgstr "전화번호 입력"
 msgid "Enter starts a new line"
 msgstr "Enter로 줄을 바꿉니다"
 
-msgid "Featured sticker packs"
-msgstr "추천 스티커 팩"
-
 msgid "Follow phone setting"
 msgstr "휴대폰 설정 따르기"
 
