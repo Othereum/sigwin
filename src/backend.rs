@@ -265,6 +265,7 @@ enum Internal {
     Saved(String, PathBuf),
     ProgressDone,
     PackInstalled(Result<String, String>),
+    PackRemoved(Result<(), String>),
     ReceiptsMoved,
     PinsIndexed,
     /// the backfill went through this thread's media
@@ -882,6 +883,8 @@ impl App {
                 None => self.notice(tr!("Not a sticker link (a signal.art/addstickers link)")),
             },
             Command::InstallPackFromMessage(id) => self.install_pack_from_message(&id),
+            Command::SetPackOrder(ids) => self.set_pack_order(&ids).await,
+            Command::RemovePack(id) => self.remove_pack(&id).await,
             Command::StickerClicked(id) => self.sticker_clicked(&id).await,
             Command::CreatePack(job) => self.create_pack(job),
             Command::CancelPack => self.cancel_pack(),
@@ -1106,6 +1109,13 @@ impl App {
                 self.threads_dirty = true;
             }
             Internal::PackInstalled(Err(e)) => self.notice(tr!("Couldn't add the sticker pack: {}", e)),
+            Internal::PackRemoved(res) => {
+                (self.emit)(Event::ProgressDone);
+                if let Err(e) = res {
+                    self.notice(tr!("Couldn't remove the sticker pack: {}", e));
+                }
+                self.sticker_packs().await;
+            }
             Internal::Avatars(done) => {
                 self.avatars_running = false;
                 self.persist.avatars.extend(done.state);

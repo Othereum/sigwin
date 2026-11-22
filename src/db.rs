@@ -472,6 +472,16 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        // the picker's pack order as the user set it (0 first). Not a cache: nothing rebuilds it.
+        // Packs without a row (installed since, or from another device) come after, in install order
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_pack_order (
+                id BLOB PRIMARY KEY,
+                pos INTEGER NOT NULL
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
         // sticker ids and emoji per pack, in manifest order (same reason as `ls_packs`)
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS ls_stickers (
@@ -1391,10 +1401,32 @@ impl Index {
         Ok(())
     }
 
-    /// Ids of installed sticker packs. Reads the id column only, not the manifests.
+    /// Ids of installed sticker packs in the picker's order. Reads the id column only, not the
+    /// manifests.
     pub async fn pack_ids(&self) -> anyhow::Result<Vec<Vec<u8>>> {
-        let rows = sqlx::query("SELECT id FROM sticker_packs").fetch_all(&self.pool).await?;
+        let rows = sqlx::query(
+            "SELECT s.id FROM sticker_packs s LEFT JOIN ls_pack_order o ON o.id = s.id
+             ORDER BY o.pos IS NULL, o.pos, s.rowid",
+        )
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows.into_iter().filter_map(|r| r.try_get("id").ok()).collect())
+    }
+
+    pub async fn set_pack_order(&self, ids: &[Vec<u8>]) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM ls_pack_order").execute(&mut *tx).await?;
+        for (pos, id) in ids.iter().enumerate() {
+            sqlx::query("INSERT INTO ls_pack_order (id, pos) VALUES (?, ?)").bind(id).bind(pos as i64).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// An installed pack's key, without reading its manifest.
+    pub async fn pack_key(&self, id: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+        let row = sqlx::query("SELECT key FROM sticker_packs WHERE id = ?").bind(id).fetch_optional(&self.pool).await?;
+        Ok(row.and_then(|r| r.try_get("key").ok()))
     }
 
     /// Cached pack metadata: (id, title, cover sticker id).
@@ -1422,6 +1454,7 @@ impl Index {
     pub async fn uncache_pack(&self, id: &[u8]) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM ls_packs WHERE id = ?").bind(id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM ls_stickers WHERE pack = ?").bind(id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM ls_pack_order WHERE id = ?").bind(id).execute(&self.pool).await?;
         Ok(())
     }
 

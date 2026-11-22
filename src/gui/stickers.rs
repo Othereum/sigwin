@@ -1,4 +1,4 @@
-//! The sticker panel: pack tabs, the open pack's grid, adding packs.
+//! The sticker panel: pack tabs, the open pack's grid, the pack page (adding, ordering, removing).
 
 use super::*;
 
@@ -13,12 +13,17 @@ pub(crate) struct Panel {
     covers: held::Pictures<{ held::STICKER_COVERS }>,
 }
 
+/// The pack page's id in `current-pack`.
+pub(super) const PACK_PAGE: &str = "+";
+
 pub(crate) fn close(app: &AppWindow) {
     app.set_sticker_open(false);
+    app.global::<StickerData>().set_packs_loaded(false);
     UI.with_borrow_mut(|ui| {
         let p = &mut ui.sticker;
         p.covers.clear();
         p.grid.clear();
+        p.pack_dtos.clear();
         anim::picker_grid(ui, "");
         let p = &mut ui.sticker;
         p.stickers.set_vec(Vec::new());
@@ -60,6 +65,8 @@ pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>) {
     if !app.get_sticker_open() {
         return;
     }
+    let d = app.global::<StickerData>();
+    d.set_packs_loaded(true);
     let first = UI.with_borrow_mut(|ui| {
         let p = &mut ui.sticker;
         p.packs.set_vec(list.iter().map(|d| pack_item(d, &p.covers)).collect::<Vec<_>>());
@@ -67,21 +74,32 @@ pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>) {
         p.pack_dtos = list;
         first
     });
-    let cur = app.get_current_pack().to_string();
+    let cur = d.get_current_pack().to_string();
+    // the pack page stays open while packs are removed there (opening the panel leaves it)
+    if cur == PACK_PAGE {
+        return;
+    }
     let still_there = UI.with_borrow(|ui| ui.sticker.pack_dtos.iter().any(|d| d.id == cur));
     // the grid is emptied when the panel closes, so always (re)load the selected pack
     let target = if still_there { Some(cur) } else { first };
     match target {
         Some(id) => {
-            app.set_current_pack(id.as_str().into());
+            d.set_current_pack(id.as_str().into());
             send_cmd(Command::OpenPack(id));
         }
-        None => app.set_current_pack("+".into()),
+        None => d.set_current_pack(PACK_PAGE.into()),
     }
 }
 
-pub(super) fn open(app: &AppWindow, pack: String) {
-    app.set_current_pack(pack.into());
+/// Opens the panel on `pack`, or on the last pack shown (the pack page is a place to visit, not
+/// to come back to).
+pub(super) fn open(app: &AppWindow, pack: Option<String>) {
+    let d = app.global::<StickerData>();
+    match pack {
+        Some(pack) => d.set_current_pack(pack.into()),
+        None if d.get_current_pack() == PACK_PAGE => d.set_current_pack(SharedString::new()),
+        None => {}
+    }
     app.set_sticker_open(true);
     UI.with_borrow_mut(anim::picker_opened);
     // reloads the pack list, then opens the current pack
@@ -93,11 +111,35 @@ pub(super) fn ask_install(app: &AppWindow, msg_id: String) {
     super::window::ask(app, super::window::Ask::YesNo, tr!("Sticker pack"), text, move || send_cmd(Command::InstallPackFromMessage(msg_id)));
 }
 
+/// Moves a pack on the pack page; the tabs follow at once, the backend keeps the order.
+pub(super) fn move_pack(from: usize, to: usize) {
+    let order = UI.with_borrow_mut(|ui| {
+        let p = &mut ui.sticker;
+        if from >= p.pack_dtos.len() || to >= p.pack_dtos.len() || from == to {
+            return None;
+        }
+        let d = p.pack_dtos.remove(from);
+        p.pack_dtos.insert(to, d);
+        let row = p.packs.remove(from);
+        p.packs.insert(to, row);
+        Some(p.pack_dtos.iter().map(|d| d.id.clone()).collect::<Vec<_>>())
+    });
+    if let Some(order) = order {
+        send_cmd(Command::SetPackOrder(order));
+    }
+}
+
+pub(super) fn ask_remove(app: &AppWindow, index: usize) {
+    let Some((id, title)) = UI.with_borrow(|ui| ui.sticker.pack_dtos.get(index).map(|d| (d.id.clone(), d.title.clone()))) else { return };
+    let text = tr!("Remove “{}”? It's also removed from your other devices.", title);
+    super::window::ask(app, super::window::Ask::YesNo, tr!("Remove sticker pack"), text, move || send_cmd(Command::RemovePack(id)));
+}
+
 pub(super) fn grid_arrived(app: &AppWindow, pack: String, items: Vec<types::StickerDto>) {
     if !app.get_sticker_open() {
         return;
     }
-    app.set_current_pack(pack.as_str().into());
+    app.global::<StickerData>().set_current_pack(pack.as_str().into());
     UI.with_borrow_mut(|ui| {
         let rows: Vec<StickerItem> = items
             .iter()

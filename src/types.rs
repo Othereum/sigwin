@@ -827,6 +827,10 @@ pub enum Command {
     InstallPackUrl(String),
     /// install the pack of the sticker in this message
     InstallPackFromMessage(String),
+    /// every installed pack's hex id, in the order the picker shows them
+    SetPackOrder(Vec<String>),
+    /// uninstall this hex id here and on the other devices; answered by a new `StickerPacks`
+    RemovePack(String),
     /// a sticker in the message list was clicked
     StickerClicked(String),
     /// make a pack of these pictures and upload it; answered by `PackProgress` and then

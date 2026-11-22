@@ -4,24 +4,153 @@ import { PackItem, StickerItem } from "types.slint";
 import { Anim, Theme } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
 import { Field, HStrip, IconButton, PlainButton, Tip, ThinScroll } from "widgets.slint";
-import { Icons } from "icons.slint";
+import { Icon, Icons } from "icons.slint";
 import { MediaLabel } from "bubble.slint";
 
-export component StickerPanel inherits Rectangle {
+export global StickerData {
     in property <[PackItem]> packs;
+    // false until the pack list has arrived, so an empty list isn't shown as "no packs"
+    in property <bool> packs-loaded;
     in property <[StickerItem]> stickers;
-    in property <string> current-pack;
-    in-out property <string> url-text;
+    // the open pack's id, or "+" for the pack page
+    in-out property <string> current-pack;
+    in-out property <string> pack-url;
     callback pick-pack(string);
     callback send-sticker(string, int);
     callback add-pack-url(string);
+    // move the pack at this index to that one
+    callback move-pack(int, int);
+    // asks first
+    callback remove-pack(int);
+}
+
+// Installed packs: drag a row to reorder, click it to open the pack.
+component PackList inherits Rectangle {
+    property <length> row-h: 44px;
+    // the pressed row (-1 none), and whether it has moved far enough to be a drag
+    property <int> drag: -1;
+    property <bool> dragging;
+    // the pointer's y in the visible part, so the drop place follows while the list scrolls
+    property <length> drag-vy;
+    // the gap between rows it would drop into, 0 to packs.length
+    property <int> slot: clamp(round((self.drag-vy - view.content-y) / self.row-h), 0, StickerData.packs.length);
+    property <bool> lands: self.dragging && self.slot != self.drag && self.slot != self.drag + 1;
+    // how near an edge a drag scrolls the list
+    property <length> edge: 28px;
+
+    ThinScroll {
+        width: parent.width;
+        height: parent.height;
+        content-y <=> view.content-y;
+        content-height: view.content-height;
+        visible-height: view.visible-height;
+        view := ScrollView {
+            width: parent.width;
+            height: parent.height;
+            vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+            content-height: StickerData.packs.length * root.row-h;
+            for p[i] in StickerData.packs: Rectangle {
+                x: 0px;
+                y: i * root.row-h;
+                // clear of the scrollbar thumb
+                width: view.visible-width - 8px;
+                height: root.row-h;
+                border-radius: 10px;
+                background: root.dragging && root.drag == i ? Theme.selected : (root.drag < 0 && ta.has-hover ? Theme.hover : transparent);
+                ta := TouchArea {
+                    mouse-cursor: root.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
+                    pointer-event(e) => {
+                        if e.button != PointerEventButton.left {
+                            return;
+                        }
+                        if e.kind == PointerEventKind.down {
+                            root.drag = i;
+                            root.dragging = false;
+                            root.drag-vy = parent.y + self.mouse-y + view.content-y;
+                        } else if e.kind == PointerEventKind.up && root.drag == i {
+                            if root.lands {
+                                StickerData.move-pack(i, root.slot > i ? root.slot - 1 : root.slot);
+                            } else if !root.dragging {
+                                StickerData.pick-pack(p.id);
+                            }
+                            root.drag = -1;
+                            root.dragging = false;
+                        }
+                    }
+                    moved => {
+                        if root.drag != i {
+                            return;
+                        }
+                        root.drag-vy = parent.y + self.mouse-y + view.content-y;
+                        if !root.dragging && abs(self.mouse-y - self.pressed-y) > 4px {
+                            root.dragging = true;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 4px;
+                    spacing: 10px;
+                    Icon {
+                        y: (parent.height - self.height) / 2;
+                        icon: Icons.grip;
+                        filled: true;
+                        size: 16px;
+                    }
+                    Image {
+                        y: (parent.height - self.height) / 2;
+                        width: 32px;
+                        height: 32px;
+                        source: p.cover;
+                        image-fit: contain;
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: p.title;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
+                        icon: Icons.trash;
+                        accessible-role: button;
+                        accessible-label: @tr("Remove");
+                        clicked => { StickerData.remove-pack(i); }
+                        Tip { hovered: parent.hovered; text: @tr("Remove"); }
+                    }
+                }
+            }
+            // where the dragged row would land
+            Rectangle {
+                x: 4px;
+                y: root.slot * root.row-h - 1px;
+                width: view.visible-width - 16px;
+                height: 2px;
+                border-radius: 1px;
+                visible: root.lands;
+                background: Theme.accent;
+            }
+        }
+    }
+
+    Timer {
+        interval: 16ms;
+        running: root.dragging && (root.drag-vy < root.edge || root.drag-vy > view.visible-height - root.edge);
+        triggered => {
+            view.content-y = clamp(view.content-y + (root.drag-vy < root.edge ? 6px : -6px), min(0px, view.visible-height - view.content-height), 0px);
+        }
+    }
+}
+
+export component StickerPanel inherits Rectangle {
     callback create-pack();
     callback close();
 
     property <length> cell: 84px;
     // the side paddings, and room for the grid's scrollbar thumb
     property <int> cols: max(1, floor((self.width - 50px) / cell));
-    property <bool> suggest: current-pack == "" || current-pack == "+";
+    property <bool> manage: StickerData.current-pack == "" || StickerData.current-pack == "+";
 
     height: 308px;
     // a card over the composer, inset like it
@@ -52,17 +181,17 @@ export component StickerPanel inherits Rectangle {
                     content-width: tabs.preferred-width;
                     tabs := HorizontalLayout {
                         spacing: 4px;
-                        for p in root.packs: Rectangle {
+                        for p in StickerData.packs: Rectangle {
                             width: 40px;
                             height: 40px;
                             accessible-role: button;
                             accessible-label: p.title;
                             border-radius: 10px;
-                            background: p.id == root.current-pack ? Theme.selected : (pta.has-hover ? Theme.hover : transparent);
+                            background: p.id == StickerData.current-pack ? Theme.selected : (pta.has-hover ? Theme.hover : transparent);
                             Image { width: 32px; height: 32px; source: p.cover; image-fit: contain; }
                             pta := TouchArea {
                                 mouse-cursor: pointer;
-                                clicked => { root.pick-pack(p.id); }
+                                clicked => { StickerData.pick-pack(p.id); }
                             }
                         }
                     }
@@ -86,18 +215,18 @@ export component StickerPanel inherits Rectangle {
             IconButton {
                 width: 40px;
                 height: 40px;
-                icon: Icons.plus;
-                active: root.suggest;
+                icon: Icons.settings;
+                active: root.manage;
                 accessible-role: button;
-                accessible-label: @tr("Add pack");
-                clicked => { root.pick-pack("+"); }
-                Tip { hovered: parent.hovered; text: @tr("Add pack"); }
+                accessible-label: @tr("Manage packs");
+                clicked => { StickerData.pick-pack("+"); }
+                Tip { hovered: parent.hovered; text: @tr("Manage packs"); }
             }
         }
         // sticker grid
-        if !root.suggest: ThinScroll {
+        if !root.manage: ThinScroll {
             property <int> first: max(0, floor(-grid-view.content-y / root.cell)) * root.cols;
-            property <int> end: min(root.stickers.length, ceil((-grid-view.content-y + grid-view.visible-height) / root.cell) * root.cols);
+            property <int> end: min(StickerData.stickers.length, ceil((-grid-view.content-y + grid-view.visible-height) / root.cell) * root.cols);
             init => { Anim.picker-view(self.first, self.end); }
             changed first => { Anim.picker-view(self.first, self.end); }
             changed end => { Anim.picker-view(self.first, self.end); }
@@ -110,8 +239,8 @@ export component StickerPanel inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                content-height: ceil(root.stickers.length / root.cols) * root.cell;
-                for s[i] in root.stickers: Rectangle {
+                content-height: ceil(StickerData.stickers.length / root.cols) * root.cell;
+                for s[i] in StickerData.stickers: Rectangle {
                     x: mod(i, root.cols) * root.cell;
                     y: floor(i / root.cols) * root.cell;
                     width: root.cell;
@@ -132,37 +261,28 @@ export component StickerPanel inherits Rectangle {
                     }
                     sta := TouchArea {
                         mouse-cursor: pointer;
-                        clicked => { root.send-sticker(root.current-pack, s.id); }
+                        clicked => { StickerData.send-sticker(StickerData.current-pack, s.id); }
                         changed has-hover => {
-                            if s.animated { Anim.hover(root.current-pack, s.id, self.has-hover); }
+                            if s.animated { Anim.hover(StickerData.current-pack, s.id, self.has-hover); }
                         }
                     }
                 }
             }
         }
-        // add packs: make one, or a signal.art link
-        if root.suggest: VerticalLayout {
+        // the pack page: add one (a signal.art link, or make one), then the installed packs
+        if root.manage: VerticalLayout {
             vertical-stretch: 1;
-            alignment: start;
-            spacing: 4px;
-            padding-left: 12px;
-            padding-right: 12px;
-            HorizontalLayout {
-                alignment: start;
-                PlainButton {
-                    text: @tr("Create a sticker pack");
-                    clicked => { root.create-pack(); }
-                }
-            }
-            Rectangle { height: 8px; }
-            Text { text: @tr("Add from a signal.art sticker link"); color: Theme.subtle; font-size: 12px; }
+            spacing: 8px;
+            padding-top: 4px;
             HorizontalLayout {
                 spacing: 6px;
+                padding-left: 4px;
+                padding-right: 4px;
                 Field {
                     height: 32px;
-                    placeholder: "https://signal.art/addstickers/#pack_id=…&pack_key=…";
-                    text <=> root.url-text;
-                    accepted => { root.add-pack-url(root.url-text); }
+                    placeholder: @tr("Paste a signal.art sticker link");
+                    text <=> StickerData.pack-url;
+                    accepted => { StickerData.add-pack-url(StickerData.pack-url); }
                     key-pressed(event) => {
                         if (event.text != Key.Escape) {
                             return reject;
@@ -173,7 +293,28 @@ export component StickerPanel inherits Rectangle {
                 }
                 PlainButton {
                     text: @tr("Add");
-                    clicked => { root.add-pack-url(root.url-text); }
+                    clicked => { StickerData.add-pack-url(StickerData.pack-url); }
+                }
+                PlainButton {
+                    text: @tr("Create a sticker pack");
+                    clicked => { root.create-pack(); }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border; }
+            // holds the rest of the panel whatever shows in it
+            Rectangle {
+                vertical-stretch: 1;
+                if StickerData.packs-loaded && StickerData.packs.length == 0: Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: @tr("No sticker packs yet");
+                    color: Theme.subtle;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                if StickerData.packs.length > 0: PackList {
+                    width: parent.width;
+                    height: parent.height;
                 }
             }
         }

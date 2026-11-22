@@ -13,7 +13,7 @@ use crate::types::{ClickedMedia, Command, Event, Find, MsgDto, Paging, ResultDto
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
     AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem, RequestData,
-    FindKind, PackCell, PackData, ResultItem, ResultKind, SearchData, SettingsData, StickerItem, TextOps, Theme, ThreadItem, ThreadMenuData,
+    FindKind, PackCell, PackData, ResultItem, ResultKind, SearchData, SettingsData, StickerData, StickerItem, TextOps, Theme, ThreadItem, ThreadMenuData,
 };
 
 pub(crate) mod anim;
@@ -136,8 +136,8 @@ pub(crate) fn bind_models(app: &AppWindow) {
         app.set_threads(ModelRc::from(ui.threads.clone()));
         app.global::<SearchData>().set_results(ModelRc::from(ui.results.clone()));
         app.set_messages(ModelRc::from(ui.messages.clone()));
-        app.set_packs(ModelRc::from(ui.sticker.packs.clone()));
-        app.set_stickers(ModelRc::from(ui.sticker.stickers.clone()));
+        app.global::<StickerData>().set_packs(ModelRc::from(ui.sticker.packs.clone()));
+        app.global::<StickerData>().set_stickers(ModelRc::from(ui.sticker.stickers.clone()));
         app.global::<PackData>().set_cells(ModelRc::from(ui.maker.cells.clone()));
     });
 }
@@ -379,7 +379,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             }
         }
         Event::StickerPacks(list) => stickers::packs_arrived(app, list),
-        Event::OpenStickerPanel(pack) => stickers::open(app, pack),
+        Event::OpenStickerPanel(pack) => stickers::open(app, Some(pack)),
         Event::AskInstallPack(msg_id) => stickers::ask_install(app, msg_id),
         Event::Account { name, number, device, receipts, typing } => {
             let state = |v: Option<bool>| if v == Some(false) { tr!("Off") } else { tr!("On") };

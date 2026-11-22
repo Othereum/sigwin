@@ -903,31 +903,30 @@ pub(crate) fn emoji_rows(tab: i32) -> ModelRc<ModelRc<SharedString>> {
 
 /// Sticker panel and packs.
 fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
-    let s = send.clone();
     let weak = app.as_weak();
     app.on_toggle_stickers(move || {
         let Some(app) = weak.upgrade() else { return };
         if app.get_sticker_open() {
             stickers::close(&app);
         } else {
-            app.set_sticker_open(true);
-            s(Command::StickerPanel);
+            stickers::open(&app, None);
         }
     });
 
+    let d = app.global::<StickerData>();
     let s = send.clone();
     let weak = app.as_weak();
-    app.on_pick_pack(move |id| {
+    d.on_pick_pack(move |id| {
         let Some(app) = weak.upgrade() else { return };
-        app.set_current_pack(id.clone());
-        if id.as_str() != "+" {
+        app.global::<StickerData>().set_current_pack(id.clone());
+        if id.as_str() != stickers::PACK_PAGE {
             s(Command::OpenPack(id.to_string()));
         }
     });
 
     let s = send.clone();
     let weak = app.as_weak();
-    app.on_send_sticker(move |pack, id| {
+    d.on_send_sticker(move |pack, id| {
         s(Command::SendSticker { pack: pack.to_string(), id: id as u32 });
         if let Some(app) = weak.upgrade() {
             stickers::close(&app);
@@ -936,13 +935,22 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
 
     let s = send.clone();
     let weak = app.as_weak();
-    app.on_add_pack_url(move |url| {
+    d.on_add_pack_url(move |url| {
         if url.trim().is_empty() {
             return;
         }
         s(Command::InstallPackUrl(url.to_string()));
         if let Some(app) = weak.upgrade() {
-            app.set_pack_url(SharedString::new());
+            app.global::<StickerData>().set_pack_url(SharedString::new());
+        }
+    });
+
+    d.on_move_pack(|from, to| stickers::move_pack(from as usize, to as usize));
+
+    let weak = app.as_weak();
+    d.on_remove_pack(move |i| {
+        if let Some(app) = weak.upgrade() {
+            stickers::ask_remove(&app, i as usize);
         }
     });
 }

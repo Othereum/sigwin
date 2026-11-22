@@ -28,6 +28,7 @@ export { ThreadMenuData } from "thread_menu.slint";
 export { FindKind, ResultItem, ResultKind, SearchData } from "search.slint";
 export { RepliesData } from "replies.slint";
 export { RequestData } from "request.slint";
+export { StickerData } from "stickers.slint";
 export { GalleryCell, GalleryData, GalleryRow } from "gallery.slint";
 export { CalendarCell, CalendarData } from "calendar.slint";
 
@@ -469,16 +470,9 @@ export component AppWindow inherits Window {
     in property <bool> current-muted;
 
     in-out property <bool> sticker-open;
-    in property <[PackItem]> packs;
-    in property <[StickerItem]> stickers;
-    in property <string> current-pack;
-    in-out property <string> pack-url;
     callback toggle-stickers();
     in-out property <string> info-text;
     in-out property <string> info-title: @tr("Message info");
-    callback pick-pack(string);
-    callback send-sticker(string, int);
-    callback add-pack-url(string);
 
     // headless test mode: no platform color scheme, set it explicitly
     public function set-dark(d: bool) {
@@ -1021,13 +1015,6 @@ export component AppWindow inherits Window {
                 }
             }
             if root.current-key != "" && root.sticker-open: StickerPanel {
-                packs: root.packs;
-                stickers: root.stickers;
-                current-pack: root.current-pack;
-                url-text <=> root.pack-url;
-                pick-pack(id) => { root.pick-pack(id); }
-                send-sticker(p, i) => { root.send-sticker(p, i); }
-                add-pack-url(u) => { root.add-pack-url(u); }
                 create-pack => { PackData.start(); }
                 close => {
                     root.toggle-stickers();

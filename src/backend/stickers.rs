@@ -17,9 +17,15 @@ impl App {
             .into_iter()
             .map(|(id, title, cover)| (id, (title, cover)))
             .collect();
-        for id in cached.keys().filter(|k| !ids.contains(k)).cloned().collect::<Vec<_>>() {
-            let _ = self.index.uncache_pack(&id).await;
-            cached.remove(&id);
+        // packs removed since, here or on another device: their files go too
+        let gone: Vec<Vec<u8>> = cached.keys().filter(|k| !ids.contains(k)).cloned().collect();
+        for id in &gone {
+            let _ = self.index.uncache_pack(id).await;
+            cached.remove(id);
+        }
+        if !gone.is_empty() {
+            let dir = self.paths.thumbs.clone();
+            tokio::task::spawn_blocking(move || remove_pack_files(&dir, &gone));
         }
         let mut loaded = 0;
         let mut jobs = Vec::new();
@@ -287,6 +293,27 @@ impl App {
         });
     }
 
+    pub(super) async fn set_pack_order(&self, ids: &[String]) {
+        let ids: Vec<Vec<u8>> = ids.iter().filter_map(|id| hex::decode(id).ok()).collect();
+        if let Err(e) = self.index.set_pack_order(&ids).await {
+            warn!("pack order: {e}");
+        }
+    }
+
+    /// The other devices hear of it first (presage removes it from the store after sending);
+    /// the reloaded list then drops its caches and files.
+    pub(super) async fn remove_pack(&self, hex_id: &str) {
+        let Some(mut m) = self.manager.clone() else { return };
+        let Ok(id) = hex::decode(hex_id) else { return };
+        let Ok(Some(key)) = self.index.pack_key(&id).await else { return };
+        let tx = self.tx.clone();
+        self.progress(tr!("Removing sticker pack…"));
+        tokio::task::spawn_local(async move {
+            let res = Box::pin(m.remove_sticker_pack(&id, &key)).await;
+            let _ = tx.send(Internal::PackRemoved(res.map_err(|e| e.to_string())));
+        });
+    }
+
     /// Installed pack: open the panel on it. Otherwise ask the user whether to install it.
     pub(super) async fn sticker_clicked(&mut self, msg_id: &str) {
         let pack_id = self.current.as_ref().and_then(|open| {
@@ -436,7 +463,6 @@ fn anim_marker(dir: &Path, pack_hex: &str) -> PathBuf {
     dir.join(format!("{STICKER_THUMB_PREFIX}{pack_hex}-anim.enc"))
 }
 
-/// An animated picker sticker's original bytes.
 /// `App::picker_frames`' work: (pack, sticker id) to make, the one being made, whether a thread runs.
 #[derive(Default)]
 pub(super) struct PickerQueue {
@@ -445,6 +471,23 @@ pub(super) struct PickerQueue {
     running: bool,
 }
 
+/// Every picker file of these packs: thumbs, covers, animated sources and the marker.
+fn remove_pack_files(dir: &Path, packs: &[Vec<u8>]) {
+    let prefixes: Vec<String> = packs.iter().map(|id| format!("{STICKER_THUMB_PREFIX}{}", hex::encode(id))).collect();
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut removed = 0;
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        let ours = prefixes.iter().any(|p| name.strip_prefix(p.as_str()).is_some_and(|rest| rest.starts_with(['_', '-'])));
+        if ours && std::fs::remove_file(e.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    debug!(packs = packs.len(), removed, "removed pack files");
+}
+
+/// An animated picker sticker's original bytes.
 fn anim_source(dir: &Path, pack_hex: &str, id: u32) -> PathBuf {
     dir.join(format!("{}-anim.enc", sticker_thumb_key(pack_hex, id)))
 }

@@ -53,11 +53,6 @@ msgstr "Konto"
 msgid "Add"
 msgstr "Hinzufügen"
 
-msgid "Add from a signal.art sticker link"
-msgstr "Über einen signal.art-Sticker-Link hinzufügen"
-
-msgid "Add pack"
-msgstr "Set hinzufügen"
 
 msgid "Adds the title and image of a link to messages you send. Sigwin visits the site to get them, so the site sees your IP address."
 msgstr "Fügt Nachrichten, die du sendest, den Titel und das Bild eines Links hinzu. Sigwin ruft dafür die Website auf, sodass sie deine IP-Adresse sieht."
@@ -206,6 +201,9 @@ msgstr "Hell"
 msgid "Loading…"
 msgstr "Wird geladen …"
 
+msgid "Manage packs"
+msgstr "Sets verwalten"
+
 msgid "Log folder"
 msgstr "Protokollordner"
 
@@ -263,6 +261,9 @@ msgstr "Keine Antworten"
 msgid "No results"
 msgstr "Keine Ergebnisse"
 
+msgid "No sticker packs yet"
+msgstr "Noch keine Sticker-Sets"
+
 msgid "Not shown while you're looking at the Sigwin window"
 msgstr "Nicht, während du das Sigwin-Fenster ansiehst"
 
@@ -305,6 +306,9 @@ msgstr "In Standard-App öffnen"
 msgid "Open source licenses"
 msgstr "Open-Source-Lizenzen"
 
+msgid "Paste a signal.art sticker link"
+msgstr "signal.art-Sticker-Link einfügen"
+
 msgid "Pin"
 msgstr "Fixieren"
 
@@ -331,6 +335,9 @@ msgstr "Lesebestätigungen · Tipp-Indikatoren"
 
 msgid "Recently used"
 msgstr "Zuletzt verwendet"
+
+msgid "Remove"
+msgstr "Entfernen"
 
 msgid "Replies"
 msgstr "Antworten"
@@ -681,6 +688,9 @@ msgstr "Zwischenablage konnte nicht geöffnet werden"
 msgid "Couldn't read an attached file"
 msgstr "Eine angehängte Datei konnte nicht gelesen werden"
 
+msgid "Couldn't remove the sticker pack: {}"
+msgstr "Sticker-Set konnte nicht entfernt werden: {}"
+
 msgid "Couldn't search. You can try again in a moment"
 msgstr "Suche fehlgeschlagen. Du kannst es gleich noch einmal versuchen"
 
@@ -883,6 +893,15 @@ msgstr "Gelesen ({})\n{}"
 
 msgid "Receiving the chat history… {}"
 msgstr "Chatverlauf wird empfangen … {}"
+
+msgid "Remove sticker pack"
+msgstr "Sticker-Set entfernen"
+
+msgid "Remove “{}”? It's also removed from your other devices."
+msgstr "„{}“ entfernen? Es wird auch von deinen anderen Geräten entfernt."
+
+msgid "Removing sticker pack…"
+msgstr "Sticker-Set wird entfernt …"
 
 msgid "Remove the app and its data\nAlso deletes the chat history and account from this PC."
 msgstr "App und Daten entfernen\nLöscht auch den Chatverlauf und das Konto von diesem PC."
