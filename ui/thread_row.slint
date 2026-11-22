@@ -5,16 +5,17 @@ import { Theme } from "theme.slint";
 import { Avatar } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
 
-// the unread count; grey while the thread is muted, unless something got through
+// the unread count; washed out while the thread is muted, unless something got through
 component Unread inherits Rectangle {
     in property <ThreadItem> item;
+    property <bool> quiet: item.muted && !item.loud;
     width: max(20px, count.preferred-width + 12px);
     height: 18px;
     border-radius: 9px;
-    background: item.muted && !item.loud ? Theme.subtle : Theme.accent;
+    background: quiet ? Theme.badge-muted : Theme.accent;
     count := Text {
         text: item.unread > 99 ? "99+" : item.unread;
-        color: white;
+        color: quiet ? Theme.badge-muted-text : white;
         font-size: 11px;
         font-weight: 700;
         horizontal-alignment: center;
