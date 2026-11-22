@@ -16,6 +16,7 @@ pub(crate) fn wire(app: &AppWindow, tx: UnboundedSender<Command>) {
     anim::wire(app);
     whatsnew::wire(app);
     gallery::wire(app);
+    packmaker::wire(app);
     calendar::wire(app);
     wire_photo_room(app);
     app.on_day_label(|day| crate::view::time::scroll_day_label(day).into());
@@ -686,12 +687,7 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     app.on_picker_tab_changed(move |tab| {
         let Some(app) = weak.upgrade() else { return };
-        let all = emoji::picker_tab(tab.max(0) as usize);
-        let rows: Vec<ModelRc<SharedString>> = all
-            .chunks(emoji::PICKER_COLUMNS)
-            .map(|row| ModelRc::new(VecModel::from(row.iter().map(|e| SharedString::from(*e)).collect::<Vec<_>>())))
-            .collect();
-        app.set_picker_rows(ModelRc::new(VecModel::from(rows)));
+        app.set_picker_rows(emoji_rows(tab));
     });
     let weak = app.as_weak();
     app.on_picker_closed(move || {
@@ -894,6 +890,15 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             link::open(&url);
         }
     });
+}
+
+/// The emoji of one picker tab as the rows `EmojiPicker` shows.
+pub(crate) fn emoji_rows(tab: i32) -> ModelRc<ModelRc<SharedString>> {
+    let rows: Vec<ModelRc<SharedString>> = emoji::picker_tab(tab.max(0) as usize)
+        .chunks(emoji::PICKER_COLUMNS)
+        .map(|row| ModelRc::new(VecModel::from(row.iter().map(|e| SharedString::from(*e)).collect::<Vec<_>>())))
+        .collect();
+    ModelRc::new(VecModel::from(rows))
 }
 
 /// Sticker panel and packs.

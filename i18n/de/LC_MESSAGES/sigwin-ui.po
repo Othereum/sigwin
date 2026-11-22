@@ -1275,3 +1275,140 @@ msgstr "Lässt sich auch per Rechtsklick auf ein Foto im Chat ändern"
 
 msgid "You can also change it by right-clicking a sticker in a chat"
 msgstr "Lässt sich auch per Rechtsklick auf einen Sticker im Chat ändern"
+
+msgid "1. Add stickers"
+msgstr "1. Sticker hinzufügen"
+
+msgid "2. Pick emoji"
+msgstr "2. Emoji wählen"
+
+msgid "3. Pack info"
+msgstr "3. Paketinfo"
+
+msgid "4. Uploading"
+msgstr "4. Hochladen"
+
+msgid "5. Done"
+msgstr "5. Fertig"
+
+msgid "A pack.json is loaded by itself, before any images"
+msgstr "Eine pack.json wird allein geladen, bevor Bilder hinzugefügt werden"
+
+msgid "A pack holds up to {} stickers"
+msgstr "Ein Paket fasst höchstens {} Sticker"
+
+msgid "Add the pictures for your stickers, up to 200. Animated ones must be APNG."
+msgstr "Füge die Bilder für deine Sticker hinzu, bis zu 200. Animierte müssen APNG sein."
+
+msgid "or drop them here"
+msgstr "oder hierher ziehen"
+
+msgid "Add to my stickers"
+msgstr "Zu meinen Stickern hinzufügen"
+
+msgid "Added"
+msgstr "Hinzugefügt"
+
+msgid "An animated sticker must be at least 10 px"
+msgstr "Ein animierter Sticker muss mindestens 10 px groß sein"
+
+msgid "An animated sticker must be square"
+msgstr "Ein animierter Sticker muss quadratisch sein"
+
+msgid "An animated sticker must repeat forever"
+msgstr "Ein animierter Sticker muss endlos wiederholen"
+
+msgid "Author"
+msgstr "Autor"
+
+msgid "Back"
+msgstr "Zurück"
+
+msgid "Choose a pack.json"
+msgstr "pack.json wählen"
+
+msgid "Choose a picture"
+msgstr "Bild wählen"
+
+msgid "Choose picture"
+msgstr "Bild wählen"
+
+msgid "Choose pictures"
+msgstr "Bilder wählen"
+
+msgid "Copied"
+msgstr "Kopiert"
+
+msgid "Cover"
+msgstr "Cover"
+
+msgid "Cover: {}"
+msgstr "Cover: {}"
+
+msgid "Create a sticker pack"
+msgstr "Sticker-Paket erstellen"
+
+msgid "Create another"
+msgstr "Noch eins erstellen"
+
+msgid "Load pack.json"
+msgstr "pack.json laden"
+
+msgid "Next"
+msgstr "Weiter"
+
+msgid "Not a pack.json with stickers"
+msgstr "Keine pack.json mit Stickern"
+
+msgid "Not a picture it can read"
+msgstr "Kein lesbares Bild"
+
+msgid "Not connected"
+msgstr "Nicht verbunden"
+
+msgid "Once created, a pack can't be edited or deleted."
+msgstr "Ein erstelltes Paket lässt sich weder bearbeiten noch löschen."
+
+msgid "Once created, a pack can't be edited or deleted. Create it?"
+msgstr "Ein erstelltes Paket lässt sich weder bearbeiten noch löschen. Erstellen?"
+
+msgid "Only animated PNG (APNG) can move"
+msgstr "Nur animierte PNG (APNG) können sich bewegen"
+
+msgid "Over 300 KB"
+msgstr "Über 300 KB"
+
+msgid "Pick an emoji for each sticker."
+msgstr "Wähle für jeden Sticker ein Emoji."
+
+msgid "Pictures"
+msgstr "Bilder"
+
+msgid "Sticker {}: {}"
+msgstr "Sticker {}: {}"
+
+msgid "The first sticker, unless you pick another picture."
+msgstr "Der erste Sticker, falls du kein anderes Bild wählst."
+
+msgid "Title"
+msgstr "Titel"
+
+msgid "Too big (at most 512 px for animated stickers)"
+msgstr "Zu groß (animierte Sticker höchstens 512 px)"
+
+msgid "Try again"
+msgstr "Erneut versuchen"
+
+msgid "Use the first sticker"
+msgstr "Ersten Sticker verwenden"
+
+msgid "Your pack is ready. Share its link, or add it to your stickers."
+msgstr "Dein Paket ist fertig. Teile den Link oder füge es zu deinen Stickern hinzu."
+
+msgid "{} left"
+msgstr "noch {}"
+
+msgid "{n} picture wasn't added"
+msgid_plural "{n} pictures weren't added"
+msgstr[0] "{n} Bild wurde nicht hinzugefügt"
+msgstr[1] "{n} Bilder wurden nicht hinzugefügt"

@@ -13,6 +13,7 @@ Layout and glyph bugs only show up visually; a successful compile proves nothing
 - `SIGWIN_DEMO_TALL=<row>:<chars>[,...]` (very long messages at those rows, a line per 20 characters)
 - `SIGWIN_DEMO_MENU=1|edit|pin|picker[<tab 0-7>]` (`picker`: the emoji picker on that tab, with a few recent emoji)
 - `SIGWIN_DEMO_SETTINGS=1`
+- `SIGWIN_DEMO_PACK=json|pictures` (the sticker pack page, filled with pictures made into a temp folder, one of them a GIF animation that is refused; `json`: through a pack.json, whose emoji are partly missing). `SIGWIN_DEMO_PACK_UPLOAD=1` goes on to the fake upload by itself (the confirmation before it is a real dialog), `SIGWIN_DEMO_PACK_FAIL=1` makes the first upload fail
 - `SIGWIN_DEMO_LOADING=1` (the loading screen with its spinner, as while waiting for the phone's history at link time)
 - `SIGWIN_DEMO_REQUEST=1` (the open chat is a message request: the request bar instead of the composer)
 - `SIGWIN_DEMO_VIDEO=1|<path>` (the newest rows show videos: blurhash and size label replaced by a frame and length after 2s, downloading, nothing, in a grid; with a path the frame is that file's first, through the encrypted file and the decoding child, and the blurhash is the one that file would be sent with)

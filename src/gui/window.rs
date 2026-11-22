@@ -537,7 +537,9 @@ fn winit_events(app: &AppWindow) {
             WindowEvent::DroppedFile(path) => {
                 if let Some(app) = weak.upgrade() {
                     app.set_drop_hover(false);
-                    if !app.get_current_key().is_empty() && path.is_file() {
+                    if app.global::<sigwin_ui::PackData>().get_open() {
+                        super::packmaker::dropped(&app, path.clone());
+                    } else if !app.get_current_key().is_empty() && path.is_file() {
                         super::wire::add_files(&app, vec![path.clone()]);
                     }
                 }

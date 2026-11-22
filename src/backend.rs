@@ -52,6 +52,7 @@ pub(crate) mod notify;
 mod once;
 mod opening;
 mod ops;
+mod packmaker;
 mod pni;
 mod receive;
 mod requests;
@@ -472,6 +473,8 @@ struct App {
     avatar_refresh: std::collections::VecDeque<crate::avatar::Want>,
     /// bumped per opened sticker pack: image work for an older grid stops
     grid_gen: Arc<std::sync::atomic::AtomicU64>,
+    /// the sticker pack being uploaded (`packmaker.rs`)
+    pack_task: Option<tokio::task::AbortHandle>,
     /// the toast slot (`notify.rs`)
     notes: notify::Notifier,
     /// a thread's "notifications off" runs out then (the list shows it)
@@ -645,6 +648,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         avatar_queue: Default::default(),
         avatar_refresh: Default::default(),
         grid_gen: Default::default(),
+        pack_task: None,
         notes: Default::default(),
         mute_due: None,
         storage_syncing: false,
@@ -876,6 +880,8 @@ impl App {
             },
             Command::InstallPackFromMessage(id) => self.install_pack_from_message(&id),
             Command::StickerClicked(id) => self.sticker_clicked(&id).await,
+            Command::CreatePack(job) => self.create_pack(job),
+            Command::CancelPack => self.cancel_pack(),
             Command::StickerFrames(key) => self.sticker_frames(key),
             Command::PickerFrames { pack, id } => self.picker_frames(&pack, id),
             Command::React { id, emoji, remove } => self.react(&id, emoji, remove).await,

@@ -1263,3 +1263,139 @@ msgstr "대화에서 사진을 우클릭해서 바꿀 수도 있습니다"
 
 msgid "You can also change it by right-clicking a sticker in a chat"
 msgstr "대화에서 스티커를 우클릭해서 바꿀 수도 있습니다"
+
+msgid "1. Add stickers"
+msgstr "1. 스티커 추가"
+
+msgid "2. Pick emoji"
+msgstr "2. 이모지 고르기"
+
+msgid "3. Pack info"
+msgstr "3. 팩 정보"
+
+msgid "4. Uploading"
+msgstr "4. 올리는 중"
+
+msgid "5. Done"
+msgstr "5. 완료"
+
+msgid "A pack.json is loaded by itself, before any images"
+msgstr "pack.json은 이미지를 넣기 전에 하나만 따로 불러올 수 있습니다"
+
+msgid "A pack holds up to {} stickers"
+msgstr "팩에는 스티커를 최대 {}개까지 넣을 수 있습니다"
+
+msgid "Add the pictures for your stickers, up to 200. Animated ones must be APNG."
+msgstr "스티커로 만들 이미지를 최대 200개까지 추가할 수 있습니다. 움직이는 이미지는 APNG여야 합니다."
+
+msgid "or drop them here"
+msgstr "또는 여기로 끌어다 놓기"
+
+msgid "Add to my stickers"
+msgstr "내 스티커에 추가"
+
+msgid "Added"
+msgstr "추가됨"
+
+msgid "An animated sticker must be at least 10 px"
+msgstr "움직이는 스티커는 10px 이상이어야 합니다"
+
+msgid "An animated sticker must be square"
+msgstr "움직이는 스티커는 정사각형이어야 합니다"
+
+msgid "An animated sticker must repeat forever"
+msgstr "움직이는 스티커는 무한 반복이어야 합니다"
+
+msgid "Author"
+msgstr "만든 사람"
+
+msgid "Back"
+msgstr "이전"
+
+msgid "Choose a pack.json"
+msgstr "pack.json 선택"
+
+msgid "Choose a picture"
+msgstr "이미지 선택"
+
+msgid "Choose picture"
+msgstr "이미지 선택"
+
+msgid "Choose pictures"
+msgstr "이미지 선택"
+
+msgid "Copied"
+msgstr "복사됨"
+
+msgid "Cover"
+msgstr "표지"
+
+msgid "Cover: {}"
+msgstr "표지: {}"
+
+msgid "Create a sticker pack"
+msgstr "스티커팩 만들기"
+
+msgid "Create another"
+msgstr "하나 더 만들기"
+
+msgid "Load pack.json"
+msgstr "pack.json 불러오기"
+
+msgid "Next"
+msgstr "다음"
+
+msgid "Not a pack.json with stickers"
+msgstr "스티커가 든 pack.json이 아닙니다"
+
+msgid "Not a picture it can read"
+msgstr "읽을 수 있는 이미지가 아닙니다"
+
+msgid "Not connected"
+msgstr "연결되어 있지 않습니다"
+
+msgid "Once created, a pack can't be edited or deleted."
+msgstr "한 번 만든 팩은 고치거나 지울 수 없습니다."
+
+msgid "Once created, a pack can't be edited or deleted. Create it?"
+msgstr "한 번 만든 팩은 고치거나 지울 수 없습니다. 만들까요?"
+
+msgid "Only animated PNG (APNG) can move"
+msgstr "움직이는 이미지는 APNG만 쓸 수 있습니다"
+
+msgid "Over 300 KB"
+msgstr "300KB를 넘습니다"
+
+msgid "Pick an emoji for each sticker."
+msgstr "스티커마다 이모지를 고를 수 있습니다."
+
+msgid "Pictures"
+msgstr "이미지"
+
+msgid "Sticker {}: {}"
+msgstr "스티커 {}: {}"
+
+msgid "The first sticker, unless you pick another picture."
+msgstr "다른 이미지를 고르지 않으면 첫 스티커가 표지입니다."
+
+msgid "Title"
+msgstr "제목"
+
+msgid "Too big (at most 512 px for animated stickers)"
+msgstr "너무 큽니다 (움직이는 스티커는 512px까지)"
+
+msgid "Try again"
+msgstr "다시 시도"
+
+msgid "Use the first sticker"
+msgstr "첫 스티커 쓰기"
+
+msgid "Your pack is ready. Share its link, or add it to your stickers."
+msgstr "팩이 만들어졌습니다. 링크를 공유하거나 내 스티커에 추가할 수 있습니다."
+
+msgid "{} left"
+msgstr "{}개 남음"
+
+msgid "{n} picture wasn't added"
+msgid_plural "{n} pictures weren't added"
+msgstr[0] "이미지 {n}개를 추가하지 못했습니다"

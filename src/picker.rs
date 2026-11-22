@@ -11,6 +11,34 @@ use std::process::{Command, Stdio};
 const ARG: &str = "--pick-files";
 const ARG_SAVE: &str = "--save-file";
 const ARG_FOLDER: &str = "--pick-folder";
+const ARG_IMAGES: &str = "--pick-images";
+const ARG_IMAGE: &str = "--pick-image";
+const ARG_JSON: &str = "--pick-json";
+
+/// What a file dialog offers.
+#[derive(Clone, Copy)]
+pub enum Kind {
+    /// any files, several
+    Files,
+    /// pictures, several
+    Images,
+    /// one picture
+    Image,
+    /// one pack.json
+    PackJson,
+}
+
+impl Kind {
+    fn arg(self) -> &'static str {
+        match self {
+            Kind::Files => ARG,
+            Kind::Images => ARG_IMAGES,
+            Kind::Image => ARG_IMAGE,
+            Kind::PackJson => ARG_JSON,
+        }
+    }
+}
+
 /// Call first thing in `main`: returns true if this process was the picker child.
 pub fn run_if_child() -> bool {
     let args: Vec<String> = std::env::args().collect();
@@ -18,6 +46,9 @@ pub fn run_if_child() -> bool {
         Some(ARG) => ARG,
         Some(ARG_SAVE) => ARG_SAVE,
         Some(ARG_FOLDER) => ARG_FOLDER,
+        Some(ARG_IMAGES) => ARG_IMAGES,
+        Some(ARG_IMAGE) => ARG_IMAGE,
+        Some(ARG_JSON) => ARG_JSON,
         _ => return false,
     };
     let owner = args.get(2).and_then(|s| s.parse::<isize>().ok()).unwrap_or(0);
@@ -33,6 +64,9 @@ pub fn run_if_child() -> bool {
             dialog.set_title(tr!("Save")).set_file_name(name).save_file().into_iter().collect()
         }
         ARG_FOLDER => dialog.set_title(tr!("Choose a folder to save to")).pick_folder().into_iter().collect(),
+        ARG_IMAGES => images(dialog.set_title(tr!("Choose pictures"))).pick_files().unwrap_or_default(),
+        ARG_IMAGE => images(dialog.set_title(tr!("Choose a picture"))).pick_file().into_iter().collect(),
+        ARG_JSON => dialog.set_title(tr!("Choose a pack.json")).add_filter("pack.json", &["json"]).pick_file().into_iter().collect(),
         _ => dialog.set_title(tr!("Choose files to attach")).pick_files().unwrap_or_default(),
     };
     let mut out = std::io::stdout().lock();
@@ -41,6 +75,10 @@ pub fn run_if_child() -> bool {
     }
     let _ = out.flush();
     true
+}
+
+fn images(dialog: rfd::FileDialog) -> rfd::FileDialog {
+    dialog.add_filter(tr!("Pictures"), &["png", "apng", "webp", "gif", "jpg", "jpeg"])
 }
 
 /// Opens a save dialog owned by `owner` (HWND), suggesting `name`, and calls `done` with the
@@ -89,12 +127,17 @@ pub fn spawn_folder(owner: isize, done: impl FnOnce(Option<PathBuf>) + Send + 's
 /// Opens the picker owned by `owner` (HWND) and calls `done` with the selection from a
 /// background thread.
 pub fn spawn(owner: isize, done: impl FnOnce(Vec<PathBuf>) + Send + 'static) {
+    spawn_kind(owner, Kind::Files, done);
+}
+
+/// `spawn` for what `kind` offers.
+pub fn spawn_kind(owner: isize, kind: Kind, done: impl FnOnce(Vec<PathBuf>) + Send + 'static) {
     std::thread::spawn(move || {
         let files = (|| {
             let exe = std::env::current_exe().ok()?;
             let out = Command::new(exe)
                 .env("SIGWIN_LANG", crate::i18n::lang())
-                .arg(ARG)
+                .arg(kind.arg())
                 .arg(owner.to_string())
                 .stdin(Stdio::null())
                 .stderr(Stdio::null())

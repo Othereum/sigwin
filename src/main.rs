@@ -30,6 +30,7 @@ mod sealed;
 mod secret;
 mod settings;
 mod shell;
+mod stickerpack;
 mod toast;
 mod tray;
 mod types;

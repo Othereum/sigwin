@@ -36,6 +36,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/gui/rows.rs` | DTOs → Slint rows: rich text, row diffing |
 | `src/gui/media.rs` | thumbnails, their labels and photos arriving for rows already shown |
 | `src/gui/stickers.rs` | sticker panel: pack tabs, the open pack's grid |
+| `src/gui/packmaker.rs` | the page that makes a sticker pack: the pictures added, the steps, their thumbnails |
 | `src/gui/scroll.rs` | message list scrolling and jumps |
 | `src/gui/anim.rs` | animated stickers (APNGs that Slint's `Image` plays) under a memory budget; the one GIF playing in the message list |
 | `src/gui/drafts.rs` | per-thread composer drafts |
@@ -78,6 +79,8 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `src/backend/once.rs` | view-once pictures: used up when shown, here or on another device |
 | `src/backend/typing.rs` | typing indicators |
 | `src/backend/stickers.rs` | sticker packs: picker, sending, installing |
+| `src/backend/packmaker.rs` | uploading a new sticker pack: form, manifest, pictures a few at a time |
+| `src/stickerpack.rs` | making a pack: pack.json, the manifest, sealing files; `crates/thumb/src/sticker.rs` holds the picture rules |
 | `src/backend/gallery.rs` | a chat's media page: pages from the media index, the messages it loaded (the viewer finds them there), its thumbnails |
 | `src/backend/gif.rs` | a GIF playing in a message or the viewer: one frame at a time on its own thread, handed over through a slot |
 | `src/backend/files.rs` | attachment and thumbnail caches, opening and viewing attachments; `AttachmentDownloads::ensure` is the only place an attachment is downloaded |
@@ -123,5 +126,6 @@ The UI thread never touches Signal or the database. Everything crossing between 
 | `ui/widgets.slint` | small shared widgets |
 | `ui/icons.slint` | the icon set: paths on a 24-unit grid and the `Icon` that draws them |
 | `ui/thread_row.slint`, `ui/stickers.slint`, `ui/link.slint` | thread list row, sticker panel, linking page |
+| `ui/packmaker.slint` | the sticker pack page, and `PackData`: what it shows and edits |
 | `ui/settings.slint` | settings page, and `SettingsData`: what it shows and edits (Rust: `app.global::<SettingsData>()`) |
 | `ui/thread_menu.slint` | a chat's notification menu and settings dialog, and their `ThreadMenuData` |

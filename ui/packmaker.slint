@@ -1,0 +1,553 @@
+// The page that makes a sticker pack: pictures, emoji, title and author, upload, the link. Rust
+// (`gui/packmaker.rs`) holds the state and moves `step`; the page only draws it.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icon, Icons } from "icons.slint";
+import { BusySpinner, Field, IconButton, PlainButton, PrimaryButton, TextBox, ThinScroll } from "widgets.slint";
+import { EmojiPicker, PickerLayout } from "reactions.slint";
+
+export struct PackCell {
+    img: image,
+    emoji: string,
+}
+
+export global PackData {
+    in-out property <bool> open;
+    // 1 pictures, 2 emoji, 3 title and author, 4 uploading, 5 done
+    in-out property <int> step: 1;
+    in property <[PackCell]> cells;
+    // pictures are being read
+    in property <bool> loading;
+    // stickers still without an emoji
+    in property <int> missing;
+    in-out property <string> title;
+    in-out property <string> author;
+    // the cover the user picked, else the first sticker is it
+    in property <image> cover;
+    in property <bool> has-cover;
+    // what the upload has done, "3/12"
+    in property <string> progress;
+    // why the upload stopped
+    in property <string> error;
+    in property <string> link;
+    // the pack was added to the user's stickers
+    in-out property <bool> added;
+    in property <[[string]]> picker-rows;
+    in-out property <int> picker-tab;
+    // the sticker panel's button: Rust resets the page and opens it
+    callback start();
+    callback choose-images();
+    callback load-json();
+    callback remove(int);
+    callback emoji-picked(int, string);
+    callback picker-tab-changed(int);
+    callback choose-cover();
+    callback use-first-cover();
+    callback back();
+    callback next();
+    callback retry();
+    callback add-to-mine();
+    callback another();
+    callback close();
+}
+
+export component PackPage inherits Rectangle {
+    // the emoji used lately, as in the message menu's picker
+    in property <[string]> recent;
+    property <length> cell-w: 96px;
+    property <length> cell-h: PackData.step == 2 ? 120px : 96px;
+    property <length> pad: 24px;
+    property <int> cols: max(1, floor((self.width - 2 * pad - 12px) / cell-w));
+    // the grid centered in the page
+    property <length> grid-x: max(pad, (self.width - cols * cell-w - 12px) / 2);
+    // the cell whose emoji is being picked
+    property <int> editing;
+    // the link the Copy button last copied
+    property <string> copied-link;
+    property <bool> grid-shown: (PackData.step == 1 || PackData.step == 2) && (PackData.cells.length > 0 || PackData.loading);
+    property <bool> can-next: PackData.step == 1 ? PackData.cells.length > 0 && !PackData.loading
+        : PackData.step == 2 ? PackData.missing == 0
+        : PackData.step == 3 ? PackData.title != "" && PackData.author != "" : false;
+    background: Theme.pane;
+    // swallow clicks so nothing underneath reacts
+    TouchArea { }
+
+    VerticalLayout {
+        Rectangle {
+            height: 56px;
+            HorizontalLayout {
+                padding-left: 24px;
+                padding-right: 12px;
+                Text {
+                    text: @tr("Create a sticker pack");
+                    color: Theme.text;
+                    font-size: 17px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Icons.close;
+                    clicked => { PackData.close(); }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+        }
+        // what this step is, and what to do in it
+        VerticalLayout {
+            padding-left: root.pad;
+            padding-right: root.pad;
+            padding-top: 14px;
+            padding-bottom: 6px;
+            spacing: 2px;
+            Text {
+                text: PackData.step == 1 ? @tr("1. Add stickers")
+                    : PackData.step == 2 ? @tr("2. Pick emoji")
+                    : PackData.step == 3 ? @tr("3. Pack info")
+                    : PackData.step == 4 ? @tr("4. Uploading")
+                    : @tr("5. Done");
+                color: Theme.text;
+                font-size: 14px;
+                font-weight: 700;
+            }
+            Text {
+                text: PackData.step == 1 ? @tr("Add the pictures for your stickers, up to 200. Animated ones must be APNG.")
+                    : PackData.step == 2 ? @tr("Pick an emoji for each sticker.")
+                    : PackData.step == 3 ? @tr("Once created, a pack can't be edited or deleted.")
+                    : PackData.step == 5 ? @tr("Your pack is ready. Share its link, or add it to your stickers.")
+                    : "";
+                color: Theme.subtle;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+
+        body := Rectangle {
+            vertical-stretch: 1;
+            // 1: nothing added yet
+            if PackData.step == 1 && PackData.cells.length == 0 && !PackData.loading: VerticalLayout {
+                alignment: center;
+                spacing: 12px;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 10px;
+                    PrimaryButton {
+                        text: @tr("Choose pictures");
+                        clicked => { PackData.choose-images(); }
+                    }
+                    PlainButton {
+                        text: @tr("Load pack.json");
+                        clicked => { PackData.load-json(); }
+                    }
+                }
+                Text {
+                    text: @tr("or drop them here");
+                    color: Theme.subtle;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                }
+            }
+            if PackData.step <= 2 && PackData.cells.length == 0 && PackData.loading: BusySpinner {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+            // 1 and 2: the pictures
+            if root.grid-shown && PackData.cells.length > 0: ThinScroll {
+                width: parent.width;
+                height: parent.height;
+                content-y <=> grid-view.content-y;
+                content-height: grid-view.content-height;
+                visible-height: grid-view.visible-height;
+                grid-view := ScrollView {
+                    width: parent.width;
+                    height: parent.height;
+                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                    content-height: ceil((PackData.cells.length + (PackData.step == 1 ? 1 : 0)) / root.cols) * root.cell-h + 16px;
+                    for c[i] in PackData.cells: Rectangle {
+                        x: root.grid-x + mod(i, root.cols) * root.cell-w;
+                        y: floor(i / root.cols) * root.cell-h;
+                        width: root.cell-w;
+                        height: root.cell-h;
+                        Rectangle {
+                            x: 4px;
+                            y: 4px;
+                            width: parent.width - 8px;
+                            height: parent.height - 8px;
+                            border-radius: 12px;
+                            background: cta.has-hover && PackData.step == 2 ? Theme.hover : Theme.field;
+                            Image {
+                                x: (parent.width - self.width) / 2;
+                                y: 6px;
+                                width: parent.width - 12px;
+                                height: parent.width - 12px;
+                                source: c.img;
+                                image-fit: contain;
+                            }
+                            if PackData.step == 2: Rectangle {
+                                y: parent.width - 6px;
+                                height: parent.height - self.y;
+                                if c.emoji != "": Text {
+                                    text: c.emoji;
+                                    font-size: 20px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                if c.emoji == "": Icon {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    icon: Icons.plus;
+                                    size: 16px;
+                                }
+                            }
+                            cta := TouchArea {
+                                mouse-cursor: PackData.step == 2 ? MouseCursor.pointer : MouseCursor.default;
+                                clicked => {
+                                    if (PackData.step == 2) {
+                                        root.editing = i;
+                                        PackData.picker-tab = 0;
+                                        PackData.picker-tab-changed(0);
+                                        emoji-popup.show();
+                                    }
+                                }
+                                // takes the pointer only where it is drawn, and only while shown
+                                if PackData.step == 1 && cta.has-hover: Rectangle {
+                                    x: parent.width - self.width - 4px;
+                                    y: 4px;
+                                    width: 24px;
+                                    height: 24px;
+                                    border-radius: 12px;
+                                    background: rta.has-hover ? Theme.on-media-hover : Theme.on-media;
+                                    Icon {
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        icon: Icons.close;
+                                        size: 12px;
+                                        tint: white;
+                                    }
+                                    rta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { PackData.remove(i); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // 1: one more
+                    if PackData.step == 1 && PackData.cells.length < 200: Rectangle {
+                        x: root.grid-x + mod(PackData.cells.length, root.cols) * root.cell-w;
+                        y: floor(PackData.cells.length / root.cols) * root.cell-h;
+                        width: root.cell-w;
+                        height: root.cell-h;
+                        Rectangle {
+                            x: 4px;
+                            y: 4px;
+                            width: parent.width - 8px;
+                            height: parent.height - 8px;
+                            border-radius: 12px;
+                            background: plus-ta.has-hover ? Theme.hover : transparent;
+                            border-width: 1.5px;
+                            border-color: Theme.border;
+                            if !PackData.loading: Icon {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                icon: Icons.plus;
+                                size: 24px;
+                            }
+                            if PackData.loading: BusySpinner {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 28px;
+                                height: 28px;
+                            }
+                            plus-ta := TouchArea {
+                                enabled: !PackData.loading;
+                                mouse-cursor: pointer;
+                                clicked => { PackData.choose-images(); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3: the pack's face
+            if PackData.step == 3: VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    alignment: center;
+                    VerticalLayout {
+                        width: min(360px, root.width - 48px);
+                        spacing: 12px;
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 16px;
+                            Rectangle {
+                                width: 92px;
+                                height: 92px;
+                                border-radius: 16px;
+                                background: cover-ta.has-hover ? Theme.hover : Theme.field;
+                                // the thumbnail's own size: images are sampled nearest-neighbor
+                                Image {
+                                    x: 8px;
+                                    y: 8px;
+                                    width: 76px;
+                                    height: 76px;
+                                    source: PackData.has-cover || PackData.cells.length == 0 ? PackData.cover : PackData.cells[0].img;
+                                    image-fit: contain;
+                                }
+                                cover-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { PackData.choose-cover(); }
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 8px;
+                                Text {
+                                    text: @tr("Cover");
+                                    color: Theme.text;
+                                    font-size: 13px;
+                                    font-weight: 700;
+                                }
+                                Text {
+                                    text: @tr("The first sticker, unless you pick another picture.");
+                                    color: Theme.subtle;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                    min-width: 0px;
+                                    horizontal-stretch: 1;
+                                }
+                                HorizontalLayout {
+                                    alignment: start;
+                                    spacing: 8px;
+                                    PlainButton {
+                                        text: @tr("Choose picture");
+                                        clicked => { PackData.choose-cover(); }
+                                    }
+                                    if PackData.has-cover: PlainButton {
+                                        text: @tr("Use the first sticker");
+                                        clicked => { PackData.use-first-cover(); }
+                                    }
+                                }
+                            }
+                        }
+                        Field {
+                            placeholder: @tr("Title");
+                            text <=> PackData.title;
+                            accepted => { if (root.can-next) { PackData.next(); } }
+                        }
+                        Field {
+                            placeholder: @tr("Author");
+                            text <=> PackData.author;
+                            accepted => { if (root.can-next) { PackData.next(); } }
+                        }
+                    }
+                }
+            }
+
+            // 4: uploading, or why it stopped
+            if PackData.step == 4: VerticalLayout {
+                alignment: center;
+                spacing: 14px;
+                if PackData.error == "": HorizontalLayout {
+                    alignment: center;
+                    BusySpinner { }
+                }
+                if PackData.error == "": Text {
+                    text: PackData.progress;
+                    color: Theme.subtle;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                }
+                if PackData.error != "": HorizontalLayout {
+                    alignment: center;
+                    Icon {
+                        icon: Icons.warning;
+                        size: 28px;
+                        tint: Theme.warning-text;
+                    }
+                }
+                if PackData.error != "": HorizontalLayout {
+                    alignment: center;
+                    Text {
+                        width: min(420px, root.width - 48px);
+                        text: PackData.error;
+                        color: Theme.text;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                        horizontal-alignment: center;
+                    }
+                }
+                if PackData.error != "": HorizontalLayout {
+                    alignment: center;
+                    PrimaryButton {
+                        text: @tr("Try again");
+                        clicked => { PackData.retry(); }
+                    }
+                }
+            }
+
+            // 5: made
+            if PackData.step == 5: VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    alignment: center;
+                    VerticalLayout {
+                        width: min(520px, root.width - 48px);
+                        spacing: 16px;
+                        HorizontalLayout {
+                            spacing: 14px;
+                            Rectangle {
+                                width: 88px;
+                                height: 88px;
+                                border-radius: 14px;
+                                background: Theme.field;
+                                Image {
+                                    x: 6px;
+                                    y: 6px;
+                                    width: 76px;
+                                    height: 76px;
+                                    source: PackData.has-cover || PackData.cells.length == 0 ? PackData.cover : PackData.cells[0].img;
+                                    image-fit: contain;
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                Text {
+                                    text: PackData.title;
+                                    color: Theme.text;
+                                    font-size: 17px;
+                                    font-weight: 700;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: PackData.author;
+                                    color: Theme.subtle;
+                                    font-size: 13px;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Rectangle {
+                                height: 34px;
+                                horizontal-stretch: 1;
+                                border-radius: 8px;
+                                background: Theme.field;
+                                clip: true;
+                                link-text := TextBox {
+                                    x: 12px;
+                                    width: parent.width - 24px;
+                                    height: parent.height;
+                                    read-only: true;
+                                    single-line: true;
+                                    vertical-alignment: center;
+                                    text: PackData.link;
+                                    color: Theme.text;
+                                    font-size: 13px;
+                                }
+                            }
+                            PlainButton {
+                                text: root.copied-link == PackData.link ? @tr("Copied") : @tr("Copy");
+                                clicked => {
+                                    link-text.select-all();
+                                    link-text.copy();
+                                    root.copied-link = PackData.link;
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+                            PrimaryButton {
+                                text: PackData.added ? @tr("Added") : @tr("Add to my stickers");
+                                enabled: !PackData.added;
+                                clicked => {
+                                    PackData.added = true;
+                                    PackData.add-to-mine();
+                                }
+                            }
+                            PlainButton {
+                                text: @tr("Create another");
+                                clicked => { PackData.another(); }
+                            }
+                            PlainButton {
+                                text: @tr("Close");
+                                clicked => { PackData.close(); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // steps 1 to 3 go back and on
+        if PackData.step <= 4 && !(PackData.step == 4 && PackData.error == ""): Rectangle {
+            height: 60px;
+            Rectangle { y: 0px; height: 1px; background: Theme.border; }
+            HorizontalLayout {
+                padding-left: root.pad;
+                padding-right: root.pad;
+                spacing: 10px;
+                alignment: end;
+                if PackData.step == 2 && PackData.missing > 0: Text {
+                    text: @tr("{} left", PackData.missing);
+                    color: Theme.subtle;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                if PackData.step >= 2: PlainButton {
+                    y: (parent.height - self.height) / 2;
+                    text: @tr("Back");
+                    clicked => { PackData.back(); }
+                }
+                if PackData.step <= 3: PrimaryButton {
+                    y: (parent.height - self.height) / 2;
+                    text: @tr("Next");
+                    enabled: root.can-next;
+                    clicked => { PackData.next(); }
+                }
+            }
+        }
+    }
+
+    // 2: the emoji of the clicked sticker
+    emoji-popup := PopupWindow {
+        x: (root.width - self.width) / 2;
+        // not from its height: the popup's place is taken when it opens, before its rows have
+        // sized it, and clicks would land where it was
+        y: max(8px, (root.height - 340px) / 2);
+        width: PickerLayout.columns * PickerLayout.cell + 12px;
+        height: picker-col.preferred-height;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            border-radius: 12px;
+            background: Theme.pane;
+            border-width: 1px;
+            border-color: Theme.border;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: Theme.shadow;
+            TouchArea { }
+            picker-col := VerticalLayout {
+                padding: 6px;
+                EmojiPicker {
+                    recent: root.recent;
+                    rows: PackData.picker-rows;
+                    tab: PackData.picker-tab;
+                    tab-changed(i) => {
+                        PackData.picker-tab = i;
+                        PackData.picker-tab-changed(i);
+                    }
+                    picked(e) => {
+                        PackData.emoji-picked(root.editing, e);
+                        emoji-popup.close();
+                    }
+                }
+            }
+        }
+    }
+}

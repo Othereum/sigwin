@@ -113,9 +113,95 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
             }
         });
     }
+    if let Ok(how) = std::env::var("SIGWIN_DEMO_PACK") {
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
+            if let Some(app) = weak.upgrade() {
+                demo_pack(&app, &how);
+            }
+        });
+    }
     if std::env::var_os("SIGWIN_SELFTEST").is_some() {
         selftest();
     }
+}
+
+/// `SIGWIN_DEMO_PACK=json|pictures`: the sticker pack page with pictures made into a temp folder
+/// (some need converting, one is a GIF animation that is refused), loaded through pack.json or
+/// as picked files. `SIGWIN_DEMO_PACK_FAIL=1`: the upload fails the first time.
+fn demo_pack(app: &AppWindow, how: &str) {
+    let dir = std::env::temp_dir().join("sigwin-demo-pack");
+    let _ = std::fs::create_dir_all(&dir);
+    let mut names = Vec::new();
+    for i in 0..14u32 {
+        let (w, h) = match i % 4 {
+            0 => (512, 512),
+            1 => (300, 200),
+            2 => (120, 120),
+            _ => (640, 640),
+        };
+        let side = w.min(h) as f32;
+        let img = image::RgbaImage::from_fn(w, h, |x, y| {
+            let d = ((x as f32 - w as f32 / 2.0).powi(2) + (y as f32 - h as f32 / 2.0).powi(2)).sqrt();
+            let hue = (i * 18) as u8;
+            image::Rgba([hue, 180u8.wrapping_sub(hue / 2), 255 - hue, if d < side * 0.45 { 255 } else { 0 }])
+        });
+        let name = format!("{:03}.png", i + 1);
+        if let Ok(png) = sigwin_thumb::png_rgba(&img) {
+            let _ = std::fs::write(dir.join(&name), png);
+            names.push(name);
+        }
+    }
+    let frames = (0..2u8).map(|i| image::RgbaImage::from_pixel(32, 32, image::Rgba([i * 90, 0, 0, 255]))).collect();
+    if let Ok(gif) = sigwin_thumb::gif(frames, 50) {
+        let _ = std::fs::write(dir.join("moving.gif"), gif);
+        names.push("moving.gif".into());
+    }
+    let app_data = app.global::<PackData>();
+    app_data.invoke_start();
+    if how == "json" {
+        let emoji = ["😏", "👍", "", "😂", "🎉", "", "❤️"];
+        let stickers: Vec<String> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| format!(r#"{{"file":"{n}","emoji":"{}"}}"#, emoji[i % emoji.len()]))
+            .collect();
+        let json = format!(r#"{{"title":"데모 팩","author":"Demo","stickers":[{}]}}"#, stickers.join(","));
+        let _ = std::fs::write(dir.join("pack.json"), json);
+        crate::gui::packmaker::demo_files(app, vec![dir.join("pack.json")], true);
+    } else {
+        crate::gui::packmaker::demo_files(app, names.iter().map(|n| dir.join(n)).collect(), false);
+    }
+    // `SIGWIN_DEMO_PACK_UPLOAD=1`: goes on to the upload by itself (the confirmation is a real dialog)
+    if std::env::var_os("SIGWIN_DEMO_PACK_UPLOAD").is_some() {
+        let weak = app.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(900), move || {
+            if let Some(app) = weak.upgrade() {
+                crate::gui::packmaker::demo_upload(&app);
+            }
+        });
+    }
+}
+
+/// The upload of `CreatePack` in the demo: steps through the files, then done. A title starting
+/// with "fail" fails at the third.
+fn demo_pack_upload(emit: &backend::Emit, job: &types::PackJob) {
+    let total = job.stickers.len() + job.cover.is_some() as usize;
+    let fail = job.title.starts_with("fail") || (std::env::var_os("SIGWIN_DEMO_PACK_FAIL").is_some() && {
+        static FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        !FAILED.swap(true, std::sync::atomic::Ordering::Relaxed)
+    });
+    let emit = emit.clone();
+    std::thread::spawn(move || {
+        for done in 0..=total {
+            if fail && done == 2 {
+                return emit(Event::PackFailed("스티커 3: 300KB를 넘습니다".into()));
+            }
+            emit(Event::PackProgress { done, total });
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
+        emit(Event::PackCreated { id: "0123456789abcdef0123456789abcdef".into(), key: "ab".repeat(32) });
+    });
 }
 
 
@@ -1134,6 +1220,9 @@ fn demo_calendar(emit: &backend::Emit, key: &str, days: &[i32], bounds: &[i32]) 
 }
 
 fn demo_frames(emit: &backend::Emit, c: &Command) {
+    if let Command::CreatePack(job) = c {
+        return demo_pack_upload(emit, job);
+    }
     if let Command::LinkPreview(Some(url)) = c {
         return demo_link_fetch(emit, url);
     }

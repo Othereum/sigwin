@@ -439,6 +439,16 @@ pub struct PackDto {
     pub cover_key: String,
 }
 
+/// A pack to make. The pictures are read one at a time as they are uploaded.
+pub struct PackJob {
+    pub title: String,
+    pub author: String,
+    /// file and emoji
+    pub stickers: Vec<(PathBuf, String)>,
+    /// None: the first sticker is the cover
+    pub cover: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone)]
 pub struct StickerDto {
     pub key: String,
@@ -693,6 +703,12 @@ pub enum Event {
     OpenStickerPanel(String),
     /// the clicked sticker's pack is not installed: ask, then InstallPackFromMessage(msg id)
     AskInstallPack(String),
+    /// files of the new pack uploaded so far
+    PackProgress { done: usize, total: usize },
+    /// the new pack's hex id and key
+    PackCreated { id: String, key: String },
+    /// why it couldn't be uploaded
+    PackFailed(String),
     /// who is typing in the open thread as (uuid, name), sorted; empty when nobody.
     /// Shown as a "…" bubble at the end of the message list.
     Typing { group: bool, who: Vec<(String, String)> },
@@ -812,6 +828,11 @@ pub enum Command {
     InstallPackFromMessage(String),
     /// a sticker in the message list was clicked
     StickerClicked(String),
+    /// make a pack of these pictures and upload it; answered by `PackProgress` and then
+    /// `PackCreated` or `PackFailed`
+    CreatePack(PackJob),
+    /// the page was left while the pack was uploading
+    CancelPack,
     /// the frames of the sticker with this thumbnail key (message list), if it is animated
     StickerFrames(String),
     /// the frames of a picker sticker (hovered), if it is animated

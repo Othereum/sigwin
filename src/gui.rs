@@ -13,7 +13,7 @@ use crate::types::{ClickedMedia, Command, Event, Find, MsgDto, Paging, ResultDto
 use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
     AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, PackItem, PendingFile, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem, RequestData,
-    FindKind, ResultItem, ResultKind, SearchData, SettingsData, StickerItem, TextOps, Theme, ThreadItem, ThreadMenuData,
+    FindKind, PackCell, PackData, ResultItem, ResultKind, SearchData, SettingsData, StickerItem, TextOps, Theme, ThreadItem, ThreadMenuData,
 };
 
 pub(crate) mod anim;
@@ -25,6 +25,7 @@ mod held;
 pub(crate) mod linkcard;
 mod media;
 pub(crate) mod notice;
+pub(crate) mod packmaker;
 mod rows;
 mod scenario;
 mod scroll;
@@ -99,6 +100,7 @@ pub(crate) struct Ui {
     older: Option<(Vec<MsgDto>, Paging)>,
     picking: bool,
     pub(crate) sticker: stickers::Panel,
+    pub(crate) maker: packmaker::State,
     pub(crate) tx: Option<UnboundedSender<Command>>,
     /// who can be @mentioned in the open thread
     members: Vec<mention::Member>,
@@ -136,6 +138,7 @@ pub(crate) fn bind_models(app: &AppWindow) {
         app.set_messages(ModelRc::from(ui.messages.clone()));
         app.set_packs(ModelRc::from(ui.sticker.packs.clone()));
         app.set_stickers(ModelRc::from(ui.sticker.stickers.clone()));
+        app.global::<PackData>().set_cells(ModelRc::from(ui.maker.cells.clone()));
     });
 }
 
@@ -400,6 +403,9 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
             );
         }
         Event::StickerGrid { pack, items } => stickers::grid_arrived(app, pack, items),
+        Event::PackProgress { done, total } => packmaker::progress(app, done, total),
+        Event::PackCreated { id, key } => packmaker::created(app, id, key),
+        Event::PackFailed(why) => packmaker::failed(app, why),
     }
 }
 

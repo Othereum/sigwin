@@ -4,6 +4,7 @@
 
 mod avif;
 pub mod photo;
+pub mod sticker;
 
 pub use image::{DynamicImage, ImageResult, RgbaImage};
 

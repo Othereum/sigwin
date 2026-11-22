@@ -8,6 +8,7 @@ import { Bubble, MediaLabel, QuoteBox } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
 import { StickerPanel } from "stickers.slint";
 import { SettingsData, SettingsPage } from "settings.slint";
+import { PackData, PackPage } from "packmaker.slint";
 import { EmojiPicker, PickerLayout, ReactionCell } from "reactions.slint";
 import { ThreadMenu, ThreadMenuData, ThreadPrefsDialog } from "thread_menu.slint";
 import { LinkPage } from "link.slint";
@@ -22,6 +23,7 @@ export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, Repl
 export { Anim, Links, Theme } from "theme.slint";
 export { ImageViewer } from "viewer.slint";
 export { SettingsData } from "settings.slint";
+export { PackCell, PackData } from "packmaker.slint";
 export { ThreadMenuData } from "thread_menu.slint";
 export { FindKind, ResultItem, ResultKind, SearchData } from "search.slint";
 export { RepliesData } from "replies.slint";
@@ -502,6 +504,7 @@ export component AppWindow inherits Window {
     }
     function pick-thread(key: string) {
         root.settings-open = false;
+        PackData.close();
         GalleryData.close();
         root.open-thread(key);
     }
@@ -1027,6 +1030,7 @@ export component AppWindow inherits Window {
                 send-sticker(p, i) => { root.send-sticker(p, i); }
                 install-pack(id) => { root.install-pack(id); }
                 add-pack-url(u) => { root.add-pack-url(u); }
+                create-pack => { PackData.start(); }
                 close => {
                     root.toggle-stickers();
                     root.focus-composer();
@@ -1592,6 +1596,13 @@ export component AppWindow inherits Window {
         open-whatsnew => { root.open-whatsnew(); }
         close => { root.settings-open = false; }
         unlink => { root.unlink(); }
+    }
+
+    if page == "main" && PackData.open: PackPage {
+        x: root.pane-x;
+        width: root.width - root.pane-x;
+        height: root.height;
+        recent: root.recent-emoji;
     }
 
     // sidebar
@@ -2551,7 +2562,7 @@ export component AppWindow inherits Window {
     }
 
     // files being dragged over the conversation: where they would go
-    if page == "main" && root.current-key != "" && root.drop-hover: Rectangle {
+    if page == "main" && root.current-key != "" && root.drop-hover && !PackData.open: Rectangle {
         x: root.pane-x;
         y: 0px;
         width: root.width - root.pane-x;

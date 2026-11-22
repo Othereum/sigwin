@@ -15,6 +15,7 @@ export component StickerPanel inherits Rectangle {
     callback send-sticker(string, int);
     callback install-pack(string);
     callback add-pack-url(string);
+    callback create-pack();
     callback close();
 
     property <length> cell: 84px;
@@ -119,6 +120,14 @@ export component StickerPanel inherits Rectangle {
                     // the Add buttons clear of the scrollbar's thumb
                     width: sug-view.visible-width - 12px;
                     spacing: 4px;
+                    HorizontalLayout {
+                        alignment: start;
+                        PlainButton {
+                            text: @tr("Create a sticker pack");
+                            clicked => { root.create-pack(); }
+                        }
+                    }
+                    Rectangle { height: 4px; }
                     Text { text: @tr("Featured sticker packs"); color: Theme.subtle; font-size: 12px; }
                     for p in root.packs: HorizontalLayout {
                         visible: !p.installed;
