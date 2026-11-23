@@ -59,6 +59,8 @@ impl App {
                 Some(cid) => {
                     let base = sticker_thumb_key(&id, cid);
                     let key = cover_key(&base);
+                    let small = crate::types::small_cover_key(&key);
+                    jobs.push(StickerJob { base: base.clone(), key: small, bytes: bytes.clone(), fit: PACK_COVER_SMALL });
                     jobs.push(StickerJob { base, key: key.clone(), bytes, fit: PACK_COVER });
                     key
                 }
@@ -439,10 +441,13 @@ pub(super) async fn send_sticker_task(
     deliver(&mut m, thread, dm.into(), ts, group_revision).await
 }
 
-/// Logical sizes the picker shows stickers at (ui/stickers.slint: `cell - 12px`, pack tab cover).
+/// Logical sizes the picker shows stickers at (ui/stickers.slint: `cell - 12px`, `PackCover`
+/// and its size in a selected tab).
 pub(super) const PICKER_CELL: u32 = 72;
 
 pub(super) const PACK_COVER: u32 = 32;
+
+pub(super) const PACK_COVER_SMALL: u32 = 28;
 
 /// How many the recently used tab shows (Signal Desktop's count).
 const RECENT_STICKERS: usize = 24;

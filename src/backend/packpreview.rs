@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 use presage::store::StickerPackManifest;
 
-use super::stickers::{cover_key, sticker_thumb_key, still_thumb, PACK_COVER, PICKER_CELL};
+use super::stickers::{cover_key, sticker_thumb_key, still_thumb, PACK_COVER, PACK_COVER_SMALL, PICKER_CELL};
 use super::*;
 use crate::types::{PreviewDto, PreviewState};
 
@@ -204,7 +204,9 @@ impl App {
                 tokio::task::spawn_blocking(move || {
                     let mut thumbs = Vec::new();
                     if cover {
-                        thumbs.extend(still_thumb(cover_key(&key), &bytes, PACK_COVER));
+                        let ck = cover_key(&key);
+                        thumbs.extend(still_thumb(crate::types::small_cover_key(&ck), &bytes, PACK_COVER_SMALL));
+                        thumbs.extend(still_thumb(ck, &bytes, PACK_COVER));
                     }
                     thumbs.extend(still_thumb(key.clone(), &bytes, PICKER_CELL));
                     emit(Event::StickerThumbs(thumbs));

@@ -58,14 +58,12 @@ pub(super) fn thumbs_arrived(app: &AppWindow, list: Vec<types::Thumb>) {
             fresh.insert(t.key, Image::from_rgba8(buf));
         }
         for (i, d) in p.pack_dtos.iter().enumerate() {
-            if let Some(img) = fresh.get(&d.cover_key) {
-                p.covers.insert(d.cover_key.clone(), img.clone());
+            if take_covers(&mut p.covers, &fresh, &d.cover_key) {
                 slint::Model::set_row_data(&*p.packs, i, pack_item(d, &p.covers));
             }
         }
         if let Some(v) = &p.preview {
-            if let Some(img) = fresh.get(&v.pack.cover_key) {
-                p.covers.insert(v.pack.cover_key.clone(), img.clone());
+            if take_covers(&mut p.covers, &fresh, &v.pack.cover_key) {
                 let d = app.global::<StickerData>();
                 d.set_preview(preview_item(v, &p.covers, d.get_preview().installing));
             }
@@ -165,7 +163,9 @@ pub(super) fn preview_arrived(app: &AppWindow, v: types::PreviewDto) {
         let p = &mut ui.sticker;
         // a new pack's cover isn't the old one's
         if p.preview.as_ref().is_some_and(|old| old.pack.id != id) {
-            p.covers.retain(|k, _| p.pack_dtos.iter().any(|d| &d.cover_key == k));
+            p.covers.retain(|k, _| {
+                p.pack_dtos.iter().any(|d| *k == d.cover_key || *k == types::small_cover_key(&d.cover_key))
+            });
         }
         let item = preview_item(&v, &p.covers, false);
         p.preview = Some(v);
@@ -178,6 +178,18 @@ pub(super) fn preview_arrived(app: &AppWindow, v: types::PreviewDto) {
     } else if ready {
         send_cmd(Command::OpenPack(id));
     }
+}
+
+/// Moves a pack's covers (both sizes) found in `fresh` into `covers`; whether there were any.
+fn take_covers(covers: &mut held::Pictures<{ held::STICKER_COVERS }>, fresh: &HashMap<String, Image>, cover_key: &str) -> bool {
+    let mut any = false;
+    for k in [cover_key.to_owned(), types::small_cover_key(cover_key)] {
+        if let Some(img) = fresh.get(&k) {
+            covers.insert(k, img.clone());
+            any = true;
+        }
+    }
+    any
 }
 
 fn preview_item(v: &types::PreviewDto, covers: &HashMap<String, Image>, installing: bool) -> PreviewItem {

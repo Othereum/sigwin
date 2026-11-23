@@ -443,6 +443,12 @@ pub struct PackDto {
     pub cover_key: String,
 }
 
+/// The thumbnail key of a cover drawn smaller in its selected tab: it gets its own image at
+/// that size, as scaling the other one down would be nearest-neighbor.
+pub fn small_cover_key(cover_key: &str) -> String {
+    format!("{cover_key}-s")
+}
+
 /// A pack shown in the sticker panel before it is installed.
 #[derive(Debug, Clone)]
 pub struct PreviewDto {

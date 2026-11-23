@@ -150,6 +150,7 @@ pub(crate) fn pack_item(p: &types::PackDto, thumbs: &HashMap<String, Image>) -> 
         title: p.title.as_str().into(),
         author: p.author.as_str().into(),
         cover: thumbs.get(&p.cover_key).cloned().unwrap_or_default(),
+        cover_small: thumbs.get(&types::small_cover_key(&p.cover_key)).cloned().unwrap_or_default(),
     }
 }
 
