@@ -499,14 +499,9 @@ pub(crate) mod harness {
             self.cmd(Command::OpenThread(key)).await;
         }
 
-        /// The app's window focus, as the UI reports it.
-        pub(crate) async fn focus(&mut self, on: bool) {
-            self.cmd(Command::WindowFocus(on)).await;
-        }
-
-        /// The window shows without the focus, as the UI reports it.
-        pub(crate) async fn watch(&mut self, on: bool) {
-            self.cmd(Command::WindowWatching(on)).await;
+        /// Whether the user is at the window, as the UI reports it.
+        pub(crate) async fn active(&mut self, on: bool) {
+            self.cmd(Command::WindowActive(on)).await;
         }
 
         /// Everything emitted since the last call.

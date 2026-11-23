@@ -845,12 +845,10 @@ pub enum Command {
     StartChat(String),
     /// the request bar of message request `key`
     AnswerRequest { key: String, answer: RequestAnswer },
-    /// the user is working in the window: it has the focus and they are not away. Otherwise
-    /// notifications show and nothing is read.
-    WindowFocus(bool),
-    /// the window has no focus, but the mouse moves or the wheel turns over it: what the list
-    /// shows is read, with no toast for the open thread, and the list stays at the bottom
-    WindowWatching(bool),
+    /// the user is at the window (`gui::presence`): what the list shows is read, news at the
+    /// bottom stays read, and no notification shows. Otherwise notifications show and nothing
+    /// is read.
+    WindowActive(bool),
     Unlink,
     /// sticker panel opened: (re)load the pack list
     StickerPanel,

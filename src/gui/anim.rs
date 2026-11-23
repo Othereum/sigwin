@@ -243,7 +243,7 @@ pub(crate) fn refresh_hover() {
     slint::Timer::single_shot(Duration::ZERO, move || {
         REFRESH_PENDING.set(false);
         let Some(app) = APP.with_borrow(|a| a.as_ref().and_then(|w| w.upgrade())) else { return };
-        if app.get_inactive() {
+        if !super::presence::is_active() {
             return;
         }
         if let Some(position) = super::window::cursor_in_window(&app).or_else(|| crate::headless::pointer(app.window())) {

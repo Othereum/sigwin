@@ -26,8 +26,8 @@
 //!   open N           open fixture contact N's thread, as a click on it does
 //!   jump             the jump-to-latest button
 //!   focus on|off     the window gains or loses the focus
-//!   away on|off      the user goes away / comes back
-//!   touch on|off     the mouse moves over the window without the focus / leaves it
+//!   idle MS          MS pass with no input (the presence clock stands still otherwise; input
+//!                    steps like click, key and wheel count as the user at the window)
 //!   settle           wait until the UI and the backend have stopped talking
 //!   expect backend WHAT [who=N] OP VALUE   (`unread`, `read_upto`, `sent`, `toasts`, `window`)
 //!   expect ui NAME OP VALUE                (`open-unread`, `near-bottom`, `bottom-gap`, `divider-top`, ...)
@@ -78,7 +78,7 @@ enum Step {
 }
 
 /// Scenario steps the driver runs.
-const SCENARIO_STEPS: [&str; 10] = ["fx", "open", "jump", "focus", "away", "touch", "expect", "settle", "attach", "members"];
+const SCENARIO_STEPS: [&str; 9] = ["fx", "open", "jump", "focus", "idle", "expect", "settle", "attach", "members"];
 
 /// What runs scenario steps: it knows the window and the backend.
 pub struct Driver {
@@ -371,8 +371,8 @@ pub fn install_if_requested() -> anyhow::Result<()> {
     let p = Headless { steps: RefCell::new(steps), window: RefCell::new(None), queue: Arc::default() };
     slint::platform::set_platform(Box::new(p)).map_err(|e| anyhow::anyhow!("{e:?}"))?;
     ACTIVE.store(true, Ordering::Relaxed);
-    // the real idle and lock state of the PC must not decide a run
-    crate::away::force(Some(false));
+    // how fast a run goes must not decide whether the user is at the window
+    crate::gui::presence::freeze();
     Ok(())
 }
 
@@ -508,6 +508,14 @@ impl State {
         // NaN: where the pointer is now, in this window (it may have moved under the pointer)
         let here = pointer(self.w.window()).map_or((0.0, 0.0), |p| (p.x, p.y));
         let pos = |x: f32, y: f32| if x.is_nan() { LogicalPosition::new(here.0, here.1) } else { LogicalPosition::new(x, y) };
+        // what the window procedure counts as the user at the window
+        match step {
+            Step::Move(..) | Step::Click(..) | Step::Drag(..) | Step::Type(_) | Step::Ime(_) | Step::Commit(_) | Step::Key(_) => {
+                crate::gui::presence::input(false)
+            }
+            Step::Wheel(..) => crate::gui::presence::input(true),
+            _ => {}
+        }
         match step {
             Step::Screen(w, h) => DESK.with_borrow_mut(|d| d.logical = (w, h)),
             Step::At(x, y) => {

@@ -372,9 +372,6 @@ export component AppWindow inherits Window {
     // the view is on its way to the first unread row: what passes by is not reported as seen,
     // nor is the bottom (gui::scroll::jump_to_unread). Lifting it reports the rows on screen.
     in-out property <bool> reading-hold;
-    // the window is in the background (or the user is away): nothing is being read. Becoming
-    // active reports the rows on screen.
-    in property <bool> inactive;
     in-out property <int> jump-probe;
     // the row across the message list's top edge (0 = its top, above the edge when negative)
     in-out property <string> view-top-id;
@@ -910,9 +907,10 @@ export component AppWindow inherits Window {
                         }
                         changed is-divider => { if (self.is-divider) { root.divider-top = self.screen-top; } }
                         // reading as the user goes: a row whose bottom edge is on screen, above
-                        // the composer floating over the list. The id, not a bool: the ListView
+                        // the composer floating over the list, reported whether or not the user
+                        // is at the window (`gui::presence`). The id, not a bool: the ListView
                         // gives rows old instances with new data.
-                        property <string> seen-id: !root.reading-hold && !root.inactive && !m.typing && self.y + self.height - self.below + msg-list.content-y <= msg-list.visible-height - root.under-h + 1px ? m.id : "";
+                        property <string> seen-id: !root.reading-hold && !m.typing && self.y + self.height - self.below + msg-list.content-y <= msg-list.visible-height - root.under-h + 1px ? m.id : "";
                         changed seen-id => {
                             if (self.seen-id != "") {
                                 root.row-seen(self.seen-id);

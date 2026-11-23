@@ -15,8 +15,9 @@ expect backend unread who=1 = 2
 expect ui open-unread = 2
 expect ui bottom-gap = 0
 expect ui divider-top > 0
-# coming back reads them
+# coming back reads them, a second later
 focus on
+idle 1000
 settle
 expect backend unread who=1 = 0
 expect ui open-unread = 0

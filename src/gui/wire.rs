@@ -166,7 +166,7 @@ fn wire_threads(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         if weak.upgrade().is_none_or(|a| !a.get_jump_id().is_empty() || a.get_reading_hold()) {
             return;
         }
-        window::row_seen(&id);
+        super::presence::row_seen(&id);
     });
 
     let s = send.clone();

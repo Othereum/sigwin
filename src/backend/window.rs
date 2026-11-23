@@ -36,15 +36,14 @@ impl App {
         self.at_bottom && self.current.as_ref().is_some_and(|o| o.end_seq.is_none())
     }
 
-    /// What the user sees counts as read: they work in the window, or handle it with the mouse
-    /// without the focus (`Command::WindowWatching`).
+    /// What the user sees counts as read: they are at the window (`Command::WindowActive`).
     pub(super) fn reads(&self) -> bool {
-        self.focused || self.watching
+        self.active
     }
 
     /// Marks the open thread read if the user can see its newest messages.
     pub(super) fn read_if_seen(&mut self) {
-        if self.focused && self.sees_latest() {
+        if self.active && self.sees_latest() {
             if let Some(key) = self.current.as_ref().map(|o| o.key.clone()) {
                 self.mark_read(&key);
             }

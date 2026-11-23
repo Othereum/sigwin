@@ -441,9 +441,8 @@ struct App {
     /// a pin of the open thread runs out then
     pin_expiry: Option<u64>,
     sweeping: bool,
-    focused: bool,
-    /// the mouse is at the window without the focus (`Command::WindowWatching`)
-    watching: bool,
+    /// the user is at the window (`Command::WindowActive`)
+    active: bool,
     /// the window lost rows since the last `emit_messages`
     moved: bool,
     /// when a window that grew lets go again, while the user stays at the newest messages
@@ -636,8 +635,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         next_expiry: None,
         pin_expiry: None,
         sweeping: false,
-        focused: true,
-        watching: false,
+        active: true,
         moved: false,
         settle_at: None,
         at_bottom: true,
@@ -870,14 +868,13 @@ impl App {
             Command::SearchMore => self.more_hits().await,
             Command::StartChat(target) => self.start_chat(target),
             Command::AnswerRequest { key, answer } => self.answer_request(&key, answer).await,
-            Command::WindowFocus(f) => {
-                self.focused = f;
-                if f {
+            // what is on screen is read by the UI after a delay (`gui::presence`)
+            Command::WindowActive(a) => {
+                self.active = a;
+                if a {
                     self.notes.clear();
-                    self.read_if_seen();
                 }
             }
-            Command::WindowWatching(w) => self.watching = w,
             Command::Unlink => self.unlink().await,
             Command::StickerPanel => self.sticker_packs().await,
             Command::OpenPack(id) => self.open_pack(&id).await,

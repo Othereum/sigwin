@@ -121,13 +121,15 @@ fn nothing_is_read_while_not_in_front_of_the_window() {
         let mut h = Harness::new().await;
         h.op("seed who=1 n=100 unread=30").await;
         h.open(1).await;
-        h.focus(false).await;
+        h.active(false).await;
         h.cmd(Command::ReadUpTo(h.row(59))).await;
         h.cmd(Command::AtBottom(true)).await;
         assert_eq!(h.query("unread", 1), "30");
         assert_eq!(h.query("sent", 1), "delivery=0 read=0 sync=0");
-        // back in front of it: the visible rows count again
-        h.focus(true).await;
+        // back at the window: nothing is read until the UI reports the list again, a moment later
+        h.active(true).await;
+        assert_eq!(h.query("unread", 1), "30");
+        h.cmd(Command::AtBottom(true)).await;
         assert_eq!(h.query("unread", 1), "0", "the list sits at its bottom, so coming back reads it");
         assert_eq!(h.query("sent", 1), "delivery=0 read=30 sync=30");
     });
@@ -155,7 +157,7 @@ fn news_in_the_background_is_shown_from_the_line() {
         let mut h = Harness::new().await;
         h.op("seed who=1 n=20").await;
         h.open(1).await;
-        h.focus(false).await;
+        h.active(false).await;
         h.take_events();
         h.op("recv who=1 n=2").await;
         let ev = h.take_events();
@@ -163,32 +165,10 @@ fn news_in_the_background_is_shown_from_the_line() {
         assert_eq!(scroll, Scroll::News);
         assert_eq!(divider(items).map(|d| d.1), Some(2));
         assert_eq!(h.query("unread", 1), "2");
-        // coming back reads them, and the line goes
-        h.focus(true).await;
+        // coming back reads them once the UI reports the list
+        h.active(true).await;
+        h.cmd(Command::AtBottom(true)).await;
         assert_eq!(h.query("unread", 1), "0");
-    });
-}
-
-#[test]
-fn news_while_watching_stays_at_the_bottom_and_is_read_by_the_ui() {
-    scenario(|| async {
-        let mut h = Harness::new().await;
-        h.op("seed who=1 n=20").await;
-        h.open(1).await;
-        h.focus(false).await;
-        h.watch(true).await;
-        h.take_events();
-        h.op("recv who=1 n=2").await;
-        let ev = h.take_events();
-        let (items, scroll) = last_list(&ev).expect("a list");
-        assert_ne!(scroll, Scroll::News, "the list stays at the bottom");
-        assert!(divider(items).is_none(), "no line: the user is looking");
-        assert_eq!(h.query("unread", 1), "2", "read once the UI reports the rows");
-        assert_eq!(h.query("toasts", 1), "", "the open thread doesn't toast");
-        // the last row stayed on screen: read, with receipts
-        h.cmd(Command::ReadUpTo(h.row(21))).await;
-        assert_eq!(h.query("unread", 1), "0");
-        assert_eq!(h.query("sent", 1), "delivery=2 read=2 sync=2");
     });
 }
 
@@ -200,8 +180,7 @@ fn a_reply_to_us_stays_loud_until_read() {
         let mut h = Harness::new().await;
         h.op("seed who=1 n=20").await;
         h.open(1).await;
-        h.focus(false).await;
-        h.watch(true).await;
+        h.active(false).await;
         let one = Thread::Contact(ServiceId::Aci(super::fixture::contact(1).into()));
         let key = thread_key(&one);
         let newest = h.app.index.page(&one, i64::MAX, 10).await.unwrap()[0].1;
@@ -221,7 +200,8 @@ fn a_reply_to_us_stays_loud_until_read() {
         h.app.flush().await;
         assert_eq!(h.query("unread", 1), "2");
         assert!(h.app.persist.loud.contains_key(&key));
-        // the reply came on screen, the plain one not yet
+        // back at the window: the reply came on screen, the plain one not yet
+        h.active(true).await;
         h.cmd(Command::ReadUpTo(h.row(20))).await;
         assert_eq!(h.query("unread", 1), "1");
         assert!(!h.app.persist.loud.contains_key(&key), "the reply was read");
@@ -229,6 +209,7 @@ fn a_reply_to_us_stays_loud_until_read() {
         assert_eq!(h.query("unread", 1), "0");
         // a stale mark from before everything was read doesn't color news
         h.app.persist.loud.insert(key.clone(), newest + 10);
+        h.active(false).await;
         h.op("recv who=1 n=1").await;
         assert_eq!(h.query("unread", 1), "1");
         assert!(!h.app.persist.loud.contains_key(&key));
@@ -280,25 +261,6 @@ fn sending_drops_the_unread_line() {
         assert_eq!(scroll, Scroll::Bottom);
         assert!(divider(items).is_none());
         assert!(h.query("window", 1).contains("divider=none"));
-    });
-}
-
-#[test]
-fn watching_stops_when_the_mouse_leaves() {
-    scenario(|| async {
-        let mut h = Harness::new().await;
-        h.op("seed who=1 n=20").await;
-        h.open(1).await;
-        h.focus(false).await;
-        h.watch(true).await;
-        h.watch(false).await;
-        h.take_events();
-        h.op("recv who=1 n=2").await;
-        let ev = h.take_events();
-        let (_, scroll) = last_list(&ev).expect("a list");
-        assert_eq!(scroll, Scroll::News);
-        h.cmd(Command::ReadUpTo(h.row(21))).await;
-        assert_eq!(h.query("unread", 1), "2", "nothing is read once the mouse has left");
     });
 }
 

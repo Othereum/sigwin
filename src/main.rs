@@ -6,7 +6,6 @@ mod i18n;
 mod alloc;
 mod attached;
 mod autostart;
-mod away;
 mod avatar;
 mod badge;
 mod backend;
@@ -272,7 +271,7 @@ fn main() -> anyhow::Result<()> {
     if std::env::args().any(|a| a == autostart::BACKGROUND_FLAG) && !headless::active() && tray::active() {
         // autostart: the window stays unshown until the tray icon is used. It isn't in the
         // foreground, so notifications must not wait for a focus event that never comes.
-        let _ = cmd_tx.send(Command::WindowFocus(false));
+        gui::presence::focus_changed(&app, false);
         preset_scale(UI.with_borrow(|ui| ui.settings.zoom));
         slint::run_event_loop_until_quit()?;
         let _ = app.hide();

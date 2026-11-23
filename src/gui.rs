@@ -10,7 +10,7 @@ use slint::{Color, ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffe
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::types::{ClickedMedia, Command, Event, Find, MsgDto, Paging, ResultDto, Scroll, ThreadDto};
-use crate::{autostart, avatar, away, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
+use crate::{autostart, avatar, backend, badge, clip, emoji, format, headless, link, mention, picker, settings, types, update, view, winhook};
 use sigwin_ui::{
     AppWindow, ImageCell, ImageViewer, Links, MediaState, MentionItem, MsgItem, PackItem, PendingFile, PreviewItem, PinItem, ReactionItem, ReaderItem, RepliesData, ReplyItem, RequestData,
     FindKind, PackCell, PackData, ResultItem, ResultKind, SearchData, SettingsData, StickerData, StickerItem, TextOps, Theme, ThreadItem, ThreadMenuData,
@@ -26,6 +26,7 @@ pub(crate) mod linkcard;
 mod media;
 pub(crate) mod notice;
 pub(crate) mod packmaker;
+pub(crate) mod presence;
 mod rows;
 mod scenario;
 mod scroll;
@@ -74,9 +75,6 @@ pub(crate) struct Ui {
     dark: bool,
     /// the furthest row of the open thread reported seen (`ReadUpTo`), to send only what's new
     read_sent: Option<String>,
-    /// the window is not the one the user is working in (no focus, or away): rows coming in
-    /// don't scroll the list
-    inactive: bool,
     files: Vec<PathBuf>,
     /// the server's attachment size limit; None: the default (`attach::admit`)
     send_limit: Option<u64>,
@@ -429,6 +427,7 @@ fn messages_arrived(app: &AppWindow, key: String, items: Vec<MsgDto>, paging: Pa
             restored = Some(drafts::switch(app, ui, &key));
             ui.open_key = key.clone();
             ui.read_sent = None;
+            presence::thread_switched();
             show_open_unread(app, ui);
             ui.mention_rows.clear();
             ui.typing.clear();

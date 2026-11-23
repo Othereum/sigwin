@@ -44,17 +44,8 @@ fn exec(app: &AppWindow, line: &str) -> anyhow::Result<()> {
         "jump" => app.invoke_jump_to_bottom(),
         // files into the composer, as if picked: `attach A|B`
         "attach" => wire::add_files(app, rest.split('|').map(|p| p.trim().into()).collect()),
-        "focus" => window::focus_changed(app, on_off("focus")?),
-        "away" => {
-            away::force(Some(on_off("away")?));
-            window::refresh_active(app);
-        }
-        // the mouse moves over the window (`touch off`: it leaves)
-        "touch" => {
-            if window::touched(on_off("touch")?) {
-                window::refresh_active(app);
-            }
-        }
+        "focus" => super::presence::focus_changed(app, on_off("focus")?),
+        "idle" => super::presence::pass(app, std::time::Duration::from_millis(rest.trim().parse()?)),
         "expect" => expect(app, rest)?,
         // who @mentions can name, as a group's members arrive: `members 이서연|이민준`
         "members" => {
@@ -95,7 +86,8 @@ fn probe(app: &AppWindow, name: &str) -> anyhow::Result<String> {
     use slint::Model;
     Ok(match name {
         "open-unread" => app.get_open_unread().to_string(),
-        "inactive" => app.get_inactive().to_string(),
+        // the user is at the window (`presence`)
+        "active" => super::presence::is_active().to_string(),
         "reading-hold" => app.get_reading_hold().to_string(),
         "near-bottom" => app.get_near_bottom().to_string(),
         "rows" => app.get_messages().row_count().to_string(),

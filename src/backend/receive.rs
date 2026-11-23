@@ -354,11 +354,11 @@ impl App {
                     // the first message made the open (empty) chat a request
                     self.emit_header(&thread).await;
                 }
-                if !(is_open && self.focused && self.sees_latest()) {
+                if !(is_open && self.active && self.sees_latest()) {
                     let n = self.persist.unread.entry(key.clone()).or_default();
                     // the first news since everything was read: the open list marks where it starts
                     let first = *n == 0;
-                    if first && !self.watching {
+                    if first {
                         if let Some(open) = self.current.as_mut().filter(|o| o.key == key) {
                             open.divider_due = true;
                         }
@@ -374,10 +374,8 @@ impl App {
                     }
                     self.persist_dirty = true;
                 }
-                // watched: the user is at it, the list shows it
-                if !(is_open && self.watching && !self.focused) {
-                    self.notify_message(&thread, &key, &c).await;
-                }
+                // dropped by `Notifier::tick` while the user is at the window
+                self.notify_message(&thread, &key, &c).await;
             }
             Kind::Msg { outgoing: true, .. } => {
                 // we replied from another device: consider the thread read, and accepted
@@ -404,7 +402,7 @@ impl App {
 
     /// Periodic work: coalesces bursts of incoming messages into one UI update.
     pub(super) async fn flush(&mut self) {
-        self.notes.tick(self.focused);
+        self.notes.tick(self.active);
         if self.next_expiry.is_some_and(|t| t <= view::time::now_ms()) {
             self.next_expiry = None;
             self.current_dirty = true;

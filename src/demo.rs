@@ -1066,13 +1066,13 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
         let photo = sigwin_thumb::png_rgba(&src).unwrap_or_default();
         let letter = |key: &str, name: &str| Picture::Initial { text: initial(name), rgb: tint_rgb(key) };
         let mut notes = Notifier::default();
-        let mut focused = true;
+        let mut active = true;
         let mut next = std::time::Instant::now() + every;
         let mut n = 0u32;
         loop {
             match rx.recv_timeout(std::time::Duration::from_millis(250)) {
-                Ok(Command::WindowFocus(f)) => {
-                    focused = f;
+                Ok(Command::WindowActive(f)) => {
+                    active = f;
                     if f {
                         notes.clear();
                     }
@@ -1130,10 +1130,10 @@ fn demo_notify(emit: backend::Emit, secs: u64) -> std::sync::mpsc::Sender<Comman
                         sound: crate::settings::sound(),
                     },
                 };
-                tracing::info!(n, focused, "demo notify: message");
+                tracing::info!(n, active, "demo notify: message");
                 notes.add(q);
             }
-            notes.tick(focused);
+            notes.tick(active);
         }
     });
     tx

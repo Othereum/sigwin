@@ -2,7 +2,8 @@
 //! `ts/messages/maybeNotify.preload.ts`):
 //! - one slot: a new toast replaces the last one; queued work runs 1s after the last request
 //!   (debounce), so bursts and read syncs collapse into one update
-//! - nothing shows while the window is focused, and focusing it clears the toast
+//! - nothing shows while the user is at the window (`gui::presence`), and coming to it clears
+//!   the toast
 //! - reading the chat (here or on the phone), deleting the message for everyone, or taking
 //!   back / changing the reaction removes it
 //! - reactions to our own messages from others notify too
@@ -92,7 +93,7 @@ impl Notifier {
         }
     }
 
-    /// The window was focused (`activeWindowService.registerForActive`).
+    /// The user came to the window (`activeWindowService.registerForActive`).
     pub fn clear(&mut self) {
         self.clear_shown = true;
         self.queued = None;
@@ -107,7 +108,7 @@ impl Notifier {
     }
 
     /// Runs the debounced update once it is due (`#fastUpdate`).
-    pub fn tick(&mut self, focused: bool) {
+    pub fn tick(&mut self, active: bool) {
         if !self.due.is_some_and(|d| d <= Instant::now()) {
             return;
         }
@@ -115,7 +116,7 @@ impl Notifier {
         if self.clear_shown {
             self.close_last_shown();
         }
-        if focused {
+        if active {
             self.queued = None;
             return;
         }
