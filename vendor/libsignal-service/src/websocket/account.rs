@@ -180,8 +180,7 @@ impl SignalWebSocket<websocket::Identified> {
     // whole account, so each connect cleared the registration lock and undid "find me by number:
     // nobody", and their name reverted a rename made on the phone. Sigwin is always linked, so
     // this sends only the capabilities, as Signal-Desktop does linked. Drop once presage pins
-    // whisperfish/presage#503 (with whisperfish/libsignal-service-rs#503, which adds
-    // `set_device_capabilities` below as is).
+    // whisperfish/presage#503, which calls `set_device_capabilities` itself.
     pub async fn set_account_attributes(
         &mut self,
         attributes: AccountAttributes,

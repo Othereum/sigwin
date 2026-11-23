@@ -6,10 +6,8 @@ license = "AGPL-3.0-only"
 description = "A lightweight Signal-compatible desktop client (unofficial)"
 
 [dependencies]
-# our fork until whisperfish/presage#508 (Manager::sticker_pack_manifest, for the pack preview) is
-# merged; then back to upstream's rev. Keep the fork's branch until then, or this rev can vanish
-presage = { git = "https://github.com/Othereum/presage", rev = "386989f079466cfeef12f021c6ac6b85dd15f0ab" }
-presage-store-sqlite = { git = "https://github.com/Othereum/presage", rev = "386989f079466cfeef12f021c6ac6b85dd15f0ab", features = ["cdsi"] }
+presage = { git = "https://github.com/whisperfish/presage", rev = "10d41fc421f33523a1d5a589812dcbaf0c399dcf" }
+presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "10d41fc421f33523a1d5a589812dcbaf0c399dcf", features = ["cdsi"] }
 
 slint = { version = "1.19.0", default-features = false, features = [
     "std",
@@ -68,8 +66,8 @@ minisign-verify = "0.3.0"
 # Signal's backup format, for the history the phone sends when linking. Not the latest tag: it
 # must be the libsignal presage pins (Cargo.lock), whose key and id types it shares; bump them
 # together. `test-util` is what makes its `proto` module public.
-libsignal-message-backup = { git = "https://github.com/signalapp/libsignal", tag = "v0.99.0", features = ["test-util"] }
-libsignal-account-keys = { git = "https://github.com/signalapp/libsignal", tag = "v0.99.0" }
+libsignal-message-backup = { git = "https://github.com/signalapp/libsignal", tag = "v0.106.2", features = ["test-util"] }
+libsignal-account-keys = { git = "https://github.com/signalapp/libsignal", tag = "v0.106.2" }
 protobuf = "3.7" # the version libsignal-message-backup's generated code uses
 
 [workspace]

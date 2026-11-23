@@ -98,7 +98,6 @@ fn init_logging(to_file: bool) -> anyhow::Result<()> {
     use tracing_subscriber::prelude::*;
     tracing_subscriber::registry()
         .with(filter)
-        .with(logfile::Noise)
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .with(file.map(|f| tracing_subscriber::fmt::layer().with_ansi(false).with_writer(f)))
         .init();
