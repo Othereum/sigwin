@@ -901,7 +901,7 @@ impl App {
             Command::CancelPack => self.cancel_pack(),
             Command::StickerFrames(key) => self.sticker_frames(key),
             Command::StickerAnimated(key) => self.sticker_animated(key),
-            Command::PickerFrames { pack, ids } => self.picker_frames(pack, ids),
+            Command::PickerFrames(items) => self.picker_frames(items),
             Command::React { id, emoji, remove } => self.react(&id, emoji, remove).await,
             Command::Edit { id, text, mentions } => self.edit(&id, text, &mentions).await,
             Command::Delete(id) => self.delete(&id).await,

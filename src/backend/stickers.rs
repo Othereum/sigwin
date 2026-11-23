@@ -1,6 +1,7 @@
 //! Sticker packs: picker, grid thumbnails, sending, installing.
 
 use super::*;
+use crate::types::RECENT_TAB;
 
 impl App {
     /// Installed packs come from the `ls_packs` cache. Only packs it doesn't know yet (or whose
@@ -65,8 +66,9 @@ impl App {
             };
             out.push(PackDto { id, title, author, cover_key });
         }
-        debug!(ms = started.elapsed().as_millis() as u64, packs = out.len(), loaded, "sticker packs");
-        (self.emit)(Event::StickerPacks(out));
+        let recent = !self.recent_grid().await.0.is_empty();
+        debug!(ms = started.elapsed().as_millis() as u64, packs = out.len(), loaded, recent, "sticker packs");
+        (self.emit)(Event::StickerPacks { packs: out, recent });
         self.sticker_thumbs(jobs, false);
     }
 
@@ -75,6 +77,12 @@ impl App {
     pub(super) async fn open_pack(&mut self, hex_id: &str) {
         if self.preview.as_ref().is_some_and(|p| p.hex == hex_id) {
             self.preview_grid();
+            return;
+        }
+        if hex_id == RECENT_TAB {
+            let (items, jobs) = self.recent_grid().await;
+            (self.emit)(Event::StickerGrid { pack: RECENT_TAB.to_string(), items });
+            self.sticker_thumbs(jobs, true);
             return;
         }
         let started = std::time::Instant::now();
@@ -91,7 +99,7 @@ impl App {
             for (sid, emoji) in cached {
                 let key = sticker_thumb_key(hex_id, sid);
                 jobs.push(StickerJob { base: key.clone(), key: key.clone(), bytes: None, fit: PICKER_CELL });
-                items.push(StickerDto { key, id: sid, emoji, animated: animated.contains(&sid) });
+                items.push(StickerDto { key, pack: hex_id.to_string(), id: sid, emoji, animated: animated.contains(&sid) });
             }
         } else {
             let Ok(Some(pack)) = self.store.sticker_pack(&id).await else { return };
@@ -107,7 +115,7 @@ impl App {
                 jobs.push(StickerJob { base: key.clone(), key: key.clone(), bytes: s.bytes, fit: PICKER_CELL });
                 let emoji = s.emoji.unwrap_or_default();
                 meta.push((s.id, emoji.clone()));
-                items.push(StickerDto { key, id: s.id, emoji, animated });
+                items.push(StickerDto { key, pack: hex_id.to_string(), id: s.id, emoji, animated });
             }
             if let Err(e) = self.index.cache_stickers(&id, &meta).await {
                 warn!("cache stickers: {e}");
@@ -134,6 +142,29 @@ impl App {
         if let Some(saved) = saved {
             let _ = saved.await;
         }
+    }
+
+    /// The recently used tab's grid. Its stickers were sent from the picker, so their packs'
+    /// thumbs and animation markers are cached; one whose thumb is gone anyway is left out
+    /// rather than reading its whole pack from presage.
+    async fn recent_grid(&self) -> (Vec<StickerDto>, Vec<StickerJob>) {
+        let rows = self.index.recent_stickers().await.unwrap_or_default();
+        let mut markers: HashMap<String, Option<HashSet<u32>>> = HashMap::new();
+        let mut items = Vec::with_capacity(rows.len());
+        let mut jobs = Vec::with_capacity(rows.len());
+        for (raw, id, emoji) in rows {
+            let pack = hex::encode(&raw);
+            let key = sticker_thumb_key(&pack, id);
+            let job = StickerJob { base: key.clone(), key: key.clone(), bytes: None, fit: PICKER_CELL };
+            if !job.has_cache(&self.paths.thumbs) {
+                continue;
+            }
+            let marker = markers.entry(pack.clone()).or_insert_with(|| read_marker(&anim_marker(&self.paths.thumbs, &pack)));
+            let animated = marker.as_ref().is_some_and(|m| m.contains(&id));
+            jobs.push(job);
+            items.push(StickerDto { key, pack, id, emoji, animated });
+        }
+        (items, jobs)
     }
 
     /// A message-list sticker's frames, from its downloaded attachment (`key` is its thumbnail key).
@@ -165,19 +196,17 @@ impl App {
     /// Picker stickers' frames, from the bytes `open_pack` kept for animated stickers. One at a
     /// time on one blocking thread, in the order asked: a screenful asks for tens at once, each
     /// tens of ms, and the grid's thumbnails come first. A new list replaces what's left of the old.
-    pub(super) fn picker_frames(&self, pack: String, ids: Vec<u32>) {
-        // the previewed pack's stickers are only in memory
-        let held = self.preview.as_ref().filter(|p| p.hex == pack).map(|p| &p.bytes);
+    pub(super) fn picker_frames(&self, items: Vec<(String, u32)>) {
         let mut q = self.picker_queue.lock().unwrap_or_else(|e| e.into_inner());
         // the one being made comes anyway
         let busy = q.busy.clone();
-        q.todo = ids
+        q.todo = items
             .into_iter()
-            .map(|id| (pack.clone(), id))
             .filter(|j| Some(j) != busy.as_ref())
             .map(|j| {
-                let bytes = held.and_then(|b| b.get(&j.1)).map(|(b, _)| b.clone());
-                (j, bytes)
+                // the previewed pack's stickers are only in memory
+                let held = self.preview.as_ref().filter(|p| p.hex == j.0).and_then(|p| p.bytes.get(&j.1)).map(|(b, _)| b.clone());
+                (j, held)
             })
             .collect();
         if q.running || q.todo.is_empty() {
@@ -268,6 +297,9 @@ impl App {
         let ts = self.next_send_ts();
         let image_key = format!("pending-{ts}");
         let Some(thread_key) = self.current.as_ref().map(|o| o.key.clone()) else { return };
+        if let Err(e) = self.index.use_sticker(&id, sticker_id, ts, RECENT_STICKERS).await {
+            warn!("recent sticker: {e}");
+        }
         // preview straight from the sticker bytes, no disk cache
         let bytes = s.bytes.clone();
         let emit = self.emit.clone();
@@ -411,6 +443,9 @@ pub(super) async fn send_sticker_task(
 pub(super) const PICKER_CELL: u32 = 72;
 
 pub(super) const PACK_COVER: u32 = 32;
+
+/// How many the recently used tab shows (Signal Desktop's count).
+const RECENT_STICKERS: usize = 24;
 
 /// Picker thumbs used to be cached at 96px as `sp_<pack>_<id>.png`; they are `...-260.enc` now.
 pub(super) fn remove_legacy_sticker_thumbs(dir: &Path) {

@@ -12,8 +12,11 @@ export global StickerData {
     // false until the pack list has arrived, so an empty list isn't shown as "no packs"
     in property <bool> packs-loaded;
     in property <[StickerItem]> stickers;
-    // the open pack's id, or "+" for the pack page
+    // the open pack's id, "recent" for the recently used tab (`types::RECENT_TAB`), or "+" for
+    // the pack page
     in-out property <string> current-pack;
+    // stickers were sent from here: the recently used tab shows, before the packs
+    in property <bool> has-recent;
     in-out property <string> pack-url;
     callback pick-pack(string);
     callback send-sticker(string, int);
@@ -24,7 +27,7 @@ export global StickerData {
     callback remove-pack(int);
     // the installed pack's index among `packs`, -1 if it isn't one
     pure callback pack-index(string) -> int;
-    // a pack not installed, in a tab of its own before the installed ones
+    // a pack not installed, in a tab of its own after the installed ones
     in property <bool> has-preview;
     in property <PreviewItem> preview;
     callback install-preview();
@@ -169,15 +172,20 @@ export component StickerPanel inherits Rectangle {
     property <int> cols: max(1, floor((self.width - 50px) / cell));
     property <bool> manage: StickerData.current-pack == "" || StickerData.current-pack == "+";
     property <bool> previewing: StickerData.has-preview && StickerData.current-pack == StickerData.preview.pack.id;
-    // the tab under the pointer (the preview's is `packs.length`), and its x in the strip's view:
-    // the hint is drawn outside the strip, which would clip it
+    property <bool> recent: StickerData.current-pack == "recent";
+    // the tab under the pointer (the preview's is `packs.length`, the recently used one's
+    // `packs.length + 1`), and its x in the strip's view: the hint is drawn outside the strip,
+    // which would clip it
     property <int> tip-i: -1;
     property <length> tip-x;
-    property <PackItem> tip-pack: root.tip-i >= 0 && root.tip-i < StickerData.packs.length ? StickerData.packs[root.tip-i] : StickerData.preview.pack;
+    property <string> tip-text: root.tip-i == StickerData.packs.length + 1 ? @tr("Recently used")
+        : root.tip-i >= 0 && root.tip-i < StickerData.packs.length ? StickerData.packs[root.tip-i].title : StickerData.preview.pack.title;
+    // the recently used tab comes before the installed packs', the preview's after them
+    property <int> lead-tabs: StickerData.has-recent ? 1 : 0;
     // a tab and the gap after it. The strip's width comes from the count, not from its layout:
     // that is laid out only when drawn, after the tabs that just arrived are revealed.
     property <length> tab-pitch: 44px;
-    property <length> tabs-width: max(0px, (StickerData.packs.length + (StickerData.has-preview ? 1 : 0)) * root.tab-pitch - 4px);
+    property <length> tabs-width: max(0px, (StickerData.packs.length + root.lead-tabs + (StickerData.has-preview ? 1 : 0)) * root.tab-pitch - 4px);
     // the selected tab comes into view: when picked, when the panel opens, when the tabs arrive
     property <string> cur: StickerData.current-pack;
     property <bool> loaded: StickerData.packs-loaded;
@@ -186,11 +194,10 @@ export component StickerPanel inherits Rectangle {
     init => { root.reveal-tab(); }
     function reveal-tab() {
         let i = StickerData.pack-index(root.cur);
-        if !root.previewing && i < 0 {
+        if !root.previewing && !root.recent && i < 0 {
             return;
         }
-        // the preview's tab is first
-        let left = root.previewing ? 0px : ((StickerData.has-preview ? 1 : 0) + i) * root.tab-pitch;
+        let left = root.recent ? 0px : (root.lead-tabs + (root.previewing ? StickerData.packs.length : i)) * root.tab-pitch;
         // the least move that puts the tab clear of the edge fades
         let x = clamp(strip.content-x, strip.width - 28px - left - 40px, 28px - left);
         strip.content-x = clamp(x, min(0px, strip.width - strip.content-width), 0px);
@@ -225,25 +232,22 @@ export component StickerPanel inherits Rectangle {
                     content-width: root.tabs-width;
                     tabs := HorizontalLayout {
                         spacing: 4px;
-                        // not installed: outlined, apart from the installed ones
-                        if StickerData.has-preview: Rectangle {
+                        if StickerData.has-recent: Rectangle {
                             width: 40px;
                             height: 40px;
                             accessible-role: button;
-                            accessible-label: StickerData.preview.pack.title;
+                            accessible-label: @tr("Recently used");
                             border-radius: 10px;
-                            border-width: 1px;
-                            border-color: Theme.accent;
-                            background: root.previewing ? Theme.selected : (prta.has-hover ? Theme.hover : transparent);
-                            Image { width: 32px; height: 32px; source: StickerData.preview.pack.cover; image-fit: contain; }
-                            prta := TouchArea {
+                            background: root.recent ? Theme.selected : (rta.has-hover ? Theme.hover : transparent);
+                            Icon { icon: Icons.recent; size: 24px; tint: root.recent ? Theme.accent : Theme.subtle; }
+                            rta := TouchArea {
                                 mouse-cursor: pointer;
-                                clicked => { StickerData.pick-pack(StickerData.preview.pack.id); }
+                                clicked => { StickerData.pick-pack("recent"); }
                                 changed has-hover => {
                                     if self.has-hover {
-                                        root.tip-i = StickerData.packs.length;
+                                        root.tip-i = StickerData.packs.length + 1;
                                         root.tip-x = parent.x + strip.content-x;
-                                    } else if root.tip-i == StickerData.packs.length {
+                                    } else if root.tip-i == StickerData.packs.length + 1 {
                                         root.tip-i = -1;
                                     }
                                 }
@@ -265,6 +269,30 @@ export component StickerPanel inherits Rectangle {
                                         root.tip-i = i;
                                         root.tip-x = parent.x + strip.content-x;
                                     } else if root.tip-i == i {
+                                        root.tip-i = -1;
+                                    }
+                                }
+                            }
+                        }
+                        // not installed: outlined, apart from the installed ones
+                        if StickerData.has-preview: Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            accessible-role: button;
+                            accessible-label: StickerData.preview.pack.title;
+                            border-radius: 10px;
+                            border-width: 1px;
+                            border-color: Theme.accent;
+                            background: root.previewing ? Theme.selected : (prta.has-hover ? Theme.hover : transparent);
+                            Image { width: 32px; height: 32px; source: StickerData.preview.pack.cover; image-fit: contain; }
+                            prta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { StickerData.pick-pack(StickerData.preview.pack.id); }
+                                changed has-hover => {
+                                    if self.has-hover {
+                                        root.tip-i = StickerData.packs.length;
+                                        root.tip-x = parent.x + strip.content-x;
+                                    } else if root.tip-i == StickerData.packs.length {
                                         root.tip-i = -1;
                                     }
                                 }
@@ -421,11 +449,11 @@ export component StickerPanel inherits Rectangle {
                         mouse-cursor: root.previewing ? MouseCursor.default : MouseCursor.pointer;
                         clicked => {
                             if !root.previewing {
-                                StickerData.send-sticker(StickerData.current-pack, s.id);
+                                StickerData.send-sticker(s.pack, s.id);
                             }
                         }
                         changed has-hover => {
-                            if s.animated { Anim.hover(StickerData.current-pack, s.id, self.has-hover); }
+                            if s.animated { Anim.hover(s.pack, s.id, self.has-hover); }
                         }
                     }
                 }
@@ -489,9 +517,9 @@ export component StickerPanel inherits Rectangle {
         width: 40px;
         height: 40px;
         Tip {
-            hovered: root.tip-i >= 0 && root.tip-pack.title != "";
+            hovered: root.tip-i >= 0 && root.tip-text != "";
             place: TipPlace.below-center;
-            text: root.tip-pack.title;
+            text: root.tip-text;
         }
     }
 

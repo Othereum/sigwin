@@ -378,7 +378,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 stick_to_bottom(app);
             }
         }
-        Event::StickerPacks(list) => stickers::packs_arrived(app, list),
+        Event::StickerPacks { packs, recent } => stickers::packs_arrived(app, packs, recent),
         Event::OpenStickerPanel { pack, sticker } => stickers::open_at(app, pack, sticker),
         Event::PackPreview(v) => stickers::preview_arrived(app, v),
         Event::PreviewSticker { key, animated, failed } => stickers::preview_sticker(&key, animated, failed),

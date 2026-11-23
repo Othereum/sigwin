@@ -134,6 +134,7 @@ impl App {
             .iter()
             .map(|s| StickerDto {
                 key: sticker_thumb_key(&p.hex, s.id),
+                pack: p.hex.clone(),
                 id: s.id,
                 emoji: s.emoji.clone().unwrap_or_default(),
                 animated: p.animated.contains(&s.id),

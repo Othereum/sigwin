@@ -1248,8 +1248,8 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
     match c {
         Command::StickerFrames(k) => demo_sticker(emit, k.clone(), view::media::sticker_size()),
         Command::StickerAnimated(k) if k == "demo-st-1" => emit(Event::StickerAnimated(k.clone())),
-        Command::PickerFrames { pack, ids } => {
-            for id in ids {
+        Command::PickerFrames(items) => {
+            for (pack, id) in items {
                 demo_sticker(emit, format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX), 72);
             }
         }
@@ -1445,17 +1445,28 @@ pub(crate) fn demo_stickers(emit: backend::Emit) {
     let packs: Vec<types::PackDto> = (0..count)
         .map(|i| types::PackDto { id: format!("p{i}"), title: format!("Pack {i}"), author: format!("Artist {i}"), cover_key: format!("sp_p{i}_0") })
         .collect();
-    let items: Vec<types::StickerDto> =
-        (0..20).map(|i| types::StickerDto { key: format!("sp_p0_{i}"), id: i, emoji: String::new(), animated: i % 4 == 0 }).collect();
-    let open = packs.last().map(|p| p.id.clone()).unwrap_or_default();
-    let open = if count > 2 { open } else { "p0".into() };
+    let sticker = |pack: u32, i: u32| types::StickerDto {
+        key: format!("sp_p{pack}_{i}"),
+        pack: format!("p{pack}"),
+        id: i,
+        emoji: String::new(),
+        animated: i % 4 == 0,
+    };
+    // `recent`: the recently used tab open, mixing both packs
+    let (open, items): (String, Vec<_>) = match var.as_str() {
+        "recent" => (types::RECENT_TAB.into(), (0..10).map(|i| sticker(i % 2, i)).collect()),
+        _ if count > 2 => (packs.last().map(|p| p.id.clone()).unwrap_or_default(), (0..20).map(|i| sticker(0, i)).collect()),
+        _ => ("p0".into(), (0..20).map(|i| sticker(0, i)).collect()),
+    };
+    let recent = !add;
     // the panel is opened by main(); give it a moment before filling it
     slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
-        emit(Event::StickerPacks(packs));
+        emit(Event::StickerPacks { packs, recent });
         if !add {
             emit(Event::StickerGrid { pack: open, items });
         }
         let mut thumbs: Vec<_> = (0..20u32).map(|i| demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8)).collect();
+        thumbs.extend((1..10u32).step_by(2).map(|i| demo_blob(&format!("sp_p1_{i}"), 96, (i * 25) as u8)));
         thumbs.extend((1..count.max(2)).map(|i| demo_blob(&format!("sp_p{i}_0"), 96, (i * 40) as u8)));
         emit(Event::StickerThumbs(thumbs));
     });
@@ -1480,11 +1491,13 @@ fn demo_preview(emit: backend::Emit, state: &str) {
         cover_key: if ready { "sp_pv_0-c".into() } else { String::new() },
     };
     slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
-        emit(Event::StickerPacks(packs));
+        emit(Event::StickerPacks { packs, recent: true });
         emit(Event::PackPreview(types::PreviewDto { pack, state, count: if ready { 30 } else { 0 } }));
         let mut thumbs: Vec<_> = (0..2u32).map(|i| demo_blob(&format!("sp_p{i}_0-c"), 64, (i * 40) as u8)).collect();
         if ready {
-            let items = (0..30).map(|i| types::StickerDto { key: format!("sp_pv_{i}"), id: i, emoji: String::new(), animated: false }).collect();
+            let items = (0..30)
+                .map(|i| types::StickerDto { key: format!("sp_pv_{i}"), pack: "pv".into(), id: i, emoji: String::new(), animated: false })
+                .collect();
             emit(Event::StickerGrid { pack: "pv".into(), items });
             thumbs.push(demo_blob("sp_pv_0-c", 64, 200));
             thumbs.extend((0..12u32).filter(|i| *i != 5 && *i != 9).map(|i| demo_blob(&format!("sp_pv_{i}"), 96, (i * 20) as u8)));

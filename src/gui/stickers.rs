@@ -1,4 +1,5 @@
-//! The sticker panel: pack tabs, the open pack's grid, the pack page (adding, ordering, removing).
+//! The sticker panel: the recently used tab and pack tabs, the open tab's grid, the pack page
+//! (adding, ordering, removing).
 
 use super::*;
 
@@ -11,7 +12,7 @@ pub(crate) struct Panel {
     pub(crate) grid: Vec<types::StickerDto>,
     /// pack cover images (grid images live only in `stickers` rows)
     covers: held::Pictures<{ held::STICKER_COVERS }>,
-    /// the pack shown before it is installed, in a tab before the others
+    /// the pack shown before it is installed, in a tab after the others
     preview: Option<types::PreviewDto>,
     /// the sticker to show once its pack's grid is here: (pack, sticker id)
     focus: Option<(String, u32)>,
@@ -24,6 +25,7 @@ pub(crate) fn close(app: &AppWindow) {
     app.set_sticker_open(false);
     let d = app.global::<StickerData>();
     d.set_packs_loaded(false);
+    d.set_has_recent(false);
     d.set_has_preview(false);
     d.set_focus_index(-1);
     UI.with_borrow_mut(|ui| {
@@ -81,12 +83,13 @@ pub(super) fn thumbs_arrived(app: &AppWindow, list: Vec<types::Thumb>) {
     });
 }
 
-pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>) {
+pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>, recent: bool) {
     if !app.get_sticker_open() {
         return;
     }
     let d = app.global::<StickerData>();
     d.set_packs_loaded(true);
+    d.set_has_recent(recent);
     let (first, preview) = UI.with_borrow_mut(|ui| {
         let p = &mut ui.sticker;
         p.packs.set_vec(list.iter().map(|d| pack_item(d, &p.covers)).collect::<Vec<_>>());
@@ -108,9 +111,16 @@ pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>) {
         send_cmd(Command::OpenPack(cur));
         return;
     }
-    let still_there = UI.with_borrow(|ui| ui.sticker.pack_dtos.iter().any(|d| d.id == cur));
-    // the grid is emptied when the panel closes, so always (re)load the selected pack
-    let target = if still_there { Some(cur) } else { first };
+    let still_there = if cur == types::RECENT_TAB { recent } else { UI.with_borrow(|ui| ui.sticker.pack_dtos.iter().any(|d| d.id == cur)) };
+    // the grid is emptied when the panel closes, so always (re)load the selected tab; else the
+    // first one
+    let target = if still_there {
+        Some(cur)
+    } else if recent {
+        Some(types::RECENT_TAB.to_string())
+    } else {
+        first
+    };
     match target {
         Some(id) => {
             d.set_current_pack(id.as_str().into());
@@ -257,7 +267,13 @@ pub(super) fn grid_arrived(app: &AppWindow, pack: String, items: Vec<types::Stic
         };
         let rows: Vec<StickerItem> = items
             .iter()
-            .map(|s| StickerItem { id: s.id as i32, emoji: s.emoji.as_str().into(), animated: s.animated, ..Default::default() })
+            .map(|s| StickerItem {
+                pack: s.pack.as_str().into(),
+                id: s.id as i32,
+                emoji: s.emoji.as_str().into(),
+                animated: s.animated,
+                ..Default::default()
+            })
             .collect();
         ui.sticker.stickers.set_vec(rows);
         ui.sticker.grid = items;

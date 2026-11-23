@@ -229,6 +229,8 @@ export struct PreviewItem {
 }
 
 export struct StickerItem {
+    // hex id of the sticker's pack: the recently used tab mixes packs
+    pack: string,
     id: int,
     emoji: string,
     img: image,

@@ -380,6 +380,10 @@ pub struct ReplyDto {
 /// Thumbnail keys with this prefix belong to the sticker picker, not the message list.
 pub const STICKER_THUMB_PREFIX: &str = "sp_";
 
+/// The picker's recently used tab in place of a pack id (`OpenPack`, `StickerGrid`). Not hex, so
+/// no pack's. `ui/stickers.slint` spells it too: change both together.
+pub const RECENT_TAB: &str = "recent";
+
 /// Thumbnail and label keys with this prefix belong to the chat's media page, not the message list.
 pub const GALLERY_PREFIX: &str = "g:";
 
@@ -468,6 +472,8 @@ pub struct PackJob {
 #[derive(Debug, Clone)]
 pub struct StickerDto {
     pub key: String,
+    /// hex id of the sticker's pack: the recently used tab mixes packs
+    pub pack: String,
     pub id: u32,
     pub emoji: String,
     /// plays in the picker (`Command::PickerFrames`)
@@ -711,7 +717,9 @@ pub enum Event {
     /// rise with messages before the read syncs behind them bring them down again
     /// (Signal Desktop's `_hasQueueEmptied`)
     CatchingUp(bool),
-    StickerPacks(Vec<PackDto>),
+    /// `recent`: the recently used tab has stickers
+    StickerPacks { packs: Vec<PackDto>, recent: bool },
+    /// `pack`: the tab, a pack's hex id or `RECENT_TAB`
     StickerGrid { pack: String, items: Vec<StickerDto> },
     /// The open chat's media page: items to add below what it has (`reset`: in place of it),
     /// and whether older ones remain. `files`: the page's files rather than its pictures.
@@ -840,6 +848,7 @@ pub enum Command {
     Unlink,
     /// sticker panel opened: (re)load the pack list
     StickerPanel,
+    /// a pack's hex id, or `RECENT_TAB`
     OpenPack(String),
     SendSticker { pack: String, id: u32 },
     /// hex id + hex key
@@ -871,7 +880,8 @@ pub enum Command {
     StickerAnimated(String),
     /// the frames of these picker stickers, in order, each answered by `Event::Frames`; replaces
     /// the ones of an earlier call not made yet (empty: stop)
-    PickerFrames { pack: String, ids: Vec<u32> },
+    /// (pack hex id, sticker id)
+    PickerFrames(Vec<(String, u32)>),
     /// react to message `id`; `remove` takes back our reaction `emoji`
     React { id: String, emoji: String, remove: bool },
     /// replace the text of our message `id`

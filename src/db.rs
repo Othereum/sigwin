@@ -509,6 +509,18 @@ impl Index {
         )
         .execute(&pool)
         .await?;
+        // stickers sent from this PC, for the picker's recently used tab (the official apps
+        // don't sync it either). `used` is ms since the epoch. Not a cache: nothing rebuilds it
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_sticker_recent (
+                pack BLOB NOT NULL,
+                id INTEGER NOT NULL,
+                used INTEGER NOT NULL,
+                PRIMARY KEY (pack, id)
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
         // attachments we uploaded, so sending the same bytes to the same thread again can reuse
         // the upload. `hash` is of the bytes as uploaded; `pointer` is the protobuf, `at` its
         // upload time. A cache: rows past their useful life are dropped on every `put`
@@ -1472,7 +1484,44 @@ impl Index {
         sqlx::query("DELETE FROM ls_packs WHERE id = ?").bind(id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM ls_stickers WHERE pack = ?").bind(id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM ls_pack_order WHERE id = ?").bind(id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM ls_sticker_recent WHERE pack = ?").bind(id).execute(&self.pool).await?;
         Ok(())
+    }
+
+    /// A sticker was sent: it leads the recently used ones, of which `keep` stay.
+    pub async fn use_sticker(&self, pack: &[u8], id: u32, at: u64, keep: usize) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("INSERT OR REPLACE INTO ls_sticker_recent (pack, id, used) VALUES (?, ?, ?)")
+            .bind(pack)
+            .bind(id as i64)
+            .bind(at as i64)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "DELETE FROM ls_sticker_recent WHERE (pack, id) NOT IN
+             (SELECT pack, id FROM ls_sticker_recent ORDER BY used DESC LIMIT ?)",
+        )
+        .bind(keep as i64)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Recently used stickers of installed packs, newest first: (pack, sticker id, emoji).
+    pub async fn recent_stickers(&self) -> anyhow::Result<Vec<(Vec<u8>, u32, String)>> {
+        let rows = sqlx::query(
+            "SELECT r.pack, r.id, COALESCE(s.emoji, '') AS emoji FROM ls_sticker_recent r
+             JOIN sticker_packs p ON p.id = r.pack
+             LEFT JOIN ls_stickers s ON s.pack = r.pack AND s.id = r.id
+             ORDER BY r.used DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| Some((r.try_get("pack").ok()?, r.try_get::<i64, _>("id").ok()? as u32, r.try_get("emoji").ok()?)))
+            .collect())
     }
 
     /// Cached stickers of a pack in manifest order: (id, emoji). Empty if not cached yet.
@@ -2189,5 +2238,32 @@ pub(crate) mod tests {
         index.cache_pack(&[2], "new", "someone", Some(3)).await.unwrap();
         let packs = index.cached_packs().await.unwrap();
         assert_eq!(packs, vec![(vec![2], ("new".to_string(), "someone".to_string()), Some(3))]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn recent_stickers_keep_the_newest_of_installed_packs() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        for id in [1u8, 2] {
+            sqlx::query("INSERT INTO sticker_packs (id, key, manifest) VALUES (?, x'00', x'00')").bind(vec![id]).execute(&index.pool).await.unwrap();
+        }
+        index.cache_stickers(&[1], &[(7, "😀".into())]).await.unwrap();
+        index.use_sticker(&[1], 7, 100, 3).await.unwrap();
+        index.use_sticker(&[2], 1, 200, 3).await.unwrap();
+        index.use_sticker(&[2], 2, 300, 3).await.unwrap();
+        // sent again: first, not twice
+        index.use_sticker(&[1], 7, 400, 3).await.unwrap();
+        // past `keep`, the oldest goes
+        index.use_sticker(&[2], 3, 500, 3).await.unwrap();
+        let ids = |r: Vec<(Vec<u8>, u32, String)>| r.into_iter().map(|(p, id, _)| (p[0], id)).collect::<Vec<_>>();
+        let recent = index.recent_stickers().await.unwrap();
+        assert_eq!(recent[1].2, "😀");
+        assert_eq!(ids(recent), vec![(2, 3), (1, 7), (2, 2)]);
+        // a pack removed elsewhere shows none, and dropping its cache forgets them
+        sqlx::query("DELETE FROM sticker_packs WHERE id = x'02'").execute(&index.pool).await.unwrap();
+        assert_eq!(ids(index.recent_stickers().await.unwrap()), vec![(1, 7)]);
+        index.uncache_pack(&[2]).await.unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ls_sticker_recent").fetch_one(&index.pool).await.unwrap();
+        assert_eq!(left, 1);
     }
 }

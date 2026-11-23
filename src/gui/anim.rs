@@ -109,7 +109,7 @@ struct Picker {
     stills: HashSet<String>,
     /// what the last `PickerFrames` asked for
     asked: Vec<String>,
-    /// the grid's pack
+    /// the grid's tab: a pack's id or `RECENT_TAB`
     pack: String,
     /// the grid's cells on screen, [first, end)
     range: (usize, usize),
@@ -432,7 +432,7 @@ pub(crate) fn picker_range(ui: &Ui) -> (usize, usize) {
     ui.anims.picker.range
 }
 
-/// The pack whose grid the picker shows ("" none).
+/// The tab whose grid the picker shows ("" none).
 pub(crate) fn picker_pack(ui: &Ui) -> &str {
     &ui.anims.picker.pack
 }
@@ -442,7 +442,7 @@ pub(crate) fn picker_opened(ui: &mut Ui) {
     ui.anims.read_motion();
 }
 
-/// The picker shows the grid of `pack` (in `ui.sticker.grid`) or none (""): the old grid's
+/// The picker shows the grid of tab `pack` (in `ui.sticker.grid`) or none (""): the old grid's
 /// animations go, and what's still to make for it is dropped.
 pub(crate) fn picker_grid(ui: &mut Ui, pack: &str) {
     let p = std::mem::take(&mut ui.anims.picker);
@@ -450,7 +450,7 @@ pub(crate) fn picker_grid(ui: &mut Ui, pack: &str) {
     ui.anims.picker.pack = pack.to_string();
     if p.asked.iter().any(|k| !p.made.contains_key(k) && !p.stills.contains(k)) {
         if let Some(tx) = &ui.tx {
-            let _ = tx.send(Command::PickerFrames { pack: String::new(), ids: Vec::new() });
+            let _ = tx.send(Command::PickerFrames(Vec::new()));
         }
     }
     update_picker(ui);
@@ -505,7 +505,7 @@ pub(crate) fn update_picker(ui: &mut Ui) {
     if !pending.eq(ask.iter().map(|s| &s.key)) {
         p.asked = ask.iter().map(|s| s.key.clone()).collect();
         if let Some(tx) = &ui.tx {
-            let _ = tx.send(Command::PickerFrames { pack: p.pack.clone(), ids: ask.iter().map(|s| s.id).collect() });
+            let _ = tx.send(Command::PickerFrames(ask.iter().map(|s| (s.pack.clone(), s.id)).collect()));
         }
     }
     let mut off: Vec<(u64, &String, usize)> =
