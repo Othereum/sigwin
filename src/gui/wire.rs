@@ -927,6 +927,8 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         }
     });
 
+    d.on_pack_index(|id| stickers::pack_index(&id));
+
     let s = send.clone();
     let weak = app.as_weak();
     d.on_send_sticker(move |pack, id| {

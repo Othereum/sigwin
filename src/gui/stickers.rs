@@ -11,7 +11,7 @@ pub(crate) struct Panel {
     pub(crate) grid: Vec<types::StickerDto>,
     /// pack cover images (grid images live only in `stickers` rows)
     covers: held::Pictures<{ held::STICKER_COVERS }>,
-    /// the pack shown before it is installed, in a tab after the others
+    /// the pack shown before it is installed, in a tab before the others
     preview: Option<types::PreviewDto>,
     /// the sticker to show once its pack's grid is here: (pack, sticker id)
     focus: Option<(String, u32)>,
@@ -118,6 +118,11 @@ pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>) {
         }
         None => d.set_current_pack(PACK_PAGE.into()),
     }
+}
+
+/// The installed pack's place among the tabs, -1 if it isn't one.
+pub(super) fn pack_index(id: &str) -> i32 {
+    UI.with_borrow(|ui| ui.sticker.pack_dtos.iter().position(|d| d.id == id).map_or(-1, |i| i as i32))
 }
 
 /// Opens the panel on `pack`, or on the last pack shown (the pack page is a place to visit, not

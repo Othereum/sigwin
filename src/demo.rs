@@ -109,6 +109,10 @@ pub(crate) fn start(app: &AppWindow, emit: backend::Emit, cmd_rx: tokio::sync::m
         let weak = app.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(150), move || {
             if let Some(app) = weak.upgrade() {
+                // `many` opens on the last tab, as a click on one of its stickers would
+                if std::env::var("SIGWIN_DEMO_STICKERS").is_ok_and(|v| v == "many") {
+                    app.global::<StickerData>().set_current_pack("p15".into());
+                }
                 app.set_sticker_open(true);
             }
         });
@@ -1443,11 +1447,13 @@ pub(crate) fn demo_stickers(emit: backend::Emit) {
         .collect();
     let items: Vec<types::StickerDto> =
         (0..20).map(|i| types::StickerDto { key: format!("sp_p0_{i}"), id: i, emoji: String::new(), animated: i % 4 == 0 }).collect();
+    let open = packs.last().map(|p| p.id.clone()).unwrap_or_default();
+    let open = if count > 2 { open } else { "p0".into() };
     // the panel is opened by main(); give it a moment before filling it
     slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
         emit(Event::StickerPacks(packs));
         if !add {
-            emit(Event::StickerGrid { pack: "p0".into(), items });
+            emit(Event::StickerGrid { pack: open, items });
         }
         let mut thumbs: Vec<_> = (0..20u32).map(|i| demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8)).collect();
         thumbs.extend((1..count.max(2)).map(|i| demo_blob(&format!("sp_p{i}_0"), 96, (i * 40) as u8)));
