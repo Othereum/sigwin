@@ -222,7 +222,9 @@ export component StickerPanel inherits Rectangle {
     // change with every cell passing under the pointer, and comes back at once where the pointer
     // rests after
     property <bool> scrolling;
-    property <int> peek-i: root.peeking && !root.manage ? root.hover-i : -1;
+    // off for now: some may find it in the way, and whether it needs a setting is still open
+    property <bool> peek-enabled: false;
+    property <int> peek-i: root.peek-enabled && root.peeking && !root.manage ? root.hover-i : -1;
     function hovered(i: int, x: length, y: length) {
         root.hover-i = i;
         root.hover-x = x - root.absolute-position.x;
