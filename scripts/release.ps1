@@ -20,19 +20,25 @@ foreach ($tool in "cargo", "cargo-about", "minisign", "gh", "git") {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "$tool not found in PATH" }
 }
 if (-not (Test-Path $Key)) { throw "secret key not found: $Key" }
-# before the long build; a release never goes out without notes
-if (-not (Test-Path $Notes)) { throw "release notes not found: $Notes" }
-$Notes = (Resolve-Path $Notes).Path
-$notesText = [IO.File]::ReadAllText($Notes, [Text.UTF8Encoding]::new($false))
-if (-not $notesText.Trim()) { throw "release notes are empty: $Notes" }
-# GitHub reads "@name" as a mention: it notifies that user and lists them as a contributor. A name
-# stops at the first character outside [A-Za-z0-9-], so "@erwähnen" mentions "erw". Code spans are
-# safe; Korean "@멘션" isn't a name at all
-$mentions = [regex]::Replace($notesText, '(?s)```.*?```|`[^`\n]*`', '') -split "`n" |
-    Where-Object { $_ -match '(?<![\w`])@[A-Za-z0-9]' }
-if ($mentions) {
-    throw "release notes mention GitHub users; drop the @ or wrap it in backticks:`n$($mentions -join "`n")"
+
+function Read-Notes {
+    if (-not (Test-Path $Notes)) { throw "release notes not found: $Notes" }
+    $text = [IO.File]::ReadAllText($Notes, [Text.UTF8Encoding]::new($false))
+    if (-not $text.Trim()) { throw "release notes are empty: $Notes" }
+    # GitHub reads "@name" as a mention: it notifies that user and lists them as a contributor. A
+    # name stops at the first character outside [A-Za-z0-9-], so "@erwähnen" mentions "erw". Code
+    # spans are safe; Korean "@멘션" isn't a name at all
+    $mentions = [regex]::Replace($text, '(?s)```.*?```|`[^`\n]*`', '') -split "`n" |
+        Where-Object { $_ -match '(?<![\w`])@[A-Za-z0-9]' }
+    if ($mentions) {
+        throw "release notes mention GitHub users; drop the @ or wrap it in backticks:`n$($mentions -join "`n")"
+    }
+    $text
 }
+
+# before the long build, so missing or bad notes fail early. They are read again after it: the
+# notes may still be edited while it runs
+$null = Read-Notes
 
 # release only what is on origin/main
 if ((git branch --show-current) -ne "main") { throw "not on main" }
@@ -98,13 +104,18 @@ for ($try = 1; ; $try++) {
 }
 minisign -V -P $pub -m $exe; Run "minisign verify"
 
+$notesText = Read-Notes
 Write-Host $notesText
 $answer = Read-Host "Publish $tag from $($sha.Substring(0, 7)) with these notes? (y/N)"
 if ($answer -ne "y") { Write-Host "Not published. Files are in $out"; exit 1 }
 
+# publish exactly the notes shown, not what the file holds after an edit during the prompt
+$shown = Join-Path $out "release-notes.md"
+[IO.File]::WriteAllText($shown, $notesText, [Text.UTF8Encoding]::new($false))
 # --generate-notes adds the link comparing with the last release below the notes
-gh release create $tag --target $sha $exe "$exe.minisig" $licenses --title "Sigwin $v" --notes-file $Notes --generate-notes
+gh release create $tag --target $sha $exe "$exe.minisig" $licenses --title "Sigwin $v" --notes-file $shown --generate-notes
 Run "gh release create"
+Remove-Item $shown
 Write-Host "Published $tag"
 # they were this version's: the next release must not pick them up by accident
 Remove-Item $Notes
