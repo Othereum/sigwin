@@ -222,8 +222,7 @@ pub(crate) fn wire(app: &AppWindow) {
         let id = id.to_string();
         slint::Timer::single_shot(Duration::ZERO, move || shown(&id));
     });
-    app.on_gif_scrolled(refresh_hover);
-    g.on_picker_scrolled(refresh_hover);
+    app.global::<crate::Hover>().on_refresh(refresh_hover);
     g.on_gif_hover(|id, cell, on| {
         let id = id.to_string();
         // these run while Slint evaluates the row: act on the next turn of the event loop
@@ -248,10 +247,10 @@ pub(crate) fn wire(app: &AppWindow) {
     });
 }
 
-/// Slint moves the hover only with the mouse: rows that scroll under a resting cursor never get
-/// it, the one that left keeps it, and a cell drawn again (its row was) starts without it. Tell
-/// it where the cursor is, on the next turn (this can run while the list updates), once for any
-/// number of calls.
+/// Slint moves the hover only with the mouse: content that moves under a resting cursor never
+/// gets it, what moved away keeps it, and an element drawn again (a row was) starts without it.
+/// Tell it where the cursor is, on the next turn (this can run while a list updates), once for
+/// any number of calls (`Hover.refresh`: every scroll).
 pub(crate) fn refresh_hover() {
     if REFRESH_PENDING.replace(true) {
         return;

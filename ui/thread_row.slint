@@ -47,6 +47,13 @@ export component ThreadRow inherits Rectangle {
             root.hover(true);
         }
     }
+    // the list's `ThinScroll.settled`: the row under the pointer tells it again
+    in property <int> settled;
+    changed settled => {
+        if (self.hovered) {
+            root.hover(true);
+        }
+    }
     height: 64px;
     // the reader photos' outline: the row's own color
     property <color> ring: selected ? Theme.selected : (ta.has-hover ? Theme.hover : Theme.sidebar);

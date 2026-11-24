@@ -1,8 +1,8 @@
 import { ListView, Palette, ScrollView } from "std-widgets.slint";
 import { PendingFile, ThreadItem, MsgItem, PinItem, MentionItem, PackItem, StickerItem } from "types.slint";
 import { Theme } from "theme.slint";
-import { Avatar, BusySpinner, DangerButton, HStrip, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton, TextBox, TextOps, ThinScroll, Tip, TipPlace } from "widgets.slint";
-export { TextOps } from "widgets.slint";
+import { Avatar, BusySpinner, DangerButton, HStrip, Hover, IconButton, MenuRow, Notice, Field, PlainButton, PrimaryButton, TextBox, TextOps, ThinScroll, Tip, TipPlace } from "widgets.slint";
+export { Hover, TextOps } from "widgets.slint";
 import { Icon, Icons } from "icons.slint";
 import { Bubble, MediaLabel, QuoteBox } from "bubble.slint";
 import { ThreadRow } from "thread_row.slint";
@@ -379,8 +379,6 @@ export component AppWindow inherits Window {
     in-out property <string> view-top-id;
     in-out property <string> view-bottom-id;
     in-out property <length> view-top-off;
-    // the message list moved: the hover is brought up to date for the cursor (gui::anim)
-    callback gif-scrolled();
     // the widest a message may be in the message list: the row's padding (16px a side in
     // `Bubble`), a group's avatar column (28px and 8px of spacing) and 20px more left out, so the
     // hover tools' "more" (36px, `MsgTools.compact`) fits beside any message, past the padding.
@@ -852,10 +850,11 @@ export component AppWindow inherits Window {
                         self.user-scrolled = true;
                         root.check-older();
                         root.check-newer();
-                        root.gif-scrolled();
+                        Hover.refresh();
                     }
+                    // not a ThinScroll (no scrollbar here): it brings the hover up to date itself
                     changed content-y => {
-                        root.gif-scrolled();
+                        Hover.refresh();
                         if (self.user-scrolled) {
                             root.check-older();
                             root.check-newer();
@@ -1903,7 +1902,7 @@ export component AppWindow inherits Window {
             Rectangle {
                 vertical-stretch: 1;
                 // folded, a search left with results keeps them for when the box opens again
-                ThinScroll {
+                thread-scroll := ThinScroll {
                     visible: !SearchData.active || !root.side-wide;
                     // a thumb always up would crowd the folded rail
                     hover-only: true;
@@ -1925,6 +1924,7 @@ export component AppWindow inherits Window {
                             item: t;
                             folded: !root.side-wide;
                             selected: t.key == root.current-key;
+                            settled: thread-scroll.settled;
                             clicked => { root.pick-thread(t.key); }
                             menu(x, y) => { ThreadMenuData.open(t.key, x, y); }
                             hover(on) => {

@@ -216,12 +216,10 @@ export component StickerPanel inherits Rectangle {
     property <length> hover-x;
     property <length> hover-y;
     property <bool> peeking;
-    // the grid is scrolling: its cells move under a resting pointer without telling it, so the
-    // big one goes meanwhile and comes back at once where the pointer rests after
+    // the grid is scrolling (`ThinScroll.scrolling`): the big one goes meanwhile, so it doesn't
+    // change with every cell passing under the pointer, and comes back at once where the pointer
+    // rests after
     property <bool> scrolling;
-    // bumped once the cells know the pointer again after a scroll: the one under it says so,
-    // even if it is the cell that had it before (no hover change to tell)
-    property <int> recheck;
     property <int> peek-i: root.peeking && !root.manage ? root.hover-i : -1;
     function hovered(i: int, x: length, y: length) {
         root.hover-i = i;
@@ -428,7 +426,7 @@ export component StickerPanel inherits Rectangle {
         // the manifest on its way: the header says so
         if root.previewing && StickerData.preview.loading: Rectangle { vertical-stretch: 1; }
         // sticker grid
-        if !root.manage && !(root.previewing && (StickerData.preview.loading || StickerData.preview.failed)): ThinScroll {
+        if !root.manage && !(root.previewing && (StickerData.preview.loading || StickerData.preview.failed)): grid := ThinScroll {
             property <int> first: max(0, floor(-grid-view.content-y / root.cell)) * root.cols;
             property <int> end: min(StickerData.stickers.length, ceil((-grid-view.content-y + grid-view.visible-height) / root.cell) * root.cols);
             property <int> focused: StickerData.focus-index;
@@ -436,12 +434,11 @@ export component StickerPanel inherits Rectangle {
                 Anim.picker-view(self.first, self.end);
                 self.show-focus();
             }
-            changed content-y => {
-                root.hover-i = -1;
-                root.scrolling = true;
-                // restart() only resets a running timer
-                settle.start();
-                settle.restart();
+            changed scrolling => {
+                root.scrolling = self.scrolling;
+                if self.scrolling {
+                    root.hover-i = -1;
+                }
             }
             changed first => { Anim.picker-view(self.first, self.end); }
             changed end => { Anim.picker-view(self.first, self.end); }
@@ -512,8 +509,8 @@ export component StickerPanel inherits Rectangle {
                             }
                         }
                     }
-                    property <int> recheck: root.recheck;
-                    changed recheck => {
+                    property <int> settled: grid.settled;
+                    changed settled => {
                         if sta.has-hover {
                             root.hovered(i, self.absolute-position.x, self.absolute-position.y);
                         }
@@ -600,26 +597,6 @@ export component StickerPanel inherits Rectangle {
         interval: 300ms;
         running: root.peeking && root.hover-i < 0 && !root.scrolling;
         triggered => { root.peeking = false; }
-    }
-    // the scroll has ended (no move for a moment): the pointer is told to the cells again
-    settle := Timer {
-        interval: 150ms;
-        running: false;
-        triggered => {
-            self.stop();
-            root.scrolling = false;
-            Anim.picker-scrolled();
-            recheck-timer.start();
-        }
-    }
-    // after `picker-scrolled`'s hover refresh, which runs on the next turn
-    recheck-timer := Timer {
-        interval: 30ms;
-        running: false;
-        triggered => {
-            self.stop();
-            root.recheck += 1;
-        }
     }
 
     // the sticker under the pointer, big, right above its cell where the eyes are, hiding none
