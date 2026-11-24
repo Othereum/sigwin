@@ -151,7 +151,7 @@ async fn fetch(m: Option<&Mgr>, url: String, key: String) -> Option<(Fetched, Ve
             // what we can't show, we don't send
             content.image = None;
             content.image_content_type = None;
-            (None, (0, 0), Vec::new())
+            (None, ((0, 0), 0), Vec::new())
         }
     };
     let card = LinkCard {
@@ -160,8 +160,9 @@ async fn fetch(m: Option<&Mgr>, url: String, key: String) -> Option<(Fetched, Ve
         title,
         description,
         image_key: if dims.is_some() { key } else { String::new() },
-        img_w: size.0,
-        img_h: size.1,
+        img_w: size.0.0,
+        img_h: size.0.1,
+        full_w: size.1,
     };
     Some((Fetched { content, url, dims, card }, thumbs))
 }
@@ -208,11 +209,14 @@ async fn sticker_pack(m: &Mgr, id: &[u8], key: &[u8]) -> Option<PreviewContent> 
     })
 }
 
-/// The image's size, its size on the card, and thumbnails for the card and the composer.
-fn card_images(bytes: &[u8], key: &str, sticker_pack: bool) -> Option<((u32, u32), (u32, u32), Vec<Thumb>)> {
+/// The image's size, its size on the card (`view::media::link_image_size`), and thumbnails for
+/// the card and the composer.
+type CardImages = ((u32, u32), ((u32, u32), u32), Vec<Thumb>);
+
+fn card_images(bytes: &[u8], key: &str, sticker_pack: bool) -> Option<CardImages> {
     let dims = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
     let size = view::media::link_image_size(Some(dims.0), Some(dims.1), sticker_pack);
-    let card = (crate::types::physical_px(size.0), crate::types::physical_px(size.1));
+    let card = (crate::types::physical_px(size.0.0), crate::types::physical_px(size.0.1));
     let small = crate::types::physical_px(COMPOSER_IMAGE);
     let side = |d| sigwin_thumb::cover_side(d, card).max(sigwin_thumb::cover_side(d, (small, small)));
     let img = sigwin_thumb::decode_thumb_for(bytes, 0, side).ok()?;

@@ -72,7 +72,7 @@ static ROOM_BOXED: AtomicU32 = AtomicU32::new(0);
 /// Sets the widths pictures may take in the chat. Whether any picture's size changes: past the
 /// widest box at the chosen size, the room makes no difference.
 pub fn set_room(px: u32, boxed: u32) -> bool {
-    let widest = photo_px(PHOTO_BOX_WIDE.0, photo_choice()).max(LINK_IMAGE_WIDE.0);
+    let widest = photo_px(PHOTO_BOX_WIDE.0, photo_choice()).max(LINK_IMAGE_WIDEST);
     let bound = |r: u32| if r == 0 { widest } else { r.min(widest) };
     // the UI's least pane leaves more; a caption's bubble is never narrower anyway
     let set = |room: &AtomicU32, px: u32| {
@@ -131,35 +131,42 @@ pub fn attachment_key(ptr: &AttachmentPointer, ts: u64, idx: usize) -> String {
 
 /// `attachment_key` index of a link preview's image (not in `attachments`, like a sticker's).
 pub const LINK_IMAGE_INDEX: usize = 98;
-/// Size of that image on the card (logical px): a wide one on top, others beside the text.
-const LINK_IMAGE_WIDE: (u32, u32) = (300, 158);
+/// Size of that image on the card (logical px): a large one on top, others beside the text. A
+/// large one is as wide as the image up to the widest, as tall as its shape says within the
+/// height bounds (cropped past them).
+const LINK_IMAGE_WIDEST: u32 = 300;
+const LINK_IMAGE_HEIGHT: (u32, u32) = (50, 450);
 const LINK_IMAGE_SMALL: (u32, u32) = (64, 64);
+/// Below this on either side an image stays small.
+const LINK_IMAGE_LARGE_MIN: u32 = 200;
 
 /// Cut-offs for what a preview can say (characters).
 pub const LINK_TITLE_MAX: usize = 200;
 pub const LINK_DESC_MAX: usize = 300;
 
-/// An image too small or of unknown size stays small (site logos), and so does a sticker pack's
-/// cover, which a wide crop would cut. A wide one is no wider than its bubble's room, keeping
+/// The image's size on the card (logical px), and its width with no room limit, which the UI
+/// follows a resize to (`Bubble.link-k`). The rule is Signal Desktop's: an image is large if
+/// both sides reach the minimum and it isn't about square, so site logos and icons stay small,
+/// and so does a sticker pack's cover. A large one is no wider than its bubble's room, keeping
 /// its shape.
-pub fn link_image_size(w: Option<u32>, h: Option<u32>, sticker_pack: bool) -> (u32, u32) {
-    if sticker_pack {
-        return LINK_IMAGE_SMALL;
-    }
-    link_image_size_in(w, h, room(Place::Boxed))
+pub fn link_image_size(w: Option<u32>, h: Option<u32>, sticker_pack: bool) -> ((u32, u32), u32) {
+    link_image_size_in(w, h, sticker_pack, room(Place::Boxed))
 }
 
-fn link_image_size_in(w: Option<u32>, h: Option<u32>, room: u32) -> (u32, u32) {
+fn link_image_size_in(w: Option<u32>, h: Option<u32>, sticker_pack: bool, room: u32) -> ((u32, u32), u32) {
+    let full = if sticker_pack { LINK_IMAGE_SMALL } else { link_image_box(w, h) };
+    (narrowed(full, room), full.0)
+}
+
+fn link_image_box(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
     match (w, h) {
-        (Some(w), Some(h)) if w >= 200 && h >= 100 && w >= h => narrowed(LINK_IMAGE_WIDE, room),
+        (Some(w), Some(h)) if w.min(h) >= LINK_IMAGE_LARGE_MIN && w.abs_diff(h) * 20 >= h => {
+            let width = w.min(LINK_IMAGE_WIDEST);
+            let height = (u64::from(width) * u64::from(h) * 2 + u64::from(w)) / (2 * u64::from(w));
+            (width, (height as u32).clamp(LINK_IMAGE_HEIGHT.0, LINK_IMAGE_HEIGHT.1))
+        }
         _ => LINK_IMAGE_SMALL,
     }
-}
-
-/// The width a link preview's image of `w` x `h` (logical px, on the card) has with no room
-/// limit: the UI follows a resize to it (`Bubble.link-k`).
-pub fn link_image_full_width(w: u32) -> u32 {
-    if w > LINK_IMAGE_SMALL.0 { LINK_IMAGE_WIDE.0 } else { w }
 }
 
 /// A box `w` x `h` no wider than `room`, keeping its shape.
@@ -182,10 +189,10 @@ pub fn link_card(dm: &DataMessage, ts: u64) -> Option<(crate::types::LinkCard, O
     }
     let mut card = crate::types::LinkCard { url: url.to_string(), title, description, domain: crate::link::domain(url), ..Default::default() };
     let wanted = p.image.as_ref().map(|a| {
-        let size = link_image_size(a.width, a.height, crate::stickerpack::is_link(url));
+        let (size, full_w) = link_image_size(a.width, a.height, crate::stickerpack::is_link(url));
         let file_key = attachment_key(a, ts, LINK_IMAGE_INDEX);
         card.image_key = format!("{file_key}@{}x{}", size.0, size.1);
-        (card.img_w, card.img_h) = size;
+        (card.img_w, card.img_h, card.full_w) = (size.0, size.1, full_w);
         WantedCell { key: card.image_key.clone(), file_key, ptr: a.clone(), size }
     });
     Some((card, wanted))
@@ -812,10 +819,20 @@ mod tests {
         let cells = grid_cells_at(5, 2, 280);
         assert_eq!(cells.iter().map(|c| c.0 + c.2).max(), Some(280));
         // a link preview's wide image too; a small one stays as it is
-        assert_eq!(link_image_size_in(Some(1200), Some(630), 240), (240, 126));
-        assert_eq!(link_image_size_in(Some(1200), Some(630), WIDE), LINK_IMAGE_WIDE);
-        assert_eq!(link_image_size_in(Some(64), Some(64), 240), LINK_IMAGE_SMALL);
-        assert_eq!(link_image_size(Some(512), Some(512), true), LINK_IMAGE_SMALL);
+        let link = |w, h, room| link_image_size_in(Some(w), Some(h), false, room);
+        assert_eq!(link(1200, 630, 240), ((240, 126), 300));
+        assert_eq!(link(1200, 630, WIDE), ((300, 158), 300));
+        // as wide as the image up to the widest; tall ones are cut at the height bound
+        assert_eq!(link(250, 400, WIDE), ((250, 400), 250));
+        assert_eq!(link(600, 1800, WIDE), ((300, 450), 300));
+        assert_eq!(link(3000, 200, WIDE), ((300, 50), 300));
+        // small, about square, or of unknown size: beside the text
+        assert_eq!(link(64, 64, 240), (LINK_IMAGE_SMALL, 64));
+        assert_eq!(link(1000, 180, WIDE), (LINK_IMAGE_SMALL, 64));
+        assert_eq!(link(512, 500, WIDE), (LINK_IMAGE_SMALL, 64));
+        assert_eq!(link_image_size_in(None, None, false, WIDE), (LINK_IMAGE_SMALL, 64));
+        // a sticker pack's cover, whatever its size
+        assert_eq!(link_image_size_in(Some(512), Some(300), true, WIDE), (LINK_IMAGE_SMALL, 64));
     }
 
     #[test]

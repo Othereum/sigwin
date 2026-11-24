@@ -733,6 +733,7 @@ pub(crate) fn demo(emit: backend::Emit, mut cmd_rx: tokio::sync::mpsc::Unbounded
             std::thread::sleep(std::time::Duration::from_millis(400));
             emit(Event::Thumb(Arc::new(demo_link_image("demo-link-wide", 300, 158))));
             emit(Event::Thumb(Arc::new(demo_link_image("demo-link-small", 64, 64))));
+            emit(Event::Thumb(Arc::new(demo_link_image("demo-link-tall", 240, 360))));
         });
     }
     if std::env::var_os("SIGWIN_DEMO_STICKERS").is_some() {
@@ -826,6 +827,7 @@ fn demo_link_rows(items: &mut [types::MsgDto]) {
             image_key: key.into(),
             img_w: size.0,
             img_h: size.1,
+            full_w: size.0,
         })
     };
     let rows = [
@@ -834,6 +836,7 @@ fn demo_link_rows(items: &mut [types::MsgDto]) {
         ("https://www.example.kr/demo/articles/2026/11/21/a-very-long-path-segment-with-no-spaces-at-all?ref=share&utm_source=messenger&utm_medium=link", true, card("내가 보낸 링크의 제목", "", "example.kr", "demo-link-wide", (300, 158))),
         ("https://www.example.kr/demo/articles/2026/11/21/a-very-long-path-segment-with-no-spaces-at-all?ref=share&utm_source=messenger&utm_medium=link", true, None),
         ("https://news.example.kr/demo", false, card("아주 긴 뉴스 제목이 두 줄을 넘어가면 어떻게 잘리는지 확인하기 위해 일부러 길게 쓴 제목입니다 정말로 길게 썼습니다", "설명도 길게 씁니다. 두 줄을 넘는 설명은 끝에서 잘리고 말줄임표가 나와야 합니다. 그래서 충분히 길게 씁니다. 더 길게 씁니다.", "news.example.kr", "demo-link-small", (64, 64))),
+        ("https://shop.example.kr/demo", false, card("세로로 긴 그림", "상품 사진처럼 세로로 긴 그림은 위에 크게 나옵니다.", "shop.example.kr", "demo-link-tall", (240, 360))),
         ("https://blog.example.kr/demo", false, card("이미지 없는 미리보기", "설명만 있습니다.", "blog.example.kr", "", (0, 0))),
         ("https://photo.example.kr/demo", false, card("이미지가 아직 도착하지 않은 카드", "", "photo.example.kr", "demo-link-missing", (300, 158))),
     ];
@@ -863,6 +866,7 @@ fn demo_link_fetch(emit: &backend::Emit, url: &str) {
         image_key: "demo-compose".into(),
         img_w: 300,
         img_h: 158,
+        full_w: 300,
     });
     emit(Event::Thumb(Arc::new(demo_link_image("demo-compose-c", 44, 44))));
     emit(Event::LinkPreview { url: url.into(), card });

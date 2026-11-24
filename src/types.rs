@@ -242,6 +242,8 @@ pub struct LinkCard {
     pub image_key: String,
     pub img_w: u32,
     pub img_h: u32,
+    /// the image's width with no room limit (`view::media::link_image_size`)
+    pub full_w: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

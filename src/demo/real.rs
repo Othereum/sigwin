@@ -68,6 +68,7 @@ fn card(url: &str, title: &str, description: &str, image_key: &str) -> types::Li
         image_key: image_key.into(),
         img_w: 300,
         img_h: 158,
+        full_w: 300,
     }
 }
 
