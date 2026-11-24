@@ -1220,7 +1220,7 @@ fn a_view_once_picture_shows_once() {
         // neither saved nor handed to another app
         assert!(h.app.viewed(&id, 0).is_none());
 
-        h.cmd(Command::ViewImage { id: id.clone(), index: 0, fit: (800, 600) }).await;
+        h.cmd(Command::ViewImage { id: id.clone(), index: 0, fit: sigwin_thumb::ViewBox::within((800, 600)) }).await;
         let mut shown = None;
         for _ in 0..50 {
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -1247,7 +1247,7 @@ fn a_view_once_picture_shows_once() {
         let stored = h.app.store.message(&thread, id.parse().unwrap()).await.unwrap().expect("the row stays");
         assert!(view::data_message(&stored).is_some_and(|dm| dm.attachments.is_empty() && dm.is_view_once == Some(true)));
 
-        h.cmd(Command::ViewImage { id, index: 0, fit: (800, 600) }).await;
+        h.cmd(Command::ViewImage { id, index: 0, fit: sigwin_thumb::ViewBox::within((800, 600)) }).await;
         let ev = h.take_events();
         assert!(!ev.iter().any(|e| matches!(e, Event::ViewerImage(_))));
         assert!(ev.iter().any(|e| matches!(e, Event::Notice(_))));

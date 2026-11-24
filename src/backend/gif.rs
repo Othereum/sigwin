@@ -24,10 +24,10 @@ pub(super) fn next_gen() -> u64 {
     GEN.fetch_add(1, Ordering::Relaxed)
 }
 
-/// The first frame of a GIF for the viewer, shrunk to fit in `fit` (never enlarged).
-pub(super) fn first_frame(bytes: &[u8], fit: (u32, u32)) -> Option<crate::types::ViewerPixels> {
+/// The first frame of a GIF for the viewer, at the size `fit` gives it (never enlarged).
+pub(super) fn first_frame(bytes: &[u8], fit: sigwin_thumb::ViewBox) -> Option<crate::types::ViewerPixels> {
     let full = sigwin_thumb::gif_size(bytes)?;
-    let (w, h) = sigwin_thumb::fit_size(full, fit);
+    let (w, h) = fit.size(full);
     let mut first = None;
     sigwin_thumb::stream_gif(bytes, w.max(h), |f, _| {
         first = Some(f);

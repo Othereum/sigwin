@@ -496,7 +496,7 @@ impl App {
         }
     }
 
-    pub(super) fn view_image(&mut self, id: &str, index: usize, fit: (u32, u32)) {
+    pub(super) fn view_image(&mut self, id: &str, index: usize, fit: sigwin_thumb::ViewBox) {
         let Some((ts, dm)) = self.row_message(id) else { return };
         let once = dm.is_view_once.unwrap_or(false);
         let count = viewer_images(dm, ts).len();
@@ -563,7 +563,7 @@ impl App {
                     let Some(first) = super::gif::first_frame(&bytes, fit) else { return Ok(None) };
                     return Ok(Some(Decoded::Gif(bytes, first)));
                 }
-                let Some(view) = sigwin_thumb::decode_view(&bytes, fit.0, fit.1, VIEW_MAX_PIXELS)? else {
+                let Some(view) = sigwin_thumb::decode_view(&bytes, fit, VIEW_MAX_PIXELS)? else {
                     return Ok(None);
                 };
                 drop(bytes);
@@ -1104,9 +1104,6 @@ fn blur_thumb(key: &str, hash: &str, w: u32, h: u32) -> Option<Thumb> {
     Some(Thumb { key: key.to_string(), width: cell.width(), height: cell.height(), rgba: cell.into_raw() })
 }
 
-/// The blurhash of a picture shown with `shape`, at the size its box has in the list.
-/// What the viewer shows of a picture on its way: its blurhash (or plain dark without one) at
-/// the size the picture will have, within `fit`.
 /// The pictures the viewer steps through: (index in `attachments`, pointer). A view-once
 /// message's one picture while it can still be opened.
 fn viewer_images(dm: &DataMessage, ts: u64) -> Vec<(usize, &AttachmentPointer)> {
@@ -1116,13 +1113,15 @@ fn viewer_images(dm: &DataMessage, ts: u64) -> Vec<(usize, &AttachmentPointer)> 
     view::media::shown_attachments(dm).filter(|(_, a)| view::media::is_image(a)).collect()
 }
 
-fn placeholder(ptr: &AttachmentPointer, fit: (u32, u32)) -> crate::types::ViewerPixels {
+/// What the viewer shows of a picture on its way: its blurhash (or plain dark without one) at
+/// the size the picture will have.
+fn placeholder(ptr: &AttachmentPointer, fit: sigwin_thumb::ViewBox) -> crate::types::ViewerPixels {
     let (w, h) = match (ptr.width, ptr.height) {
         (Some(w), Some(h)) if w > 0 && h > 0 => (w, h),
         _ => (4, 3),
     };
-    let scale = (fit.0 as f64 / w as f64).min(fit.1 as f64 / h as f64);
-    // a picture with no size given takes the box; a known one never grows past its own size
+    let scale = fit.scale((w, h));
+    // a picture with no size given takes the whole box; a known one never grows past its own size
     let scale = if ptr.width.is_some() { scale.min(1.0) } else { scale };
     let (sw, sh) = (((w as f64 * scale) as u32).max(1), ((h as f64 * scale) as u32).max(1));
     let img = ptr

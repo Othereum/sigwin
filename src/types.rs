@@ -803,9 +803,8 @@ pub enum Command {
     /// Plays a GIF waiting in the composer (a file of the user's, not a cached one) in a tile
     /// `tile` physical px wide, until it is stopped.
     PlayPendingGif { path: PathBuf, seq: u64, tile: u32 },
-    /// show image `index` of row `id` in the viewer, shrunk to fit in `fit` (physical px).
-    /// `from_file`: the file line was clicked; a row with other files then opens them outside.
-    ViewImage { id: String, index: usize, fit: (u32, u32) },
+    /// show image `index` of row `id` in the viewer, at the size `fit` gives it (physical px)
+    ViewImage { id: String, index: usize, fit: sigwin_thumb::ViewBox },
     /// save the message's files, and with `all` its pictures and videos too: the user picks where,
     /// in a dialog owned by `owner` (HWND)
     SaveFiles { id: String, owner: isize, all: bool },

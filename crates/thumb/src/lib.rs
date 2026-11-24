@@ -413,19 +413,44 @@ fn blurhash_encodes_like_signal_desktop() {
 }
 
 /// Size of a `w` x `h` image shrunk to fit in `box_w` x `box_h` (never upscales).
-pub fn fit_size((w, h): (u32, u32), (box_w, box_h): (u32, u32)) -> (u32, u32) {
-    let s = (box_w as f64 / w.max(1) as f64).min(box_h as f64 / h.max(1) as f64).min(1.0);
-    if s >= 1.0 {
-        return (w, h);
+pub fn fit_size(full: (u32, u32), max: (u32, u32)) -> (u32, u32) {
+    ViewBox::within(max).size(full)
+}
+
+/// How big the viewer shows a picture: `area` px² in its own shape, within `max`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewBox {
+    pub area: u64,
+    pub max: (u32, u32),
+}
+
+impl ViewBox {
+    /// Only `max` limits it.
+    pub fn within(max: (u32, u32)) -> Self {
+        Self { area: u64::MAX, max }
     }
-    (((w as f64 * s).round() as u32).max(1), ((h as f64 * s).round() as u32).max(1))
+
+    /// The scale for a `w` x `h` picture, above 1 when it is smaller than the box.
+    pub fn scale(&self, (w, h): (u32, u32)) -> f64 {
+        let (w, h) = (w.max(1) as f64, h.max(1) as f64);
+        (self.area as f64 / (w * h)).sqrt().min(self.max.0 as f64 / w).min(self.max.1 as f64 / h)
+    }
+
+    /// The size a `w` x `h` picture is shown at (never enlarged).
+    pub fn size(&self, (w, h): (u32, u32)) -> (u32, u32) {
+        let s = self.scale((w, h));
+        if s >= 1.0 {
+            return (w, h);
+        }
+        (((w as f64 * s).round() as u32).max(1), ((h as f64 * s).round() as u32).max(1))
+    }
 }
 
 /// A still image for the viewer.
 pub struct ViewImage {
     /// upright (EXIF), at full size
     pub original: Pixels,
-    /// shrunk to fit the box asked for; `None` when the original already does
+    /// shrunk to the size asked for; `None` when the original already is that size
     pub fitted: Option<Pixels>,
     /// can't have transparent pixels
     pub opaque: bool,
@@ -433,7 +458,7 @@ pub struct ViewImage {
 
 /// Decodes a still image for the viewer. `None` when it is animated or has more than
 /// `max_pixels` (or `MAX_PIXELS`): those go to an outside app.
-pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> ImageResult<Option<ViewImage>> {
+pub fn decode_view(bytes: &[u8], fit: ViewBox, max_pixels: u64) -> ImageResult<Option<ViewImage>> {
     let mut decoder = open(bytes)?;
     if within(&*decoder, max_pixels).is_err() || is_animated(bytes) {
         return Ok(None);
@@ -449,7 +474,7 @@ pub fn decode_view(bytes: &[u8], box_w: u32, box_h: u32, max_pixels: u64) -> Ima
         }
     };
     let full = (original.width(), original.height());
-    let out = fit_size(full, (box_w, box_h));
+    let out = fit.size(full);
     let crop = (0.0, 0.0, full.0 as f64, full.1 as f64);
     let fitted = if out == full { None } else { resize_view(original.as_bytes(), full, crop, out, opaque) };
     Ok(Some(ViewImage { original, fitted, opaque }))
@@ -1000,14 +1025,26 @@ mod tests {
     #[test]
     fn decode_view_fits_never_upscales_and_refuses() {
         let png = png_rgba(&RgbaImage::new(400, 200)).unwrap();
-        let v = decode_view(&png, 100, 100, u64::MAX).unwrap().unwrap();
+        let v = decode_view(&png, ViewBox::within((100, 100)), u64::MAX).unwrap().unwrap();
         let size = |p: &Pixels| (p.width(), p.height());
         assert_eq!((size(&v.original), size(&v.fitted.unwrap()), v.opaque), ((400, 200), (100, 50), false));
-        let v = decode_view(&png, 1000, 1000, u64::MAX).unwrap().unwrap();
+        let v = decode_view(&png, ViewBox::within((1000, 1000)), u64::MAX).unwrap().unwrap();
         assert_eq!((size(&v.original), v.fitted.is_none()), ((400, 200), true));
-        assert!(decode_view(&png, 100, 100, 79_999).unwrap().is_none());
-        assert!(decode_view(&gif(3, 50), 100, 100, u64::MAX).unwrap().is_none());
-        assert!(decode_view(b"junk", 100, 100, u64::MAX).is_err());
+        assert!(decode_view(&png, ViewBox::within((100, 100)), 79_999).unwrap().is_none());
+        assert!(decode_view(&gif(3, 50), ViewBox::within((100, 100)), u64::MAX).unwrap().is_none());
+        assert!(decode_view(b"junk", ViewBox::within((100, 100)), u64::MAX).is_err());
+    }
+
+    #[test]
+    fn a_view_box_keeps_the_area_in_the_pictures_shape() {
+        let b = ViewBox { area: 400_000, max: (1536, 832) };
+        assert_eq!(b.size((4000, 3000)), (730, 548));
+        assert_eq!(b.size((3000, 4000)), (548, 730));
+        // the screen stops it first
+        assert_eq!(b.size((8000, 1000)), (1536, 192));
+        // never enlarged
+        assert_eq!(b.size((300, 200)), (300, 200));
+        assert!(b.scale((300, 200)) > 1.0);
     }
 
     #[test]
@@ -1021,12 +1058,12 @@ mod tests {
         let direct = jpeg_rgba(&jpeg, image::metadata::Orientation::NoTransforms).expect("decoded directly");
         // the same pixels the RGB decode gives
         assert_eq!(direct.as_bytes(), to_pixels(decode(&jpeg).unwrap()).as_bytes());
-        let v = decode_view(&jpeg, 1000, 1000, u64::MAX).unwrap().unwrap();
+        let v = decode_view(&jpeg, ViewBox::within((1000, 1000)), u64::MAX).unwrap().unwrap();
         assert!(v.opaque && v.original.as_bytes() == direct.as_bytes());
         // turned by its EXIF: decoded as before, still upright
         let sideways = sideways_jpeg();
         assert!(jpeg_rgba(&sideways, image::metadata::Orientation::Rotate90).is_none());
-        let v = decode_view(&sideways, 1000, 1000, u64::MAX).unwrap().unwrap();
+        let v = decode_view(&sideways, ViewBox::within((1000, 1000)), u64::MAX).unwrap().unwrap();
         assert_eq!((v.original.width(), v.original.height()), (20, 40));
     }
 
@@ -1094,7 +1131,7 @@ mod tests {
         assert!(matches!(decode(&png), Err(image::ImageError::Limits(_))));
         assert!(decode_thumb(&png, 100).is_err() && decode_rgba(&png).is_err());
         assert!(decode_within(&claimed_png(2049, &[]), 2048 * 2048).is_err());
-        assert!(decode_view(&png, 100, 100, u64::MAX).unwrap().is_none());
+        assert!(decode_view(&png, ViewBox::within((100, 100)), u64::MAX).unwrap().is_none());
         assert!(photo::prepare(&png, photo::Quality::Standard).is_err());
         assert!(animation_png(&png, 32).is_err());
     }
@@ -1104,7 +1141,7 @@ mod tests {
         let gif = claimed_gif(u16::MAX, 1);
         assert_eq!(gif.len(), 29);
         assert!(decode(&gif).is_err());
-        assert!(decode_view(&gif, 100, 100, u64::MAX).unwrap().is_none());
+        assert!(decode_view(&gif, ViewBox::within((100, 100)), u64::MAX).unwrap().is_none());
         assert!(!is_animated(&gif));
         assert!(stream_gif(&gif, 32, |_, _| true).is_err());
         assert!(animation_png(&gif, 32).is_err());

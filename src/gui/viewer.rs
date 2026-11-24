@@ -2,7 +2,8 @@
 //! the window's frame buffer don't outlive it. It also closes when its row goes away (deleted,
 //! expired, another thread opened).
 //!
-//! An image opens at its own size within the screen, drawn 1:1, centered on where it was clicked.
+//! An image opens taking as much of the screen as the main window does, in its own shape and never
+//! past its own size, drawn 1:1, centered halfway from the main window's center to the click.
 //! Dragging moves the window, or the
 //! image on the axes where that is bigger than the window; a click, Esc or the ✕ near the top
 //! right corner closes it. The wheel scales image and window together around the cursor; the window stops at
@@ -22,7 +23,7 @@ use slint::winit_030::WinitWindowAccessor;
 use super::*;
 use crate::types::{ViewerImage, ViewerPixels};
 
-/// Share of the monitor's work area a newly shown image may take.
+/// Share of the monitor's work area a newly shown image may take at most.
 const SCREEN_SHARE: f32 = 0.8;
 /// Size of a cell of the thumbnail strip in `ImageViewer`.
 const THUMB_CELL: f32 = 44.0;
@@ -72,6 +73,9 @@ struct Viewer {
     id: String,
     /// the image on screen
     index: usize,
+    /// physical px² each image is shown at (within the screen): the main window's at opening, so
+    /// a small window opens small images
+    area: u64,
     /// the image last asked for; other answers are late and dropped
     wanted_index: Cell<usize>,
     count: usize,
@@ -105,16 +109,18 @@ struct Viewer {
 
 thread_local! {
     static VIEWER: RefCell<Option<Viewer>> = const { RefCell::new(None) };
-    /// row whose first image is on its way (the window opens when it arrives), and the cursor at
-    /// the click: it may have moved on by then
-    static PENDING: RefCell<Option<(String, Option<(i32, i32)>)>> = const { RefCell::new(None) };
+    /// row whose first image is on its way (the window opens when it arrives), the cursor at
+    /// the click (it may have moved on by then) and the area images get (`Viewer::area`)
+    static PENDING: RefCell<Option<(String, Option<(i32, i32)>, u64)>> = const { RefCell::new(None) };
 }
 
 pub(crate) fn open(app: &AppWindow, id: String, index: usize) {
     close();
     UI.with_borrow_mut(super::anim::stop_gif);
-    PENDING.with_borrow_mut(|p| *p = Some((id.clone(), cursor_pos())));
-    send_cmd(Command::ViewImage { id, index, fit: screen_box(window::hwnd(app)) });
+    let size = app.window().size();
+    let area = size.width as u64 * size.height as u64;
+    PENDING.with_borrow_mut(|p| *p = Some((id.clone(), cursor_pos(), area)));
+    send_cmd(Command::ViewImage { id, index, fit: view_box(area, window::hwnd(app)) });
 }
 
 /// The viewer is open, or an image is on its way to it. A GIF in the message list stays still
@@ -170,12 +176,12 @@ fn mark_seen(v: &Viewer) {
 pub(crate) fn arrived(app: &AppWindow, img: ViewerImage) {
     let same = VIEWER.with_borrow(|v| v.as_ref().is_some_and(|v| v.id == img.id));
     if !same {
-        let wanted = PENDING.with_borrow_mut(|p| if p.as_ref().is_some_and(|(id, _)| *id == img.id) { p.take() } else { None });
-        let Some((_, clicked)) = wanted else { return };
+        let wanted = PENDING.with_borrow_mut(|p| if p.as_ref().is_some_and(|(id, ..)| *id == img.id) { p.take() } else { None });
+        let Some((_, clicked, area)) = wanted else { return };
         if !row_has_image(&img.id, img.once) {
             return;
         }
-        if let Err(e) = create(app, img, clicked) {
+        if let Err(e) = create(app, img, clicked, area) {
             tracing::warn!("image viewer: {e}");
         }
         return;
@@ -266,7 +272,7 @@ fn toggle_download() {
         if UI.with_borrow(|ui| ui.media_labels.downloading(&key)) {
             send_cmd(Command::ToggleImageDownload { id: v.id.clone(), index: v.index });
         } else {
-            send_cmd(Command::ViewImage { id: v.id.clone(), index: v.index, fit: screen_box(viewer_hwnd(&v.win)) });
+            send_cmd(Command::ViewImage { id: v.id.clone(), index: v.index, fit: view_box(v.area, viewer_hwnd(&v.win)) });
         }
     });
 }
@@ -288,7 +294,7 @@ fn show_details(win: &ImageViewer, img: &ViewerImage) {
     win.set_current(img.index as i32);
 }
 
-fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) -> Result<(), slint::PlatformError> {
+fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>, area: u64) -> Result<(), slint::PlatformError> {
     let pending = img.pending.clone();
     let win = ImageViewer::new()?;
     win.on_go(|index| go_to(index as usize));
@@ -392,13 +398,13 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
     win.set_shown_w(pixels.0 as i32);
     win.set_shown_h(pixels.1 as i32);
     win.window().set_size(slint::PhysicalSize::new(size.0, size.1));
-    let area = work_area(window::hwnd(app));
-    // no cursor: the middle of the screen
-    let center = clicked.or(area.map(|(x, y, w, h)| (x + w / 2, y + h / 2)));
-    if let Some((cx, cy)) = center {
-        let (x, y, ..) = on_screen(area, cx - size.0 as i32 / 2, cy - size.1 as i32 / 2, size.0, size.1);
-        move_window(win.window(), slint::PhysicalPosition::new(x, y));
-    }
+    // halfway from the main window's center to the click: near what was clicked, without
+    // swinging out to the side the picture sat on
+    let (pos, main) = (window_pos(app.window()), app.window().size());
+    let middle = (pos.x + main.width as i32 / 2, pos.y + main.height as i32 / 2);
+    let (cx, cy) = clicked.map_or(middle, |(x, y)| ((middle.0 + x) / 2, (middle.1 + y) / 2));
+    let (x, y, ..) = on_screen(work_area(window::hwnd(app)), cx - size.0 as i32 / 2, cy - size.1 as i32 / 2, size.0, size.1);
+    move_window(win.window(), slint::PhysicalPosition::new(x, y));
     win.show()?;
     // the native window doesn't exist yet: show only asks for it
     let (weak, owner) = (win.as_weak(), window::hwnd(app));
@@ -418,6 +424,7 @@ fn create(app: &AppWindow, mut img: ViewerImage, clicked: Option<(i32, i32)>) ->
             win,
             id: img.id,
             index: img.index,
+            area,
             wanted_index: Cell::new(img.index),
             count: img.count,
             wheel_held: Cell::new(None),
@@ -509,8 +516,7 @@ fn go_to(index: usize) {
             v.win.set_current(index as i32);
             v.win.set_strip_on(true);
             v.hide_strip.start(slint::TimerMode::SingleShot, STRIP_SHOWN, || with_current(|v| v.win.set_strip_on(false)));
-            let fit = screen_box(viewer_hwnd(&v.win));
-            send_cmd(Command::ViewImage { id: v.id.clone(), index, fit });
+            send_cmd(Command::ViewImage { id: v.id.clone(), index, fit: view_box(v.area, viewer_hwnd(&v.win)) });
         }
     });
 }
@@ -761,10 +767,11 @@ fn clear_patch(v: &Viewer) {
     v.win.set_patch(Image::default());
 }
 
-/// Largest image size for a new image, physical px.
-fn screen_box(hwnd: isize) -> (u32, u32) {
+/// The size a new image is shown at, physical px: `area` in its own shape, within a share of the
+/// screen the window is on.
+fn view_box(area: u64, hwnd: isize) -> sigwin_thumb::ViewBox {
     let (w, h) = work_area(hwnd).map_or((1920, 1080), |(_, _, w, h)| (w, h));
-    ((w as f32 * SCREEN_SHARE) as u32, (h as f32 * SCREEN_SHARE) as u32)
+    sigwin_thumb::ViewBox { area, max: ((w as f32 * SCREEN_SHARE) as u32, (h as f32 * SCREEN_SHARE) as u32) }
 }
 
 /// Work area (x, y, w, h) of the monitor the window is on; a headless run's own screen there.

@@ -301,7 +301,7 @@ pub(super) fn demo_real(emit: backend::Emit, thumbs: Thumbs, mut cmd_rx: tokio::
                     let Some((variants, size)) = viewed(&current, &id) else { continue };
                     let index = index.min(variants.len() - 1);
                     let Ok(png) = sigwin_thumb::png_rgba(&scene(size.0, size.1, variants[index])) else { continue };
-                    let Ok(Some(view)) = sigwin_thumb::decode_view(&png, fit.0, fit.1, u64::MAX) else { continue };
+                    let Ok(Some(view)) = sigwin_thumb::decode_view(&png, fit, u64::MAX) else { continue };
                     let pixels = types::ViewerPixels::from(view);
                     emit(Event::ViewerImage(types::ViewerImage { id, index, count: variants.len(), pixels, animated: false, pending: String::new(), once }));
                 }

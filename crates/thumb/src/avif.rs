@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn view_and_send_take_avif() {
-        let v = crate::decode_view(OPAQUE, 1000, 1000, u64::MAX).unwrap().unwrap();
+        let v = crate::decode_view(OPAQUE, crate::ViewBox::within((1000, 1000)), u64::MAX).unwrap().unwrap();
         assert!(v.opaque && v.fitted.is_none());
         let sent = crate::photo::prepare(OPAQUE, crate::photo::Quality::Standard).unwrap().unwrap();
         assert_eq!(sent.content_type, "image/jpeg");
