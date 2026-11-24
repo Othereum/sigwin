@@ -1254,7 +1254,7 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
         Command::StickerAnimated(k) if k == "demo-st-1" => emit(Event::StickerAnimated(k.clone())),
         Command::PickerFrames(items) => {
             for (pack, id) in items {
-                demo_sticker(emit, format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX), 72);
+                demo_sticker(emit, format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX), 80);
             }
         }
         Command::PeekSticker(pack, id, animated) => {

@@ -553,9 +553,9 @@ pub(super) async fn send_sticker_task(
     deliver(&mut m, thread, dm.into(), ts, group_revision).await
 }
 
-/// Logical sizes the picker shows stickers at (ui/stickers.slint: `cell - 12px`, `PackCover`
+/// Logical sizes the picker shows stickers at (ui/stickers.slint: `art`, `PackCover`
 /// and its size in a selected tab).
-pub(super) const PICKER_CELL: u32 = 72;
+pub(super) const PICKER_CELL: u32 = 80;
 
 pub(super) const PACK_COVER: u32 = 32;
 

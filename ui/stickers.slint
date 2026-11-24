@@ -189,6 +189,8 @@ export component StickerPanel inherits Rectangle {
     callback close();
 
     property <length> cell: 84px;
+    // a sticker's size in its cell: keep PICKER_CELL (src/backend/stickers.rs) equal to it
+    property <length> art: cell - 4px;
     // the side paddings, and room for the grid's scrollbar thumb
     property <int> cols: max(1, floor((self.width - 50px) / cell));
     property <bool> manage: StickerData.current-pack == "" || StickerData.current-pack == "+";
@@ -470,15 +472,15 @@ export component StickerPanel inherits Rectangle {
                     border-width: i == StickerData.focus-index ? 2px : 0px;
                     border-color: Theme.accent;
                     Image {
-                        width: root.cell - 12px;
-                        height: root.cell - 12px;
+                        width: root.art;
+                        height: root.art;
                         source: s.anim.width > 0 ? s.anim : s.img;
                         image-fit: contain;
                     }
                     // a previewed pack's sticker on its way
                     if root.previewing && s.img.width == 0 && !s.failed: Rectangle {
-                        width: root.cell - 12px;
-                        height: root.cell - 12px;
+                        width: root.art;
+                        height: root.art;
                         border-radius: 10px;
                         background: Theme.loading;
                     }
