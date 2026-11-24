@@ -10,6 +10,7 @@
 //! plays them right away.
 //! With Windows' animation effects off, a sticker plays only while hovered, in the list and the
 //! picker, and animated ones have a mark until then (the list asks only whether one is).
+//! Without the window's focus no sticker plays (`focus_changed`).
 //!
 //! GIFs play from frames the backend streams (`backend::gif`): one at a time, decoded off the UI
 //! thread, which Slint's player can't do for big ones.
@@ -118,8 +119,12 @@ struct Picker {
 }
 
 impl Anims {
-    /// A sticker's animation for a message row (empty: show the still).
+    /// A sticker's animation for a message row (empty: show the still). Without the focus none
+    /// plays; the animations stay, to play again at once when it comes back.
     pub(crate) fn image(&self, key: &str) -> Image {
+        if !super::presence::focused() {
+            return Image::default();
+        }
         self.list.get(key).map(|s| s.image.clone()).unwrap_or_default()
     }
 
@@ -261,6 +266,28 @@ pub(crate) fn pause(paused: bool) {
         // called from the window procedure: don't touch UI state from inside it
         slint::Timer::single_shot(Duration::ZERO, || UI.with_borrow_mut(stop_gif));
     }
+}
+
+/// The main window gained or lost the focus. Without it no sticker plays, and the GIFs playing
+/// stop, as the pointer often rests on one while the user is in another app; one the pointer
+/// moves onto still plays. Called from the window procedure: acts on the next turn.
+pub(crate) fn focus_changed() {
+    slint::Timer::single_shot(Duration::ZERO, || {
+        let focused = super::presence::focused();
+        UI.with_borrow_mut(|ui| {
+            if !focused {
+                stop_gif(ui);
+            }
+            let list = &ui.anims.list;
+            super::rows::redraw_rows(ui, |m| m.sticker && list.contains_key(&m.image_key));
+            update_picker(ui);
+        });
+        if !focused {
+            if let Some(app) = APP.with_borrow(|a| a.as_ref().and_then(|w| w.upgrade())) {
+                super::attach::stop_gif(&app);
+            }
+        }
+    });
 }
 
 /// The cursor came onto cell `cell` of row `id` or left it. A GIF plays while the cursor is on
@@ -464,7 +491,10 @@ pub(crate) fn update_picker(ui: &mut Ui) {
     let grid = &ui.sticker.grid;
     p.turn += 1;
     let (first, end) = p.range;
-    let want: HashSet<&str> = if hover_only {
+    let focused = super::presence::focused();
+    let want: HashSet<&str> = if !focused {
+        HashSet::new()
+    } else if hover_only {
         p.hovered.iter().map(String::as_str).collect()
     } else {
         grid.iter().skip(first).take(end.saturating_sub(first)).filter(|s| s.animated).map(|s| s.key.as_str()).collect()
@@ -511,7 +541,8 @@ pub(crate) fn update_picker(ui: &mut Ui) {
     let mut off: Vec<(u64, &String, usize)> =
         p.made.iter().filter(|(k, _)| !p.shown.contains(*k)).map(|(k, (s, seen))| (*seen, k, s.bytes())).collect();
     let mut held = off.iter().map(|o| o.2).sum::<usize>();
-    if held > OFF_SCREEN {
+    // without the focus none is shown, but those on screen play again when it comes back
+    if held > OFF_SCREEN && focused {
         off.sort_by_key(|o| o.0);
         let gone: Vec<String> = off
             .into_iter()

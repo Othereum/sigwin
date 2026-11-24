@@ -134,6 +134,12 @@ pub(crate) fn focus_changed(app: &AppWindow, focused: bool) {
     }
     STATE.set(Some(s));
     refresh(app);
+    super::anim::focus_changed();
+}
+
+/// Whether the main window has the focus.
+pub(crate) fn focused() -> bool {
+    state().focused
 }
 
 /// Tells the backend when being active starts or ends, reads the rows on screen once
