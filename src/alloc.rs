@@ -96,7 +96,7 @@ pub enum Gauge {
     Avatars,
     /// photos next to group messages and of readers, open chat only
     SenderAvatars,
-    /// animated stickers playing in the open chat
+    /// animated stickers playing in the open chat and the picker, and the picker's big one
     Anims,
     /// the composer's attachment tiles
     Composer,

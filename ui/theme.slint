@@ -22,6 +22,8 @@ export global Anim {
     callback sticker-hover(string, bool);
     // the picker grid's cells on screen, as indices [first, end): their stickers play
     callback picker-view(int, int);
+    // the picker grid stopped scrolling: its cells learn which one the resting pointer is on
+    callback picker-scrolled();
     // a GIF picture in the message list (message id) gained or lost the hover: it plays meanwhile
     callback gif-hover(string, int, bool);
 }

@@ -34,6 +34,11 @@ export global StickerData {
     callback retry-preview();
     // the grid's sticker to show (scrolled to and marked for a moment), -1 none
     in-out property <int> focus-index: -1;
+    // the grid's sticker to show big, -1 none; answered with `peek-img`, made at `peek-size`
+    // (its size in chats) on its longer side
+    callback peek(int);
+    in property <image> peek-img;
+    in property <float> peek-size: 180;
 }
 
 // A pack's cover with rounded corners. `small`: smaller in its selected tab, drawn from an image
@@ -203,9 +208,34 @@ export component StickerPanel inherits Rectangle {
     property <length> tab-pitch: 44px;
     property <length> tabs-width: max(0px, (StickerData.packs.length + root.lead-tabs + (StickerData.has-preview ? 1 : 0)) * root.tab-pitch - 4px);
     // the selected tab comes into view: when picked, when the panel opens, when the tabs arrive
+    // the grid cell under the pointer (-1 none), and whether a big copy of it shows: once the
+    // pointer has rested a moment, then at once from cell to cell until it has been off the
+    // cells a while
+    property <int> hover-i: -1;
+    // that cell's place in the panel (the grid is in an `if`: its ids aren't reachable here)
+    property <length> hover-x;
+    property <length> hover-y;
+    property <bool> peeking;
+    // the grid is scrolling: its cells move under a resting pointer without telling it, so the
+    // big one goes meanwhile and comes back at once where the pointer rests after
+    property <bool> scrolling;
+    // bumped once the cells know the pointer again after a scroll: the one under it says so,
+    // even if it is the cell that had it before (no hover change to tell)
+    property <int> recheck;
+    property <int> peek-i: root.peeking && !root.manage ? root.hover-i : -1;
+    function hovered(i: int, x: length, y: length) {
+        root.hover-i = i;
+        root.hover-x = x - root.absolute-position.x;
+        root.hover-y = y - root.absolute-position.y;
+    }
+    changed peek-i => { StickerData.peek(self.peek-i); }
     property <string> cur: StickerData.current-pack;
     property <bool> loaded: StickerData.packs-loaded;
-    changed cur => { root.reveal-tab(); }
+    changed cur => {
+        root.hover-i = -1;
+        root.peeking = false;
+        root.reveal-tab();
+    }
     changed loaded => { root.reveal-tab(); }
     init => { root.reveal-tab(); }
     function reveal-tab() {
@@ -406,6 +436,13 @@ export component StickerPanel inherits Rectangle {
                 Anim.picker-view(self.first, self.end);
                 self.show-focus();
             }
+            changed content-y => {
+                root.hover-i = -1;
+                root.scrolling = true;
+                // restart() only resets a running timer
+                settle.start();
+                settle.restart();
+            }
             changed first => { Anim.picker-view(self.first, self.end); }
             changed end => { Anim.picker-view(self.first, self.end); }
             changed focused => { self.show-focus(); }
@@ -468,6 +505,17 @@ export component StickerPanel inherits Rectangle {
                         }
                         changed has-hover => {
                             if s.animated { Anim.hover(s.pack, s.id, self.has-hover); }
+                            if self.has-hover && !root.scrolling {
+                                root.hovered(i, parent.absolute-position.x, parent.absolute-position.y);
+                            } else if root.hover-i == i {
+                                root.hover-i = -1;
+                            }
+                        }
+                    }
+                    property <int> recheck: root.recheck;
+                    changed recheck => {
+                        if sta.has-hover {
+                            root.hovered(i, self.absolute-position.x, self.absolute-position.y);
                         }
                     }
                 }
@@ -541,5 +589,59 @@ export component StickerPanel inherits Rectangle {
         interval: 1500ms;
         running: StickerData.focus-index >= 0;
         triggered => { StickerData.focus-index = -1; }
+    }
+
+    Timer {
+        interval: 400ms;
+        running: !root.peeking && root.hover-i >= 0;
+        triggered => { root.peeking = true; }
+    }
+    Timer {
+        interval: 300ms;
+        running: root.peeking && root.hover-i < 0 && !root.scrolling;
+        triggered => { root.peeking = false; }
+    }
+    // the scroll has ended (no move for a moment): the pointer is told to the cells again
+    settle := Timer {
+        interval: 150ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.scrolling = false;
+            Anim.picker-scrolled();
+            recheck-timer.start();
+        }
+    }
+    // after `picker-scrolled`'s hover refresh, which runs on the next turn
+    recheck-timer := Timer {
+        interval: 30ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.recheck += 1;
+        }
+    }
+
+    // the sticker under the pointer, big, right above its cell where the eyes are, hiding none
+    // of its row or those below; below the cell if the window has no room above. It takes no
+    // pointer, so the cells it covers still get it.
+    if root.peek-i >= 0 && StickerData.peek-img.width > 0: Rectangle {
+        property <length> side: StickerData.peek-size * 1px;
+        width: self.side + 24px;
+        height: self.side + 24px;
+        x: clamp(root.hover-x + root.cell / 2 - self.width / 2, 16px, root.width - 16px - self.width);
+        y: root.hover-y - self.height + root.absolute-position.y >= 8px ? root.hover-y - self.height : root.hover-y + root.cell;
+        border-radius: 16px;
+        background: Theme.sidebar;
+        border-width: 1px;
+        border-color: Theme.border;
+        drop-shadow-blur: 12px;
+        drop-shadow-color: Theme.shadow;
+        Image {
+            width: parent.side;
+            height: parent.side;
+            source: StickerData.peek-img;
+            image-fit: contain;
+        }
     }
 }

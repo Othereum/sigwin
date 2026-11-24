@@ -116,6 +116,16 @@ struct Picker {
     range: (usize, usize),
     hovered: Option<String>,
     turn: u64,
+    peek: Option<Peek>,
+}
+
+/// The picker sticker shown big (`StickerData.peek-img`), at its size in chats.
+struct Peek {
+    key: String,
+    /// its still arrived, or the backend found none
+    answered: bool,
+    still: Option<(Image, crate::alloc::Held)>,
+    anim: Option<Sticker>,
 }
 
 impl Anims {
@@ -213,6 +223,7 @@ pub(crate) fn wire(app: &AppWindow) {
         slint::Timer::single_shot(Duration::ZERO, move || shown(&id));
     });
     app.on_gif_scrolled(refresh_hover);
+    g.on_picker_scrolled(refresh_hover);
     g.on_gif_hover(|id, cell, on| {
         let id = id.to_string();
         // these run while Slint evaluates the row: act on the next turn of the event loop
@@ -281,6 +292,7 @@ pub(crate) fn focus_changed() {
             let list = &ui.anims.list;
             super::rows::redraw_rows(ui, |m| m.sticker && list.contains_key(&m.image_key));
             update_picker(ui);
+            show_peek(&ui.anims.picker);
         });
         if !focused {
             if let Some(app) = APP.with_borrow(|a| a.as_ref().and_then(|w| w.upgrade())) {
@@ -475,6 +487,9 @@ pub(crate) fn picker_grid(ui: &mut Ui, pack: &str) {
     let p = std::mem::take(&mut ui.anims.picker);
     ui.anims.picker.range = p.range;
     ui.anims.picker.pack = pack.to_string();
+    if p.peek.is_some() {
+        show_peek(&ui.anims.picker);
+    }
     if p.asked.iter().any(|k| !p.made.contains_key(k) && !p.stills.contains(k)) {
         if let Some(tx) = &ui.tx {
             let _ = tx.send(Command::PickerFrames(Vec::new()));
@@ -602,6 +617,71 @@ pub(crate) fn frames_arrived(f: Frames) {
         trim_list(ui);
         tracing::debug!(playing = ui.anims.list.len(), kb = ui.anims.bytes() / 1024, "anim frames");
     });
+}
+
+/// The picker's grid cell `index` is to be shown big, or none (-1).
+pub(crate) fn peek(index: i32) {
+    UI.with_borrow_mut(|ui| {
+        let s = usize::try_from(index).ok().and_then(|i| ui.sticker.grid.get(i));
+        let p = &mut ui.anims.picker;
+        if p.peek.as_ref().map(|k| &k.key) == s.map(|s| &s.key) {
+            return;
+        }
+        let Some(s) = s else {
+            p.peek = None;
+            show_peek(p);
+            return;
+        };
+        // the one shown stays until this one's still arrives, so moving between cells doesn't
+        // blink
+        p.peek = Some(Peek { key: s.key.clone(), answered: false, still: None, anim: None });
+        if let Some(tx) = &ui.tx {
+            let _ = tx.send(Command::PeekSticker(s.pack.clone(), s.id, s.animated));
+        }
+    });
+}
+
+pub(crate) fn peek_still(t: crate::types::Thumb) {
+    UI.with_borrow_mut(|ui| {
+        let Some(k) = ui.anims.picker.peek.as_mut().filter(|k| k.key == t.key && !k.answered) else { return };
+        k.answered = true;
+        if t.width > 0 {
+            let held = crate::alloc::Held::new(crate::alloc::Gauge::Anims, t.rgba.len());
+            k.still = Some((Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height)), held));
+        }
+        show_peek(&ui.anims.picker);
+    });
+}
+
+pub(crate) fn peek_frames(f: Frames) {
+    UI.with_borrow_mut(|ui| {
+        let Some(k) = ui.anims.picker.peek.as_mut().filter(|k| k.key == f.key && k.anim.is_none()) else { return };
+        let Some(mut s) = Sticker::new(&f) else { return };
+        s.set_playing(true);
+        k.anim = Some(s);
+        show_peek(&ui.anims.picker);
+    });
+}
+
+/// Puts the big sticker in the picker: its animation while the window has the focus, else its
+/// still; nothing once it isn't wanted or can't be read.
+fn show_peek(p: &Picker) {
+    let Some(app) = APP.with_borrow(|a| a.as_ref().and_then(|w| w.upgrade())) else { return };
+    let d = app.global::<crate::StickerData>();
+    let Some(k) = &p.peek else {
+        d.set_peek_img(Image::default());
+        return;
+    };
+    let anim = k.anim.as_ref().filter(|_| super::presence::focused()).map(|s| s.image.clone());
+    match anim.or_else(|| k.still.as_ref().map(|s| s.0.clone())) {
+        Some(img) => {
+            d.set_peek_size(crate::view::media::sticker_size() as f32);
+            d.set_peek_img(img);
+        }
+        // not here yet: the one shown stays (see `peek`)
+        None if !k.answered => {}
+        None => d.set_peek_img(Image::default()),
+    }
 }
 
 /// Puts a key's animation (or none) on its message rows.

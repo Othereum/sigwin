@@ -244,6 +244,53 @@ impl App {
         });
     }
 
+    /// The sticker the picker shows big, at its size in chats: the still first, then the frames
+    /// of an animated one unless another was asked for meanwhile. One blocking thread works
+    /// through only the newest asked, as the pointer may cross many cells.
+    pub(super) fn peek_sticker(&self, pack: String, id: u32, animated: bool) {
+        // the previewed pack's stickers are only in memory
+        let held = self.preview.as_ref().filter(|p| p.hex == pack).and_then(|p| p.bytes.get(&id)).map(|(b, _)| b.clone());
+        let mut q = self.peek_queue.lock().unwrap_or_else(|e| e.into_inner());
+        q.next = Some(PeekJob { pack, id, animated, held });
+        if q.running {
+            return;
+        }
+        q.running = true;
+        let queue = self.peek_queue.clone();
+        let dir = self.paths.thumbs.clone();
+        let emit = self.emit.clone();
+        tokio::task::spawn_blocking(move || loop {
+            let Some(j) = ({
+                let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+                q.running = q.next.is_some();
+                q.next.take()
+            }) else {
+                return;
+            };
+            let key = sticker_thumb_key(&j.pack, j.id);
+            let fit = view::media::sticker_size();
+            let still = match &j.held {
+                Some(b) => still_thumb(key.clone(), b, fit),
+                // cached like the grid's, so resting on it again is quick
+                None => StickerJob { base: key.clone(), key: key.clone(), bytes: None, fit }.make(&dir).ok(),
+            };
+            emit(Event::PeekStill(still.unwrap_or(Thumb { key: key.clone(), width: 0, height: 0, rgba: Vec::new() })));
+            if !j.animated || queue.lock().unwrap_or_else(|e| e.into_inner()).next.is_some() {
+                continue;
+            }
+            let f = match &j.held {
+                Some(b) => Frames::decode(key, b, fit),
+                None => match sigwin_vault::read(&anim_source(&dir, &j.pack, j.id)) {
+                    Ok(bytes) => Frames::decode(key, &bytes, fit),
+                    Err(_) => continue,
+                },
+            };
+            if !f.png.is_empty() {
+                emit(Event::PeekFrames(f));
+            }
+        });
+    }
+
     pub(super) fn sticker_cover_path(&self, pack_hex: &str, id: u32) -> PathBuf {
         self.paths.thumbs.join(format!("{}-{THUMB_MAX}.enc", sticker_thumb_key(pack_hex, id)))
     }
@@ -587,6 +634,21 @@ pub(super) struct PickerQueue {
     todo: std::collections::VecDeque<((String, u32), Option<Arc<[u8]>>)>,
     busy: Option<(String, u32)>,
     running: bool,
+}
+
+/// `App::peek_sticker`'s work: the newest sticker asked for, whether a thread runs.
+#[derive(Default)]
+pub(super) struct PeekQueue {
+    next: Option<PeekJob>,
+    running: bool,
+}
+
+struct PeekJob {
+    pack: String,
+    id: u32,
+    animated: bool,
+    /// a previewed pack's sticker, held in memory
+    held: Option<Arc<[u8]>>,
 }
 
 /// Every picker file of these packs: thumbs, covers, animated sources and the marker.

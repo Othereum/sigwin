@@ -928,6 +928,8 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     d.on_pack_index(|id| stickers::pack_index(&id));
+    // runs while Slint evaluates the panel: act on the next turn of the event loop
+    d.on_peek(|i| slint::Timer::single_shot(std::time::Duration::ZERO, move || anim::peek(i)));
 
     let s = send.clone();
     let weak = app.as_weak();

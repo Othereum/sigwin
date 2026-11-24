@@ -1257,6 +1257,20 @@ fn demo_frames(emit: &backend::Emit, c: &Command) {
                 demo_sticker(emit, format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX), 72);
             }
         }
+        Command::PeekSticker(pack, id, animated) => {
+            let key = format!("{}{pack}_{id}", types::STICKER_THUMB_PREFIX);
+            let fit = view::media::sticker_size();
+            emit(Event::PeekStill(demo_blob(&key, types::physical_px(fit), (id * 12) as u8)));
+            if *animated {
+                let emit = emit.clone();
+                std::thread::spawn(move || {
+                    let frames = demo_pulse();
+                    if let Ok(gif) = sigwin_thumb::gif(frames, 120) {
+                        emit(Event::PeekFrames(types::Frames::decode(key, &gif, fit)));
+                    }
+                });
+            }
+        }
         _ => {}
     }
 }
@@ -1269,7 +1283,18 @@ fn demo_sticker(emit: &backend::Emit, key: String, fit: u32) {
         emit(Event::Frames(types::Frames::still(key)));
         return;
     }
-    let frames = (0..8u32)
+    let frames = demo_pulse();
+    let emit = emit.clone();
+    std::thread::spawn(move || {
+        if let Ok(gif) = sigwin_thumb::gif(frames, 120) {
+            emit(Event::Frames(types::Frames::decode(key, &gif, fit)));
+        }
+    });
+}
+
+/// A demo animated sticker's frames: a pulsing blob.
+fn demo_pulse() -> Vec<image::RgbaImage> {
+    (0..8u32)
         .map(|f| {
             let r = 40.0 + 50.0 * (f as f32 / 8.0 * std::f32::consts::TAU).sin().abs();
             image::RgbaImage::from_fn(200, 200, |x, y| {
@@ -1277,13 +1302,7 @@ fn demo_sticker(emit: &backend::Emit, key: String, fit: u32) {
                 if d < r { image::Rgba([240, 120 + (f * 15) as u8, 40, 255]) } else { image::Rgba([0, 0, 0, 0]) }
             })
         })
-        .collect();
-    let emit = emit.clone();
-    std::thread::spawn(move || {
-        if let Ok(gif) = sigwin_thumb::gif(frames, 120) {
-            emit(Event::Frames(types::Frames::decode(key, &gif, fit)));
-        }
-    });
+        .collect()
 }
 
 /// SIGWIN_DEMO_VIDEO: the newest rows show videos: with a frame on the way, with a blurhash only,

@@ -481,6 +481,8 @@ struct App {
     grid_gen: Arc<std::sync::atomic::AtomicU64>,
     /// picker stickers waiting for their frames (`stickers.rs`)
     picker_queue: Arc<std::sync::Mutex<stickers::PickerQueue>>,
+    /// the picker sticker to show big next (`stickers.rs`)
+    peek_queue: Arc<std::sync::Mutex<stickers::PeekQueue>>,
     /// the pack the sticker panel shows before it is installed
     preview: Option<packpreview::Preview>,
     /// the sticker pack being uploaded (`packmaker.rs`)
@@ -658,6 +660,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         avatar_refresh: Default::default(),
         grid_gen: Default::default(),
         picker_queue: Default::default(),
+        peek_queue: Default::default(),
         preview: None,
         pack_task: None,
         notes: Default::default(),
@@ -900,6 +903,7 @@ impl App {
             Command::StickerFrames(key) => self.sticker_frames(key),
             Command::StickerAnimated(key) => self.sticker_animated(key),
             Command::PickerFrames(items) => self.picker_frames(items),
+            Command::PeekSticker(pack, id, animated) => self.peek_sticker(pack, id, animated),
             Command::React { id, emoji, remove } => self.react(&id, emoji, remove).await,
             Command::Edit { id, text, mentions } => self.edit(&id, text, &mentions).await,
             Command::Delete(id) => self.delete(&id).await,

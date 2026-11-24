@@ -709,6 +709,10 @@ pub enum Event {
     StickerAnimated(String),
     /// sticker picker images (grid cells, pack covers), batched
     StickerThumbs(Vec<Thumb>),
+    /// answer to `PeekSticker`, keyed like the grid's cell; width 0: there is none
+    PeekStill(Thumb),
+    /// answer to `PeekSticker` for an animated one (none if it can't be read)
+    PeekFrames(Frames),
     /// round photo of a thread (key = thread key); width 0 = none
     Avatar(Arc<Thumb>),
     /// a short message that goes away by itself
@@ -890,6 +894,10 @@ pub enum Command {
     /// the ones of an earlier call not made yet (empty: stop)
     /// (pack hex id, sticker id)
     PickerFrames(Vec<(String, u32)>),
+    /// the picker sticker shown big while the pointer rests on it, at its size in chats: answered
+    /// by `Event::PeekStill`, then by `Event::PeekFrames` if `animated`; replaces an earlier one
+    /// not made yet (pack hex id, sticker id, animated)
+    PeekSticker(String, u32, bool),
     /// react to message `id`; `remove` takes back our reaction `emoji`
     React { id: String, emoji: String, remove: bool },
     /// replace the text of our message `id`
