@@ -65,7 +65,7 @@ pub(super) fn thumbs_arrived(app: &AppWindow, list: Vec<types::Thumb>) {
         if let Some(v) = &p.preview {
             if take_covers(&mut p.covers, &fresh, &v.pack.cover_key) {
                 let d = app.global::<StickerData>();
-                d.set_preview(preview_item(v, &p.covers, d.get_preview().installing));
+                d.set_preview(preview_item(v, &p.covers, &d.get_preview()));
             }
         }
         // grid images live only in the model rows; ones for a pack no longer shown are
@@ -88,17 +88,21 @@ pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>, recent: 
     let d = app.global::<StickerData>();
     d.set_packs_loaded(true);
     d.set_has_recent(recent);
-    let (first, preview) = UI.with_borrow_mut(|ui| {
+    let (first, preview, installed) = UI.with_borrow_mut(|ui| {
         let p = &mut ui.sticker;
         p.packs.set_vec(list.iter().map(|d| pack_item(d, &p.covers)).collect::<Vec<_>>());
         let first = list.first().map(|d| d.id.clone());
         // installed now: a tab like the others (the backend let go of it)
-        if p.preview.as_ref().is_some_and(|v| list.iter().any(|d| d.id == v.pack.id)) {
+        let installed = p.preview.as_ref().is_some_and(|v| list.iter().any(|d| d.id == v.pack.id));
+        if installed {
             p.preview = None;
         }
         p.pack_dtos = list;
-        (first, p.preview.as_ref().map(|v| v.pack.id.clone()))
+        (first, p.preview.as_ref().map(|v| v.pack.id.clone()), installed)
     });
+    if installed {
+        set_installing(app, None, None);
+    }
     d.set_has_preview(preview.is_some());
     let cur = d.get_current_pack().to_string();
     // the pack page stays open while packs are removed there (opening the panel leaves it)
@@ -167,7 +171,7 @@ pub(super) fn preview_arrived(app: &AppWindow, v: types::PreviewDto) {
                 p.pack_dtos.iter().any(|d| *k == d.cover_key || *k == types::small_cover_key(&d.cover_key))
             });
         }
-        let item = preview_item(&v, &p.covers, false);
+        let item = preview_item(&v, &p.covers, &d.get_preview());
         p.preview = Some(v);
         item
     });
@@ -192,22 +196,47 @@ fn take_covers(covers: &mut held::Pictures<{ held::STICKER_COVERS }>, fresh: &Ha
     any
 }
 
-fn preview_item(v: &types::PreviewDto, covers: &HashMap<String, Image>, installing: bool) -> PreviewItem {
+/// `shown`: the item shown now; an install under way for the same pack carries over.
+fn preview_item(v: &types::PreviewDto, covers: &HashMap<String, Image>, shown: &PreviewItem) -> PreviewItem {
+    let same = shown.pack.id == v.pack.id.as_str();
     PreviewItem {
         pack: pack_item(&v.pack, covers),
         count: v.count as i32,
         loading: v.state == types::PreviewState::Loading,
         failed: v.state == types::PreviewState::Failed,
-        installing,
+        installing: same && shown.installing,
+        progress: if same { shown.progress } else { 0.0 },
     }
 }
 
 pub(super) fn install_preview(app: &AppWindow) {
+    set_installing(app, None, Some(0.0));
+    send_cmd(Command::InstallPreview);
+}
+
+/// The previewed pack (`pack`, or whichever is shown) is being added this far along (0 to 1), or
+/// isn't any more (`None`).
+fn set_installing(app: &AppWindow, pack: Option<&str>, progress: Option<f32>) {
     let d = app.global::<StickerData>();
     let mut item = d.get_preview();
-    item.installing = true;
+    if pack.is_some_and(|p| item.pack.id != p) {
+        return;
+    }
+    item.installing = progress.is_some();
+    item.progress = progress.unwrap_or(0.0);
     d.set_preview(item);
-    send_cmd(Command::InstallPreview);
+}
+
+pub(super) fn add_progress(app: &AppWindow, pack: &str, progress: f32) {
+    set_installing(app, Some(pack), Some(progress));
+}
+
+/// Failed, the preview's button is back. Added, the button stays full until the pack's own tab
+/// takes the preview's place (`packs_arrived`).
+pub(super) fn add_ended(app: &AppWindow, pack: &str, ok: bool) {
+    if !ok {
+        set_installing(app, Some(pack), None);
+    }
 }
 
 /// A sticker of the previewed pack arrived (its thumb came just before) or failed.

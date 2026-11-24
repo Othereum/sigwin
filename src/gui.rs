@@ -379,6 +379,15 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
         Event::StickerPacks { packs, recent } => stickers::packs_arrived(app, packs, recent),
         Event::OpenStickerPanel { pack, sticker } => stickers::open_at(app, pack, sticker),
         Event::PackPreview(v) => stickers::preview_arrived(app, v),
+        Event::PackAdding { pack, done, total } => {
+            let progress = if total == 0 { 0.0 } else { done as f32 / total as f32 };
+            stickers::add_progress(app, &pack, progress);
+            packmaker::add_progress(app, &pack, progress);
+        }
+        Event::PackAdded { pack, ok } => {
+            stickers::add_ended(app, &pack, ok);
+            packmaker::add_ended(app, &pack, ok);
+        }
         Event::PreviewSticker { key, animated, failed } => stickers::preview_sticker(&key, animated, failed),
         Event::Account { name, number, device, receipts, typing } => {
             let state = |v: Option<bool>| if v == Some(false) { tr!("Off") } else { tr!("On") };

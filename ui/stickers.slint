@@ -372,8 +372,9 @@ export component StickerPanel inherits Rectangle {
             }
             PrimaryButton {
                 y: (parent.height - self.height) / 2;
-                text: StickerData.preview.installing ? @tr("Installing…") : @tr("Install");
+                text: StickerData.preview.installing ? @tr("Adding…") : @tr("Add");
                 enabled: !StickerData.preview.loading && !StickerData.preview.failed && !StickerData.preview.installing;
+                progress: StickerData.preview.installing ? StickerData.preview.progress : -1;
                 clicked => { StickerData.install-preview(); }
             }
         }

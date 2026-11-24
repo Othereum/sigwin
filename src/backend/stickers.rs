@@ -1,5 +1,8 @@
 //! Sticker packs: picker, grid thumbnails, sending, installing.
 
+use presage::proto::sync_message::{sticker_pack_operation, StickerPackOperation};
+use presage::store::{StickerPack, StickerPackManifest};
+
 use super::*;
 use crate::types::RECENT_TAB;
 
@@ -330,13 +333,16 @@ impl App {
         .await;
     }
 
-    pub(super) fn install_pack(&self, id: Vec<u8>, key: Vec<u8>) {
+    /// `have`: the pack's manifest and the stickers already downloaded (a preview's), if any.
+    pub(super) fn install_pack(&self, id: Vec<u8>, key: Vec<u8>, have: Option<(StickerPackManifest, HashMap<u32, Arc<[u8]>>)>) {
         let Some(mut m) = self.manager.clone() else { return };
-        let tx = self.tx.clone();
-        self.progress(tr!("Downloading sticker pack…"));
+        let mut store = self.store.clone();
+        let (tx, emit) = (self.tx.clone(), self.emit.clone());
         tokio::task::spawn_local(async move {
-            let res = Box::pin(m.install_sticker_pack(&id, &key)).await;
-            let _ = tx.send(Internal::PackInstalled(res.map(|_| hex::encode(&id)).map_err(|e| e.to_string())));
+            let hex = hex::encode(&id);
+            let progress = |done, total| emit(Event::PackAdding { pack: hex.clone(), done, total });
+            let res = Box::pin(add_pack(&mut m, &mut store, &id, &key, have, progress)).await;
+            let _ = tx.send(Internal::PackInstalled(hex, res));
         });
     }
 
@@ -373,6 +379,65 @@ impl App {
         let Some((id, key, sticker)) = pack else { return };
         self.preview_pack(id, key, sticker).await;
     }
+}
+
+/// What presage's `install_sticker_pack` does, with progress (`done`, `total` stickers) and several
+/// downloads at once: every
+/// sticker stored, then the other devices told. Store the pack whole or not at all: an added pack is
+/// never downloaded again, so a missing sticker would stay missing.
+async fn add_pack(
+    m: &mut Manager<SqliteStore, Registered>,
+    store: &mut SqliteStore,
+    id: &[u8],
+    key: &[u8],
+    have: Option<(StickerPackManifest, HashMap<u32, Arc<[u8]>>)>,
+    progress: impl Fn(usize, usize),
+) -> Result<(), String> {
+    let (mut manifest, held) = match have {
+        Some(h) => h,
+        None => (m.sticker_pack_manifest(id, key).await.map_err(|e| e.to_string())?, HashMap::new()),
+    };
+    let total = manifest.stickers.len();
+    let mut missing = Vec::new();
+    for s in &mut manifest.stickers {
+        match held.get(&s.id) {
+            Some(b) => s.bytes = Some(b.to_vec()),
+            None => missing.push(s.id),
+        }
+    }
+    drop(held);
+    let mut done = total - missing.len();
+    progress(done, total);
+    let mut got = HashMap::with_capacity(missing.len());
+    {
+        let m = &*m;
+        let mut downloads = futures::stream::iter(missing)
+            .map(|sid| async move { (sid, m.download_sticker(id, key, sid).await) })
+            .buffer_unordered(super::packpreview::PARALLEL);
+        while let Some((sid, res)) = downloads.next().await {
+            got.insert(sid, res.map_err(|e| e.to_string())?);
+            done += 1;
+            progress(done, total);
+        }
+    }
+    for s in &mut manifest.stickers {
+        if let Some(b) = got.remove(&s.id) {
+            s.bytes = Some(b);
+        }
+    }
+    let pack = StickerPack { id: id.to_vec(), key: key.to_vec(), manifest };
+    store.add_sticker_pack(&pack).await.map_err(|e| e.to_string())?;
+    drop(pack);
+    let op = StickerPackOperation {
+        pack_id: Some(id.to_vec()),
+        pack_key: Some(key.to_vec()),
+        r#type: Some(sticker_pack_operation::Type::Install as i32),
+    };
+    let sync = SyncMessage { sticker_pack_operation: vec![op], ..Default::default() };
+    let me = m.registration_data().service_ids.aci();
+    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    Box::pin(m.send_message(me, sync, ts)).await.map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// A sticker resampled to `logical` px from its bytes, with no disk cache.

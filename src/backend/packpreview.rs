@@ -9,9 +9,9 @@ use super::stickers::{cover_key, sticker_thumb_key, still_thumb, PACK_COVER, PAC
 use super::*;
 use crate::types::{PreviewDto, PreviewState};
 
-/// Downloads at once: a sticker takes most of a second, one after another a screenful would take
-/// tens of seconds.
-const PARALLEL: usize = 3;
+/// Downloads at once, here and when adding a pack: a sticker takes most of a second, one after
+/// another a screenful would take tens of seconds.
+pub(super) const PARALLEL: usize = 3;
 
 /// Tells one preview (and each retry) from the next, so late answers of an older one are dropped.
 static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -224,21 +224,15 @@ impl App {
 
     pub(super) fn install_preview(&self) {
         if let Some(p) = &self.preview {
-            self.install_pack(p.id.clone(), p.key.clone());
+            let have = p.manifest.clone().map(|m| (m, p.bytes.iter().map(|(id, (b, _))| (*id, b.clone())).collect()));
+            self.install_pack(p.id.clone(), p.key.clone(), have);
         }
     }
 
-    /// An install ended: the previewed pack, installed, is a pack like any other now; failed, its
-    /// button is back.
-    pub(super) fn preview_installed(&mut self, res: &Result<String, String>) {
-        match res {
-            Ok(hex) if self.preview.as_ref().is_some_and(|p| &p.hex == hex) => self.preview = None,
-            Err(_) => {
-                if let Some(p) = &self.preview {
-                    (self.emit)(Event::PackPreview(p.dto()));
-                }
-            }
-            Ok(_) => {}
+    /// A pack was added: previewed, it is a pack like any other now.
+    pub(super) fn preview_installed(&mut self, hex: &str) {
+        if self.preview.as_ref().is_some_and(|p| p.hex == hex) {
+            self.preview = None;
         }
     }
 }

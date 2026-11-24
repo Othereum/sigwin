@@ -735,9 +735,12 @@ pub enum Event {
     Gallery { files: bool, items: Vec<GalleryItemDto>, more: bool, reset: bool, indexing: bool },
     /// open the sticker panel on this (installed) pack, showing this sticker of it
     OpenStickerPanel { pack: String, sticker: Option<u32> },
-    /// open the sticker panel on a pack not installed, or its state changed (also after an
-    /// install failed: the button is back)
+    /// open the sticker panel on a pack not installed, or its state changed
     PackPreview(PreviewDto),
+    /// adding a pack to the user's stickers: `done` of its `total` stickers downloaded
+    PackAdding { pack: String, done: usize, total: usize },
+    /// adding a pack ended (`ok`: added; a failure has its notice)
+    PackAdded { pack: String, ok: bool },
     /// a sticker of the previewed pack arrived (its thumb comes in `StickerThumbs` first) or
     /// couldn't be downloaded
     PreviewSticker { key: String, animated: bool, failed: bool },

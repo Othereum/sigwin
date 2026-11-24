@@ -265,7 +265,8 @@ enum Internal {
     /// the files were saved (the last one's path)
     Saved(String, PathBuf),
     ProgressDone,
-    PackInstalled(Result<String, String>),
+    /// a pack's hex id, and whether adding it worked
+    PackInstalled(String, Result<(), String>),
     PackRemoved(Result<(), String>),
     /// the previewed pack's manifest, for preview `seq`
     PreviewManifest(u64, Result<presage::store::StickerPackManifest, String>),
@@ -880,7 +881,7 @@ impl App {
             Command::OpenPack(id) => self.open_pack(&id).await,
             Command::SendSticker { pack, id } => self.send_sticker(&pack, id).await,
             Command::InstallPack { id, key } => match (hex::decode(&id), hex::decode(&key)) {
-                (Ok(id), Ok(key)) => self.install_pack(id, key),
+                (Ok(id), Ok(key)) => self.install_pack(id, key, None),
                 _ => self.notice(tr!("Invalid sticker pack")),
             },
             Command::PreviewPackUrl(url) => match parse_pack_url(&url) {
@@ -1086,10 +1087,15 @@ impl App {
                 (self.emit)(Event::Saved(text, path));
             }
             Internal::ProgressDone => (self.emit)(Event::ProgressDone),
-            Internal::PackInstalled(Ok(id)) => {
-                (self.emit)(Event::ProgressDone);
-                self.preview_installed(&Ok(id.clone()));
-                (self.emit)(Event::OpenStickerPanel { pack: id, sticker: None });
+            Internal::PackInstalled(id, res) => {
+                (self.emit)(Event::PackAdded { pack: id.clone(), ok: res.is_ok() });
+                match res {
+                    Ok(()) => {
+                        self.preview_installed(&id);
+                        (self.emit)(Event::OpenStickerPanel { pack: id, sticker: None });
+                    }
+                    Err(e) => self.notice(tr!("Couldn't add the sticker pack: {}", e)),
+                }
             }
             Internal::PreviewManifest(seq, res) => self.manifest_arrived(seq, res),
             Internal::PreviewSticker(seq, id, res) => self.preview_sticker_arrived(seq, id, res),
@@ -1118,10 +1124,6 @@ impl App {
                 self.persist_dirty = true;
                 self.current_dirty = true;
                 self.threads_dirty = true;
-            }
-            Internal::PackInstalled(Err(e)) => {
-                self.notice(tr!("Couldn't add the sticker pack: {}", e));
-                self.preview_installed(&Err(e));
             }
             Internal::PackRemoved(res) => {
                 (self.emit)(Event::ProgressDone);

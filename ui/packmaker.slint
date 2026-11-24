@@ -33,6 +33,8 @@ export global PackData {
     in property <string> link;
     // the pack was added to the user's stickers
     in-out property <bool> added;
+    // adding it is under way, this far (0 to 1); negative: not
+    in-out property <float> add-progress: -1;
     in property <[[string]]> picker-rows;
     in-out property <int> picker-tab;
     // the sticker panel's button: Rust resets the page and opens it
@@ -463,10 +465,11 @@ export component PackPage inherits Rectangle {
                             spacing: 8px;
                             alignment: start;
                             PrimaryButton {
-                                text: PackData.added ? @tr("Added") : @tr("Add to my stickers");
-                                enabled: !PackData.added;
+                                text: PackData.added ? @tr("Added") : PackData.add-progress >= 0 ? @tr("Adding…") : @tr("Add to my stickers");
+                                enabled: !PackData.added && PackData.add-progress < 0;
+                                progress: PackData.add-progress;
                                 clicked => {
-                                    PackData.added = true;
+                                    PackData.add-progress = 0;
                                     PackData.add-to-mine();
                                 }
                             }

@@ -594,11 +594,11 @@ msgstr "다른 대화로 보낸 메시지를 전송하지 못했습니다"
 msgid "Couldn't load the sticker pack"
 msgstr "스티커 팩을 불러오지 못했습니다"
 
-msgid "Install"
-msgstr "설치"
+msgid "Add"
+msgstr "추가"
 
-msgid "Installing…"
-msgstr "설치 중…"
+msgid "Adding…"
+msgstr "추가 중…"
 
 msgid "View sticker pack"
 msgstr "스티커 팩 보기"
@@ -753,8 +753,6 @@ msgstr "다운로드 실패: {}"
 msgid "Downloading attachment… {}%"
 msgstr "첨부파일 다운로드 중… {}%"
 
-msgid "Downloading sticker pack…"
-msgstr "스티커 팩 내려받는 중…"
 
 msgid "Edit failed: {}"
 msgstr "수정 실패: {}"

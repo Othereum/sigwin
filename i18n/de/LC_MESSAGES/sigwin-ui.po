@@ -596,11 +596,11 @@ msgstr "Eine Nachricht an einen anderen Chat konnte nicht gesendet werden"
 msgid "Couldn't load the sticker pack"
 msgstr "Das Sticker-Set konnte nicht geladen werden"
 
-msgid "Install"
-msgstr "Installieren"
+msgid "Add"
+msgstr "Hinzufügen"
 
-msgid "Installing…"
-msgstr "Wird installiert …"
+msgid "Adding…"
+msgstr "Wird hinzugefügt …"
 
 msgid "View sticker pack"
 msgstr "Sticker-Set ansehen"
@@ -756,8 +756,6 @@ msgstr "Herunterladen fehlgeschlagen: {}"
 msgid "Downloading attachment… {}%"
 msgstr "Anhang wird heruntergeladen … {} %"
 
-msgid "Downloading sticker pack…"
-msgstr "Sticker-Set wird heruntergeladen …"
 
 msgid "Edit failed: {}"
 msgstr "Bearbeiten fehlgeschlagen: {}"

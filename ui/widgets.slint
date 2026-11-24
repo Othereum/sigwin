@@ -479,11 +479,20 @@ export component DangerButton inherits Rectangle {
 export component PrimaryButton inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
+    // 0 to 1: the work the button started is this far along, filling it from the left; negative: none
+    in property <float> progress: -1;
     callback clicked;
     height: 32px;
     min-width: lbl.preferred-width + 32px;
     border-radius: 6px;
-    background: !root.enabled ? Theme.field : ta.pressed ? Theme.accent.darker(0.2) : (ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent);
+    clip: root.progress >= 0;
+    background: !root.enabled || root.progress >= 0 ? Theme.field : ta.pressed ? Theme.accent.darker(0.2) : (ta.has-hover ? Theme.accent.darker(0.1) : Theme.accent);
+    if root.progress >= 0: Rectangle {
+        x: 0px;
+        width: root.width * clamp(root.progress, 0, 1);
+        background: Theme.accent.with-alpha(0.3);
+        animate width { duration: 150ms; }
+    }
     ta := TouchArea {
         enabled: root.enabled;
         mouse-cursor: self.enabled ? pointer : default;
@@ -491,7 +500,7 @@ export component PrimaryButton inherits Rectangle {
     }
     lbl := Text {
         text: root.text;
-        color: root.enabled ? white : Theme.subtle;
+        color: root.enabled && root.progress < 0 ? white : Theme.subtle;
         font-size: 13px;
         horizontal-alignment: center;
         vertical-alignment: center;

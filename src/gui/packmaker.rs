@@ -220,6 +220,7 @@ fn reset(app: &AppWindow) {
     d.set_error(SharedString::new());
     d.set_link(SharedString::new());
     d.set_added(false);
+    d.set_add_progress(-1.0);
     d.set_picker_rows(ModelRc::default());
 }
 
@@ -424,6 +425,26 @@ fn open_step_4(app: &AppWindow) -> Option<PackData<'_>> {
 pub(super) fn progress(app: &AppWindow, done: usize, total: usize) {
     if let Some(d) = open_step_4(app) {
         d.set_progress(format!("{done}/{total}").into());
+    }
+}
+
+fn made(pack: &str) -> bool {
+    UI.with_borrow(|ui| ui.maker.made.as_ref().is_some_and(|(id, _)| id == pack))
+}
+
+/// Adding the made pack to the user's stickers is this far along (0 to 1).
+pub(super) fn add_progress(app: &AppWindow, pack: &str, progress: f32) {
+    if made(pack) {
+        app.global::<PackData>().set_add_progress(progress);
+    }
+}
+
+/// Adding a pack ended: the made one's button says it's added, or is back to try again.
+pub(super) fn add_ended(app: &AppWindow, pack: &str, ok: bool) {
+    if made(pack) {
+        let d = app.global::<PackData>();
+        d.set_add_progress(-1.0);
+        d.set_added(ok);
     }
 }
 
