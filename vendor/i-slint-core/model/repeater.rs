@@ -158,6 +158,8 @@ pub struct RepeaterLayoutState {
     pub previous_content_y: Coord,
     /// The y position of the item at `offset`.
     pub anchor_y: Coord,
+    /// The y position of the item at `offset` in the viewport, from the previous layout pass.
+    pub previous_offset_y: Coord,
 }
 
 /// Abstraction over a repeater's instance collection so the same algorithm
@@ -430,6 +432,10 @@ fn update_visible_instances(
             new_off += 1;
         }
         (new_off, it_y)
+    } else if content_y_value == state.previous_content_y {
+        // Recomputing the position from `anchor_y` rounds, which can move a row edge across the
+        // viewport edge, so that each pass would add or remove that row.
+        (state.offset, state.previous_offset_y)
     } else {
         // Scrolled up: will instantiate items before offset in the loop below.
         (state.offset, first_item_y + content_y_value)
@@ -438,7 +444,6 @@ fn update_visible_instances(
     let target_row = scroll_to_row.as_ref().map(|request| request.row);
     let mut target_span: Option<(Coord, Coord)>;
     let mut loop_count = 0;
-    // sigwin patch: see "Reached end of model" below
     let mut shifted_to_end = false;
     loop {
         target_span = None;
@@ -459,8 +464,8 @@ fn update_visible_instances(
         if prepend_count > 0 {
             state.offset = new_offset;
         }
-        // sigwin patch: shifting rows down to fill the viewport must not move row 0 below the
-        // top: a model shorter than the viewport starts at the top.
+        // Shifting rows down to fill the viewport must not move row 0 below the top: a model
+        // shorter than the viewport starts at the top.
         if (seek.is_some() || shifted_to_end) && new_offset == 0 {
             new_offset_y = new_offset_y.min(0 as Coord);
         }
@@ -514,8 +519,6 @@ fn update_visible_instances(
             debug_assert!(idx >= row_count);
             // Reached end of model with room to spare. Scroll up.
             content_y_value += listview_height - y;
-            // sigwin patch: move the layout start too, or the next pass lays out the same rows
-            // again and the view never scrolls up (upstream bug)
             new_offset_y += listview_height - y;
             shifted_to_end = true;
             loop_count += 1;
@@ -555,6 +558,7 @@ fn update_visible_instances(
             props.content_y_set(LogicalLength::new(new_content_y));
         }
         state.previous_content_y = new_content_y;
+        state.previous_offset_y = new_offset_y;
 
         if let Some(request) = scroll_to_row.take() {
             let (top, height) =

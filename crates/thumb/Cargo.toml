@@ -12,7 +12,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # decodes a JPEG at 1/2, 1/4 or 1/8 of its size, which `image`'s decoder can't: a thumbnail
 # made from a photo needn't hold all of it decoded. No rayon: thumbnails are made one at a time
 jpeg-decoder = { version = "0.3.2", default-features = false }
-slint = { version = "1.19.0", default-features = false, features = ["std", "compat-1-2"] }
+slint = { version = "1.19.1", default-features = false, features = ["std", "compat-1-2"] }
 # `image`'s JPEG decoder, used directly to decode into RGBA for the viewer (same versions)
 zune-jpeg = "0.5.15"
 zune-core = "0.5.3"

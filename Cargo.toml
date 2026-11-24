@@ -9,7 +9,7 @@ description = "A lightweight Signal-compatible desktop client (unofficial)"
 presage = { git = "https://github.com/whisperfish/presage", rev = "10d41fc421f33523a1d5a589812dcbaf0c399dcf" }
 presage-store-sqlite = { git = "https://github.com/whisperfish/presage", rev = "10d41fc421f33523a1d5a589812dcbaf0c399dcf", features = ["cdsi"] }
 
-slint = { version = "1.19.0", default-features = false, features = [
+slint = { version = "1.19.1", default-features = false, features = [
     "std",
     "compat-1-2",
     "backend-winit",
@@ -20,7 +20,7 @@ slint = { version = "1.19.0", default-features = false, features = [
 ] }
 # patched (see [patch.crates-io]): text styles API `styled_text::sigwin_*`.
 # image-decoders: `Image::load_from_data` plays animated stickers (PNG through our `image`)
-i-slint-core = { version = "=1.19.0", default-features = false, features = ["image-decoders"] }
+i-slint-core = { version = "=1.19.1", default-features = false, features = ["image-decoders"] }
 raw-window-handle = "0.6"
 
 anyhow = "1"

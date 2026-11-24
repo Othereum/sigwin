@@ -1085,7 +1085,7 @@ impl PreEditSelection {
     }
 }
 
-#[repr(C)]
+#[repr(u8)]
 #[derive(Clone)]
 enum UndoItemKind {
     TextInsert,
@@ -1604,7 +1604,10 @@ impl Item for TextInput {
                         ));
                     }
 
-                    if cfg!(not(target_vendor = "apple")) && *_reason == FocusReason::TabNavigation
+                    // Like line edits on Windows and Linux.
+                    if cfg!(not(target_vendor = "apple"))
+                        && *_reason == FocusReason::TabNavigation
+                        && self.single_line()
                     {
                         self.select_all(window_adapter, self_rc);
                     }
@@ -1757,7 +1760,7 @@ impl core::convert::TryFrom<char> for TextCursorDirection {
 
 /// Which visual position a cursor byte offset means when it sits at a soft line break: the same
 /// offset is both the end of the wrapped line and the start of the following one.
-#[repr(C)]
+#[repr(u8)]
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub enum TextCursorAffinity {
     /// The start of the line after the break. Produced by typing and horizontal movement.

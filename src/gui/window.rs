@@ -74,13 +74,11 @@ pub(crate) fn set_scale(w: &slint::Window, sf: f32) {
     w.dispatch_event(slint::platform::WindowEvent::Resized { size: size.to_logical(sf) });
 }
 
-/// winit's scale change for one of our windows, handled instead of Slint, which has two faults
-/// there. It takes the new scale but keeps the window item's logical size until winit reports a
-/// resize, and none comes when the window keeps its size (maximized): the next paint overruns the
-/// buffer. And it asks winit to keep a size set before the window existed (`restore_geometry`,
-/// the viewer's first size) when the window got exactly that size, so the window kept its pixels
-/// instead of its logical size. Here winit's own new size stands, and the item fits the current
-/// pixels until it arrives. Upstream: https://github.com/slint-ui/slint/issues/15092
+/// winit's scale change for one of our windows, handled instead of Slint. Slint takes the new
+/// scale but keeps the window item's logical size until winit reports a resize, and none comes
+/// when the window keeps its size (maximized): the next paint overruns the buffer. Here the item
+/// fits the current pixels until winit's new size arrives. Upstream still has this as a TODO in
+/// its winit adapter's `ScaleFactorChanged` handler.
 pub(crate) fn scale_changed(w: &slint::Window, sf: f64) -> EventResult {
     set_scale(w, sf as f32);
     EventResult::PreventDefault
