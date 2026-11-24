@@ -17,6 +17,7 @@ import { RequestCard, RequestData, SafetyTipsDialog } from "request.slint";
 import { ChipMenu, ChipMenuRow, FilterChip, FindKind, ResultRow, ResultKind, ScopeToken, SearchData } from "search.slint";
 import { GalleryData, GalleryPage } from "gallery.slint";
 import { CalendarData, CalendarPopup } from "calendar.slint";
+import { ConfirmData, ConfirmDialog } from "confirm.slint";
 
 // Structs and globals the Rust side uses.
 export { ThreadItem, ImageCell, ReactionItem, ReaderItem, MsgItem, PinItem, ReplyItem, MentionItem, PackItem, PreviewItem, StickerItem, ViewOnce } from "types.slint";
@@ -31,6 +32,7 @@ export { RequestData } from "request.slint";
 export { StickerData } from "stickers.slint";
 export { GalleryCell, GalleryData, GalleryRow } from "gallery.slint";
 export { CalendarCell, CalendarData } from "calendar.slint";
+export { ConfirmData } from "confirm.slint";
 
 // Our photo at the sidebar's top, the way into the settings: a gear over it on hover, a ring while open.
 component MeButton inherits Rectangle {
@@ -2573,5 +2575,14 @@ export component AppWindow inherits Window {
         // above everything that sits over the input (attachment, reply, link preview), not just the
         // input row: the list ends where those begin
         y: msg-list.absolute-position.y + msg-list.height - self.height - 10px;
+    }
+
+    // over everything, the sticker pack maker included
+    if ConfirmData.open: ConfirmDialog {
+        closed => {
+            if (page == "main" && !root.settings-open && !PackData.open && root.current-key != "") {
+                root.focus-composer();
+            }
+        }
     }
 }

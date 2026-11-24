@@ -587,8 +587,8 @@ msgstr "(Entwurf)"
 msgid "(reply)"
 msgstr "(Antwort)"
 
-msgid "A message can be up to 64KB. This one is {}KB.\nPlease send it in parts."
-msgstr "Eine Nachricht darf höchstens 64 KB groß sein. Diese hat {} KB.\nBitte sende sie in Teilen."
+msgid "A message can be up to 64KB. This one is {}KB. Please send it in parts."
+msgstr "Eine Nachricht darf höchstens 64 KB groß sein. Diese hat {} KB. Bitte sende sie in Teilen."
 
 msgid "A message to another chat couldn't be sent"
 msgstr "Eine Nachricht an einen anderen Chat konnte nicht gesendet werden"
@@ -774,6 +774,9 @@ msgstr "Fehlgeschlagen"
 msgid "Canceled"
 msgstr "Abgebrochen"
 
+msgid "Cancel"
+msgstr "Abbrechen"
+
 msgid "Sending was canceled before anyone received it."
 msgstr "Das Senden wurde abgebrochen, bevor jemand die Nachricht erhalten hat."
 
@@ -826,9 +829,6 @@ msgstr "Nachricht nicht gefunden"
 
 msgid "Message request"
 msgstr "Unterhaltungsanfrage"
-
-msgid "Message too long"
-msgstr "Nachricht zu lang"
 
 msgid "Message too long (64KB max)"
 msgstr "Nachricht zu lang (höchstens 64 KB)"
@@ -1059,6 +1059,9 @@ msgstr "Unbekannt ({})"
 
 msgid "Unknown number"
 msgstr "Unbekannte Nummer"
+
+msgid "Unlink"
+msgstr "Entkoppeln"
 
 msgid "Unlink this PC and delete all of its data?"
 msgstr "Diesen PC entkoppeln und alle seine Daten löschen?"
@@ -1371,6 +1374,9 @@ msgstr "Cover"
 
 msgid "Cover: {}"
 msgstr "Cover: {}"
+
+msgid "Create"
+msgstr "Erstellen"
 
 msgid "Create a sticker pack"
 msgstr "Sticker-Paket erstellen"

@@ -372,11 +372,11 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             1 => RequestAnswer::Delete,
             _ => RequestAnswer::Block,
         };
-        let (title, text) = match answer {
-            RequestAnswer::Delete => (tr!("Delete chat"), tr!("Delete the chat with {}? Its messages and attachments are deleted from this PC, and your phone is told too.", name)),
-            _ => (tr!("Block"), tr!("Block {}? You won't get their messages, and your phone is told too.", name)),
+        let (title, text, action) = match answer {
+            RequestAnswer::Delete => (tr!("Delete chat"), tr!("Delete the chat with {}? Its messages and attachments are deleted from this PC, and your phone is told too.", name), tr!("Delete")),
+            _ => (tr!("Block"), tr!("Block {}? You won't get their messages, and your phone is told too.", name), tr!("Block")),
         };
-        super::window::ask(&app, super::window::Ask::YesNo, title, text, move || send_cmd(Command::AnswerRequest { key, answer }));
+        window::ask(&app, title, text, window::Action::Danger(action), move || send_cmd(Command::AnswerRequest { key, answer }));
     });
 
     let weak = app.as_weak();
@@ -393,8 +393,8 @@ fn wire_composer(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
         // before anything is cleared: the text stays in the composer to shorten
         // (mentions and format markers only shrink it, so this never refuses what would fit)
         if text.len() > crate::view::text::MAX_LONG_TEXT_BYTES {
-            let text = tr!("A message can be up to 64KB. This one is {}KB.\nPlease send it in parts.", text.len().div_ceil(1024));
-            window::ask(&app, window::Ask::Warning, tr!("Message too long"), text, || {});
+            let text = tr!("A message can be up to 64KB. This one is {}KB. Please send it in parts.", text.len().div_ceil(1024));
+            notice::show(&app, &text);
             return;
         }
         if let Some(id) = UI.with_borrow_mut(|ui| ui.editing.take()) {
@@ -804,7 +804,7 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     app.on_delete_message(move |id| {
         let Some(app) = weak.upgrade() else { return };
         let id = id.to_string();
-        window::ask(&app, window::Ask::YesNo, tr!("Delete message"), tr!("Delete this message for everyone?").into(), move || {
+        window::ask(&app, tr!("Delete message"), tr!("Delete this message for everyone?"), window::Action::Danger(tr!("Delete")), move || {
             send_cmd(Command::Delete(id))
         });
     });
@@ -974,8 +974,8 @@ fn wire_settings(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let weak = app.as_weak();
     app.on_unlink(move || {
         let Some(app) = weak.upgrade() else { return };
-        let text = tr!("Unlink this PC and delete all of its data?").into();
-        window::ask(&app, window::Ask::YesNo, tr!("Delete data"), text, || send_cmd(Command::Unlink));
+        let text = tr!("Unlink this PC and delete all of its data?");
+        window::ask(&app, tr!("Delete data"), text, window::Action::Danger(tr!("Unlink")), || send_cmd(Command::Unlink));
     });
 
     let s = send.clone();
@@ -1116,7 +1116,7 @@ pub(crate) fn start_updates(app: &AppWindow, exe: PathBuf) {
 pub(super) fn save_received(app: &AppWindow, danger: bool, save: Command) {
     if danger {
         let text = tr!("Files of this kind can harm your computer. Save it only if you trust the sender. Save it?");
-        window::ask(app, window::Ask::YesNo, tr!("Possibly dangerous file"), text.into(), move || send_cmd(save));
+        window::ask(app, tr!("Possibly dangerous file"), text, window::Action::Danger(tr!("Save")), move || send_cmd(save));
         return;
     }
     send_cmd(save);

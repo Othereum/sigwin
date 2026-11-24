@@ -153,8 +153,8 @@ pub(crate) fn wire(app: &AppWindow) {
             // Signal Desktop asks for both too
             3 if !d.get_title().trim().is_empty() && !d.get_author().trim().is_empty() => {
                 let weak = app.as_weak();
-                let text = tr!("Once created, a pack can't be edited or deleted. Create it?").to_string();
-                window::ask(&app, window::Ask::YesNo, tr!("Create a sticker pack"), text, move || {
+                let text = tr!("Once created, a pack can't be edited or deleted. Create it?");
+                window::ask(&app, tr!("Create a sticker pack"), text, window::Action::Go(tr!("Create")), move || {
                     if let Some(app) = weak.upgrade() {
                         upload(&app);
                     }

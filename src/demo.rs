@@ -176,7 +176,7 @@ fn demo_pack(app: &AppWindow, how: &str) {
     } else {
         crate::gui::packmaker::demo_files(app, names.iter().map(|n| dir.join(n)).collect(), false);
     }
-    // `SIGWIN_DEMO_PACK_UPLOAD=1`: goes on to the upload by itself (the confirmation is a real dialog)
+    // `SIGWIN_DEMO_PACK_UPLOAD=1`: goes on to the upload by itself, past the confirmation
     if std::env::var_os("SIGWIN_DEMO_PACK_UPLOAD").is_some() {
         let weak = app.as_weak();
         slint::Timer::single_shot(std::time::Duration::from_millis(900), move || {

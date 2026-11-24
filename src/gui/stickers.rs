@@ -260,7 +260,8 @@ pub(super) fn move_pack(from: usize, to: usize) {
 pub(super) fn ask_remove(app: &AppWindow, index: usize) {
     let Some((id, title)) = UI.with_borrow(|ui| ui.sticker.pack_dtos.get(index).map(|d| (d.id.clone(), d.title.clone()))) else { return };
     let text = tr!("Remove “{}”? It's also removed from your other devices.", title);
-    super::window::ask(app, super::window::Ask::YesNo, tr!("Remove sticker pack"), text, move || send_cmd(Command::RemovePack(id)));
+    use super::window::{ask, Action};
+    ask(app, tr!("Remove sticker pack"), text, Action::Danger(tr!("Remove")), move || send_cmd(Command::RemovePack(id)));
 }
 
 pub(super) fn grid_arrived(app: &AppWindow, pack: String, items: Vec<types::StickerDto>) {

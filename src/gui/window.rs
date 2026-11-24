@@ -245,35 +245,32 @@ pub(crate) fn protect(hwnd: isize, on: bool) {
 #[cfg(not(windows))]
 pub(crate) fn protect(_: isize, _: bool) {}
 
-/// What a message box asks: a yes/no question, or only something to read.
-pub(crate) enum Ask {
-    YesNo,
-    Warning,
+/// The button that does what `ask` asks about, labeled with the action ("Delete", not "Yes").
+pub(crate) enum Action<'a> {
+    Go(&'a str),
+    /// red, and Enter cancels: what it does can't be undone or may do harm
+    Danger(&'a str),
 }
 
-/// A message box over the window, from a thread of its own; `yes` runs on the UI thread when it
-/// is answered so (a `Warning` has nothing to answer).
-///
-/// Never on the UI thread: a dialog there runs its own loop inside our callback, and Windows shows
-/// it only once that thread's queue is empty, which a running animation (a sticker, a GIF) never
-/// lets happen. It stayed hidden and the app hung waiting for it.
-pub(crate) fn ask(app: &AppWindow, kind: Ask, title: &str, text: String, yes: impl FnOnce() + Send + 'static) {
-    let owner = hwnd(app);
-    let title = title.to_string();
-    std::thread::spawn(move || {
-        let mut d = rfd::MessageDialog::new().set_title(title).set_description(text);
-        if owner != 0 {
-            d = d.set_parent(&picker::Owner(owner));
-        }
-        let answer = match kind {
-            Ask::YesNo => d.set_buttons(rfd::MessageButtons::YesNo).show(),
-            Ask::Warning => d.set_level(rfd::MessageLevel::Warning).show(),
-        };
-        picker::reenable(owner);
-        if matches!(kind, Ask::YesNo) && answer == rfd::MessageDialogResult::Yes {
-            let _ = slint::invoke_from_event_loop(yes);
+/// Asks before an action, in a dialog over the window; `yes` runs if it is confirmed. A new
+/// question replaces one still open, which then counts as cancelled.
+pub(crate) fn ask(app: &AppWindow, title: &str, text: impl Into<SharedString>, action: Action, yes: impl FnOnce() + 'static) {
+    let (label, danger) = match action {
+        Action::Go(l) => (l, false),
+        Action::Danger(l) => (l, true),
+    };
+    let d = app.global::<sigwin_ui::ConfirmData>();
+    let yes = std::cell::Cell::new(Some(yes));
+    d.on_answered(move |confirmed| {
+        if let Some(yes) = yes.take().filter(|_| confirmed) {
+            yes();
         }
     });
+    d.set_title(title.into());
+    d.set_text(text.into());
+    d.set_action(label.into());
+    d.set_danger(danger);
+    d.set_open(true);
 }
 
 #[cfg(windows)]

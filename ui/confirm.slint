@@ -1,0 +1,77 @@
+// A question before an action: in place of a Windows message box, which looks foreign and beeps.
+
+import { Theme } from "theme.slint";
+import { DangerButton, PlainButton, PrimaryButton } from "widgets.slint";
+
+// Rust fills it (`gui::window::ask`).
+export global ConfirmData {
+    in-out property <bool> open;
+    in property <string> title;
+    in property <string> text;
+    // the action button's label: what happens, not "Yes"
+    in property <string> action;
+    // a red action button, and Enter cancels instead of confirming
+    in property <bool> danger;
+    callback answered(bool);
+}
+
+export component ConfirmDialog inherits Rectangle {
+    // the focus has to go somewhere once the dialog is gone
+    callback closed;
+    function answer(yes: bool) {
+        ConfirmData.open = false;
+        ConfirmData.answered(yes);
+        root.closed();
+    }
+    background: Theme.scrim;
+    TouchArea {
+        clicked => { root.answer(false); }
+    }
+    keys := FocusScope {
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.answer(false);
+                return accept;
+            }
+            if (e.text == Key.Return) {
+                root.answer(!ConfirmData.danger);
+                return accept;
+            }
+            reject
+        }
+    }
+    Rectangle {
+        width: min(400px, parent.width - 40px);
+        height: col.preferred-height;
+        border-radius: 12px;
+        background: Theme.pane;
+        border-width: 1px;
+        border-color: Theme.border;
+        TouchArea { }
+        col := VerticalLayout {
+            padding: 18px;
+            spacing: 10px;
+            // a name in the text is whatever someone typed, maybe one long word
+            Text { text: ConfirmData.title; font-weight: 700; font-size: 15px; color: Theme.text; wrap: word-wrap; min-width: 0px; }
+            Text { text: ConfirmData.text; wrap: word-wrap; color: Theme.text; font-size: 13px; min-width: 0px; }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                padding-top: 4px;
+                PlainButton {
+                    text: @tr("Cancel");
+                    clicked => { root.answer(false); }
+                }
+                if ConfirmData.danger: DangerButton {
+                    text: ConfirmData.action;
+                    clicked => { root.answer(true); }
+                }
+                if !ConfirmData.danger: PrimaryButton {
+                    text: ConfirmData.action;
+                    clicked => { root.answer(true); }
+                }
+            }
+        }
+    }
+}

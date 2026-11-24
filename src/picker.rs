@@ -163,7 +163,7 @@ pub(crate) fn reenable(owner: isize) {
 }
 
 /// An HWND to own a dialog.
-pub(crate) struct Owner(pub isize);
+struct Owner(isize);
 
 impl raw_window_handle::HasWindowHandle for Owner {
     fn window_handle(&self) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
