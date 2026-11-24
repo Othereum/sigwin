@@ -281,7 +281,8 @@ component LinkPreview inherits Rectangle {
                 height: m.link-img-h;
                 border-radius: 6px;
                 clip: true;
-                background: Theme.loading;
+                // a sticker cover is drawn on the card itself, like a sticker in the chat
+                background: m.link-sticker ? transparent : Theme.loading;
                 Image {
                     width: 100%;
                     height: 100%;
@@ -303,7 +304,8 @@ component LinkPreview inherits Rectangle {
                 }
                 if m.link-desc != "": Text {
                     text: m.link-desc;
-                    color: m.outgoing ? #ffffffd0 : Theme.subtle;
+                    // a sticker pack's says who made it, not a page's blurb
+                    color: m.link-sticker ? (m.outgoing ? white : Theme.text) : (m.outgoing ? #ffffffd0 : Theme.subtle);
                     font-size: 12px;
                     wrap: word-wrap;
                     overflow: elide;

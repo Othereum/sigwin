@@ -886,7 +886,7 @@ fn wire_messages(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             s(Command::RetrySend(id.to_string()));
         } else if let Some(id) = url.strip_prefix(DISCARD_URL) {
             s(Command::DiscardFailed(id.to_string()));
-        } else if url.starts_with(crate::stickerpack::LINK) {
+        } else if crate::stickerpack::is_link(&url) {
             // the page can't install it on a desktop: the panel shows the pack instead
             s(Command::PreviewPackUrl(url.to_string()));
         } else {

@@ -139,9 +139,13 @@ const LINK_IMAGE_SMALL: (u32, u32) = (64, 64);
 pub const LINK_TITLE_MAX: usize = 200;
 pub const LINK_DESC_MAX: usize = 300;
 
-/// An image too small or of unknown size stays small (site logos). A wide one is no wider than
-/// its bubble's room, keeping its shape.
-pub fn link_image_size(w: Option<u32>, h: Option<u32>) -> (u32, u32) {
+/// An image too small or of unknown size stays small (site logos), and so does a sticker pack's
+/// cover, which a wide crop would cut. A wide one is no wider than its bubble's room, keeping
+/// its shape.
+pub fn link_image_size(w: Option<u32>, h: Option<u32>, sticker_pack: bool) -> (u32, u32) {
+    if sticker_pack {
+        return LINK_IMAGE_SMALL;
+    }
     link_image_size_in(w, h, room(Place::Boxed))
 }
 
@@ -178,7 +182,7 @@ pub fn link_card(dm: &DataMessage, ts: u64) -> Option<(crate::types::LinkCard, O
     }
     let mut card = crate::types::LinkCard { url: url.to_string(), title, description, domain: crate::link::domain(url), ..Default::default() };
     let wanted = p.image.as_ref().map(|a| {
-        let size = link_image_size(a.width, a.height);
+        let size = link_image_size(a.width, a.height, crate::stickerpack::is_link(url));
         let file_key = attachment_key(a, ts, LINK_IMAGE_INDEX);
         card.image_key = format!("{file_key}@{}x{}", size.0, size.1);
         (card.img_w, card.img_h) = size;
@@ -811,6 +815,7 @@ mod tests {
         assert_eq!(link_image_size_in(Some(1200), Some(630), 240), (240, 126));
         assert_eq!(link_image_size_in(Some(1200), Some(630), WIDE), LINK_IMAGE_WIDE);
         assert_eq!(link_image_size_in(Some(64), Some(64), 240), LINK_IMAGE_SMALL);
+        assert_eq!(link_image_size(Some(512), Some(512), true), LINK_IMAGE_SMALL);
     }
 
     #[test]

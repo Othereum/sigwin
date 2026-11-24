@@ -408,7 +408,7 @@ pub(crate) fn to_item(
         link_title: text_of(|c| &c.title),
         link_desc: text_of(|c| &c.description),
         link_domain: text_of(|c| &c.domain),
-        link_sticker: card.is_some_and(|c| c.url.starts_with(crate::stickerpack::LINK)),
+        link_sticker: card.is_some_and(|c| crate::stickerpack::is_link(&c.url)),
         link_image: card.and_then(|c| thumbs.get(&c.image_key)).cloned().unwrap_or_default(),
         link_img_w: card.map_or(0.0, |c| c.img_w as f32),
         link_img_h: card.map_or(0.0, |c| c.img_h as f32),

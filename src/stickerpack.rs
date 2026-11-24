@@ -109,6 +109,10 @@ pub fn manifest(title: &str, author: &str, emoji: &[String], cover: (u32, Option
 /// What a pack's link starts with.
 pub const LINK: &str = "https://signal.art/addstickers/";
 
+pub fn is_link(url: &str) -> bool {
+    url.starts_with(LINK)
+}
+
 pub fn link(pack_id: &str, pack_key: &[u8]) -> String {
     format!("{LINK}#pack_id={pack_id}&pack_key={}", hex::encode(pack_key))
 }

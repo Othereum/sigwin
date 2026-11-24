@@ -96,7 +96,8 @@ impl App {
         let Some(Some(f)) = d.result.clone() else { return };
         let Some(bytes) = f.content.image.clone() else { return };
         let (url, key) = (d.url.clone(), f.card.image_key.clone());
-        let made = tokio::task::spawn_blocking(move || card_images(&bytes, &key)).await;
+        let sticker_pack = crate::stickerpack::is_link(&url);
+        let made = tokio::task::spawn_blocking(move || card_images(&bytes, &key, sticker_pack)).await;
         let Ok(Some((_, _, thumbs))) = made else { return };
         // the composer's link may have changed meanwhile
         if self.link_draft.as_ref().is_none_or(|d| d.url != url) {
@@ -127,7 +128,9 @@ impl App {
 /// The preview of `url`: a sticker pack's from the pack, as Signal's apps make it; any other
 /// link's from its site.
 async fn fetch(m: Option<&Mgr>, url: String, key: String) -> Option<(Fetched, Vec<Thumb>)> {
-    let mut content = match stickers::parse_pack_url(&url).filter(|_| url.starts_with(crate::stickerpack::LINK)) {
+    let pack = stickers::parse_pack_url(&url).filter(|_| crate::stickerpack::is_link(&url));
+    let is_pack = pack.is_some();
+    let mut content = match pack {
         Some((id, pack_key)) => sticker_pack(m?, &id, &pack_key).await?,
         None => fetch_site(&url).await?,
     };
@@ -139,7 +142,7 @@ async fn fetch(m: Option<&Mgr>, url: String, key: String) -> Option<(Fetched, Ve
     let image = content.image.clone();
     let k = key.clone();
     let decoded = match image {
-        Some(bytes) => tokio::task::spawn_blocking(move || card_images(&bytes, &k)).await.ok().flatten(),
+        Some(bytes) => tokio::task::spawn_blocking(move || card_images(&bytes, &k, is_pack)).await.ok().flatten(),
         None => None,
     };
     let (dims, size, thumbs) = match decoded {
@@ -206,9 +209,9 @@ async fn sticker_pack(m: &Mgr, id: &[u8], key: &[u8]) -> Option<PreviewContent> 
 }
 
 /// The image's size, its size on the card, and thumbnails for the card and the composer.
-fn card_images(bytes: &[u8], key: &str) -> Option<((u32, u32), (u32, u32), Vec<Thumb>)> {
+fn card_images(bytes: &[u8], key: &str, sticker_pack: bool) -> Option<((u32, u32), (u32, u32), Vec<Thumb>)> {
     let dims = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
-    let size = view::media::link_image_size(Some(dims.0), Some(dims.1));
+    let size = view::media::link_image_size(Some(dims.0), Some(dims.1), sticker_pack);
     let card = (crate::types::physical_px(size.0), crate::types::physical_px(size.1));
     let small = crate::types::physical_px(COMPOSER_IMAGE);
     let side = |d| sigwin_thumb::cover_side(d, card).max(sigwin_thumb::cover_side(d, (small, small)));
