@@ -117,7 +117,7 @@ component UnaddedRow inherits Rectangle {
         }
         IconButton {
             y: (parent.height - self.height) / 2;
-            icon: Icons.copy;
+            icon: Icons.link;
             accessible-role: button;
             accessible-label: @tr("Copy link");
             clicked => { StickerData.copy-pack-link(root.pack.id); }
@@ -240,7 +240,7 @@ component PackList inherits Rectangle {
                     }
                     IconButton {
                         y: (parent.height - self.height) / 2;
-                        icon: Icons.copy;
+                        icon: Icons.link;
                         accessible-role: button;
                         accessible-label: @tr("Copy link");
                         clicked => { StickerData.copy-pack-link(p.id); }
@@ -547,6 +547,14 @@ export component StickerPanel inherits Rectangle {
                     font-size: 12px;
                     overflow: elide;
                 }
+            }
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: Icons.link;
+                accessible-role: button;
+                accessible-label: @tr("Copy link");
+                clicked => { StickerData.copy-pack-link(StickerData.preview.pack.id); }
+                Tip { hovered: parent.hovered; text: @tr("Copy link"); }
             }
             PrimaryButton {
                 y: (parent.height - self.height) / 2;

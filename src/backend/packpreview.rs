@@ -42,6 +42,11 @@ impl Preview {
         PreviewDto { pack: PackDto { id: self.hex.clone(), title, author, cover_key: cover }, state: self.state, count }
     }
 
+    /// Its key, if it is pack `id`.
+    pub(super) fn key_of(&self, id: &[u8]) -> Option<Vec<u8>> {
+        (self.id == id).then(|| self.key.clone())
+    }
+
     fn cover_id(&self) -> Option<u32> {
         let m = self.manifest.as_ref()?;
         m.cover.as_ref().map(|c| c.id).or_else(|| m.stickers.first().map(|s| s.id))

@@ -142,8 +142,11 @@ impl App {
         }
     }
 
-    /// A pack's key: installed, made here, or carried by a sticker someone sent.
+    /// A pack's key: previewed, installed, made here, or carried by a sticker someone sent.
     async fn any_pack_key(&self, id: &[u8]) -> Option<Vec<u8>> {
+        if let Some(k) = self.preview.as_ref().and_then(|p| p.key_of(id)) {
+            return Some(k);
+        }
         if let Ok(Some(k)) = self.index.pack_key(id).await {
             return Some(k);
         }
