@@ -588,6 +588,15 @@ export component StickerPanel inherits Rectangle {
             property <int> first: max(0, floor(-grid-view.content-y / root.cell)) * root.cols;
             property <int> end: min(StickerData.stickers.length, ceil((-grid-view.content-y + grid-view.visible-height) / root.cell) * root.cols);
             property <int> focused: StickerData.focus-index;
+            property <string> pack: StickerData.current-pack;
+            // another tab starts at its top (a focused sticker scrolls there after)
+            changed pack => { grid-view.content-y = 0px; }
+            // the ScrollView keeps its place when what it holds shrinks, past the new end
+            changed content-height => { self.clamp-view(); }
+            changed visible-height => { self.clamp-view(); }
+            function clamp-view() {
+                grid-view.content-y = clamp(grid-view.content-y, min(0px, grid-view.visible-height - grid-view.content-height), 0px);
+            }
             init => {
                 Anim.picker-view(self.first, self.end);
                 self.show-focus();
