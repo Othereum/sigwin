@@ -172,15 +172,15 @@ impl App {
         (items, jobs)
     }
 
-    /// A message-list sticker's frames, from its downloaded attachment (`key` is its thumbnail key).
+    /// A message-list sticker's frames (`key` is its thumbnail key).
     pub(super) fn sticker_frames(&self, key: String) {
-        let path = attachment_path(&self.paths.attachments, &key);
+        let source = self.sticker_source(&key);
         let emit = self.emit.clone();
         tokio::task::spawn_blocking(move || {
             let started = std::time::Instant::now();
-            let f = match sigwin_vault::read(&path) {
-                Ok(bytes) => Frames::decode(key, &bytes, view::media::sticker_size()),
-                Err(_) => Frames::still(key),
+            let f = match source.read() {
+                Some(bytes) => Frames::decode(key, &bytes, view::media::sticker_size()),
+                None => Frames::still(key),
             };
             debug!(ms = started.elapsed().as_millis() as u64, kb = f.png.len() / 1024, "sticker frames");
             emit(Event::Frames(f));
@@ -189,13 +189,25 @@ impl App {
 
     /// Whether a message-list sticker is animated, for its mark while only the hovered one plays.
     pub(super) fn sticker_animated(&self, key: String) {
-        let path = attachment_path(&self.paths.attachments, &key);
+        let source = self.sticker_source(&key);
         let emit = self.emit.clone();
         tokio::task::spawn_blocking(move || {
-            if sigwin_vault::read(&path).is_ok_and(|bytes| sigwin_thumb::is_animated(&bytes)) {
+            if source.read().is_some_and(|bytes| sigwin_thumb::is_animated(&bytes)) {
                 emit(Event::StickerAnimated(key));
             }
         });
+    }
+
+    /// A sticker still being sent has no attachment file yet: its bytes are in the pending send.
+    fn sticker_source(&self, key: &str) -> StickerSource {
+        let sending = self.pending.iter().find(|p| p.image_key == key).and_then(|p| match &p.job {
+            SendJob::Sticker(s) => Some(s.bytes.clone()),
+            SendJob::Text { .. } => None,
+        });
+        match sending {
+            Some(bytes) => StickerSource::Sending(bytes),
+            None => StickerSource::File(attachment_path(&self.paths.attachments, key)),
+        }
     }
 
     /// Picker stickers' frames, from the bytes `open_pack` kept for animated stickers. One at a
@@ -497,6 +509,20 @@ pub(super) fn still_thumb(key: String, bytes: &[u8], logical: u32) -> Option<Thu
 /// The thumbnail key of a pack's cover in its tab, from its sticker's key.
 pub(super) fn cover_key(sticker_key: &str) -> String {
     format!("{sticker_key}-c")
+}
+
+enum StickerSource {
+    File(PathBuf),
+    Sending(Vec<u8>),
+}
+
+impl StickerSource {
+    fn read(self) -> Option<Vec<u8>> {
+        match self {
+            StickerSource::File(path) => sigwin_vault::read(&path).ok(),
+            StickerSource::Sending(bytes) => Some(bytes),
+        }
+    }
 }
 
 #[derive(Clone)]
