@@ -1,4 +1,4 @@
-//! Image decoding and resampling. Lives in its own crate because the `fast` profile builds the
+//! Image decoding and resampling. Lives in its own crate because the dev profile builds the
 //! main crate at opt-level 0 (slint's generated code), and generic/inlined pixel code is compiled
 //! in the crate that calls it: unoptimized, a 260px Lanczos resample took ~37ms instead of ~1ms.
 

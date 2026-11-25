@@ -27,7 +27,7 @@ Every change must respect this:
 - No GPU renderer, WebView, JVM, or extra runtimes. Slint uses `renderer-software` only (GPU renderers cost 200MB+; numbers in `docs/decisions.md`). Never enable the `renderer-femtovg` / `renderer-skia` features by default.
 - Never load whole threads: always bound what you read from the store.
 - Anything that loads heavy system DLLs runs in a child process.
-- Measure, don't guess: the log prints `mem: rust heap …, private …` every 10s at debug level (`sigwin=debug`; info only every 10 min, for users' log files) (`alloc.rs` counts Rust heap; the rest is native), followed by what each counted cache holds and the uncounted rest. Anything that holds memory for a while gets an `alloc::Gauge` (`alloc::Held`, `gui::held::ImageMap`), or it hides in the rest. `SIGWIN_DEMO=1 SIGWIN_SELFTEST=1` measures the dialog and notification cost. Where a heap peak was allocated: `cargo build --profile prof --features dhat-heap` (it records only the run's single highest moment, so do just the thing being measured).
+- Measure, don't guess: the log prints `mem: rust heap …, private …` every 10s at debug level (`sigwin=debug`; info only every 10 min, for users' log files) (`alloc.rs` counts Rust heap; the rest is native), followed by what each counted cache holds and the uncounted rest. Anything that holds memory for a while gets an `alloc::Gauge` (`alloc::Held`, `gui::held::ImageMap`), or it hides in the rest. `SIGWIN_DEMO=1 SIGWIN_SELFTEST=1` measures the dialog and notification cost. Where a heap peak was allocated: `cargo build --features dhat-heap` (it records only the run's single highest moment, so do just the thing being measured).
 
 ## Hard constraint: privacy and security
 This client holds private conversations; treat a leak as worse than a crash. Every change must respect this:
@@ -40,10 +40,9 @@ This client holds private conversations; treat a leak as worse than a crash. Eve
 
 ## Build & run
 ```
-cargo build --profile fast     # day-to-day, compile checks too: optimized, no LTO, incremental -> target\fast\
-cargo build                    # debug (dev profile): only for a debugger; rebuilds slower than fast here -> target\debug\
-cargo build --release          # distribution only (~2.5 min, thin LTO)
-cargo test --profile fast      # day-to-day tests: shares the fast build cache; plain `cargo test` (debug) only when debug_assert / overflow checks matter
+cargo build             # day-to-day, compile checks too: dependencies optimized, our crates not -> target\debug\
+cargo build --release   # distribution only (~2.5 min, thin LTO); memory and speed numbers come from this
+cargo test              # shares the day-to-day build cache
 ```
 - **A running `sigwin.exe` locks its exe and the build fails with "액세스가 거부되었습니다".** Stop it first, or build a different profile.
 - `protoc` comes from `PATH`. `.cargo/config.toml` defaults `LIBCLANG_PATH` (overridable by env) and pins dummy `OPENSSL_*` dirs. libsqlite3-sys uses `bundled-sqlcipher-custom-crypto` (pure-Rust crypto); its Windows build script still demands OpenSSL paths, hence `build-support/no-openssl`.
@@ -52,7 +51,7 @@ cargo test --profile fast      # day-to-day tests: shares the fast build cache; 
 ## Verifying UI without an account
 Layout and glyph bugs only show up visually; a successful compile proves nothing about them. The demo modes (`SIGWIN_DEMO=1`, synthetic data, no backend) can run **headless**, without popping up a window, taking focus or moving the real mouse: `SIGWIN_HEADLESS="<steps>"` renders offscreen and writes PNG shots (`shot PATH`). Step syntax, demo variants and what headless can't cover: `docs/headless.md`.
 
-**Behavior** (reading, unread counts, focus, scrolling with news coming in) needs the real backend, which demo data can't give: write it as a scenario (`tests/scenarios/*.sc`, headless window on an account-less backend, `SIGWIN_FIXTURE`) or a backend scenario (`src/backend/scenarios.rs`, `cargo test`). Both run with `cargo test --profile fast`; how: `docs/headless.md`.
+**Behavior** (reading, unread counts, focus, scrolling with news coming in) needs the real backend, which demo data can't give: write it as a scenario (`tests/scenarios/*.sc`, headless window on an account-less backend, `SIGWIN_FIXTURE`) or a backend scenario (`src/backend/scenarios.rs`, `cargo test`). Both run with `cargo test`; how: `docs/headless.md`.
 
 ## Architecture in brief
 UI thread (Slint) sends `Command`s to a backend thread (tokio current_thread + `LocalSet`) that owns the `!Send` presage `Manager`; results come back as `Event`s via `upgrade_in_event_loop`. `gui/` = UI wiring and rows, `backend/` = Signal logic, `view.rs` = message rows, `db.rs` = own SQL, `types.rs` = cross-thread types, `ui/` = Slint UI (`app.slint` is the window). Full file table: `docs/architecture.md`.
@@ -69,7 +68,7 @@ Every hunk under `vendor/` has to be re-applied by hand on each Slint / presage 
 ## Conventions
 - **This file holds rules, not a description of the code.** A rule stays true when the implementation changes. Don't put current values (sizes, budgets, caps) or how a feature works today here: they go stale unnoticed. They belong in the code and its comments. The same goes for `docs/architecture.md`: it explains structure and design, not implementation details. `.claude/rules/` holds what a dependency does that bites and the invariants our code must keep, each in a few lines; how our code handles it goes in that code's comments, which a rule may point to by name.
 - **Don't pass off partial data as complete.** While what a view reads is still being prepared (a backfill, a sync, a first load), show that it is, not a list or an empty state that reads as the whole answer. Show partial results only where the view says so.
-- **UI strings are written in English** with `tr!` (Rust) or `@tr` (Slint), literals only, and translated in `i18n/<lang>/LC_MESSAGES/sigwin-ui.po`. `cargo test --profile fast i18n` lists what each catalog is missing or no longer uses, in .po form. Code comments are short and English.
+- **UI strings are written in English** with `tr!` (Rust) or `@tr` (Slint), literals only, and translated in `i18n/<lang>/LC_MESSAGES/sigwin-ui.po`. `cargo test i18n` lists what each catalog is missing or no longer uses, in .po form. Code comments are short and English.
 - In the Korean catalog, hints that tell the user how to do something end in "~할 수 있습니다" ("대화별로 설정할 수 있습니다"): a plain "~합니다" reads like what the app does, not an option they have. Hints about what the app itself does ("…를 표시합니다") stay as they are.
 - **Commit subjects are short**: one line, imperative, about 50 characters or less (hard cap 72), no trailing period. Put details in the body (blank line, then wrapped lines) only when the why isn't obvious. Don't cram the whole change list into the subject.
 - **Keep the READMEs current**: `README.md` (English) and `README.ko.md` (Korean) say the same. When a user-visible feature lands or changes, update both Features / Not supported sections in the same commit, if that changes what they say.

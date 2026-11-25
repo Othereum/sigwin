@@ -95,18 +95,18 @@
 
 ```powershell
 winget install Google.Protobuf LLVM.LLVM NASM.NASM Kitware.CMake
-cargo build --profile fast   # 개발용
-cargo build --release        # 배포용 (thin LTO)
+cargo build             # 개발용
+cargo build --release   # 배포용 (thin LTO)
 cargo test
 ```
-- 결과물은 `target\fast\` 또는 `target\release\`에 생깁니다.
+- 결과물은 `target\debug\` 또는 `target\release\`에 생깁니다.
 - LLVM이 기본 경로(`C:\Program Files\LLVM\bin`)에 없으면 `LIBCLANG_PATH`로, protoc는 `PATH` 또는 `PROTOC`로 지정하세요.
 - 앱이 실행 중이면 exe가 잠겨 빌드가 실패하니 먼저 종료하세요.
 - `target` 아래의 exe는 설치 단계를 건너뛰고 그 자리에서 실행됩니다.
 
 ## 실행
 ```powershell
-target\fast\sigwin.exe
+target\debug\sigwin.exe
 ```
 | 환경 변수 | 용도 |
 |---|---|

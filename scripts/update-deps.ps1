@@ -83,10 +83,10 @@ if (-not $changed) { Write-Host "Everything is up to date."; Show-Behind; exit 0
 # a running dev build locks its exe; installed or other copies are left alone
 Get-Process sigwin -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -like "$repo\target\*" } | Stop-Process -Force
-cargo build --profile fast; Run "cargo build"
-cargo test --profile fast; Run "cargo test"
+cargo build; Run "cargo build"
+cargo test; Run "cargo test"
 
 Write-Host "`nUpdated:"
 $changed | ForEach-Object { Write-Host "  $($_.Trim())" }
 Show-Behind
-Write-Host "`nNext: run target\fast\sigwin.exe on the real account, then commit Cargo.lock as 'Update dependencies'."
+Write-Host "`nNext: run target\debug\sigwin.exe on the real account, then commit Cargo.lock as 'Update dependencies'."

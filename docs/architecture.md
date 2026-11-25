@@ -16,7 +16,7 @@ The UI thread never touches Signal or the database. Everything crossing between 
 - **Heavy system DLLs stay out of the process.** File dialogs run in a child process of the same exe.
 - **Own SQL beside presage.** Our `ls_*` tables add what presage's store doesn't offer. They are versioned and migrated, since auto-updates carry old databases forward.
 - **One installed exe.** It installs and updates itself in place, without admin rights, so the shortcut, autostart entry and updater all point at the same file.
-- **Separate crates keep the `fast` profile usable.** It builds the main crate at opt-level 0 because of Slint's generated code. Pixel work and the cipher have their own crates so they stay optimized, and the generated UI has its own so Rust-only edits don't reparse it.
+- **Separate crates keep the day-to-day (dev) build usable.** It builds the main crate at opt-level 0 because of Slint's generated code. Pixel work and the cipher have their own crates so they stay optimized, and the generated UI has its own so Rust-only edits don't reparse it.
 
 ## Files
 | File | Role |

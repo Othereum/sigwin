@@ -35,13 +35,13 @@ $work = Join-Path ([IO.Path]::GetTempPath()) 'sigwin-readme-media'
 
 Push-Location $root
 try {
-    cargo build --profile fast --bin sigwin --example readme_media
+    cargo build --bin sigwin --example readme_media
     if ($LASTEXITCODE) { throw 'build failed' }
 } finally {
     Pop-Location
 }
-$exe = Join-Path $root 'target\fast\sigwin.exe'
-$tool = Join-Path $root 'target\fast\examples\readme_media.exe'
+$exe = Join-Path $root 'target\debug\sigwin.exe'
+$tool = Join-Path $root 'target\debug\examples\readme_media.exe'
 
 if (Test-Path $work) { Remove-Item -Recurse -Force $work }
 New-Item -ItemType Directory -Force $work, $out | Out-Null

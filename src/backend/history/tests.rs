@@ -256,7 +256,7 @@ async fn shows_the_history_in_sent_order_whatever_the_archive_order() {
     assert_eq!(shown, [2000, 1000, 500]);
 }
 
-/// Import speed: `cargo test --profile fast history::tests::import_speed -- --ignored --nocapture`
+/// Import speed: `cargo test history::tests::import_speed -- --ignored --nocapture`
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
 async fn import_speed() {

@@ -24,9 +24,9 @@ When in doubt whether a value identifies someone, print its length instead. A `{
 2. Edit only `report()`, plus helpers it needs, to ask your question. `threads()` and `kinds_newest_first()` cover most of what comes up. Open question? Run it unedited first: the default overview often answers it.
 3. Stop the app and run it. The app holds the DB in WAL mode, so reading alongside it would work, but a running `sigwin.exe` can lock what the build writes (`CLAUDE.md`, Build & run).
    ```
-   cargo run --profile fast --example db_probe
+   cargo run --example db_probe
    ```
-4. Delete it in a separate command, before anything else: `rm -f examples/db_probe.rs && rm -rf target/fast/examples/db_probe*` from Bash. Only that file: `examples/` holds committed examples too. Then check `git status --short` shows no `examples/db_probe.rs` and no deleted (`D`) file.
+4. Delete it in a separate command, before anything else: `rm -f examples/db_probe.rs && rm -rf target/debug/examples/db_probe*` from Bash. Only that file: `examples/` holds committed examples too. Then check `git status --short` shows no `examples/db_probe.rs` and no deleted (`D`) file.
 5. If the app was running, start it again: the user may be relying on it.
 6. Report numbers with what they mean, and say that the contents weren't read.
 

@@ -94,18 +94,18 @@ You need Rust (stable), protoc, LLVM (clang), NASM and CMake.
 
 ```powershell
 winget install Google.Protobuf LLVM.LLVM NASM.NASM Kitware.CMake
-cargo build --profile fast   # day to day
-cargo build --release        # for distribution (thin LTO)
+cargo build             # day to day
+cargo build --release   # for distribution (thin LTO)
 cargo test
 ```
-- The build goes to `target\fast\` or `target\release\`.
+- The build goes to `target\debug\` or `target\release\`.
 - If LLVM isn't in its default place (`C:\Program Files\LLVM\bin`), set `LIBCLANG_PATH`; set protoc with `PATH` or `PROTOC`.
 - A running app locks its exe and the build fails, so quit it first.
 - An exe under `target` skips installing and runs where it is.
 
 ## Running
 ```powershell
-target\fast\sigwin.exe
+target\debug\sigwin.exe
 ```
 | Environment variable | Use |
 |---|---|

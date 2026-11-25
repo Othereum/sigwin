@@ -9,7 +9,7 @@ param(
     [int]$Down = 0,
     [int]$Notches = 8,
     [string[]]$Steps = @(),
-    [string]$Exe = "target\fast\sigwin.exe",
+    [string]$Exe = "target\debug\sigwin.exe",
     [switch]$Full
 )
 $ErrorActionPreference = "Stop"
