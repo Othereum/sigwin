@@ -110,6 +110,16 @@ pub struct Index {
     pool: SqlitePool,
 }
 
+/// A sticker pack made on this PC (`ls_made_packs`).
+pub struct MadePack {
+    pub id: Vec<u8>,
+    pub key: Vec<u8>,
+    pub title: String,
+    pub author: String,
+    /// a small PNG of its cover
+    pub cover: Option<Vec<u8>>,
+}
+
 pub struct ThreadRow {
     pub thread: Thread,
     /// newest sent timestamp (a wrong clock can put it in the future)
@@ -493,6 +503,21 @@ impl Index {
             "CREATE TABLE IF NOT EXISTS ls_pack_order (
                 id BLOB PRIMARY KEY,
                 pos INTEGER NOT NULL
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
+        // sticker packs made on this PC, so their links can be found again: the server keeps no
+        // list of them, and a pack without its key can't be opened. `cover` is a small PNG (the
+        // thumbnail folder can be cleared), `made` ms since the epoch. Not a cache: nothing rebuilds it
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_made_packs (
+                id BLOB PRIMARY KEY,
+                key BLOB NOT NULL,
+                title TEXT NOT NULL,
+                author TEXT NOT NULL,
+                cover BLOB,
+                made INTEGER NOT NULL
             ) WITHOUT ROWID",
         )
         .execute(&pool)
@@ -1456,6 +1481,46 @@ impl Index {
         Ok(row.and_then(|r| r.try_get("key").ok()))
     }
 
+    pub async fn add_made_pack(&self, p: &MadePack, at: u64) -> anyhow::Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO ls_made_packs (id, key, title, author, cover, made) VALUES (?, ?, ?, ?, ?, ?)")
+            .bind(&p.id)
+            .bind(&p.key)
+            .bind(&p.title)
+            .bind(&p.author)
+            .bind(&p.cover)
+            .bind(at as i64)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Packs made on this PC, newest first.
+    pub async fn made_packs(&self) -> anyhow::Result<Vec<MadePack>> {
+        let rows = sqlx::query("SELECT id, key, title, author, cover FROM ls_made_packs ORDER BY made DESC").fetch_all(&self.pool).await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                Some(MadePack {
+                    id: r.try_get("id").ok()?,
+                    key: r.try_get("key").ok()?,
+                    title: r.try_get("title").ok()?,
+                    author: r.try_get("author").ok()?,
+                    cover: r.try_get("cover").ok()?,
+                })
+            })
+            .collect())
+    }
+
+    pub async fn made_pack_key(&self, id: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+        let row = sqlx::query("SELECT key FROM ls_made_packs WHERE id = ?").bind(id).fetch_optional(&self.pool).await?;
+        Ok(row.and_then(|r| r.try_get("key").ok()))
+    }
+
+    pub async fn forget_made_pack(&self, id: &[u8]) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM ls_made_packs WHERE id = ?").bind(id).execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Cached pack metadata: (id, (title, author), cover sticker id).
     pub async fn cached_packs(&self) -> anyhow::Result<Vec<(Vec<u8>, (String, String), Option<u32>)>> {
         let rows = sqlx::query("SELECT id, title, author, cover FROM ls_packs").fetch_all(&self.pool).await?;
@@ -2273,5 +2338,22 @@ pub(crate) mod tests {
         index.uncache_pack(&[2]).await.unwrap();
         let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ls_sticker_recent").fetch_one(&index.pool).await.unwrap();
         assert_eq!(left, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn made_packs_outlive_their_install() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        let made = |id: u8, cover: Option<Vec<u8>>| MadePack { id: vec![id], key: vec![id; 32], title: format!("t{id}"), author: "me".into(), cover };
+        index.add_made_pack(&made(1, Some(vec![9])), 100).await.unwrap();
+        index.add_made_pack(&made(2, None), 200).await.unwrap();
+        let ids = |r: Vec<MadePack>| r.into_iter().map(|p| (p.id[0], p.cover)).collect::<Vec<_>>();
+        assert_eq!(ids(index.made_packs().await.unwrap()), vec![(2, None), (1, Some(vec![9]))]);
+        // installed, then removed: the link stays
+        index.uncache_pack(&[1]).await.unwrap();
+        assert_eq!(index.made_pack_key(&[1]).await.unwrap(), Some(vec![1; 32]));
+        index.forget_made_pack(&[1]).await.unwrap();
+        assert_eq!(index.made_pack_key(&[1]).await.unwrap(), None);
+        assert_eq!(ids(index.made_packs().await.unwrap()), vec![(2, None)]);
     }
 }

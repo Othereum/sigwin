@@ -8,6 +8,9 @@ use super::*;
 pub(crate) struct Panel {
     pub(crate) packs: Rc<VecModel<PackItem>>,
     pack_dtos: Vec<types::PackDto>,
+    /// packs made here and not installed, on the pack page
+    pub(crate) made: Rc<VecModel<PackItem>>,
+    made_dtos: Vec<types::PackDto>,
     pub(crate) stickers: Rc<VecModel<StickerItem>>,
     pub(crate) grid: Vec<types::StickerDto>,
     /// pack cover images (grid images live only in `stickers` rows)
@@ -39,10 +42,12 @@ pub(crate) fn close(app: &AppWindow) {
         p.covers.clear();
         p.grid.clear();
         p.pack_dtos.clear();
+        p.made_dtos.clear();
         anim::picker_grid(ui, "");
         let p = &mut ui.sticker;
         p.stickers.set_vec(Vec::new());
         p.packs.set_vec(Vec::new());
+        p.made.set_vec(Vec::new());
     });
 }
 
@@ -57,9 +62,11 @@ pub(super) fn thumbs_arrived(app: &AppWindow, list: Vec<types::Thumb>) {
             let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
             fresh.insert(t.key, Image::from_rgba8(buf));
         }
-        for (i, d) in p.pack_dtos.iter().enumerate() {
-            if take_covers(&mut p.covers, &fresh, &d.cover_key) {
-                slint::Model::set_row_data(&*p.packs, i, pack_item(d, &p.covers));
+        for (dtos, model) in [(&p.pack_dtos, &p.packs), (&p.made_dtos, &p.made)] {
+            for (i, d) in dtos.iter().enumerate() {
+                if take_covers(&mut p.covers, &fresh, &d.cover_key) {
+                    slint::Model::set_row_data(&**model, i, pack_item(d, &p.covers));
+                }
             }
         }
         if let Some(v) = &p.preview {
@@ -81,7 +88,7 @@ pub(super) fn thumbs_arrived(app: &AppWindow, list: Vec<types::Thumb>) {
     });
 }
 
-pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>, recent: bool) {
+pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>, made: Vec<types::PackDto>, recent: bool) {
     if !app.get_sticker_open() {
         return;
     }
@@ -91,6 +98,8 @@ pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>, recent: 
     let (first, preview, installed) = UI.with_borrow_mut(|ui| {
         let p = &mut ui.sticker;
         p.packs.set_vec(list.iter().map(|d| pack_item(d, &p.covers)).collect::<Vec<_>>());
+        p.made.set_vec(made.iter().map(|d| pack_item(d, &p.covers)).collect::<Vec<_>>());
+        p.made_dtos = made;
         let first = list.first().map(|d| d.id.clone());
         // installed now: a tab like the others (the backend let go of it)
         let installed = p.preview.as_ref().is_some_and(|v| list.iter().any(|d| d.id == v.pack.id));
@@ -311,6 +320,21 @@ pub(super) fn ask_remove(app: &AppWindow, index: usize) {
     let text = tr!("Remove “{}”? It's also removed from your other devices.", title);
     use super::window::{ask, Action};
     ask(app, tr!("Remove sticker pack"), text, Action::Danger(tr!("Remove")), move || send_cmd(Command::RemovePack(id)));
+}
+
+/// The hex id of the pack at `index` on the pack page: an installed one, or one made here.
+pub(super) fn pack_id(index: usize, made: bool) -> Option<String> {
+    UI.with_borrow(|ui| {
+        let p = &ui.sticker;
+        if made { &p.made_dtos } else { &p.pack_dtos }.get(index).map(|d| d.id.clone())
+    })
+}
+
+pub(super) fn ask_forget_made(app: &AppWindow, index: usize) {
+    let Some((id, title)) = UI.with_borrow(|ui| ui.sticker.made_dtos.get(index).map(|d| (d.id.clone(), d.title.clone()))) else { return };
+    let text = tr!("Remove “{}” from this list? Its link can't be found again here.", title);
+    use super::window::{ask, Action};
+    ask(app, tr!("Remove from list"), text, Action::Danger(tr!("Remove")), move || send_cmd(Command::ForgetMadePack(id)));
 }
 
 pub(super) fn grid_arrived(app: &AppWindow, pack: String, items: Vec<types::StickerDto>) {

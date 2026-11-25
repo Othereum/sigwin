@@ -28,6 +28,14 @@ export global StickerData {
     callback move-pack(int, int);
     // asks first
     callback remove-pack(int);
+    // packs made on this PC and not added, newest first
+    in property <[PackItem]> made;
+    // the link of the pack at this index among `packs`, or among `made` (true)
+    callback copy-pack-link(int, bool);
+    // preview the made pack at this index
+    callback open-made(int);
+    // asks first
+    callback forget-made(int);
     // the installed pack's index among `packs`, -1 if it isn't one
     pure callback pack-index(string) -> int;
     // a pack not installed, in a tab of its own after the installed ones
@@ -63,9 +71,12 @@ component PackCover inherits Rectangle {
     }
 }
 
-// Installed packs: drag a row to reorder, click it to open the pack.
+// Installed packs: drag a row to reorder, click it to open the pack. Below them, packs made here
+// and not added: click one to preview it.
 component PackList inherits Rectangle {
     property <length> row-h: 44px;
+    property <length> made-top: StickerData.packs.length * self.row-h;
+    property <length> made-head: 32px;
     // the pressed row (-1 none), and whether it has moved far enough to be a drag
     property <int> drag: -1;
     property <bool> dragging;
@@ -87,7 +98,7 @@ component PackList inherits Rectangle {
             width: parent.width;
             height: parent.height;
             vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-            content-height: StickerData.packs.length * root.row-h;
+            content-height: root.made-top + (StickerData.made.length > 0 ? root.made-head + StickerData.made.length * root.row-h : 0px);
             for p[i] in StickerData.packs: Rectangle {
                 x: 0px;
                 y: i * root.row-h;
@@ -157,11 +168,83 @@ component PackList inherits Rectangle {
                     }
                     IconButton {
                         y: (parent.height - self.height) / 2;
+                        icon: Icons.copy;
+                        accessible-role: button;
+                        accessible-label: @tr("Copy link");
+                        clicked => { StickerData.copy-pack-link(i, false); }
+                        Tip { hovered: parent.hovered; text: @tr("Copy link"); }
+                    }
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
                         icon: Icons.trash;
                         accessible-role: button;
                         accessible-label: @tr("Remove");
                         clicked => { StickerData.remove-pack(i); }
                         Tip { hovered: parent.hovered; text: @tr("Remove"); }
+                    }
+                }
+            }
+            if StickerData.made.length > 0: Text {
+                x: 6px;
+                y: root.made-top;
+                width: view.visible-width - 20px;
+                height: root.made-head;
+                text: @tr("Made here, not added");
+                color: Theme.subtle;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            for p[i] in StickerData.made: Rectangle {
+                x: 0px;
+                y: root.made-top + root.made-head + i * root.row-h;
+                width: view.visible-width - 8px;
+                height: root.row-h;
+                border-radius: 10px;
+                background: root.drag < 0 && made-ta.has-hover ? Theme.hover : transparent;
+                made-ta := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { StickerData.open-made(i); }
+                }
+                HorizontalLayout {
+                    // the covers line up with the installed ones', past their handles
+                    padding-left: 32px;
+                    padding-right: 4px;
+                    spacing: 10px;
+                    PackCover {
+                        y: (parent.height - self.height) / 2;
+                        pack: p;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        Text {
+                            text: p.title;
+                            color: Theme.text;
+                            overflow: elide;
+                        }
+                        if p.author != "": Text {
+                            text: p.author;
+                            color: Theme.subtle;
+                            font-size: 12px;
+                            overflow: elide;
+                        }
+                    }
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
+                        icon: Icons.copy;
+                        accessible-role: button;
+                        accessible-label: @tr("Copy link");
+                        clicked => { StickerData.copy-pack-link(i, true); }
+                        Tip { hovered: parent.hovered; text: @tr("Copy link"); }
+                    }
+                    IconButton {
+                        y: (parent.height - self.height) / 2;
+                        icon: Icons.trash;
+                        accessible-role: button;
+                        accessible-label: @tr("Remove from list");
+                        clicked => { StickerData.forget-made(i); }
+                        Tip { hovered: parent.hovered; text: @tr("Remove from list"); }
                     }
                 }
             }
@@ -572,7 +655,7 @@ export component StickerPanel inherits Rectangle {
             // holds the rest of the panel whatever shows in it
             Rectangle {
                 vertical-stretch: 1;
-                if StickerData.packs-loaded && StickerData.packs.length == 0: Text {
+                if StickerData.packs-loaded && StickerData.packs.length == 0 && StickerData.made.length == 0: Text {
                     width: parent.width;
                     height: parent.height;
                     text: @tr("No sticker packs yet");
@@ -580,7 +663,7 @@ export component StickerPanel inherits Rectangle {
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
-                if StickerData.packs.length > 0: PackList {
+                if StickerData.packs.length > 0 || StickerData.made.length > 0: PackList {
                     width: parent.width;
                     height: parent.height;
                 }

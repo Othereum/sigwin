@@ -1,5 +1,5 @@
 //! Pasting files and images from the Windows clipboard into the composer (Ctrl+V), and copying a
-//! received image to it (`set_image`).
+//! received image (`set_image`) or a text (`set_text`) to it.
 //!
 //! Text paste stays with Slint's TextInput: we only step in when the clipboard holds no text.
 //! Images are encoded row by row into a PNG, so a 4K screenshot never sits in memory as a
@@ -170,6 +170,16 @@ mod win {
         put(dib_format, &dib)
     }
 
+    pub fn set_text(text: &str) -> anyhow::Result<()> {
+        let wide: Vec<u8> = text.encode_utf16().chain(Some(0)).flat_map(u16::to_le_bytes).collect();
+        let _open = Open::new()?;
+        // SAFETY: clipboard is open; EmptyClipboard makes us its owner for the format set below
+        if unsafe { EmptyClipboard() } == 0 {
+            bail!(tr!("Couldn't open the clipboard"));
+        }
+        put(CF_UNICODETEXT, &wide)
+    }
+
     /// Hands a copy of `data` to the clipboard, which owns it from then on.
     fn put(format: u32, data: &[u8]) -> anyhow::Result<()> {
         // SAFETY: the block is filled before it is handed over; on failure it is still ours to free
@@ -302,7 +312,7 @@ mod win {
 }
 
 #[cfg(windows)]
-pub use win::{files, probe, save_image, set_image};
+pub use win::{files, probe, save_image, set_image, set_text};
 
 #[cfg(not(windows))]
 pub fn probe() -> Probe {
@@ -319,6 +329,11 @@ pub fn save_image(_: &Path) -> anyhow::Result<std::path::PathBuf> {
 
 #[cfg(not(windows))]
 pub fn set_image(_: &[u8], _: &[u8], _: u32, _: u32) -> anyhow::Result<()> {
+    anyhow::bail!("not supported")
+}
+
+#[cfg(not(windows))]
+pub fn set_text(_: &str) -> anyhow::Result<()> {
     anyhow::bail!("not supported")
 }
 

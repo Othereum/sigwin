@@ -971,6 +971,25 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
             stickers::ask_remove(&app, i as usize);
         }
     });
+
+    let s = send.clone();
+    d.on_copy_pack_link(move |i, made| {
+        if let Some(id) = stickers::pack_id(i as usize, made) {
+            s(Command::CopyPackLink(id));
+        }
+    });
+    let s = send.clone();
+    d.on_open_made(move |i| {
+        if let Some(id) = stickers::pack_id(i as usize, true) {
+            s(Command::OpenMadePack(id));
+        }
+    });
+    let weak = app.as_weak();
+    d.on_forget_made(move |i| {
+        if let Some(app) = weak.upgrade() {
+            stickers::ask_forget_made(&app, i as usize);
+        }
+    });
 }
 
 /// Settings page and unlinking.

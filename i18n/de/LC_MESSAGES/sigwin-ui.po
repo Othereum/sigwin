@@ -912,6 +912,21 @@ msgstr "Chatverlauf wird empfangen … {}"
 msgid "Remove sticker pack"
 msgstr "Sticker-Set entfernen"
 
+msgid "Remove from list"
+msgstr "Aus der Liste entfernen"
+
+msgid "Remove “{}” from this list? Its link can't be found again here."
+msgstr "„{}“ aus der Liste entfernen? Der Link lässt sich hier dann nicht mehr finden."
+
+msgid "Made here, not added"
+msgstr "Hier erstellt, nicht hinzugefügt"
+
+msgid "Copy link"
+msgstr "Link kopieren"
+
+msgid "Link copied."
+msgstr "Link kopiert."
+
 msgid "Remove “{}”? It's also removed from your other devices."
 msgstr "„{}“ entfernen? Es wird auch von deinen anderen Geräten entfernt."
 
@@ -1436,8 +1451,8 @@ msgstr "Erneut versuchen"
 msgid "Use the first sticker"
 msgstr "Ersten Sticker verwenden"
 
-msgid "Your pack is ready. Share its link, or add it to your stickers."
-msgstr "Dein Paket ist fertig. Teile den Link oder füge es zu deinen Stickern hinzu."
+msgid "Your pack is ready. Share its link, or add it to your stickers. You can find it again in Manage packs."
+msgstr "Dein Paket ist fertig. Teile den Link oder füge es zu deinen Stickern hinzu. Unter „Sets verwalten“ findest du es wieder."
 
 msgid "{} left"
 msgstr "noch {}"

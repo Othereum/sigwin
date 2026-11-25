@@ -72,9 +72,68 @@ impl App {
             out.push(PackDto { id, title, author, cover_key });
         }
         let recent = !self.recent_grid().await.0.is_empty();
-        debug!(ms = started.elapsed().as_millis() as u64, packs = out.len(), loaded, recent, "sticker packs");
-        (self.emit)(Event::StickerPacks { packs: out, recent });
+        // made here and not installed (an installed one is among the packs above)
+        let installed: HashSet<&str> = out.iter().map(|p| p.id.as_str()).collect();
+        let mut made = Vec::new();
+        let mut covers = Vec::new();
+        for p in self.index.made_packs().await.unwrap_or_default() {
+            let id = hex::encode(&p.id);
+            if installed.contains(id.as_str()) {
+                continue;
+            }
+            let cover_key = match p.cover {
+                Some(png) => {
+                    let key = format!("{MADE_COVER_PREFIX}{id}");
+                    covers.push((key.clone(), png));
+                    key
+                }
+                None => String::new(),
+            };
+            made.push(PackDto { id, title: p.title, author: p.author, cover_key });
+        }
+        debug!(ms = started.elapsed().as_millis() as u64, packs = out.len(), made = made.len(), loaded, recent, "sticker packs");
+        (self.emit)(Event::StickerPacks { packs: out, made, recent });
         self.sticker_thumbs(jobs, false);
+        if !covers.is_empty() {
+            let emit = self.emit.clone();
+            tokio::task::spawn_blocking(move || {
+                emit(Event::StickerThumbs(covers.into_iter().filter_map(|(key, png)| still_thumb(key, &png, PACK_COVER)).collect()));
+            });
+        }
+    }
+
+    /// Puts a pack's signal.art link on the clipboard: an installed pack's, or one made here.
+    pub(super) async fn copy_pack_link(&self, hex_id: &str) {
+        let Ok(id) = hex::decode(hex_id) else { return };
+        let key = match self.index.pack_key(&id).await {
+            Ok(Some(k)) => Some(k),
+            _ => self.index.made_pack_key(&id).await.ok().flatten(),
+        };
+        let Some(key) = key else { return };
+        let link = crate::stickerpack::link(hex_id, &key);
+        let tx = self.tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let _ = tx.send(Internal::Notice(match crate::clip::set_text(&link) {
+                Ok(()) => tr!("Link copied.").into(),
+                Err(e) => tr!("Copy failed: {}", format!("{e:#}")),
+            }));
+        });
+    }
+
+    /// A pack made here, before it is installed: its preview.
+    pub(super) async fn open_made_pack(&mut self, hex_id: &str) {
+        let Ok(id) = hex::decode(hex_id) else { return };
+        let Ok(Some(key)) = self.index.made_pack_key(&id).await else { return };
+        self.preview_pack(id, Some(key), None).await;
+    }
+
+    /// Its link is gone for good; answered by a new `StickerPacks`.
+    pub(super) async fn forget_made_pack(&mut self, hex_id: &str) {
+        let Ok(id) = hex::decode(hex_id) else { return };
+        if let Err(e) = self.index.forget_made_pack(&id).await {
+            warn!("forget made pack: {e}");
+        }
+        self.sticker_packs().await;
     }
 
     /// The grid comes from `ls_stickers` and the thumb files when all are cached; otherwise the
@@ -593,6 +652,9 @@ pub(super) const PICKER_CELL: u32 = 80;
 pub(super) const PACK_COVER: u32 = 32;
 
 pub(super) const PACK_COVER_SMALL: u32 = 28;
+
+/// Thumbnail keys of made packs' covers: drawn from `ls_made_packs`, never cached as files.
+const MADE_COVER_PREFIX: &str = "mp_";
 
 /// How many the recently used tab shows (Signal Desktop's count).
 const RECENT_STICKERS: usize = 24;

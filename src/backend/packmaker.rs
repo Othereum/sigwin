@@ -49,14 +49,18 @@ impl App {
         };
         let reg = m.registration_data().clone();
         let emit = self.emit.clone();
+        let index = self.index.clone();
         let task = tokio::task::spawn_local(async move {
             let started = std::time::Instant::now();
             let stickers = job.stickers.len();
             let progress = |done, total| emit(Event::PackProgress { done, total });
             progress(0, stickers + job.cover.is_some() as usize);
+            let (title, author) = (job.title.clone(), job.author.clone());
+            let cover = job.cover.clone().or_else(|| job.stickers.first().map(|(p, _)| p.clone()));
             match create(&reg, job, &progress).await {
                 Ok((id, key)) => {
                     info!(stickers, ms = started.elapsed().as_millis() as u64, "sticker pack uploaded");
+                    remember(&index, &id, &key, title, author, cover).await;
                     emit(Event::PackCreated { id, key });
                 }
                 Err(f) => {
@@ -84,6 +88,31 @@ impl App {
         }
     }
 }
+
+/// Keeps the new pack's link on this PC, so it can be found again once the page is left.
+async fn remember(index: &Index, id: &str, key: &str, title: String, author: String, cover: Option<PathBuf>) {
+    let (Ok(id), Ok(key)) = (hex::decode(id), hex::decode(key)) else { return };
+    let cover = match cover {
+        Some(path) => tokio::task::spawn_blocking(move || cover_png(&path)).await.ok().flatten(),
+        None => None,
+    };
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    if let Err(e) = index.add_made_pack(&crate::db::MadePack { id, key, title, author, cover }, at).await {
+        warn!("remember made pack: {e}");
+    }
+}
+
+/// The cover as a still PNG big enough for the pack list at any scale.
+fn cover_png(path: &std::path::Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path).ok()?.take(sticker::MAX_SOURCE_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    let rgba = sticker::thumb(&bytes, MADE_COVER_PX).ok()?;
+    sigwin_thumb::png_rgba(&rgba).ok()
+}
+
+/// `PACK_COVER` (32 logical px) at 400%.
+const MADE_COVER_PX: u32 = 128;
 
 /// Uploads the pack; its hex id and key.
 async fn create(reg: &RegistrationData, job: PackJob, progress: &dyn Fn(usize, usize)) -> Result<(String, String), Failure> {

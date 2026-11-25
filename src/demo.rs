@@ -1468,6 +1468,10 @@ pub(crate) fn demo_stickers(emit: backend::Emit) {
     let packs: Vec<types::PackDto> = (0..count)
         .map(|i| types::PackDto { id: format!("p{i}"), title: format!("Pack {i}"), author: format!("Artist {i}"), cover_key: format!("sp_p{i}_0") })
         .collect();
+    // made on this PC and not added, on the pack page below the installed ones
+    let made: Vec<types::PackDto> = (0..2)
+        .map(|i| types::PackDto { id: format!("m{i}"), title: format!("My pack {i}"), author: "Me".into(), cover_key: format!("mp_m{i}") })
+        .collect();
     let sticker = |pack: u32, i: u32| types::StickerDto {
         key: format!("sp_p{pack}_{i}"),
         pack: format!("p{pack}"),
@@ -1484,13 +1488,14 @@ pub(crate) fn demo_stickers(emit: backend::Emit) {
     let recent = !add;
     // the panel is opened by main(); give it a moment before filling it
     slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
-        emit(Event::StickerPacks { packs, recent });
+        emit(Event::StickerPacks { packs, made, recent });
         if !add {
             emit(Event::StickerGrid { pack: open, items });
         }
         let mut thumbs: Vec<_> = (0..20u32).map(|i| demo_blob(&format!("sp_p0_{i}"), 96, (i * 12) as u8)).collect();
         thumbs.extend((1..10u32).step_by(2).map(|i| demo_blob(&format!("sp_p1_{i}"), 96, (i * 25) as u8)));
         thumbs.extend((1..count.max(2)).map(|i| demo_blob(&format!("sp_p{i}_0"), 96, (i * 40) as u8)));
+        thumbs.extend((0..2u32).map(|i| demo_blob(&format!("mp_m{i}"), 64, (i * 90 + 30) as u8)));
         emit(Event::StickerThumbs(thumbs));
     });
 }
@@ -1514,7 +1519,7 @@ fn demo_preview(emit: backend::Emit, state: &str) {
         cover_key: if ready { "sp_pv_0-c".into() } else { String::new() },
     };
     slint::Timer::single_shot(std::time::Duration::from_millis(300), move || {
-        emit(Event::StickerPacks { packs, recent: true });
+        emit(Event::StickerPacks { packs, made: Vec::new(), recent: true });
         emit(Event::PackPreview(types::PreviewDto { pack, state, count: if ready { 30 } else { 0 } }));
         let mut thumbs: Vec<_> = (0..2u32).map(|i| demo_blob(&format!("sp_p{i}_0-c"), 64, (i * 40) as u8)).collect();
         if ready {

@@ -729,8 +729,9 @@ pub enum Event {
     /// rise with messages before the read syncs behind them bring them down again
     /// (Signal Desktop's `_hasQueueEmptied`)
     CatchingUp(bool),
-    /// `recent`: the recently used tab has stickers
-    StickerPacks { packs: Vec<PackDto>, recent: bool },
+    /// `recent`: the recently used tab has stickers. `made`: packs made on this PC and not
+    /// installed, newest first
+    StickerPacks { packs: Vec<PackDto>, made: Vec<PackDto>, recent: bool },
     /// `pack`: the tab, a pack's hex id or `RECENT_TAB`
     StickerGrid { pack: String, items: Vec<StickerDto> },
     /// The open chat's media page: items to add below what it has (`reset`: in place of it),
@@ -880,6 +881,12 @@ pub enum Command {
     SetPackOrder(Vec<String>),
     /// uninstall this hex id here and on the other devices; answered by a new `StickerPacks`
     RemovePack(String),
+    /// put the signal.art link of this hex id (installed, or made here) on the clipboard
+    CopyPackLink(String),
+    /// preview this pack made here
+    OpenMadePack(String),
+    /// drop this made pack's record, link and all; answered by a new `StickerPacks`
+    ForgetMadePack(String),
     /// a sticker in the message list was clicked
     StickerClicked(String),
     /// make a pack of these pictures and upload it; answered by `PackProgress` and then

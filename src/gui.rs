@@ -135,6 +135,7 @@ pub(crate) fn bind_models(app: &AppWindow) {
         app.global::<SearchData>().set_results(ModelRc::from(ui.results.clone()));
         app.set_messages(ModelRc::from(ui.messages.clone()));
         app.global::<StickerData>().set_packs(ModelRc::from(ui.sticker.packs.clone()));
+        app.global::<StickerData>().set_made(ModelRc::from(ui.sticker.made.clone()));
         app.global::<StickerData>().set_stickers(ModelRc::from(ui.sticker.stickers.clone()));
         app.global::<PackData>().set_cells(ModelRc::from(ui.maker.cells.clone()));
     });
@@ -378,7 +379,7 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 stick_to_bottom(app);
             }
         }
-        Event::StickerPacks { packs, recent } => stickers::packs_arrived(app, packs, recent),
+        Event::StickerPacks { packs, made, recent } => stickers::packs_arrived(app, packs, made, recent),
         Event::OpenStickerPanel { pack, sticker } => stickers::open_at(app, pack, sticker),
         Event::PackPreview(v) => stickers::preview_arrived(app, v),
         Event::PackAdding { pack, done, total } => {
