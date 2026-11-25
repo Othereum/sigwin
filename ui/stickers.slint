@@ -3,7 +3,8 @@
 import { PackItem, PreviewItem, StickerItem } from "types.slint";
 import { Anim, Theme } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
-import { Field, HStrip, IconButton, PlainButton, PrimaryButton, Tip, TipPlace, ThinScroll } from "widgets.slint";
+import { Field, HStrip, IconButton, MenuRow, PlainButton, PrimaryButton, Tip, TipPlace, ThinScroll } from "widgets.slint";
+import { ChipMenu } from "search.slint";
 import { Icon, Icons } from "icons.slint";
 import { MediaLabel } from "bubble.slint";
 
@@ -20,6 +21,8 @@ export global StickerData {
     in-out property <string> pack-url;
     callback pick-pack(string);
     callback send-sticker(string, int);
+    // take the recently used tab's sticker at this index off it
+    callback forget-recent(int);
     callback add-pack-url(string);
     // move the pack at this index to that one
     callback move-pack(int, int);
@@ -231,6 +234,10 @@ export component StickerPanel inherits Rectangle {
         root.hover-y = y - root.absolute-position.y;
     }
     changed peek-i => { StickerData.peek(self.peek-i); }
+    // the recently used sticker right-clicked, and where its menu opens (in the panel)
+    property <int> menu-i: -1;
+    property <length> menu-x;
+    property <length> menu-y;
     property <string> cur: StickerData.current-pack;
     property <bool> loaded: StickerData.packs-loaded;
     changed cur => {
@@ -504,6 +511,14 @@ export component StickerPanel inherits Rectangle {
                                 StickerData.send-sticker(s.pack, s.id);
                             }
                         }
+                        pointer-event(e) => {
+                            if root.recent && e.button == PointerEventButton.right && e.kind == PointerEventKind.down {
+                                root.menu-i = i;
+                                root.menu-x = self.absolute-position.x - root.absolute-position.x + self.mouse-x;
+                                root.menu-y = self.absolute-position.y - root.absolute-position.y + self.mouse-y;
+                                recent-menu.show();
+                            }
+                        }
                         changed has-hover => {
                             if s.animated { Anim.hover(s.pack, s.id, self.has-hover); }
                             if self.has-hover && !root.scrolling {
@@ -583,6 +598,21 @@ export component StickerPanel inherits Rectangle {
             hovered: root.tip-i >= 0 && root.tip-text != "";
             place: TipPlace.below-center;
             text: root.tip-text;
+        }
+    }
+
+    recent-menu := ChipMenu {
+        // German needs more than the menu's usual width
+        width: 260px;
+        x: min(root.menu-x, root.width - self.width - 16px);
+        y: root.menu-y;
+        MenuRow {
+            icon: Icons.trash;
+            text: @tr("Remove from recently used");
+            clicked => {
+                StickerData.forget-recent(root.menu-i);
+                recent-menu.close();
+            }
         }
     }
 

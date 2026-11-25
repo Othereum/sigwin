@@ -333,6 +333,9 @@ msgstr "Lesebestätigungen · Tipp-Indikatoren"
 msgid "Recently used"
 msgstr "Zuletzt verwendet"
 
+msgid "Remove from recently used"
+msgstr "Aus „Zuletzt verwendet“ entfernen"
+
 msgid "Remove"
 msgstr "Entfernen"
 

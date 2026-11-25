@@ -883,6 +883,7 @@ impl App {
             Command::StickerPanel => self.sticker_packs().await,
             Command::OpenPack(id) => self.open_pack(&id).await,
             Command::SendSticker { pack, id } => self.send_sticker(&pack, id).await,
+            Command::ForgetRecentSticker { pack, id } => self.forget_recent_sticker(&pack, id).await,
             Command::InstallPack { id, key } => match (hex::decode(&id), hex::decode(&key)) {
                 (Ok(id), Ok(key)) => self.install_pack(id, key, None),
                 _ => self.notice(tr!("Invalid sticker pack")),

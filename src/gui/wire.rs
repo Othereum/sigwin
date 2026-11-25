@@ -961,6 +961,8 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     let s = send.clone();
     d.on_retry_preview(move || s(Command::RetryPreview));
 
+    d.on_forget_recent(|i| stickers::forget_recent(i as usize));
+
     d.on_move_pack(|from, to| stickers::move_pack(from as usize, to as usize));
 
     let weak = app.as_weak();

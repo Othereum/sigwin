@@ -286,6 +286,26 @@ pub(super) fn move_pack(from: usize, to: usize) {
     }
 }
 
+/// Takes the recently used tab's sticker at `index` off it, at once. The last one gone, the tab
+/// goes too: the pack list reloads and picks the tab to show.
+pub(super) fn forget_recent(index: usize) {
+    let Some((s, left)) = UI.with_borrow_mut(|ui| {
+        if anim::picker_pack(ui) != types::RECENT_TAB || index >= ui.sticker.grid.len() {
+            return None;
+        }
+        let s = ui.sticker.grid.remove(index);
+        ui.sticker.stickers.remove(index);
+        anim::picker_removed(ui, &s.key);
+        Some((s, ui.sticker.grid.len()))
+    }) else {
+        return;
+    };
+    send_cmd(Command::ForgetRecentSticker { pack: s.pack, id: s.id });
+    if left == 0 {
+        send_cmd(Command::StickerPanel);
+    }
+}
+
 pub(super) fn ask_remove(app: &AppWindow, index: usize) {
     let Some((id, title)) = UI.with_borrow(|ui| ui.sticker.pack_dtos.get(index).map(|d| (d.id.clone(), d.title.clone()))) else { return };
     let text = tr!("Remove “{}”? It's also removed from your other devices.", title);

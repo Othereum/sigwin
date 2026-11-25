@@ -863,6 +863,8 @@ pub enum Command {
     /// a pack's hex id, or `RECENT_TAB`
     OpenPack(String),
     SendSticker { pack: String, id: u32 },
+    /// take this sticker off the recently used tab
+    ForgetRecentSticker { pack: String, id: u32 },
     /// hex id + hex key
     InstallPack { id: String, key: String },
     /// show the pack of https://signal.art/addstickers/#pack_id=..&pack_key=.. (installed: open it)

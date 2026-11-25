@@ -497,6 +497,17 @@ pub(crate) fn picker_grid(ui: &mut Ui, pack: &str) {
     update_picker(ui);
 }
 
+/// The picker's cell of `key` left its grid (the cells after it moved up one).
+pub(crate) fn picker_removed(ui: &mut Ui, key: &str) {
+    let p = &mut ui.anims.picker;
+    p.made.remove(key);
+    p.shown.remove(key);
+    if p.hovered.as_deref() == Some(key) {
+        p.hovered = None;
+    }
+    update_picker(ui);
+}
+
 /// Puts the animations on the picker cells that should play and takes them off the others, asks
 /// for the ones missing, and lets go of those not shown past `OFF_SCREEN`.
 pub(crate) fn update_picker(ui: &mut Ui) {

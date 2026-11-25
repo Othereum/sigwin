@@ -405,6 +405,13 @@ impl App {
         });
     }
 
+    pub(super) async fn forget_recent_sticker(&self, hex_id: &str, sticker_id: u32) {
+        let Ok(id) = hex::decode(hex_id) else { return };
+        if let Err(e) = self.index.forget_recent_sticker(&id, sticker_id).await {
+            warn!("forget recent sticker: {e}");
+        }
+    }
+
     pub(super) async fn set_pack_order(&self, ids: &[String]) {
         let ids: Vec<Vec<u8>> = ids.iter().filter_map(|id| hex::decode(id).ok()).collect();
         if let Err(e) = self.index.set_pack_order(&ids).await {

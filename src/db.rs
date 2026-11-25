@@ -1508,6 +1508,11 @@ impl Index {
         Ok(())
     }
 
+    pub async fn forget_recent_sticker(&self, pack: &[u8], id: u32) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM ls_sticker_recent WHERE pack = ? AND id = ?").bind(pack).bind(id as i64).execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Recently used stickers of installed packs, newest first: (pack, sticker id, emoji).
     pub async fn recent_stickers(&self) -> anyhow::Result<Vec<(Vec<u8>, u32, String)>> {
         let rows = sqlx::query(
@@ -2259,6 +2264,9 @@ pub(crate) mod tests {
         let recent = index.recent_stickers().await.unwrap();
         assert_eq!(recent[1].2, "😀");
         assert_eq!(ids(recent), vec![(2, 3), (1, 7), (2, 2)]);
+        // forgotten: only that one goes
+        index.forget_recent_sticker(&[2], 3).await.unwrap();
+        assert_eq!(ids(index.recent_stickers().await.unwrap()), vec![(1, 7), (2, 2)]);
         // a pack removed elsewhere shows none, and dropping its cache forgets them
         sqlx::query("DELETE FROM sticker_packs WHERE id = x'02'").execute(&index.pool).await.unwrap();
         assert_eq!(ids(index.recent_stickers().await.unwrap()), vec![(1, 7)]);
