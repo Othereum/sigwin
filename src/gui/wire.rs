@@ -973,17 +973,10 @@ fn wire_stickers(app: &AppWindow, send: &(impl Fn(Command) + Clone + 'static)) {
     });
 
     let s = send.clone();
-    d.on_copy_pack_link(move |i, made| {
-        if let Some(id) = stickers::pack_id(i as usize, made) {
-            s(Command::CopyPackLink(id));
-        }
-    });
+    d.on_copy_pack_link(move |id| s(Command::CopyPackLink(id.to_string())));
     let s = send.clone();
-    d.on_open_made(move |i| {
-        if let Some(id) = stickers::pack_id(i as usize, true) {
-            s(Command::OpenMadePack(id));
-        }
-    });
+    d.on_open_unadded(move |id| s(Command::OpenUnaddedPack(id.to_string())));
+    d.on_shared_shown(|first, end| stickers::shared_shown(first.max(0) as usize, end.max(0) as usize));
     let weak = app.as_weak();
     d.on_forget_made(move |i| {
         if let Some(app) = weak.upgrade() {

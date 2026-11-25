@@ -917,6 +917,12 @@ msgstr "“{}” 팩을 목록에서 지울까요? 이 팩의 링크를 다시 �
 msgid "Made here, not added"
 msgstr "만들었지만 추가하지 않은 팩"
 
+msgid "Shared with you"
+msgstr "받은 팩"
+
+msgid "Shared with you (still looking through messages)"
+msgstr "받은 팩 (메시지를 살펴보는 중)"
+
 msgid "Copy link"
 msgstr "링크 복사"
 

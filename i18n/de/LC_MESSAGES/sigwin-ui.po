@@ -921,6 +921,12 @@ msgstr "„{}“ aus der Liste entfernen? Der Link lässt sich hier dann nicht m
 msgid "Made here, not added"
 msgstr "Hier erstellt, nicht hinzugefügt"
 
+msgid "Shared with you"
+msgstr "Mit dir geteilt"
+
+msgid "Shared with you (still looking through messages)"
+msgstr "Mit dir geteilt (Nachrichten werden noch durchsucht)"
+
 msgid "Copy link"
 msgstr "Link kopieren"
 

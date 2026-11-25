@@ -136,6 +136,7 @@ pub(crate) fn bind_models(app: &AppWindow) {
         app.set_messages(ModelRc::from(ui.messages.clone()));
         app.global::<StickerData>().set_packs(ModelRc::from(ui.sticker.packs.clone()));
         app.global::<StickerData>().set_made(ModelRc::from(ui.sticker.made.clone()));
+        app.global::<StickerData>().set_shared(ModelRc::from(ui.sticker.shared.clone()));
         app.global::<StickerData>().set_stickers(ModelRc::from(ui.sticker.stickers.clone()));
         app.global::<PackData>().set_cells(ModelRc::from(ui.maker.cells.clone()));
     });
@@ -379,7 +380,10 @@ pub(crate) fn apply(app: &AppWindow, ev: Event) {
                 stick_to_bottom(app);
             }
         }
-        Event::StickerPacks { packs, made, recent } => stickers::packs_arrived(app, packs, made, recent),
+        Event::StickerPacks { packs, made, shared, shared_partial, recent } => {
+            stickers::packs_arrived(app, stickers::Packs { list: packs, made, shared, partial: shared_partial, recent })
+        }
+        Event::SharedPack(p) => stickers::shared_pack_arrived(app, p),
         Event::OpenStickerPanel { pack, sticker } => stickers::open_at(app, pack, sticker),
         Event::PackPreview(v) => stickers::preview_arrived(app, v),
         Event::PackAdding { pack, done, total } => {

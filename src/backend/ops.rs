@@ -385,6 +385,19 @@ pub(super) async fn record_media(index: &Index, key: &str, c: &Content, me: Uuid
     Ok(true)
 }
 
+/// Notes the pack of a sticker someone else sent, for the packs shared with us; true if `c` was one.
+pub(super) async fn record_sticker_msg(index: &Index, key: &str, c: &Content, me: Uuid) -> anyhow::Result<bool> {
+    if c.metadata.sender.raw_uuid() == me {
+        return Ok(false);
+    }
+    let Kind::Msg { dm, .. } = view::classify(c, me) else { return Ok(false) };
+    let Some((pack, pack_key)) = dm.sticker.as_ref().and_then(|s| Some((s.pack_id.as_ref()?, s.pack_key.as_ref()?))) else {
+        return Ok(false);
+    };
+    index.record_sticker_msg(key, c.timestamp(), pack, pack_key).await?;
+    Ok(true)
+}
+
 /// What the message search looks in: the body, captions and the names of files (not of
 /// pictures and videos, which are mostly camera numbers), lowercase. Empty for no text.
 pub(super) fn search_text(dm: &DataMessage) -> String {

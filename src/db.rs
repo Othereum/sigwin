@@ -120,6 +120,15 @@ pub struct MadePack {
     pub cover: Option<Vec<u8>>,
 }
 
+/// A pack of stickers others sent us (`ls_sticker_msgs`, `ls_shared_packs`).
+pub struct SharedPack {
+    pub id: Vec<u8>,
+    /// title and author, once its manifest was fetched
+    pub names: Option<(String, String)>,
+    /// its cover sticker's id
+    pub cover: Option<u32>,
+}
+
 pub struct ThreadRow {
     pub thread: Thread,
     /// newest sent timestamp (a wrong clock can put it in the future)
@@ -518,6 +527,33 @@ impl Index {
                 author TEXT NOT NULL,
                 cover BLOB,
                 made INTEGER NOT NULL
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
+        // stickers others sent us, one row a message, for the packs shared with us: finding them
+        // in presage's table means reading every message. Rows go with their message (deleted,
+        // expired), so a pack seen only in a disappearing message leaves no trace
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_sticker_msgs (
+                thread TEXT NOT NULL,
+                ts INTEGER NOT NULL,
+                pack BLOB NOT NULL,
+                key BLOB NOT NULL,
+                PRIMARY KEY (thread, ts)
+            ) WITHOUT ROWID",
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS ls_sticker_msgs_by_pack ON ls_sticker_msgs (pack, ts)").execute(&pool).await?;
+        // title and cover of packs shared with us, from their manifests (`ls_packs`' shape). A
+        // cache: rows of packs no message holds any more are dropped
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ls_shared_packs (
+                id BLOB PRIMARY KEY,
+                title TEXT NOT NULL,
+                author TEXT NOT NULL,
+                cover INTEGER
             ) WITHOUT ROWID",
         )
         .execute(&pool)
@@ -1188,8 +1224,9 @@ impl Index {
     pub async fn rekey_thread(&self, from: &str, to: &str) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         // one pair per table keyed by thread (sqlx wants the strings static)
-        const TABLES: [(&str, &str); 6] = [
+        const TABLES: [(&str, &str); 7] = [
             ("UPDATE OR IGNORE ls_media SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_media WHERE thread = ?1"),
+            ("UPDATE OR IGNORE ls_sticker_msgs SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_sticker_msgs WHERE thread = ?1"),
             ("UPDATE OR IGNORE ls_pins SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_pins WHERE thread = ?1"),
             ("UPDATE OR IGNORE ls_edits SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_edits WHERE thread = ?1"),
             ("UPDATE OR IGNORE ls_reactions SET thread = ?1 WHERE thread = ?2", "DELETE FROM ls_reactions WHERE thread = ?1"),
@@ -1447,9 +1484,69 @@ impl Index {
             .collect())
     }
 
-    /// The message sent at `ts` is gone (deleted, expired).
+    /// The message sent at `ts` is gone (deleted, expired): its attachments and its sticker.
     pub async fn forget_media(&self, thread: &str, ts: u64) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM ls_media WHERE thread = ? AND ts = ?").bind(thread).bind(ts as i64).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM ls_sticker_msgs WHERE thread = ? AND ts = ?").bind(thread).bind(ts as i64).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Someone else's message sent at `ts` is a sticker of this pack.
+    pub async fn record_sticker_msg(&self, thread: &str, ts: u64, pack: &[u8], key: &[u8]) -> anyhow::Result<()> {
+        sqlx::query("INSERT OR IGNORE INTO ls_sticker_msgs (thread, ts, pack, key) VALUES (?, ?, ?, ?)")
+            .bind(thread)
+            .bind(ts as i64)
+            .bind(pack)
+            .bind(key)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Packs of the stickers others sent us, most recently sent first, with their cached title,
+    /// author and cover sticker id (None: not fetched yet). Drops the cache of packs no message
+    /// holds any more, and says which those were.
+    pub async fn shared_packs(&self) -> anyhow::Result<(Vec<SharedPack>, Vec<Vec<u8>>)> {
+        let gone: Vec<Vec<u8>> = sqlx::query_scalar("DELETE FROM ls_shared_packs WHERE id NOT IN (SELECT pack FROM ls_sticker_msgs) RETURNING id")
+            .fetch_all(&self.pool)
+            .await?;
+        let rows = sqlx::query(
+            "SELECT m.pack, MAX(m.ts) AS last, s.title, s.author, s.cover FROM ls_sticker_msgs m
+             LEFT JOIN ls_shared_packs s ON s.id = m.pack
+             GROUP BY m.pack ORDER BY last DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let packs: Vec<SharedPack> = rows
+            .into_iter()
+            .filter_map(|r| {
+                let title: Option<String> = r.try_get("title").ok()?;
+                let author: Option<String> = r.try_get("author").ok()?;
+                let cover: Option<i64> = r.try_get("cover").ok()?;
+                Some(SharedPack {
+                    id: r.try_get("pack").ok()?,
+                    names: title.zip(author),
+                    cover: cover.map(|c| c as u32),
+                })
+            })
+            .collect();
+        Ok((packs, gone))
+    }
+
+    /// A pack's key, as a sticker of it someone sent us carries it.
+    pub async fn shared_pack_key(&self, id: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+        let row = sqlx::query("SELECT key FROM ls_sticker_msgs WHERE pack = ? LIMIT 1").bind(id).fetch_optional(&self.pool).await?;
+        Ok(row.and_then(|r| r.try_get("key").ok()))
+    }
+
+    pub async fn cache_shared_pack(&self, id: &[u8], title: &str, author: &str, cover: Option<u32>) -> anyhow::Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO ls_shared_packs (id, title, author, cover) VALUES (?, ?, ?, ?)")
+            .bind(id)
+            .bind(title)
+            .bind(author)
+            .bind(cover.map(|c| c as i64))
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -1741,6 +1838,7 @@ impl Index {
             "DELETE FROM ls_reactions WHERE thread = ?",
             "DELETE FROM ls_replies WHERE thread = ?",
             "DELETE FROM ls_media WHERE thread = ?",
+            "DELETE FROM ls_sticker_msgs WHERE thread = ?",
         ] {
             sqlx::query(sql).bind(key).execute(&self.pool).await?;
         }
@@ -2194,6 +2292,33 @@ pub(crate) mod tests {
         assert_eq!(index.media_page("v", m, None, 10).await.unwrap().len(), 2);
         index.forget_thread("v").await.unwrap();
         assert!(index.media_page("v", m, None, 10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn shared_packs_last_as_long_as_their_messages() {
+        let db = Db::new().await;
+        let index = db.index().await;
+        let ids = |(packs, _): (Vec<SharedPack>, Vec<Vec<u8>>)| packs.into_iter().map(|p| p.id[0]).collect::<Vec<_>>();
+        index.record_sticker_msg("t", 10, &[1], &[11]).await.unwrap();
+        index.record_sticker_msg("t", 20, &[2], &[12]).await.unwrap();
+        index.record_sticker_msg("u", 30, &[1], &[11]).await.unwrap();
+        // most recently sent first, each pack once
+        assert_eq!(ids(index.shared_packs().await.unwrap()), [1, 2]);
+        assert_eq!(index.shared_pack_key(&[2]).await.unwrap(), Some(vec![12]));
+        index.cache_shared_pack(&[2], "Two", "Someone", Some(5)).await.unwrap();
+        let (packs, _) = index.shared_packs().await.unwrap();
+        assert_eq!(packs[1].names, Some(("Two".into(), "Someone".into())));
+        assert_eq!((packs[0].names.is_none(), packs[1].cover), (true, Some(5)));
+        // its only message gone, the pack and its cache go too
+        index.forget_media("t", 20).await.unwrap();
+        let (packs, gone) = index.shared_packs().await.unwrap();
+        assert_eq!((packs.len(), gone), (1, vec![vec![2]]));
+        assert_eq!(index.shared_pack_key(&[2]).await.unwrap(), None);
+        index.rekey_thread("u", "v").await.unwrap();
+        index.forget_thread("t").await.unwrap();
+        assert_eq!(ids(index.shared_packs().await.unwrap()), [1]);
+        index.forget_thread("v").await.unwrap();
+        assert!(ids(index.shared_packs().await.unwrap()).is_empty());
     }
 
     #[tokio::test(flavor = "current_thread")]

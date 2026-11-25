@@ -91,8 +91,48 @@ impl App {
             };
             made.push(PackDto { id, title: p.title, author: p.author, cover_key });
         }
-        debug!(ms = started.elapsed().as_millis() as u64, packs = out.len(), made = made.len(), loaded, recent, "sticker packs");
-        (self.emit)(Event::StickerPacks { packs: out, made, recent });
+        // a pack that is also installed or made here shows there
+        let listed: HashSet<String> = out.iter().chain(&made).map(|p| p.id.clone()).collect();
+        let mut shared = Vec::new();
+        // a new list asks again for what failed or came without its cover
+        self.shared_fetch.failed.clear();
+        self.shared_fetch.done.clear();
+        let (found, gone) = self.index.shared_packs().await.unwrap_or_default();
+        // no message holds them any more: their covers go too, unless the pack is installed
+        let gone: Vec<Vec<u8>> = gone.into_iter().filter(|id| !installed.contains(hex::encode(id).as_str())).collect();
+        if !gone.is_empty() {
+            let dir = self.paths.thumbs.clone();
+            tokio::task::spawn_blocking(move || remove_pack_files(&dir, &gone));
+        }
+        for p in found {
+            let id = hex::encode(&p.id);
+            if listed.contains(&id) {
+                continue;
+            }
+            let (title, author, cover_key) = match (p.names, p.cover) {
+                (Some((title, author)), None) => (title, author, String::new()),
+                (Some((title, author)), Some(cid)) if self.sticker_cover_path(&id, cid).exists() => {
+                    let base = sticker_thumb_key(&id, cid);
+                    let key = cover_key(&base);
+                    jobs.push(StickerJob { base, key: key.clone(), bytes: None, fit: PACK_COVER });
+                    (title, author, key)
+                }
+                // not fetched, or its cover thumb is gone (the cache was cleared): fetched with it
+                _ => Default::default(),
+            };
+            shared.push(PackDto { id, title, author, cover_key });
+        }
+        let shared_partial = !self.persist.sticker_msgs_indexed;
+        debug!(
+            ms = started.elapsed().as_millis() as u64,
+            packs = out.len(),
+            made = made.len(),
+            shared = shared.len(),
+            loaded,
+            recent,
+            "sticker packs"
+        );
+        (self.emit)(Event::StickerPacks { packs: out, made, shared, shared_partial, recent });
         self.sticker_thumbs(jobs, false);
         if !covers.is_empty() {
             let emit = self.emit.clone();
@@ -102,14 +142,21 @@ impl App {
         }
     }
 
-    /// Puts a pack's signal.art link on the clipboard: an installed pack's, or one made here.
+    /// A pack's key: installed, made here, or carried by a sticker someone sent.
+    async fn any_pack_key(&self, id: &[u8]) -> Option<Vec<u8>> {
+        if let Ok(Some(k)) = self.index.pack_key(id).await {
+            return Some(k);
+        }
+        if let Ok(Some(k)) = self.index.made_pack_key(id).await {
+            return Some(k);
+        }
+        self.index.shared_pack_key(id).await.ok().flatten()
+    }
+
+    /// Puts a pack's signal.art link on the clipboard.
     pub(super) async fn copy_pack_link(&self, hex_id: &str) {
         let Ok(id) = hex::decode(hex_id) else { return };
-        let key = match self.index.pack_key(&id).await {
-            Ok(Some(k)) => Some(k),
-            _ => self.index.made_pack_key(&id).await.ok().flatten(),
-        };
-        let Some(key) = key else { return };
+        let Some(key) = self.any_pack_key(&id).await else { return };
         let link = crate::stickerpack::link(hex_id, &key);
         let tx = self.tx.clone();
         tokio::task::spawn_blocking(move || {
@@ -120,11 +167,79 @@ impl App {
         });
     }
 
-    /// A pack made here, before it is installed: its preview.
-    pub(super) async fn open_made_pack(&mut self, hex_id: &str) {
+    /// A pack made here or shared with us, before it is installed: its preview.
+    pub(super) async fn open_unadded_pack(&mut self, hex_id: &str) {
         let Ok(id) = hex::decode(hex_id) else { return };
-        let Ok(Some(key)) = self.index.made_pack_key(&id).await else { return };
+        let Some(key) = self.any_pack_key(&id).await else { return };
         self.preview_pack(id, Some(key), None).await;
+    }
+
+    /// The pack page shows these shared packs untitled: they are fetched, a few at a time, in
+    /// this order after what's under way. Only for rows on screen: each is a manifest and a
+    /// cover from the sticker CDN.
+    pub(super) async fn shared_want(&mut self, ids: Vec<String>) {
+        let f = &mut self.shared_fetch;
+        f.want = ids
+            .iter()
+            .filter_map(|h| hex::decode(h).ok())
+            .filter(|id| !f.running.contains(id) && !f.failed.contains(id) && !f.done.contains(id))
+            .collect();
+        self.pump_shared().await;
+    }
+
+    async fn pump_shared(&mut self) {
+        let Some(m) = self.manager.clone() else { return };
+        while self.shared_fetch.running.len() < super::packpreview::PARALLEL {
+            let Some(id) = self.shared_fetch.want.pop_front() else { break };
+            let Ok(Some(key)) = self.index.shared_pack_key(&id).await else { continue };
+            self.shared_fetch.running.insert(id.clone());
+            let (m, tx) = (m.clone(), self.tx.clone());
+            tokio::task::spawn_local(async move {
+                let res = async {
+                    let manifest = m.sticker_pack_manifest(&id, &key).await.map_err(|e| e.to_string())?;
+                    let cover_id = manifest.cover.as_ref().map(|c| c.id).or_else(|| manifest.stickers.first().map(|s| s.id));
+                    // without its cover the pack still has its title
+                    let bytes = match cover_id {
+                        Some(cid) => m.download_sticker(&id, &key, cid).await.inspect_err(|e| warn!("shared pack cover: {e}")).ok(),
+                        None => None,
+                    };
+                    Ok(SharedFetched { title: manifest.title, author: manifest.author, cover_id, bytes })
+                }
+                .await;
+                let _ = tx.send(Internal::SharedFetched(id, res));
+            });
+        }
+    }
+
+    pub(super) async fn shared_fetched(&mut self, id: Vec<u8>, res: Result<SharedFetched, String>) {
+        self.shared_fetch.running.remove(&id);
+        match res {
+            Ok(f) => {
+                self.shared_fetch.done.insert(id.clone());
+                // one whose cover didn't come is fetched again with the next pack list
+                if f.cover_id.is_none() || f.bytes.is_some() {
+                    if let Err(e) = self.index.cache_shared_pack(&id, &f.title, &f.author, f.cover_id).await {
+                        warn!("cache shared pack: {e}");
+                    }
+                }
+                let hex = hex::encode(&id);
+                let cover_key = match f.cover_id.zip(f.bytes) {
+                    Some((cid, bytes)) => {
+                        let base = sticker_thumb_key(&hex, cid);
+                        let key = cover_key(&base);
+                        self.sticker_thumbs(vec![StickerJob { base, key: key.clone(), bytes: Some(bytes), fit: PACK_COVER }], false);
+                        key
+                    }
+                    None => String::new(),
+                };
+                (self.emit)(Event::SharedPack(PackDto { id: hex, title: f.title, author: f.author, cover_key }));
+            }
+            Err(e) => {
+                warn!("shared pack manifest: {e}");
+                self.shared_fetch.failed.insert(id);
+            }
+        }
+        self.pump_shared().await;
     }
 
     /// Its link is gone for good; answered by a new `StickerPacks`.
@@ -729,6 +844,24 @@ pub(super) struct PickerQueue {
     todo: std::collections::VecDeque<((String, u32), Option<Arc<[u8]>>)>,
     busy: Option<(String, u32)>,
     running: bool,
+}
+
+/// `App::shared_want`'s work: packs to fetch (raw ids) in order, those under way, those that
+/// failed or came since the pack list was last made (not asked for again until the next).
+#[derive(Default)]
+pub(super) struct SharedFetch {
+    want: std::collections::VecDeque<Vec<u8>>,
+    running: HashSet<Vec<u8>>,
+    failed: HashSet<Vec<u8>>,
+    done: HashSet<Vec<u8>>,
+}
+
+/// A shared pack's manifest, and its cover sticker's bytes if they came.
+pub(super) struct SharedFetched {
+    title: String,
+    author: String,
+    cover_id: Option<u32>,
+    bytes: Option<Vec<u8>>,
 }
 
 /// `App::peek_sticker`'s work: the newest sticker asked for, whether a thread runs.

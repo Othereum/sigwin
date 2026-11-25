@@ -174,6 +174,9 @@ struct Persist {
     /// attachments stored before the media index existed have been indexed
     #[serde(default)]
     media_indexed: bool,
+    /// stickers stored before the sticker index existed have been indexed
+    #[serde(default)]
+    sticker_msgs_indexed: bool,
     /// what the message search's texts hold (`TEXT_FORMAT` once every stored message is
     /// indexed that way)
     #[serde(default)]
@@ -272,6 +275,8 @@ enum Internal {
     PreviewManifest(u64, Result<presage::store::StickerPackManifest, String>),
     /// one of its stickers: (seq, sticker id, bytes)
     PreviewSticker(u64, u32, Result<Vec<u8>, String>),
+    /// a shared pack fetched for the pack page (raw id)
+    SharedFetched(Vec<u8>, Result<stickers::SharedFetched, String>),
     ReceiptsMoved,
     PinsIndexed,
     /// the backfill went through this thread's media
@@ -485,6 +490,8 @@ struct App {
     peek_queue: Arc<std::sync::Mutex<stickers::PeekQueue>>,
     /// the pack the sticker panel shows before it is installed
     preview: Option<packpreview::Preview>,
+    /// shared packs the pack page shows untitled, being fetched
+    shared_fetch: stickers::SharedFetch,
     /// the sticker pack being uploaded (`packmaker.rs`)
     pack_task: Option<tokio::task::AbortHandle>,
     /// the toast slot (`notify.rs`)
@@ -662,6 +669,7 @@ async fn open_app(dir: &Path, emit: Emit) -> anyhow::Result<(App, UnboundedRecei
         picker_queue: Default::default(),
         peek_queue: Default::default(),
         preview: None,
+        shared_fetch: Default::default(),
         pack_task: None,
         notes: Default::default(),
         mute_due: None,
@@ -781,6 +789,7 @@ impl App {
             || !self.persist.reactions_indexed
             || !self.persist.replies_indexed
             || !self.persist.media_indexed
+            || !self.persist.sticker_msgs_indexed
             || self.persist.text_format < TEXT_FORMAT
         {
             self.backfill_pins();
@@ -899,7 +908,8 @@ impl App {
             Command::SetPackOrder(ids) => self.set_pack_order(&ids).await,
             Command::RemovePack(id) => self.remove_pack(&id).await,
             Command::CopyPackLink(id) => self.copy_pack_link(&id).await,
-            Command::OpenMadePack(id) => self.open_made_pack(&id).await,
+            Command::OpenUnaddedPack(id) => self.open_unadded_pack(&id).await,
+            Command::SharedWant(ids) => self.shared_want(ids).await,
             Command::ForgetMadePack(id) => self.forget_made_pack(&id).await,
             Command::StickerClicked(id) => self.sticker_clicked(&id).await,
             Command::CreatePack(job) => self.create_pack(job),
@@ -1107,12 +1117,14 @@ impl App {
             }
             Internal::PreviewManifest(seq, res) => self.manifest_arrived(seq, res),
             Internal::PreviewSticker(seq, id, res) => self.preview_sticker_arrived(seq, id, res),
+            Internal::SharedFetched(id, res) => self.shared_fetched(id, res).await,
             Internal::PinsIndexed => {
                 self.persist.pins_indexed = true;
                 self.persist.edits_indexed = true;
                 self.persist.reactions_indexed = true;
                 self.persist.replies_indexed = true;
                 self.persist.media_indexed = true;
+                self.persist.sticker_msgs_indexed = true;
                 self.persist.text_format = TEXT_FORMAT;
                 self.persist_dirty = true;
                 self.texts_indexed().await;

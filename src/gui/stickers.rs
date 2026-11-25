@@ -11,6 +11,11 @@ pub(crate) struct Panel {
     /// packs made here and not installed, on the pack page
     pub(crate) made: Rc<VecModel<PackItem>>,
     made_dtos: Vec<types::PackDto>,
+    /// packs of stickers others sent, on the pack page
+    pub(crate) shared: Rc<VecModel<PackItem>>,
+    shared_dtos: Vec<types::PackDto>,
+    /// the rows of `shared` on screen: (first, end)
+    shared_shown: (usize, usize),
     pub(crate) stickers: Rc<VecModel<StickerItem>>,
     pub(crate) grid: Vec<types::StickerDto>,
     /// pack cover images (grid images live only in `stickers` rows)
@@ -43,11 +48,19 @@ pub(crate) fn close(app: &AppWindow) {
         p.grid.clear();
         p.pack_dtos.clear();
         p.made_dtos.clear();
+        p.shared_shown = (0, 0);
+        if !std::mem::take(&mut p.shared_dtos).is_empty() {
+            // what wasn't fetched yet isn't wanted any more
+            if let Some(tx) = &ui.tx {
+                let _ = tx.send(Command::SharedWant(Vec::new()));
+            }
+        }
         anim::picker_grid(ui, "");
         let p = &mut ui.sticker;
         p.stickers.set_vec(Vec::new());
         p.packs.set_vec(Vec::new());
         p.made.set_vec(Vec::new());
+        p.shared.set_vec(Vec::new());
     });
 }
 
@@ -62,7 +75,7 @@ pub(super) fn thumbs_arrived(app: &AppWindow, list: Vec<types::Thumb>) {
             let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&t.rgba, t.width, t.height);
             fresh.insert(t.key, Image::from_rgba8(buf));
         }
-        for (dtos, model) in [(&p.pack_dtos, &p.packs), (&p.made_dtos, &p.made)] {
+        for (dtos, model) in [(&p.pack_dtos, &p.packs), (&p.made_dtos, &p.made), (&p.shared_dtos, &p.shared)] {
             for (i, d) in dtos.iter().enumerate() {
                 if take_covers(&mut p.covers, &fresh, &d.cover_key) {
                     slint::Model::set_row_data(&**model, i, pack_item(d, &p.covers));
@@ -88,18 +101,32 @@ pub(super) fn thumbs_arrived(app: &AppWindow, list: Vec<types::Thumb>) {
     });
 }
 
-pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>, made: Vec<types::PackDto>, recent: bool) {
+/// The pack lists: installed, made here, and shared with us (`partial`: not all messages looked
+/// through yet).
+pub(super) struct Packs {
+    pub(super) list: Vec<types::PackDto>,
+    pub(super) made: Vec<types::PackDto>,
+    pub(super) shared: Vec<types::PackDto>,
+    pub(super) partial: bool,
+    pub(super) recent: bool,
+}
+
+pub(super) fn packs_arrived(app: &AppWindow, packs: Packs) {
     if !app.get_sticker_open() {
         return;
     }
+    let Packs { list, made, shared, partial, recent } = packs;
     let d = app.global::<StickerData>();
     d.set_packs_loaded(true);
     d.set_has_recent(recent);
+    d.set_shared_partial(partial);
     let (first, preview, installed) = UI.with_borrow_mut(|ui| {
         let p = &mut ui.sticker;
         p.packs.set_vec(list.iter().map(|d| pack_item(d, &p.covers)).collect::<Vec<_>>());
         p.made.set_vec(made.iter().map(|d| pack_item(d, &p.covers)).collect::<Vec<_>>());
         p.made_dtos = made;
+        p.shared.set_vec(shared.iter().map(|d| pack_item(d, &p.covers)).collect::<Vec<_>>());
+        p.shared_dtos = shared;
         let first = list.first().map(|d| d.id.clone());
         // installed now: a tab like the others (the backend let go of it)
         let installed = p.preview.as_ref().is_some_and(|v| list.iter().any(|d| d.id == v.pack.id));
@@ -109,6 +136,8 @@ pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>, made: Ve
         p.pack_dtos = list;
         (first, p.preview.as_ref().map(|v| v.pack.id.clone()), installed)
     });
+    // the rows on screen may stay as they were, and then don't report again
+    UI.with_borrow(shared_want);
     if installed {
         set_installing(app, None, None);
     }
@@ -139,6 +168,41 @@ pub(super) fn packs_arrived(app: &AppWindow, list: Vec<types::PackDto>, made: Ve
         }
         None => d.set_current_pack(PACK_PAGE.into()),
     }
+}
+
+/// The pack page shows these rows of `shared` (none: it isn't open).
+pub(super) fn shared_shown(first: usize, end: usize) {
+    UI.with_borrow_mut(|ui| {
+        ui.sticker.shared_shown = (first, end);
+        shared_want(ui);
+    });
+}
+
+/// Asks the backend for the shared packs on screen that have no title yet.
+fn shared_want(ui: &Ui) {
+    let p = &ui.sticker;
+    let (first, end) = p.shared_shown;
+    let ids: Vec<String> =
+        p.shared_dtos.iter().take(end).skip(first).filter(|d| d.title.is_empty()).map(|d| d.id.clone()).collect();
+    if ids.is_empty() {
+        return;
+    }
+    if let Some(tx) = &ui.tx {
+        let _ = tx.send(Command::SharedWant(ids));
+    }
+}
+
+/// A shared pack's title came; its cover follows in `thumbs_arrived`.
+pub(super) fn shared_pack_arrived(app: &AppWindow, dto: types::PackDto) {
+    if !app.get_sticker_open() {
+        return;
+    }
+    UI.with_borrow_mut(|ui| {
+        let p = &mut ui.sticker;
+        let Some(i) = p.shared_dtos.iter().position(|d| d.id == dto.id) else { return };
+        slint::Model::set_row_data(&*p.shared, i, pack_item(&dto, &p.covers));
+        p.shared_dtos[i] = dto;
+    });
 }
 
 /// The installed pack's place among the tabs, -1 if it isn't one.
@@ -320,14 +384,6 @@ pub(super) fn ask_remove(app: &AppWindow, index: usize) {
     let text = tr!("Remove “{}”? It's also removed from your other devices.", title);
     use super::window::{ask, Action};
     ask(app, tr!("Remove sticker pack"), text, Action::Danger(tr!("Remove")), move || send_cmd(Command::RemovePack(id)));
-}
-
-/// The hex id of the pack at `index` on the pack page: an installed one, or one made here.
-pub(super) fn pack_id(index: usize, made: bool) -> Option<String> {
-    UI.with_borrow(|ui| {
-        let p = &ui.sticker;
-        if made { &p.made_dtos } else { &p.pack_dtos }.get(index).map(|d| d.id.clone())
-    })
 }
 
 pub(super) fn ask_forget_made(app: &AppWindow, index: usize) {

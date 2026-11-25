@@ -3,7 +3,7 @@
 use super::*;
 
 impl App {
-    /// One-time: index pin, edit, reaction, reply, media and text messages presage stored
+    /// One-time: index pin, edit, reaction, reply, media, sticker and text messages presage stored
     /// before we kept our own indexes; only the indexes not done yet.
     /// Walks every thread oldest first in pages, so pins and unpins apply in order.
     pub(super) fn backfill_pins(&mut self) {
@@ -14,7 +14,7 @@ impl App {
         let p = &self.persist;
         // a second replay could bring back a pin whose unpin is still being sent
         let (pins, edits, reactions, replies) = (!p.pins_indexed, !p.edits_indexed, !p.reactions_indexed, !p.replies_indexed);
-        let (media, text) = (!p.media_indexed, p.text_format < TEXT_FORMAT);
+        let (media, text, stickers) = (!p.media_indexed, p.text_format < TEXT_FORMAT, !p.sticker_msgs_indexed);
         if media {
             self.media_backfill = Some(HashSet::new());
         }
@@ -54,6 +54,7 @@ impl App {
                                 if reactions { record_reaction(&index, &key, c, me).await } else { Ok(false) },
                                 if replies { record_reply(&index, &key, c, me).await } else { Ok(false) },
                                 if media { record_media(&index, &key, c, me).await } else { Ok(false) },
+                                if stickers { record_sticker_msg(&index, &key, c, me).await } else { Ok(false) },
                                 // an edit's text goes over its target's, stored by the page above
                                 if text && matches!(view::classify(c, me), Kind::Edit { .. }) {
                                     record_text(&index, &row.thread, c, me).await
@@ -335,6 +336,9 @@ impl App {
         }
         if let Err(e) = record_media(&self.index, &key, &c, self.me).await {
             warn!("record media: {e:#}");
+        }
+        if let Err(e) = record_sticker_msg(&self.index, &key, &c, self.me).await {
+            warn!("record sticker: {e:#}");
         }
         self.note_text(&thread, &c).await;
         let kind = view::classify(&c, self.me);

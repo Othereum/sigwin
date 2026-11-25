@@ -435,7 +435,7 @@ pub fn physical_px(logical: u32) -> u32 {
     ((logical * s + 500) / 1000).max(1)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PackDto {
     /// hex pack id
     pub id: String,
@@ -730,8 +730,12 @@ pub enum Event {
     /// (Signal Desktop's `_hasQueueEmptied`)
     CatchingUp(bool),
     /// `recent`: the recently used tab has stickers. `made`: packs made on this PC and not
-    /// installed, newest first
-    StickerPacks { packs: Vec<PackDto>, made: Vec<PackDto>, recent: bool },
+    /// installed, newest first. `shared`: packs of stickers others sent, not installed or made
+    /// here, most recently sent first; an empty title is one not fetched yet (`SharedWant`).
+    /// `shared_partial`: older messages haven't all been gone through yet
+    StickerPacks { packs: Vec<PackDto>, made: Vec<PackDto>, shared: Vec<PackDto>, shared_partial: bool, recent: bool },
+    /// a pack of `shared` was fetched: its title and author (its cover comes in `StickerThumbs`)
+    SharedPack(PackDto),
     /// `pack`: the tab, a pack's hex id or `RECENT_TAB`
     StickerGrid { pack: String, items: Vec<StickerDto> },
     /// The open chat's media page: items to add below what it has (`reset`: in place of it),
@@ -881,10 +885,13 @@ pub enum Command {
     SetPackOrder(Vec<String>),
     /// uninstall this hex id here and on the other devices; answered by a new `StickerPacks`
     RemovePack(String),
-    /// put the signal.art link of this hex id (installed, or made here) on the clipboard
+    /// put the signal.art link of this hex id (installed, made here, or shared) on the clipboard
     CopyPackLink(String),
-    /// preview this pack made here
-    OpenMadePack(String),
+    /// preview this pack made here or shared with us
+    OpenUnaddedPack(String),
+    /// these shared packs (hex ids) show on the pack page without a title: fetch their manifests
+    /// and covers
+    SharedWant(Vec<String>),
     /// drop this made pack's record, link and all; answered by a new `StickerPacks`
     ForgetMadePack(String),
     /// a sticker in the message list was clicked

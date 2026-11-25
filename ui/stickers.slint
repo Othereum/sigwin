@@ -30,10 +30,17 @@ export global StickerData {
     callback remove-pack(int);
     // packs made on this PC and not added, newest first
     in property <[PackItem]> made;
-    // the link of the pack at this index among `packs`, or among `made` (true)
-    callback copy-pack-link(int, bool);
-    // preview the made pack at this index
-    callback open-made(int);
+    // packs of stickers others sent, not added, most recently sent first; an empty title is one
+    // still being fetched
+    in property <[PackItem]> shared;
+    // older messages are still being looked through for `shared`
+    in property <bool> shared-partial;
+    // these rows of `shared` are on screen (first, end; 0, 0 none)
+    callback shared-shown(int, int);
+    // put this pack's link on the clipboard
+    callback copy-pack-link(string);
+    // preview this pack (made here, or shared)
+    callback open-unadded(string);
     // asks first
     callback forget-made(int);
     // the installed pack's index among `packs`, -1 if it isn't one
@@ -71,12 +78,77 @@ component PackCover inherits Rectangle {
     }
 }
 
+// A pack not added (made here, or shared): click it to preview it. `forget`: it has a remove
+// button. An empty title is one still being fetched.
+component UnaddedRow inherits Rectangle {
+    in property <PackItem> pack;
+    in property <bool> forget;
+    in property <bool> hover-ok;
+    callback forget-clicked();
+    border-radius: 10px;
+    background: root.hover-ok && ta.has-hover ? Theme.hover : transparent;
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { StickerData.open-unadded(root.pack.id); }
+    }
+    HorizontalLayout {
+        // the covers line up with the installed ones', past their handles
+        padding-left: 32px;
+        padding-right: 4px;
+        spacing: 10px;
+        PackCover {
+            y: (parent.height - self.height) / 2;
+            pack: root.pack;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            Text {
+                text: root.pack.title != "" ? root.pack.title : @tr("Loading…");
+                color: root.pack.title != "" ? Theme.text : Theme.subtle;
+                overflow: elide;
+            }
+            if root.pack.author != "": Text {
+                text: root.pack.author;
+                color: Theme.subtle;
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.copy;
+            accessible-role: button;
+            accessible-label: @tr("Copy link");
+            clicked => { StickerData.copy-pack-link(root.pack.id); }
+            Tip { hovered: parent.hovered; text: @tr("Copy link"); }
+        }
+        if root.forget: IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.trash;
+            accessible-role: button;
+            accessible-label: @tr("Remove from list");
+            clicked => { root.forget-clicked(); }
+            Tip { hovered: parent.hovered; text: @tr("Remove from list"); }
+        }
+    }
+}
+
 // Installed packs: drag a row to reorder, click it to open the pack. Below them, packs made here
-// and not added: click one to preview it.
+// and not added, then packs of stickers others sent: click one to preview it.
 component PackList inherits Rectangle {
     property <length> row-h: 44px;
     property <length> made-top: StickerData.packs.length * self.row-h;
     property <length> made-head: 32px;
+    property <length> shared-top: self.made-top + (StickerData.made.length > 0 ? self.made-head + StickerData.made.length * self.row-h : 0px);
+    property <bool> shared-head: StickerData.shared.length > 0 || StickerData.shared-partial;
+    property <length> shared-rows: self.shared-top + (self.shared-head ? self.made-head : 0px);
+    // the shared rows on screen, reported so only those are fetched
+    property <int> shared-first: clamp(floor((-view.content-y - self.shared-rows) / self.row-h), 0, StickerData.shared.length);
+    property <int> shared-end: clamp(ceil((-view.content-y + view.visible-height - self.shared-rows) / self.row-h), 0, StickerData.shared.length);
+    init => { StickerData.shared-shown(self.shared-first, self.shared-end); }
+    changed shared-first => { StickerData.shared-shown(self.shared-first, self.shared-end); }
+    changed shared-end => { StickerData.shared-shown(self.shared-first, self.shared-end); }
     // the pressed row (-1 none), and whether it has moved far enough to be a drag
     property <int> drag: -1;
     property <bool> dragging;
@@ -98,7 +170,7 @@ component PackList inherits Rectangle {
             width: parent.width;
             height: parent.height;
             vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-            content-height: root.made-top + (StickerData.made.length > 0 ? root.made-head + StickerData.made.length * root.row-h : 0px);
+            content-height: root.shared-rows + StickerData.shared.length * root.row-h;
             for p[i] in StickerData.packs: Rectangle {
                 x: 0px;
                 y: i * root.row-h;
@@ -171,7 +243,7 @@ component PackList inherits Rectangle {
                         icon: Icons.copy;
                         accessible-role: button;
                         accessible-label: @tr("Copy link");
-                        clicked => { StickerData.copy-pack-link(i, false); }
+                        clicked => { StickerData.copy-pack-link(p.id); }
                         Tip { hovered: parent.hovered; text: @tr("Copy link"); }
                     }
                     IconButton {
@@ -195,58 +267,34 @@ component PackList inherits Rectangle {
                 vertical-alignment: center;
                 overflow: elide;
             }
-            for p[i] in StickerData.made: Rectangle {
+            for p[i] in StickerData.made: UnaddedRow {
                 x: 0px;
                 y: root.made-top + root.made-head + i * root.row-h;
                 width: view.visible-width - 8px;
                 height: root.row-h;
-                border-radius: 10px;
-                background: root.drag < 0 && made-ta.has-hover ? Theme.hover : transparent;
-                made-ta := TouchArea {
-                    mouse-cursor: MouseCursor.pointer;
-                    clicked => { StickerData.open-made(i); }
-                }
-                HorizontalLayout {
-                    // the covers line up with the installed ones', past their handles
-                    padding-left: 32px;
-                    padding-right: 4px;
-                    spacing: 10px;
-                    PackCover {
-                        y: (parent.height - self.height) / 2;
-                        pack: p;
-                    }
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        alignment: center;
-                        Text {
-                            text: p.title;
-                            color: Theme.text;
-                            overflow: elide;
-                        }
-                        if p.author != "": Text {
-                            text: p.author;
-                            color: Theme.subtle;
-                            font-size: 12px;
-                            overflow: elide;
-                        }
-                    }
-                    IconButton {
-                        y: (parent.height - self.height) / 2;
-                        icon: Icons.copy;
-                        accessible-role: button;
-                        accessible-label: @tr("Copy link");
-                        clicked => { StickerData.copy-pack-link(i, true); }
-                        Tip { hovered: parent.hovered; text: @tr("Copy link"); }
-                    }
-                    IconButton {
-                        y: (parent.height - self.height) / 2;
-                        icon: Icons.trash;
-                        accessible-role: button;
-                        accessible-label: @tr("Remove from list");
-                        clicked => { StickerData.forget-made(i); }
-                        Tip { hovered: parent.hovered; text: @tr("Remove from list"); }
-                    }
-                }
+                pack: p;
+                forget: true;
+                hover-ok: root.drag < 0;
+                forget-clicked => { StickerData.forget-made(i); }
+            }
+            if root.shared-head: Text {
+                x: 6px;
+                y: root.shared-top;
+                width: view.visible-width - 20px;
+                height: root.made-head;
+                text: StickerData.shared-partial ? @tr("Shared with you (still looking through messages)") : @tr("Shared with you");
+                color: Theme.subtle;
+                font-size: 12px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            for p[i] in StickerData.shared: UnaddedRow {
+                x: 0px;
+                y: root.shared-rows + i * root.row-h;
+                width: view.visible-width - 8px;
+                height: root.row-h;
+                pack: p;
+                hover-ok: root.drag < 0;
             }
             // where the dragged row would land
             Rectangle {
@@ -280,6 +328,14 @@ export component StickerPanel inherits Rectangle {
     // the side paddings, and room for the grid's scrollbar thumb
     property <int> cols: max(1, floor((self.width - 50px) / cell));
     property <bool> manage: StickerData.current-pack == "" || StickerData.current-pack == "+";
+    // the pack page has a list to show (shared packs still being looked for count)
+    property <bool> any-listed: StickerData.packs.length > 0 || StickerData.made.length > 0 || StickerData.shared.length > 0 || StickerData.shared-partial;
+    // the pack list reports the shared rows on screen only while it shows
+    changed manage => {
+        if !self.manage {
+            StickerData.shared-shown(0, 0);
+        }
+    }
     property <bool> previewing: StickerData.has-preview && StickerData.current-pack == StickerData.preview.pack.id;
     property <bool> recent: StickerData.current-pack == "recent";
     // the tab under the pointer (the preview's is `packs.length`, the recently used one's
@@ -655,7 +711,7 @@ export component StickerPanel inherits Rectangle {
             // holds the rest of the panel whatever shows in it
             Rectangle {
                 vertical-stretch: 1;
-                if StickerData.packs-loaded && StickerData.packs.length == 0 && StickerData.made.length == 0: Text {
+                if StickerData.packs-loaded && !root.any-listed: Text {
                     width: parent.width;
                     height: parent.height;
                     text: @tr("No sticker packs yet");
@@ -663,7 +719,7 @@ export component StickerPanel inherits Rectangle {
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
-                if StickerData.packs.length > 0 || StickerData.made.length > 0: PackList {
+                if root.any-listed: PackList {
                     width: parent.width;
                     height: parent.height;
                 }
