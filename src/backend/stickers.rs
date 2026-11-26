@@ -153,7 +153,7 @@ impl App {
         if let Ok(Some(k)) = self.index.made_pack_key(id).await {
             return Some(k);
         }
-        self.index.shared_pack_key(id).await.ok().flatten()
+        self.index.shared_pack_keys(id).await.ok()?.into_iter().next()
     }
 
     /// Puts a pack's signal.art link on the clipboard.
@@ -194,19 +194,33 @@ impl App {
         let Some(m) = self.manager.clone() else { return };
         while self.shared_fetch.running.len() < super::packpreview::PARALLEL {
             let Some(id) = self.shared_fetch.want.pop_front() else { break };
-            let Ok(Some(key)) = self.index.shared_pack_key(&id).await else { continue };
+            let keys = self.index.shared_pack_keys(&id).await.unwrap_or_default();
+            if keys.is_empty() {
+                continue;
+            }
             self.shared_fetch.running.insert(id.clone());
             let (m, tx) = (m.clone(), self.tx.clone());
             tokio::task::spawn_local(async move {
                 let res = async {
-                    let manifest = m.sticker_pack_manifest(&id, &key).await.map_err(|e| e.to_string())?;
+                    // the first key that opens the manifest is the pack's
+                    let mut tried = Err(String::new());
+                    for key in keys {
+                        match m.sticker_pack_manifest(&id, &key).await {
+                            Ok(manifest) => {
+                                tried = Ok((manifest, key));
+                                break;
+                            }
+                            Err(e) => tried = Err(e.to_string()),
+                        }
+                    }
+                    let (manifest, key) = tried?;
                     let cover_id = manifest.cover.as_ref().map(|c| c.id).or_else(|| manifest.stickers.first().map(|s| s.id));
                     // without its cover the pack still has its title
                     let bytes = match cover_id {
                         Some(cid) => m.download_sticker(&id, &key, cid).await.inspect_err(|e| warn!("shared pack cover: {e}")).ok(),
                         None => None,
                     };
-                    Ok(SharedFetched { title: manifest.title, author: manifest.author, cover_id, bytes })
+                    Ok(SharedFetched { key, title: manifest.title, author: manifest.author, cover_id, bytes })
                 }
                 .await;
                 let _ = tx.send(Internal::SharedFetched(id, res));
@@ -221,7 +235,7 @@ impl App {
                 self.shared_fetch.done.insert(id.clone());
                 // one whose cover didn't come is fetched again with the next pack list
                 if f.cover_id.is_none() || f.bytes.is_some() {
-                    if let Err(e) = self.index.cache_shared_pack(&id, &f.title, &f.author, f.cover_id).await {
+                    if let Err(e) = self.index.cache_shared_pack(&id, &f.key, &f.title, &f.author, f.cover_id).await {
                         warn!("cache shared pack: {e}");
                     }
                 }
@@ -859,8 +873,10 @@ pub(super) struct SharedFetch {
     done: HashSet<Vec<u8>>,
 }
 
-/// A shared pack's manifest, and its cover sticker's bytes if they came.
+/// A shared pack's manifest with the key that opened it, and its cover sticker's bytes if they
+/// came.
 pub(super) struct SharedFetched {
+    key: Vec<u8>,
     title: String,
     author: String,
     cover_id: Option<u32>,

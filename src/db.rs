@@ -120,7 +120,7 @@ pub struct MadePack {
     pub cover: Option<Vec<u8>>,
 }
 
-/// A pack of stickers others sent us (`ls_sticker_msgs`, `ls_shared_packs`).
+/// A pack of stickers others sent us (`ls_sticker_msgs`, `ls_shared_cache`).
 pub struct SharedPack {
     pub id: Vec<u8>,
     /// title and author, once its manifest was fetched
@@ -546,11 +546,16 @@ impl Index {
         .execute(&pool)
         .await?;
         sqlx::query("CREATE INDEX IF NOT EXISTS ls_sticker_msgs_by_pack ON ls_sticker_msgs (pack, ts)").execute(&pool).await?;
-        // title and cover of packs shared with us, from their manifests (`ls_packs`' shape). A
-        // cache: rows of packs no message holds any more are dropped
+        // title and cover of packs shared with us, from their manifests (`ls_packs`' shape), and
+        // the key that opened them: messages may carry different keys for one pack. A cache: rows
+        // of packs no message holds any more are dropped. It replaced `ls_shared_packs`, which
+        // lacked the key: being a cache, it goes instead of a schema step, and an older build
+        // that makes it again only fetches its titles again
+        sqlx::query("DROP TABLE IF EXISTS ls_shared_packs").execute(&pool).await?;
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS ls_shared_packs (
+            "CREATE TABLE IF NOT EXISTS ls_shared_cache (
                 id BLOB PRIMARY KEY,
+                key BLOB NOT NULL,
                 title TEXT NOT NULL,
                 author TEXT NOT NULL,
                 cover INTEGER
@@ -1507,12 +1512,12 @@ impl Index {
     /// author and cover sticker id (None: not fetched yet). Drops the cache of packs no message
     /// holds any more, and says which those were.
     pub async fn shared_packs(&self) -> anyhow::Result<(Vec<SharedPack>, Vec<Vec<u8>>)> {
-        let gone: Vec<Vec<u8>> = sqlx::query_scalar("DELETE FROM ls_shared_packs WHERE id NOT IN (SELECT pack FROM ls_sticker_msgs) RETURNING id")
+        let gone: Vec<Vec<u8>> = sqlx::query_scalar("DELETE FROM ls_shared_cache WHERE id NOT IN (SELECT pack FROM ls_sticker_msgs) RETURNING id")
             .fetch_all(&self.pool)
             .await?;
         let rows = sqlx::query(
             "SELECT m.pack, MAX(m.ts) AS last, s.title, s.author, s.cover FROM ls_sticker_msgs m
-             LEFT JOIN ls_shared_packs s ON s.id = m.pack
+             LEFT JOIN ls_shared_cache s ON s.id = m.pack
              GROUP BY m.pack ORDER BY last DESC",
         )
         .fetch_all(&self.pool)
@@ -1533,15 +1538,24 @@ impl Index {
         Ok((packs, gone))
     }
 
-    /// A pack's key, as a sticker of it someone sent us carries it.
-    pub async fn shared_pack_key(&self, id: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
-        let row = sqlx::query("SELECT key FROM ls_sticker_msgs WHERE pack = ? LIMIT 1").bind(id).fetch_optional(&self.pool).await?;
-        Ok(row.and_then(|r| r.try_get("key").ok()))
+    /// Keys to try for a pack shared with us: the one that opened it, once its manifest came;
+    /// before that each different key its stickers carried, the most recently sent first. Anyone
+    /// can send a sticker with a real pack's id and a wrong key: don't take one of these as the
+    /// pack's key before it opened the manifest.
+    pub async fn shared_pack_keys(&self, id: &[u8]) -> anyhow::Result<Vec<Vec<u8>>> {
+        if let Some(key) = sqlx::query_scalar("SELECT key FROM ls_shared_cache WHERE id = ?").bind(id).fetch_optional(&self.pool).await? {
+            return Ok(vec![key]);
+        }
+        Ok(sqlx::query_scalar("SELECT key FROM ls_sticker_msgs WHERE pack = ? GROUP BY key ORDER BY MAX(ts) DESC")
+            .bind(id)
+            .fetch_all(&self.pool)
+            .await?)
     }
 
-    pub async fn cache_shared_pack(&self, id: &[u8], title: &str, author: &str, cover: Option<u32>) -> anyhow::Result<()> {
-        sqlx::query("INSERT OR REPLACE INTO ls_shared_packs (id, title, author, cover) VALUES (?, ?, ?, ?)")
+    pub async fn cache_shared_pack(&self, id: &[u8], key: &[u8], title: &str, author: &str, cover: Option<u32>) -> anyhow::Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO ls_shared_cache (id, key, title, author, cover) VALUES (?, ?, ?, ?, ?)")
             .bind(id)
+            .bind(key)
             .bind(title)
             .bind(author)
             .bind(cover.map(|c| c as i64))
@@ -2304,8 +2318,12 @@ pub(crate) mod tests {
         index.record_sticker_msg("u", 30, &[1], &[11]).await.unwrap();
         // most recently sent first, each pack once
         assert_eq!(ids(index.shared_packs().await.unwrap()), [1, 2]);
-        assert_eq!(index.shared_pack_key(&[2]).await.unwrap(), Some(vec![12]));
-        index.cache_shared_pack(&[2], "Two", "Someone", Some(5)).await.unwrap();
+        // a later sticker with another key comes first, until a key opened the pack
+        index.record_sticker_msg("u", 40, &[2], &[99]).await.unwrap();
+        assert_eq!(index.shared_pack_keys(&[2]).await.unwrap(), [vec![99], vec![12]]);
+        index.cache_shared_pack(&[2], &[12], "Two", "Someone", Some(5)).await.unwrap();
+        assert_eq!(index.shared_pack_keys(&[2]).await.unwrap(), [vec![12]]);
+        index.forget_media("u", 40).await.unwrap();
         let (packs, _) = index.shared_packs().await.unwrap();
         assert_eq!(packs[1].names, Some(("Two".into(), "Someone".into())));
         assert_eq!((packs[0].names.is_none(), packs[1].cover), (true, Some(5)));
@@ -2313,7 +2331,7 @@ pub(crate) mod tests {
         index.forget_media("t", 20).await.unwrap();
         let (packs, gone) = index.shared_packs().await.unwrap();
         assert_eq!((packs.len(), gone), (1, vec![vec![2]]));
-        assert_eq!(index.shared_pack_key(&[2]).await.unwrap(), None);
+        assert!(index.shared_pack_keys(&[2]).await.unwrap().is_empty());
         index.rekey_thread("u", "v").await.unwrap();
         index.forget_thread("t").await.unwrap();
         assert_eq!(ids(index.shared_packs().await.unwrap()), [1]);
