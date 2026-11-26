@@ -609,6 +609,35 @@ export component AppWindow inherits Window {
                     clicked => { root.skip-history(); }
                 }
             }
+            // startup that never finishes (an error, a server refusing this version) can still
+            // take the release that fixes it: the sidebar's update bar isn't reachable from here
+            if SettingsData.update-version != "" || SettingsData.update-available != "": VerticalLayout {
+                spacing: 8px;
+                padding-top: 12px;
+                Text {
+                    text: (SettingsData.update-version != "" ? @tr("New version ready") : @tr("New version available")) + ": "
+                        + SettingsData.current-version + " → "
+                        + (SettingsData.update-version != "" ? SettingsData.update-version : SettingsData.update-available);
+                    color: Theme.text;
+                    horizontal-alignment: center;
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    PlainButton {
+                        text: SettingsData.update-version != "" ? @tr("Restart")
+                            : SettingsData.update-installing ? @tr("Downloading…") : @tr("Update");
+                        enabled: SettingsData.update-version != "" || !SettingsData.update-installing;
+                        clicked => {
+                            if SettingsData.update-version != "" {
+                                SettingsData.restart-for-update();
+                            } else {
+                                SettingsData.update-installing = true;
+                                SettingsData.install-update();
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

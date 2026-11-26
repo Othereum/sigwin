@@ -245,9 +245,22 @@ fn main() -> anyhow::Result<()> {
         let _backend = backend::spawn_offline(data_dir(), cmd_rx, emit);
         gui::scenario_install(&app);
     } else {
-        let _backend = backend::spawn(data_dir(), cmd_rx, emit);
-        if let Some(exe) = install::installed_self() {
-            start_updates(&app, exe);
+        // updates first: a backend failing at once calls `update::start`
+        let recover = install::installed_self().is_some_and(|exe| start_updates(&app, exe, &data_dir()));
+        if recover {
+            // the last run died before it could update; this one may die the same way, so the
+            // fix gets its chance first (bounded: offline, the app must still come up)
+            emit(Event::Loading(tr!("Checking for updates…").into()));
+            std::thread::spawn(move || {
+                if update::wait_first_check(std::time::Duration::from_secs(120)) {
+                    // the loading page offers the restart
+                    emit(Event::Loading(String::new()));
+                    return;
+                }
+                let _backend = backend::spawn(data_dir(), cmd_rx, emit);
+            });
+        } else {
+            let _backend = backend::spawn(data_dir(), cmd_rx, emit);
         }
     }
     app.global::<SettingsData>().on_open_logs(|| {

@@ -4,7 +4,9 @@
 //! when off, checks still run and `Status::Available` offers an install button. The settings button
 //! checks once on demand.)
 //! A background thread checks `releases/latest` once the first sync is done (or at once on the
-//! login screen, where there is nothing to sync), then once an hour, and also
+//! login screen, where there is nothing to sync, or when the backend failed; at the latest after
+//! `START_LIMIT`; before the backend starts if the last run died first, see `MARKER`), then once
+//! an hour, and also
 //! when the window gains focus and the last check is over an hour old. "An hour" is wall-clock
 //! time checked every few minutes, so a laptop waking from sleep checks soon. A check that fails
 //! on the network (none yet right after login) is retried after 5 minutes, backing off to an
@@ -52,6 +54,29 @@ enum Msg {
 }
 
 static POKE: OnceLock<mpsc::Sender<Msg>> = OnceLock::new();
+/// The first check runs after this even without `start`: startup that never finishes (storage
+/// that won't open, a server refusing this version) must still be able to fetch the fix.
+const START_LIMIT: Duration = Duration::from_secs(10 * 60);
+/// In the data dir from start until the first check was tried: found at start, the last run died
+/// (a panic aborts the process) before it could look for the release that fixes it.
+const MARKER: &str = "update-pending";
+/// The first check was tried; `true` = it installed a new version.
+static FIRST: (std::sync::Mutex<Option<bool>>, std::sync::Condvar) = (std::sync::Mutex::new(None), std::sync::Condvar::new());
+
+fn first_tried(installed: bool) {
+    let (lock, cv) = &FIRST;
+    if let Ok(mut f) = lock.lock() {
+        f.get_or_insert(installed);
+        cv.notify_all();
+    }
+}
+
+/// Blocks until the first check was tried, at most `limit`. True if it installed a new version.
+pub fn wait_first_check(limit: Duration) -> bool {
+    let (lock, cv) = &FIRST;
+    let Ok(f) = lock.lock() else { return false };
+    cv.wait_timeout_while(f, limit, |f| f.is_none()).map_or(false, |(f, _)| f.unwrap_or(false))
+}
 /// The "automatic download" setting: install a newer release without asking. Off = offer only.
 static AUTO: AtomicBool = AtomicBool::new(true);
 
@@ -60,7 +85,8 @@ pub fn set_auto(on: bool) {
 }
 
 /// Lets the first check run: called once the first sync is done (the network works and the
-/// startup load is over) or when there is no account to sync (login screen). Later calls do nothing.
+/// startup load is over), when there is no account to sync (login screen), or when the backend
+/// failed. Later calls do nothing.
 pub fn start() {
     if let Some(tx) = POKE.get() {
         let _ = tx.send(Msg::Start);
@@ -132,17 +158,29 @@ impl<E: Into<anyhow::Error>> From<E> for Failure {
 
 /// Starts checking for updates of `exe` (the installed copy we run from). `report` gets the new
 /// version once it has replaced `exe` (checking stops then), and the outcome of manual checks.
-pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
+/// Call it before the backend starts, so its `start` isn't lost. True if the last run died before
+/// its first check: then this one checks at once, and the caller should hold the backend until
+/// `wait_first_check`, or it may die the same way before the fix is in.
+pub fn spawn(exe: PathBuf, data_dir: &Path, report: impl Fn(Status) + Send + 'static) -> bool {
     let (tx, rx) = mpsc::channel();
     if POKE.set(tx).is_err() {
-        return;
+        return false;
+    }
+    let marker = data_dir.join(MARKER);
+    let recover = marker.exists();
+    if let Err(e) = std::fs::write(&marker, b"") {
+        tracing::warn!("update: marker: {e}");
+    }
+    if recover {
+        tracing::warn!("update: the last run ended before its first check, checking first");
     }
     let _ = std::thread::Builder::new().name("update".into()).spawn(move || {
         // wait for the first check; pokes meanwhile are dropped, a manual check isn't
         let mut manual = false;
         let mut want_install = false;
-        loop {
-            match rx.recv() {
+        let limit = std::time::Instant::now() + START_LIMIT;
+        while !recover {
+            match rx.recv_timeout(limit.saturating_duration_since(std::time::Instant::now())) {
                 Ok(Msg::Start) => break,
                 Ok(m @ (Msg::Manual | Msg::Install)) => {
                     manual = true;
@@ -150,7 +188,11 @@ pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
                     break;
                 }
                 Ok(Msg::Poke) => {}
-                Err(_) => return,
+                Err(RecvTimeoutError::Timeout) => {
+                    tracing::info!("update: startup unfinished after {} min, checking anyway", START_LIMIT.as_secs() / 60);
+                    break;
+                }
+                Err(RecvTimeoutError::Disconnected) => return,
             }
         }
         let (mut ok, mut tried, mut failures) = (None, None, 0u32);
@@ -165,6 +207,8 @@ pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
                 match check_once(&exe, skip, install) {
                     Ok(Some(Found::Installed(v))) => {
                         tracing::info!("update: {v} installed, restart to use it");
+                        let _ = std::fs::remove_file(&marker);
+                        first_tried(true);
                         report(Status::Ready(v));
                         return;
                     }
@@ -205,6 +249,10 @@ pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
                         }
                     }
                 }
+                if tried.is_none() {
+                    let _ = std::fs::remove_file(&marker);
+                    first_tried(false);
+                }
                 tried = Some(SystemTime::now());
             }
             (manual, want_install) = match rx.recv_timeout(TICK) {
@@ -215,6 +263,7 @@ pub fn spawn(exe: PathBuf, report: impl Fn(Status) + Send + 'static) {
             };
         }
     });
+    recover
 }
 
 enum Found {

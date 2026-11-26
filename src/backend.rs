@@ -538,6 +538,8 @@ fn spawn_with(dir: PathBuf, cmd_rx: UnboundedReceiver<Command>, emit: Emit, offl
                 if let Err(e) = Box::pin(run(dir, cmd_rx, emit, offline)).await {
                     error!("backend failed: {e:#}");
                     emit2(Event::Loading(tr!("Error: {}", format!("{e:#}"))));
+                    // a release may fix this; the loading page offers it
+                    crate::update::start();
                 }
             });
         })

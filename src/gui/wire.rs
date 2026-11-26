@@ -1102,9 +1102,10 @@ fn wire_update(app: &AppWindow) {
 }
 
 /// Starts checking for updates of the installed `exe`; the settings page shows what it finds.
-pub(crate) fn start_updates(app: &AppWindow, exe: PathBuf) {
+/// True if this run must check before the backend starts (`update::spawn`).
+pub(crate) fn start_updates(app: &AppWindow, exe: PathBuf, data_dir: &std::path::Path) -> bool {
     let weak = app.as_weak();
-    update::spawn(exe, move |st| {
+    update::spawn(exe, data_dir, move |st| {
         let _ = weak.upgrade_in_event_loop(move |app| {
             let d = app.global::<SettingsData>();
             d.set_update_checking(false);
@@ -1124,7 +1125,7 @@ pub(crate) fn start_updates(app: &AppWindow, exe: PathBuf) {
                 }
             }
         });
-    });
+    })
 }
 
 

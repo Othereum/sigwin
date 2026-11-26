@@ -84,6 +84,9 @@ msgstr "지금 확인"
 msgid "Checking…"
 msgstr "확인 중…"
 
+msgid "Checking for updates…"
+msgstr "업데이트 확인 중…"
+
 msgid "Checks GitHub for a new version."
 msgstr "GitHub에서 새 버전을 확인합니다."
 

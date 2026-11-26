@@ -84,6 +84,9 @@ msgstr "Jetzt suchen"
 msgid "Checking…"
 msgstr "Suche …"
 
+msgid "Checking for updates…"
+msgstr "Suche nach Updates …"
+
 msgid "Checks GitHub for a new version."
 msgstr "Sucht auf GitHub nach einer neuen Version."
 
